@@ -92,7 +92,11 @@ void tv_function::check()
 
       std::optional<std::string> msg = check_refine(module);
       if (msg)
-	inform(DECL_SOURCE_LOCATION(cfun->decl), "%s", (*msg).c_str());
+	{
+	  std::string warning =
+	    prev_pass_name + " -> " + pass_name + ": " + *msg;
+	  inform(DECL_SOURCE_LOCATION(cfun->decl), "%s", warning.c_str());
+	}
     }
   catch (Not_implemented& error)
     {
