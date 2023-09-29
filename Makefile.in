@@ -1,0 +1,85 @@
+CC:=@TARGET_COMPILER@
+GCCPLUGINS_DIR:= $(shell $(CC) --print-file-name=plugin)
+
+CXXFLAGS:=-std=gnu++20 -I. -Ilib -g -fPIC -fno-rtti -O2 -Wall -Wextra
+
+LIBS:=@LIBS@
+
+.PHONY: all clean
+
+tools = \
+	smtgcc-check-refine \
+	smtgcc-check-ub \
+	smtgcc-opt
+
+plugins = \
+	smtgcc-check-refine.so \
+	smtgcc-tv-backend.so \
+	smtgcc-tv.so
+
+lib_sources = \
+	lib/cfg.cpp \
+	lib/dead_code_elimination.cpp \
+	lib/loop_unroll.cpp \
+	lib/memory_opt.cpp \
+	lib/read_ir.cpp \
+	lib/read_riscv.cpp \
+	lib/simplify_insts.cpp \
+	lib/smt_cvc5.cpp \
+	lib/smt_z3.cpp \
+	lib/smtgcc.cpp \
+	lib/validate_ir.cpp
+lib_objects = $(lib_sources:.cpp=.o)
+
+tools_sources = \
+	tools/smtgcc-check-refine.cpp \
+	tools/smtgcc-check-ub.cpp \
+	tools/smtgcc-opt.cpp
+tools_objects = $(tools_sources:.cpp=.o)
+
+plugin_sources = \
+	plugin/gimple_conv.cpp \
+	plugin/smtgcc-check-refine.cpp \
+	plugin/smtgcc-tv-backend.cpp \
+	plugin/smtgcc-tv.cpp
+plugin_objects = $(plugin_sources:.cpp=.o)
+
+
+all: $(tools) $(plugins)
+
+install: $(plugins)
+	for plugin in $(plugins); do \
+	  install $$plugin $(GCCPLUGINS_DIR); \
+	done
+
+clean:
+	rm -f $(lib_objects) $(tools_objects) $(plugin_objects) $(tools) $(plugins)
+
+distclean: clean
+	rm -f Makefile config.h config.log config.status
+
+$(lib_objects) $(tools_objects): config.h lib/smtgcc.h Makefile
+$(lib_objects) $(tools_objects): %.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(plugin_objects): config.h lib/smtgcc.h plugin/gimple_conv.h Makefile
+$(plugin_objects): %.o: %.cpp
+	$(CXX) $(CXXFLAGS) -I$(GCCPLUGINS_DIR)/include -c $< -o $@
+
+
+smtgcc-check-refine: tools/smtgcc-check-refine.o $(lib_objects)
+	$(CXX) $(CXXFLAGS) tools/smtgcc-check-refine.o -o $@ $(lib_objects) $(LIBS)
+smtgcc-check-ub: tools/smtgcc-check-ub.o $(lib_objects)
+	$(CXX) $(CXXFLAGS) tools/smtgcc-check-ub.o -o $@ $(lib_objects) $(LIBS)
+
+smtgcc-opt: tools/smtgcc-opt.o $(lib_objects)
+	$(CXX) $(CXXFLAGS) tools/smtgcc-opt.o -o $@ $(lib_objects) $(LIBS)
+
+smtgcc-check-refine.so: plugin/smtgcc-check-refine.o plugin/gimple_conv.o $(lib_objects)
+	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-check-refine.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)
+
+smtgcc-tv-backend.so: plugin/smtgcc-tv-backend.o plugin/gimple_conv.o $(lib_objects)
+	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-tv-backend.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)
+
+smtgcc-tv.so: plugin/smtgcc-tv.o plugin/gimple_conv.o $(lib_objects)
+	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-tv.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)
