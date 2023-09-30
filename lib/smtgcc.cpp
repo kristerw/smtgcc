@@ -8,6 +8,8 @@
 
 #include "smtgcc.h"
 
+using namespace std::string_literals;
+
 namespace smtgcc {
 
 const std::array<Instruction_info, 77> inst_info{{
@@ -897,6 +899,118 @@ Function *Module::build_function(const std::string& name)
   func->name = name;
   functions.push_back(func);
   return func;
+}
+
+Function *Module::clone(Function *src_func)
+{
+  Function *tgt_func = build_function(src_func->name);
+
+  std::map<Basic_block*, Basic_block*> src2tgt_bb;
+  std::map<Instruction*, Instruction*> src2tgt_inst;
+  for (auto src_bb : src_func->bbs)
+    {
+      src2tgt_bb[src_bb] = tgt_func->build_bb();
+    }
+
+  for (auto src_bb : src_func->bbs)
+    {
+      Basic_block *tgt_bb = src2tgt_bb.at(src_bb);
+      for (auto src_phi : src_bb->phis)
+	{
+	  src2tgt_inst[src_phi] = tgt_bb->build_phi_inst(src_phi->bitsize);
+	}
+      for (Instruction *src_inst = src_bb->first_inst;
+	   src_inst;
+	   src_inst = src_inst->next)
+	{
+	  Instruction *tgt_inst = nullptr;
+	  Inst_class iclass = src_inst->iclass();
+	  switch (iclass)
+	    {
+	    case Inst_class::iunary:
+	    case Inst_class::funary:
+	      {
+		Instruction *arg = src2tgt_inst.at(src_inst->arguments[0]);
+		tgt_inst = tgt_bb->build_inst(src_inst->opcode, arg);
+	      }
+	      break;
+	    case Inst_class::icomparison:
+	    case Inst_class::fcomparison:
+	    case Inst_class::ibinary:
+	    case Inst_class::fbinary:
+	    case Inst_class::conv:
+	      {
+		Instruction *arg1 = src2tgt_inst.at(src_inst->arguments[0]);
+		Instruction *arg2 = src2tgt_inst.at(src_inst->arguments[1]);
+		tgt_inst = tgt_bb->build_inst(src_inst->opcode, arg1, arg2);
+	      }
+	      break;
+	    case Inst_class::ternary:
+	      {
+		Instruction *arg1 = src2tgt_inst.at(src_inst->arguments[0]);
+		Instruction *arg2 = src2tgt_inst.at(src_inst->arguments[1]);
+		Instruction *arg3 = src2tgt_inst.at(src_inst->arguments[2]);
+		tgt_inst =
+		  tgt_bb->build_inst(src_inst->opcode, arg1, arg2, arg3);
+	      }
+	      break;
+	    case Inst_class::special:
+	      if (src_inst->opcode == Op::BR)
+		{
+		  if (src_inst->nof_args == 0)
+		    {
+		      tgt_inst = tgt_bb->build_br_inst(src_inst->u.br1.dest_bb);
+		    }
+		  else
+		    {
+		      assert(src_inst->nof_args == 2);
+		      Instruction *arg1 =
+			src2tgt_inst.at(src_inst->arguments[0]);
+		      tgt_inst =
+			tgt_bb->build_br_inst(arg1,
+					      src_inst->u.br3.true_bb,
+					      src_inst->u.br3.false_bb);
+		    }
+		}
+	      else if (src_inst->opcode == Op::RET)
+		{
+		  if (src_inst->nof_args == 0)
+		    {
+		      tgt_inst = tgt_bb->build_ret_inst();
+		    }
+		  else if (src_inst->nof_args == 1)
+		    {
+		      Instruction *arg1 =
+			src2tgt_inst.at(src_inst->arguments[0]);
+		      tgt_inst = tgt_bb->build_ret_inst(arg1);
+		    }
+		  else
+		    {
+		      assert(src_inst->nof_args == 2);
+		      Instruction *arg1 =
+			src2tgt_inst.at(src_inst->arguments[0]);
+		      Instruction *arg2 =
+			src2tgt_inst.at(src_inst->arguments[1]);
+		      tgt_inst = tgt_bb->build_ret_inst(arg1, arg2);
+		    }
+		}
+	      else if (src_inst->opcode == Op::VALUE)
+		{
+		  tgt_inst = tgt_bb->value_inst(src_inst->value(),
+						src_inst->bitsize);
+		}
+	      else
+		throw Not_implemented("Module::clone: "s + src_inst->name());
+	      break;
+	    default:
+	      throw Not_implemented("Module::clone: "s + src_inst->name());
+	    }
+	  assert(tgt_inst);
+	  src2tgt_inst[src_inst] = tgt_inst;
+	}
+    }
+
+  return tgt_func;
 }
 
 void Module::print(FILE *stream) const

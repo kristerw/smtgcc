@@ -275,6 +275,7 @@ private:
 struct Module {
   std::vector<Function *> functions;
   Function *build_function(const std::string& name);
+  Function *clone(Function *func);
   void print(FILE *stream) const;
   uint32_t ptr_bits;
   uint32_t ptr_id_bits;
