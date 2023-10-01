@@ -1,3 +1,5 @@
+#include <cassert>
+
 #include "gcc-plugin.h"
 #include "tree-pass.h"
 #include "context.h"
@@ -56,9 +58,14 @@ unsigned int tv_pass::execute(function *fun)
 	  simplify_insts(module);
 	  dead_code_elimination(module);
 
-	  std::optional<std::string> msg = check_refine(module);
-	  if (msg)
-	    inform(DECL_SOURCE_LOCATION(cfun->decl), "%s", (*msg).c_str());
+	  Solver_result result = check_refine(module);
+	  if (result.status != Result_status::correct)
+	    {
+	      assert(result.message);
+	      std::string msg = *result.message;
+	      msg.pop_back();
+	      inform(DECL_SOURCE_LOCATION(cfun->decl), "%s", msg.c_str());
+	    }
 	}
     }
   catch (Not_implemented& error)

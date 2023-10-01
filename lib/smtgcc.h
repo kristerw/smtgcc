@@ -300,6 +300,15 @@ struct Config
 
 extern Config config;
 
+enum class Result_status {
+  correct, incorrect, unknown
+};
+
+struct Solver_result {
+  Result_status status;
+  std::optional<std::string> message;
+};
+
 Module *create_module(uint32_t ptr_bits, uint32_t id_bits, uint32_t offset_bits);
 void destroy_module(Module *);
 void destroy_function(Function *);
@@ -332,9 +341,9 @@ struct SStats {
 };
 
 uint64_t get_time();
-std::optional<std::string> check_refine(Module *module);
-std::optional<std::string> check_assert(Function *func);
-std::optional<std::string> check_ub(Function *func);
+Solver_result check_refine(Module *module);
+Solver_result check_assert(Function *func);
+Solver_result check_ub(Function *func);
 
 // cfg.cpp
 void reverse_post_order(Function *func);
@@ -374,14 +383,14 @@ void simplify_mem(Function *func);
 void simplify_mem(Module *module);
 
 // smt_cvc5.cpp
-std::pair<SStats, std::optional<std::string>> check_refine_cvc5(Function *src, Function *tgt);
-std::pair<SStats, std::optional<std::string>> check_assert_cvc5(Function *func);
-std::pair<SStats, std::optional<std::string>> check_ub_cvc5(Function *func);
+std::pair<SStats, Solver_result> check_refine_cvc5(Function *src, Function *tgt);
+std::pair<SStats, Solver_result> check_assert_cvc5(Function *func);
+std::pair<SStats, Solver_result> check_ub_cvc5(Function *func);
 
 // smt_z3.cpp
-std::pair<SStats, std::optional<std::string>> check_refine_z3(Function *src, Function *tgt);
-std::pair<SStats, std::optional<std::string>> check_assert_z3(Function *func);
-std::pair<SStats, std::optional<std::string>> check_ub_z3(Function *func);
+std::pair<SStats, Solver_result> check_refine_z3(Function *src, Function *tgt);
+std::pair<SStats, Solver_result> check_assert_z3(Function *func);
+std::pair<SStats, Solver_result> check_ub_z3(Function *func);
 
 // validate_ir.cpp
 void validate(Module *module);

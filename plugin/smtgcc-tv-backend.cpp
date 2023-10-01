@@ -155,9 +155,14 @@ static void finish(void *, void *data)
       simplify_insts(func);
       dead_code_elimination(func);
 
-      std::optional<std::string> msg = check_refine(module);
-      if (msg)
-	inform(UNKNOWN_LOCATION, "%s", (*msg).c_str());
+      Solver_result result = check_refine(module);
+      if (result.status != Result_status::correct)
+	{
+	  assert(result.message);
+	  std::string msg = *result.message;
+	  msg.pop_back();
+	  inform(UNKNOWN_LOCATION, "%s", msg.c_str());
+	}
     }
  catch (Parse_error error)
     {

@@ -1013,30 +1013,27 @@ z3::expr Converter::generate_assert()
   return assrt;
 }
 
-std::optional<std::string> run_solver(z3::solver& s, const char *str)
+Solver_result run_solver(z3::solver& s, const char *str)
 {
   switch (s.check()) {
   case z3::unsat:
-    return {};
+    return {Result_status::correct, {}};
   case z3::sat:
     {
       std::string msg = "Transformation is not correct ("s + str + ")\n";
-      {
-	z3::model m = s.get_model();
-	for (unsigned i = 0; i < m.size(); i++)
-	  {
-	    z3::func_decl v = m[i];
-	    std::string name = v.name().str();
-	    std::string value = m.get_const_interp(v).to_string();
-	    msg = msg + name + " = " + value + "\n";
-	  }
-      }
-      return msg;
+      z3::model m = s.get_model();
+      for (unsigned i = 0; i < m.size(); i++)
+	{
+	  z3::func_decl v = m[i];
+	  std::string name = v.name().str();
+	  std::string value = m.get_const_interp(v).to_string();
+	  msg = msg + name + " = " + value + "\n";
+	}
+      return {Result_status::incorrect, msg};
     }
   case z3::unknown:
-    if (config.verbose > 0)
-      std::cerr << "SMTGCC: Analysis timed out ("s << str << ")\n";
-    return {};
+    std::string msg = "Analysis timed out ("s + str + ")\n";
+    return {Result_status::unknown, msg};
   }
 
   throw Not_implemented("run_solver: unknown solver.check return");
@@ -1044,7 +1041,7 @@ std::optional<std::string> run_solver(z3::solver& s, const char *str)
 
 } // end anonymous namespace
 
-std::pair<SStats, std::optional<std::string>> check_refine_z3(Function *src, Function *tgt)
+std::pair<SStats, Solver_result> check_refine_z3(Function *src, Function *tgt)
 {
   char buf[32];
   sprintf(buf, "%d", config.timeout);
@@ -1065,6 +1062,7 @@ std::pair<SStats, std::optional<std::string>> check_refine_z3(Function *src, Fun
   Converter conv_tgt(common, tgt);
   z3::expr tgt_ub_expr = conv_tgt.generate_ub();
 
+  std::string warning;
   if (conv_src.retval || conv_tgt.retval)
     {
       assert(conv_src.retval && conv_tgt.retval);
@@ -1092,12 +1090,13 @@ std::pair<SStats, std::optional<std::string>> check_refine_z3(Function *src, Fun
       solver.add(!src_ub_expr);
       solver.add((src_expr != tgt_expr) || is_more_undef);
       uint64_t start_time = get_time();
-      std::optional<std::string> solver_msg = run_solver(solver, "retval");
+      Solver_result solver_result = run_solver(solver, "retval");
       stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
-      if (solver_msg)
+      if (solver_result.status == Result_status::incorrect)
 	{
+	  assert(solver_result.message);
 	  z3::model model = solver.get_model();
-	  std::string msg = *solver_msg;
+	  std::string msg = *solver_result.message;
 	  msg = msg + "src retval: " + model.eval(src_expr).to_string() + "\n";
 	  msg = msg + "tgt retval: " + model.eval(tgt_expr).to_string() + "\n";
 	  if (conv_src.retval_undef || conv_tgt.retval_undef)
@@ -1105,7 +1104,13 @@ std::pair<SStats, std::optional<std::string>> check_refine_z3(Function *src, Fun
 	      msg = msg + "src undef: " + model.eval(src_undef).to_string() + "\n";
 	      msg = msg +  "tgt undef: " + model.eval(tgt_undef).to_string() + "\n";
 	    }
-	  return std::pair<SStats, std::optional<std::string>>(stats, msg);
+	  Solver_result result = {Result_status::incorrect, msg};
+	  return std::pair<SStats, Solver_result>(stats, result);
+	}
+      if (solver_result.status == Result_status::unknown)
+	{
+	  assert(solver_result.message);
+	  warning = warning + *solver_result.message;
 	}
     }
 
@@ -1145,22 +1150,29 @@ std::pair<SStats, std::optional<std::string>> check_refine_z3(Function *src, Fun
     solver.add(src_value != tgt_value || tgt_more_undef);
 
     uint64_t start_time = get_time();
-    std::optional<std::string> solver_msg = run_solver(solver, "Memory");
+    Solver_result solver_result = run_solver(solver, "Memory");
     stats.time[1] = std::max(get_time() - start_time, (uint64_t)1);
-    if (solver_msg)
+    if (solver_result.status == Result_status::incorrect)
       {
+	assert(solver_result.message);
 	z3::model model = solver.get_model();
 	z3::expr src_byte = model.eval(z3::select(src_mem, ptr));
 	z3::expr tgt_byte = model.eval(z3::select(tgt_mem, ptr));
 	z3::expr src_undef = model.eval(z3::select(src_mem_undef, ptr));
 	z3::expr tgt_undef = model.eval(z3::select(tgt_mem_undef, ptr));
-	std::string msg = *solver_msg;
+	std::string msg = *solver_result.message;
 	msg = msg + "\n.ptr = " + model.eval(ptr).to_string() + "\n";
 	msg = msg + "src *.ptr: " + src_byte.to_string() + "\n";
 	msg = msg + "tgt *.ptr: " + tgt_byte.to_string() + "\n";
 	msg = msg + "src undef: " + src_undef.to_string() + "\n";
 	msg = msg + "tgt undef: " + tgt_undef.to_string() + "\n";
-	return std::pair<SStats, std::optional<std::string>>(stats, msg);
+	Solver_result result = {Result_status::incorrect, msg};
+	return std::pair<SStats, Solver_result>(stats, result);
+      }
+    if (solver_result.status == Result_status::unknown)
+      {
+	assert(solver_result.message);
+	warning = warning + *solver_result.message;
       }
   }
 
@@ -1174,16 +1186,26 @@ std::pair<SStats, std::optional<std::string>> check_refine_z3(Function *src, Fun
     solver.add(tgt_ub_expr);
     solver.add(src_ub_expr != tgt_ub_expr);
     uint64_t start_time = get_time();
-    std::optional<std::string> solver_msg = run_solver(solver, "UB");
+    Solver_result solver_result = run_solver(solver, "UB");
     stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-    if (solver_msg)
-      return std::pair<SStats, std::optional<std::string>>(stats, solver_msg);
+    if (solver_result.status == Result_status::incorrect)
+      return std::pair<SStats, Solver_result>(stats, solver_result);
+    if (solver_result.status == Result_status::unknown)
+      {
+	assert(solver_result.message);
+	warning = warning + *solver_result.message;
+      }
   }
 
-  return std::pair<SStats, std::optional<std::string>>(stats, {});
+  if (!warning.empty())
+    {
+      Solver_result result = {Result_status::unknown, warning};
+      return std::pair<SStats, Solver_result>(stats, result);
+    }
+  return std::pair<SStats, Solver_result>(stats, {Result_status::correct, {}});
 }
 
-std::pair<SStats, std::optional<std::string>> check_ub_z3(Function *func)
+std::pair<SStats, Solver_result> check_ub_z3(Function *func)
 {
   char buf[32];
   sprintf(buf, "%d", config.timeout);
@@ -1203,12 +1225,12 @@ std::pair<SStats, std::optional<std::string>> check_ub_z3(Function *func)
   z3::solver solver(ctx);
   solver.add(ub_expr);
   uint64_t start_time = get_time();
-  std::optional<std::string> solver_msg = run_solver(solver, "UB");
+  Solver_result solver_result = run_solver(solver, "UB");
   stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-  return std::pair<SStats, std::optional<std::string>>(stats, solver_msg);
+  return std::pair<SStats, Solver_result>(stats, solver_result);
 }
 
-std::pair<SStats, std::optional<std::string>> check_assert_z3(Function *func)
+std::pair<SStats, Solver_result> check_assert_z3(Function *func)
 {
   char buf[32];
   sprintf(buf, "%d", config.timeout);
@@ -1230,9 +1252,9 @@ std::pair<SStats, std::optional<std::string>> check_assert_z3(Function *func)
   solver.add(!ub_expr);
   solver.add(assert_expr);
   uint64_t start_time = get_time();
-  std::optional<std::string> solver_msg = run_solver(solver, "ASSERT");
+  Solver_result solver_result = run_solver(solver, "ASSERT");
   stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-  return std::pair<SStats, std::optional<std::string>>(stats, solver_msg);
+  return std::pair<SStats, Solver_result>(stats, solver_result);
 }
 
 } // end namespace smtgcc

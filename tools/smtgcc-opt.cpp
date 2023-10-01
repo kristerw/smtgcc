@@ -55,9 +55,12 @@ int main(int argc, char **argv)
 	    Function *tgt_func = m->clone(module->functions[i]);
 	    tgt_func->rename("tgt");
 
-	    std::optional<std::string> msg = check_refine(m);
-	    if (msg)
-	      fprintf(stderr, "%s", (*msg).c_str());
+	    Solver_result result = check_refine(m);
+	    if (result.status != Result_status::correct)
+	      {
+		assert(result.message);
+		fprintf(stderr, "%s", (*result.message).c_str());
+	      }
 
 	    destroy_module(m);
 	  }

@@ -957,24 +957,23 @@ cvc5::Term Converter::generate_assert()
   return assrt;
 }
 
-std::optional<std::string> run_solver(cvc5::Solver& solver, const char *str)
+Solver_result run_solver(cvc5::Solver& solver, const char *str)
 {
   cvc5::Result result = solver.checkSat();
   if (result.isUnsat())
     {
-      return {};
+      return {Result_status::correct, {}};
     }
   else if (result.isSat())
     {
       std::string msg = "Transformation is not correct ("s + str + ")\n";
       // TODO: Display the model.
-      return msg;
+      return {Result_status::incorrect, msg};
     }
   else if (result.isUnknown())
     {
-      if (config.verbose > 0)
-	std::cerr << "SMTGCC: Analysis timed out (" << str << ")\n";
-      return {};
+      std::string msg = "Analysis timed out ("s + str + ")\n";
+      return {Result_status::unknown, msg};
     }
 
   throw Not_implemented("run_solver: unknown solver.check return");
@@ -982,7 +981,7 @@ std::optional<std::string> run_solver(cvc5::Solver& solver, const char *str)
 
 } // end anonymous namespace
 
-std::pair<SStats, std::optional<std::string>> check_refine_cvc5(Function *src, Function *tgt)
+std::pair<SStats, Solver_result> check_refine_cvc5(Function *src, Function *tgt)
 {
   cvc5::Solver solver;
   solver.setOption("produce-models", "true");
@@ -1004,6 +1003,7 @@ std::pair<SStats, std::optional<std::string>> check_refine_cvc5(Function *src, F
   Converter conv_tgt(common, tgt);
   cvc5::Term tgt_ub_expr = conv_tgt.generate_ub();
 
+  std::string warning;
   if (conv_src.retval || conv_tgt.retval)
     {
       solver.push();
@@ -1037,13 +1037,14 @@ std::pair<SStats, std::optional<std::string>> check_refine_cvc5(Function *src, F
       cvc5::Term res2 = solver.mkTerm(cvc5::OR, {res1, is_more_undef});
       solver.assertFormula(res2);
       uint64_t start_time = get_time();
-      std::optional<std::string> solver_msg = run_solver(solver, "retval");
+      Solver_result solver_result = run_solver(solver, "retval");
       stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
-      if (solver_msg)
+      if (solver_result.status == Result_status::incorrect)
 	{
+	  assert(solver_result.message);
 	  cvc5::Term src_val = solver.getValue(src_expr);
 	  cvc5::Term tgt_val = solver.getValue(tgt_expr);
-	  std::string msg = *solver_msg;
+	  std::string msg = *solver_result.message;
 	  msg = msg + "src retval: " + src_val.getBitVectorValue(16) + "\n";
 	  msg = msg + "tgt retval: " + tgt_val.getBitVectorValue(16) + "\n";
 	  if (conv_src.retval_undef || conv_tgt.retval_undef)
@@ -1053,7 +1054,13 @@ std::pair<SStats, std::optional<std::string>> check_refine_cvc5(Function *src, F
 	      msg = msg + "src undef: " + src_undef_val.getBitVectorValue(16) + "\n";
 	      msg = msg + "tgt undef: " + tgt_undef_val.getBitVectorValue(16) + "\n";
 	    }
-	  return std::pair<SStats, std::optional<std::string>>(stats, msg);
+	  Solver_result result = {Result_status::incorrect, msg};
+	  return std::pair<SStats, Solver_result>(stats, result);
+	}
+      if (solver_result.status == Result_status::unknown)
+	{
+	  assert(solver_result.message);
+	  warning = warning + *solver_result.message;
 	}
       solver.pop();
     }
@@ -1112,22 +1119,29 @@ std::pair<SStats, std::optional<std::string>> check_refine_cvc5(Function *src, F
     // TODO: Should make a better getBitVectorValue that prints values as
     // hex, etc.
     uint64_t start_time = get_time();
-    std::optional<std::string> solver_msg = run_solver(solver, "Memory");
+    Solver_result solver_result = run_solver(solver, "Memory");
     stats.time[1] = std::max(get_time() - start_time, (uint64_t)1);
-    if (solver_msg)
+    if (solver_result.status == Result_status::incorrect)
       {
+	assert(solver_result.message);
 	cvc5::Term ptr_val = solver.getValue(ptr);
 	cvc5::Term src_byte_val = solver.getValue(src_byte);
 	cvc5::Term tgt_byte_val = solver.getValue(tgt_byte);
 	cvc5::Term src_undef_val = solver.getValue(src_undef);
 	cvc5::Term tgt_undef_val = solver.getValue(tgt_undef);
-	std::string msg = *solver_msg;
+	std::string msg = *solver_result.message;
 	msg = msg + "\n.ptr = " + ptr_val.getBitVectorValue(16) + "\n";
 	msg = msg + "src *.ptr: " + src_byte_val.getBitVectorValue(16) + "\n";
 	msg = msg + "tgt *.ptr: " + tgt_byte_val.getBitVectorValue(16) + "\n";
 	msg = msg + "src undef: " + src_undef_val.getBitVectorValue(16) + "\n";
 	msg = msg + "tgt undef: " + tgt_undef_val.getBitVectorValue(16) + "\n";
-	return std::pair<SStats, std::optional<std::string>>(stats, msg);
+	Solver_result result = {Result_status::incorrect, msg};
+	return std::pair<SStats, Solver_result>(stats, result);
+      }
+    if (solver_result.status == Result_status::unknown)
+      {
+	assert(solver_result.message);
+	warning = warning + *solver_result.message;
       }
     solver.pop();
   }
@@ -1143,17 +1157,27 @@ std::pair<SStats, std::optional<std::string>> check_refine_cvc5(Function *src, F
     cvc5::Term res1 = solver.mkTerm(cvc5::DISTINCT, {src_ub_expr, tgt_ub_expr});
     solver.assertFormula(res1);
     uint64_t start_time = get_time();
-    std::optional<std::string> msg = run_solver(solver, "UB");
+    Solver_result solver_result = run_solver(solver, "UB");
     stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-    if (msg)
-      return std::pair<SStats, std::optional<std::string>>(stats, msg);
+    if (solver_result.status == Result_status::incorrect)
+      return std::pair<SStats, Solver_result>(stats, solver_result);
+    if (solver_result.status == Result_status::unknown)
+      {
+	assert(solver_result.message);
+	warning = warning + *solver_result.message;
+      }
     solver.pop();
   }
 
-  return std::pair<SStats, std::optional<std::string>>(stats, {});
+  if (!warning.empty())
+    {
+      Solver_result result = {Result_status::unknown, warning};
+      return std::pair<SStats, Solver_result>(stats, result);
+    }
+  return std::pair<SStats, Solver_result>(stats, {Result_status::correct, {}});
 }
 
-std::pair<SStats, std::optional<std::string>> check_ub_cvc5(Function *func)
+std::pair<SStats, Solver_result> check_ub_cvc5(Function *func)
 {
   cvc5::Solver solver;
   solver.setOption("produce-models", "true");
@@ -1173,12 +1197,12 @@ std::pair<SStats, std::optional<std::string>> check_ub_cvc5(Function *func)
   solver.push();
   solver.assertFormula(ub_expr);
   uint64_t start_time = get_time();
-  std::optional<std::string> msg = run_solver(solver, "UB");
+  Solver_result solver_result = run_solver(solver, "UB");
   stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-  return std::pair<SStats, std::optional<std::string>>(stats, msg);
+  return std::pair<SStats, Solver_result>(stats, solver_result);
 }
 
-std::pair<SStats, std::optional<std::string>> check_assert_cvc5(Function *func)
+std::pair<SStats, Solver_result> check_assert_cvc5(Function *func)
 {
   cvc5::Solver solver;
   solver.setOption("produce-models", "true");
@@ -1201,9 +1225,9 @@ std::pair<SStats, std::optional<std::string>> check_assert_cvc5(Function *func)
   solver.assertFormula(not_ub_expr);
   solver.assertFormula(assert_expr);
   uint64_t start_time = get_time();
-  std::optional<std::string> msg = run_solver(solver, "UB");
+  Solver_result solver_result = run_solver(solver, "UB");
   stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-  return std::pair<SStats, std::optional<std::string>>(stats, msg);
+  return std::pair<SStats, Solver_result>(stats, solver_result);
 }
 
 } // end namespace smtgcc

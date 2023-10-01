@@ -1295,7 +1295,7 @@ uint64_t get_time()
   return tv.tv_sec * 1000 + tv.tv_usec / 1000;
 }
 
-std::optional<std::string> check_refine(Module *module)
+Solver_result check_refine(Module *module)
 {
   struct VStats {
     SStats cvc5;
@@ -1315,18 +1315,18 @@ std::optional<std::string> check_refine(Module *module)
   if (config.verbose > 1)
     module->print(stderr);
 
-  std::optional<std::string> msg;
+  Solver_result result = {Result_status::correct, {}};
 #if 0
-  auto [stats_cvc5, msg_cvc5] = check_refine_cvc5(src, tgt);
+  auto [stats_cvc5, result_cvc5] = check_refine_cvc5(src, tgt);
   stats.cvc5 = stats_cvc5;
-  if (msg_cvc5)
-    msg = msg_cvc5;
+  if (result_cvc5.status != Result_status::correct)
+    result = result_cvc5;
 #endif
 #if 1
-  auto [stats_z3, msg_z3] = check_refine_z3(src, tgt);
+  auto [stats_z3, result_z3] = check_refine_z3(src, tgt);
   stats.z3 = stats_z3;
-  if (msg_z3)
-    msg = msg_z3;
+  if (result_z3.status != Result_status::correct)
+    result = result_z3;
 #endif
 
   if (config.verbose > 0)
@@ -1346,10 +1346,10 @@ std::optional<std::string> check_refine(Module *module)
 	}
     }
 
-  return msg;
+  return result;
 }
 
-std::optional<std::string> check_ub(Function *func)
+Solver_result check_ub(Function *func)
 {
   struct VStats {
     SStats cvc5;
@@ -1359,18 +1359,18 @@ std::optional<std::string> check_ub(Function *func)
   if (config.verbose > 1)
     func->print(stderr);
 
-  std::optional<std::string> msg;
+  Solver_result result = {Result_status::correct, {}};
 #if 0
-  auto [stats_cvc5, msg_cvc5] = check_ub_cvc5(func);
+  auto [stats_cvc5, result_cvc5] = check_ub_cvc5(func);
   stats.cvc5 = stats_cvc5;
-  if (msg_cvc5)
-    msg = msg_cvc5;
+  if (result_cvc5.status != Result_status::correct)
+    result = result_cvc5;
 #endif
 #if 1
-  auto [stats_z3, msg_z3] = check_ub_z3(func);
+  auto [stats_z3, result_z3] = check_ub_z3(func);
   stats.z3 = stats_z3;
-  if (msg_z3)
-    msg = msg_z3;
+  if (result_z3.status != Result_status::correct)
+    result = result_z3;
 #endif
 
   if (config.verbose > 0)
@@ -1390,10 +1390,10 @@ std::optional<std::string> check_ub(Function *func)
 	}
     }
 
-  return msg;
+  return result;
 }
 
-std::optional<std::string> check_assert(Function *func)
+Solver_result check_assert(Function *func)
 {
   struct VStats {
     SStats cvc5;
@@ -1403,18 +1403,18 @@ std::optional<std::string> check_assert(Function *func)
   if (config.verbose > 1)
     func->print(stderr);
 
-  std::optional<std::string> msg;
+  Solver_result result = {Result_status::correct, {}};
 #if 0
-  auto [stats_cvc5, msg_cvc5] = check_assert_cvc5(func);
+  auto [stats_cvc5, result_cvc5] = check_assert_cvc5(func);
   stats.cvc5 = stats_cvc5;
-  if (msg_cvc5)
-    msg = msg_cvc5;
+  if (result_cvc5.status != Result_status::correct)
+    result = result_cvc5;
 #endif
 #if 1
-  auto [stats_z3, msg_z3] = check_assert_z3(func);
+  auto [stats_z3, result_z3] = check_assert_z3(func);
   stats.z3 = stats_z3;
-  if (msg_z3)
-    msg = msg_z3;
+  if (result_z3.status != Result_status::correct)
+    result = result_z3;
 #endif
 
   if (config.verbose > 0)
@@ -1434,7 +1434,7 @@ std::optional<std::string> check_assert(Function *func)
 	}
     }
 
-  return msg;
+  return result;
 }
 
 } // end namespace smtgcc

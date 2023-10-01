@@ -1,3 +1,5 @@
+#include <cassert>
+
 #include "smtgcc.h"
 
 using namespace smtgcc;
@@ -28,9 +30,12 @@ int main(int argc, char **argv)
 	exit(1);
       }
 
-    std::optional<std::string> msg = check_refine(module);
-    if (msg)
-      fprintf(stderr, "%s", (*msg).c_str());
+    Solver_result result = check_refine(module);
+    if (result.status != Result_status::correct)
+      {
+	assert(result.message);
+	fprintf(stderr, "%s", (*result.message).c_str());
+      }
 
     destroy_module(module);
   }

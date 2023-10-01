@@ -90,11 +90,13 @@ void tv_function::check()
 
       validate(module);
 
-      std::optional<std::string> msg = check_refine(module);
-      if (msg)
+      Solver_result result = check_refine(module);
+      if (result.status != Result_status::correct)
 	{
+	  assert(result.message);
 	  std::string warning =
-	    prev_pass_name + " -> " + pass_name + ": " + *msg;
+	    prev_pass_name + " -> " + pass_name + ": " + *result.message;
+	  warning.pop_back();
 	  inform(DECL_SOURCE_LOCATION(cfun->decl), "%s", warning.c_str());
 	}
     }
@@ -128,7 +130,7 @@ static void ipa_pass(opt_pass *pass, my_plugin *plugin_data)
       push_cfun(fun);
       Function *func = convert_function(tv_fun, "tgt");
       if (func)
-	  tv_fun->check();
+	tv_fun->check();
       pop_cfun();
 
       tv_fun->delete_ir();

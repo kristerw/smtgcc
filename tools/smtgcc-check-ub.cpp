@@ -1,3 +1,5 @@
+#include <cassert>
+
 #include "smtgcc.h"
 
 using namespace smtgcc;
@@ -15,9 +17,13 @@ int main(int argc, char **argv)
 
     for (auto func : module->functions)
       {
-	std::optional<std::string> msg = check_ub(func);
-	if (msg)
-	  fprintf(stderr, "%s: %s", func->name.c_str(), (*msg).c_str());
+	Solver_result result = check_ub(func);
+	if (result.status != Result_status::correct)
+	  {
+	    assert(result.message);
+	    fprintf(stderr, "%s: %s", func->name.c_str(),
+		    (*result.message).c_str());
+	  }
       }
 
     destroy_module(module);
