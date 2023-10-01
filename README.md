@@ -32,7 +32,7 @@ make
 
 # plugins
 
-# smtgcc-tv
+## smtgcc-tv
 `smtgcc-tv` compares the IR before/after each GIMPLE pass and complains if the resulting IR is not a refinement of the input (that is, if the GIMPLE pass miscompiled the program).
 
 For example, compiling the function `foo` from [PR 111494](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111494)
@@ -59,7 +59,7 @@ pr111494.c:2:5: note: ifcvt -> dce: Transformation is not correct (UB)
 ```
 telling us that the output IR of the `dce` pass is not a refinement of the input that comes from `ifcvt` (in this case the error is in the vectorizer pass, but we are treating `vect` followed by `dce` as one pass because of [PR 111257](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111257)) because the result has more UB than the original, and the tool give us an example for `n = 5` where this happen.
 
-# smtgcc-tv-backend
+## smtgcc-tv-backend
 `smtgcc-tv-backend` compares the GIMPLE IR from  the last GIMPLE pass with the generated assembly code, and complains if the resulting assembly code is not a refinement of the GIMPLE IR (that is, if the backend has miscompiled the program).
 
 This was just a quick experiment, so it has far too many limitations to be useful:
@@ -69,7 +69,7 @@ This was just a quick experiment, so it has far too many limitations to be usefu
  * The function must not access global memory
  * The ABI is not correctly implemented, so the function must have a few parameters of an integral type.
 
-# smtgcc-check-refine
+## smtgcc-check-refine
 `smtgcc-check-refine` requires the translation unit to consist of two functions named `src` and `tgt`, and it verifies that `tgt` is a refinement of `src`.
 
 For example, testing changing the order of signed addition
