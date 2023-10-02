@@ -1013,8 +1013,8 @@ Addr Converter::process_array_ref(Basic_block *bb, tree expr)
   Instruction *max_inst = nullptr;
   if (domain && TYPE_MAX_VALUE(domain))
     {
-      // TODO: Handle min_val != 0.
-      assert(integer_zerop(TYPE_MIN_VALUE(domain)));
+      if (!integer_zerop(TYPE_MIN_VALUE(domain)))
+	throw Not_implemented("process_array_ref: index TYPE_MIN_VALUE != 0");
       tree max = TYPE_MAX_VALUE(domain);
       // TODO: Handle variable size arrays. This is (currently) not needed
       //       for correctness -- the array is its own obkect or last in a
