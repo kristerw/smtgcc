@@ -3166,6 +3166,18 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       return;
     }
 
+  if (name == "BUILTIN_EXPECT"s)
+    {
+      tree lhs = gimple_call_lhs(stmt);
+      if (!lhs)
+	return;
+
+      Instruction *arg = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
+      constrain_range(bb, lhs, arg);
+      tree2instruction[lhs] = arg;
+      return;
+    }
+
   if (name == "CLZ"s)
     {
       tree lhs = gimple_call_lhs(stmt);
