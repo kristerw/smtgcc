@@ -733,8 +733,7 @@ std::pair<Instruction *, Instruction *> Converter::tree2inst(Basic_block *bb, tr
 	  if (var && TREE_CODE(var) == VAR_DECL)
 	    {
 	      uint64_t bitsize = bitsize_for_type(TREE_TYPE(expr));
-	      Instruction *bitsize_inst = (bb->value_inst(bitsize, 32));
-	      Instruction *inst = bb->build_inst(Op::SYMBOLIC, bitsize_inst);
+	      Instruction *inst = bb->value_inst(0, bitsize);
 	      Instruction *undef = bb->value_m1_inst(bitsize);
 	      return std::pair(inst, undef);
 	    }
