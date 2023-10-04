@@ -212,12 +212,12 @@ Instruction *cfold_sext(Instruction *inst)
 
 Instruction *constant_fold_inst(Instruction *inst)
 {
+  if (inst->bitsize > 128)
+    return inst;
   for (uint64_t i = 0; i < inst->nof_args; i++)
     {
       Instruction *arg = inst->arguments[i];
       if (arg->opcode != Op::VALUE)
-	return inst;
-      if (inst->bitsize > 128)
 	return inst;
     }
 
@@ -880,6 +880,10 @@ Instruction *simplify_inst(Instruction *inst)
 {
   Instruction *original_inst = inst;
 
+  inst = constant_fold_inst(inst);
+  if (inst != original_inst)
+    return inst;
+
   switch (inst->opcode)
     {
     case Op::ADD:
@@ -936,8 +940,6 @@ Instruction *simplify_inst(Instruction *inst)
 
   if (inst != original_inst)
     inst = simplify_inst(inst);
-  else
-    inst = constant_fold_inst(inst);
 
   return inst;
 }
