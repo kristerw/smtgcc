@@ -2,6 +2,7 @@
 #define SMTGCC_H
 
 #include <array>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <set>
