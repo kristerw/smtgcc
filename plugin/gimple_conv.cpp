@@ -424,6 +424,30 @@ Instruction *Converter::build_memory_inst(uint64_t id, uint64_t size, uint32_t f
   return bb->build_inst(Op::MEMORY, arg1, arg2, arg3);
 }
 
+int popcount(unsigned __int128 x)
+{
+  int result = 0;
+  for (int i = 0; i < 4; i++)
+    {
+      uint32_t t = x >> (i* 32);
+      result += __builtin_popcount(t);
+    }
+  return result;
+}
+
+int clz(unsigned __int128 x)
+{
+  int result = 0;
+  for (int i = 0; i < 4; i++)
+    {
+      uint32_t t = x >> ((3 - i) * 32);
+      if (t)
+	return result + __builtin_clz(t);
+      result += 32;
+    }
+  return result;
+}
+
 void Converter::constrain_range(Basic_block *bb, tree expr, Instruction *inst, Instruction *undef)
 {
   assert(TREE_CODE(expr) == SSA_NAME);
@@ -442,15 +466,27 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Instruction *inst, I
   if (r.undefined_p() || r.varying_p())
     return;
 
+  // TODO: get_nonzero_bits is deprecated if I understand correctly. This
+  // should be updated to the new API.
   Instruction *is_ub1 = nullptr;
   wide_int nz = r.get_nonzero_bits();
   if (nz != -1)
     {
-      unsigned __int128 mask_val = ~get_wide_int_val(nz);
-      Instruction *mask = bb->value_inst(mask_val, inst->bitsize);
-      Instruction *bits = bb->build_inst(Op::AND, inst, mask);
-      Instruction *zero = bb->value_inst(0, bits->bitsize);
-      is_ub1 = bb->build_inst(Op::NE, bits, zero);
+      unsigned __int128 nonzero_bits = get_wide_int_val(nz);
+      // The SMT solver get confused, and becomes much slower, when we have
+      // both a mask and a range describing the same value. We therefore
+      // skip adding a check for the mask if it does not constrain the value
+      // more than what the range does.
+      // TODO: Implement this for real. For now, we just assume that a mask
+      // representing the top n bits as zero is fully represented by the
+      // range.
+      if (clz(nonzero_bits) + popcount(nonzero_bits) != 128)
+	{
+	  Instruction *mask = bb->value_inst(~nonzero_bits, inst->bitsize);
+	  Instruction *bits = bb->build_inst(Op::AND, inst, mask);
+	  Instruction *zero = bb->value_inst(0, bits->bitsize);
+	  is_ub1 = bb->build_inst(Op::NE, bits, zero);
+	}
     }
 
   Instruction *is_ub2 = nullptr;
