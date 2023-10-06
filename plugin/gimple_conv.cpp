@@ -2974,6 +2974,44 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
+  if (name == "__builtin_fmax"s ||
+      name == "__builtin_fmaxf"s ||
+      name == "__builtin_fmaxl"s ||
+      name == "fmax"s ||
+      name == "fmaxf"s ||
+      name == "fmaxl"s)
+    {
+      tree lhs = gimple_call_lhs(stmt);
+      if (!lhs)
+	return;
+      Instruction *arg1 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
+      Instruction *arg2 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 1));
+      Instruction *is_nan = bb->build_inst(Op::IS_NAN, arg2);
+      Instruction *cmp = bb->build_inst(Op::FGT, arg1, arg2);
+      Instruction *max = bb->build_inst(Op::ITE, cmp, arg1, arg2);
+      tree2instruction[lhs] = bb->build_inst(Op::ITE, is_nan, arg1, max);
+      return;
+    }
+
+  if (name == "__builtin_fmin"s ||
+      name == "__builtin_fminf"s ||
+      name == "__builtin_fminl"s ||
+      name == "fmin"s ||
+      name == "fminf"s ||
+      name == "fminl"s)
+    {
+      tree lhs = gimple_call_lhs(stmt);
+      if (!lhs)
+	return;
+      Instruction *arg1 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
+      Instruction *arg2 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 1));
+      Instruction *is_nan = bb->build_inst(Op::IS_NAN, arg2);
+      Instruction *cmp = bb->build_inst(Op::FLT, arg1, arg2);
+      Instruction *min = bb->build_inst(Op::ITE, cmp, arg1, arg2);
+      tree2instruction[lhs] = bb->build_inst(Op::ITE, is_nan, arg1, min);
+      return;
+    }
+
   if (name == "__builtin_memcpy"s ||
       name == "memcpy"s)
     {
