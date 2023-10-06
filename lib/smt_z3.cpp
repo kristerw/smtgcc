@@ -409,6 +409,13 @@ void Converter::build_bv_unary_smt(const Instruction *inst)
 	inst2bool.insert({inst, is_const});
       }
       break;
+    case Op::IS_NAN:
+      {
+	z3::expr farg1 = inst_as_fp(inst->arguments[0]);
+	z3::expr is_nan = z3::expr(ctx, Z3_mk_fpa_is_nan(ctx, farg1));
+	inst2bool.insert({inst, is_nan});
+      }
+      break;
     case Op::IS_NONCANONICAL_NAN:
       {
 	z3::expr farg1 = inst_as_fp(inst->arguments[0]);
@@ -455,6 +462,12 @@ void Converter::build_fp_unary_smt(const Instruction *inst)
       break;
     case Op::FNEG:
       inst2fp.insert({inst, -arg1});
+      break;
+    case Op::NAN:
+      {
+	Z3_sort sort = fp_sort(inst->arguments[0]->value());
+	inst2fp.insert({inst, z3::expr(ctx, Z3_mk_fpa_nan(ctx, sort))});
+      }
       break;
     default:
       throw Not_implemented("build_fp_unary_smt: "s + inst->name());

@@ -55,6 +55,7 @@ enum class Op : uint8_t {
   GET_MEM_FLAG,
   GET_MEM_UNDEF,
   IS_CONST_MEM,
+  IS_NAN,
   IS_NONCANONICAL_NAN,
   LOAD,
   MEM_SIZE,
@@ -69,6 +70,7 @@ enum class Op : uint8_t {
   // Floating-point unary
   FABS,
   FNEG,
+  NAN,
 
   // Integer binary
   ADD,
@@ -152,7 +154,7 @@ struct Instruction_info {
   bool is_commutative;
 };
 
-extern const std::array<Instruction_info, 77> inst_info;
+extern const std::array<Instruction_info, 79> inst_info;
 
 struct Module;
 struct Function;

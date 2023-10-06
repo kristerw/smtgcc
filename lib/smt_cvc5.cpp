@@ -413,6 +413,9 @@ void Converter::build_bv_unary_smt(const Instruction *inst)
 	inst2bool.insert({inst, is_const});
       }
       break;
+    case Op::IS_NAN:
+      // TODO: Implement Op::IS_NAN
+      throw Not_implemented("build_bv_unary_smt: "s + inst->name());
     case Op::IS_NONCANONICAL_NAN:
       // TODO: Implement Op::IS_NONCANONICAL_NAN
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
@@ -453,6 +456,9 @@ void Converter::build_fp_unary_smt(const Instruction *inst)
     case Op::FNEG:
       inst2fp.insert({inst, solver.mkTerm(cvc5::FLOATINGPOINT_NEG, {arg1})});
       break;
+    case Op::NAN:
+      // TODO: Implement Op::NAN
+      throw Not_implemented("build_fp_unary_smt: "s + inst->name());
     default:
       throw Not_implemented("build_fp_unary_smt: "s + inst->name());
     }

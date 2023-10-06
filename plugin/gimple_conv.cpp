@@ -3015,6 +3015,24 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
+  if (name == "__builtin_nan"s ||
+      name == "__builtin_nanf"s ||
+      name == "__builtin_nanl"s ||
+      name == "nan"s ||
+      name == "nanf"s ||
+      name == "nanl"s)
+    {
+      // TODO: Implement the argument setting NaN payload when support for
+      // noncanonical NaNs is implemented in the SMT solvers.
+      tree lhs = gimple_call_lhs(stmt);
+      if (!lhs)
+	return;
+
+      Instruction *bs = bb->value_inst(bitsize_for_type(TREE_TYPE(lhs)), 32);
+      tree2instruction[lhs] = bb->build_inst(Op::NAN, bs);
+      return;
+    }
+
   if (name == "__builtin_memset"s ||
       name == "memset"s)
     {

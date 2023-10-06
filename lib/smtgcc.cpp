@@ -12,7 +12,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Instruction_info, 77> inst_info{{
+const std::array<Instruction_info, 79> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -39,6 +39,7 @@ const std::array<Instruction_info, 77> inst_info{{
   {"get_mem_flag", Op::GET_MEM_FLAG, Inst_class::iunary, true, false},
   {"get_mem_undef", Op::GET_MEM_UNDEF, Inst_class::iunary, true, false},
   {"is_const_mem", Op::IS_CONST_MEM, Inst_class::iunary, true, false},
+  {"is_nan", Op::IS_NAN, Inst_class::iunary, true, false},
   {"is_noncanonical_nan", Op::IS_NONCANONICAL_NAN, Inst_class::iunary, true, false},
   {"load", Op::LOAD, Inst_class::iunary, true, false},
   {"mem_size", Op::MEM_SIZE, Inst_class::iunary, true, false},
@@ -53,6 +54,7 @@ const std::array<Instruction_info, 77> inst_info{{
   // Floating-point unary
   {"fabs", Op::FABS, Inst_class::funary, true, false},
   {"fneg", Op::FNEG, Inst_class::funary, true, false},
+  {"nan", Op::NAN, Inst_class::funary, true, false},
 
   // Integer binary
   {"add", Op::ADD, Inst_class::ibinary, true, true},
@@ -152,6 +154,7 @@ Instruction *create_inst(Op opcode, Instruction *arg)
   inst->nof_args = 1;
   inst->arguments[0] = arg;
   if (opcode == Op::IS_CONST_MEM
+      || opcode == Op::IS_NAN
       || opcode == Op::IS_NONCANONICAL_NAN
       || opcode == Op::GET_MEM_FLAG)
     inst->bitsize = 1;
@@ -159,7 +162,9 @@ Instruction *create_inst(Op opcode, Instruction *arg)
     inst->bitsize = 8;
   else if (opcode == Op::MEM_SIZE)
     inst->bitsize = arg->bb->func->module->ptr_offset_bits;
-  else if (opcode == Op::SYMBOLIC || opcode == Op::REGISTER)
+  else if (opcode == Op::NAN
+	   || opcode == Op::REGISTER
+	   || opcode == Op::SYMBOLIC)
     inst->bitsize = arg->value();
   else if (opcode == Op::READ)
     {
