@@ -182,8 +182,9 @@ z3::expr Converter::inst_as_bool(const Instruction *inst)
   z3::expr bv = inst2bv.at(inst);
   z3::expr expr = bv != ctx.bv_val(0, 1);
   if (Z3_is_numeral_ast(ctx, bv))
-    expr = expr.simplify();
-  inst2bool.insert({inst, expr});
+    inst2bool.insert({inst, expr.simplify()});
+  else
+    inst2bool.insert({inst, expr});
   return expr;
 }
 
@@ -201,8 +202,9 @@ z3::expr Converter::inst_as_fp(const Instruction *inst)
   Z3_ast r = Z3_mk_fpa_to_fp_bv(ctx, bv, sort);
   z3::expr expr = z3::expr(ctx, r);
   if (Z3_is_numeral_ast(ctx, bv))
-    expr = expr.simplify();
-  inst2fp.insert({inst, expr});
+    inst2fp.insert({inst, expr.simplify()});
+  else
+    inst2fp.insert({inst, expr});
   return expr;
 }
 
@@ -285,21 +287,24 @@ void Converter::add_ub(const Basic_block *bb, z3::expr cond)
 {
   if (bb2ub.contains(bb))
     {
-      cond = bool_or(bb2ub.at(bb), cond);
+      z3::expr prev_cond = bb2ub.at(bb);
       bb2ub.erase(bb);
+      bb2ub.insert({bb, bool_or(prev_cond, cond)});
     }
-  bb2ub.insert({bb, cond});
+  else
+    bb2ub.insert({bb, cond});
 }
 
 void Converter::add_assert(const Basic_block *bb, z3::expr cond)
 {
-  cond = !cond;
   if (bb2not_assert.contains(bb))
     {
-      cond = bool_or(bb2not_assert.at(bb), cond);
+      z3::expr prev_cond = bb2not_assert.at(bb);
       bb2not_assert.erase(bb);
+      bb2not_assert.insert({bb, bool_or(prev_cond, !cond)});
     }
-  bb2not_assert.insert({bb, cond});
+  else
+    bb2not_assert.insert({bb, !cond});
 }
 
 void Converter::build_fp_comparison_smt(const Instruction *inst)
@@ -391,11 +396,10 @@ void Converter::build_bv_unary_smt(const Instruction *inst)
       break;
     case Op::FREE:
       {
-	uint32_t ptr_offset_bits = func->module->ptr_offset_bits;
+	z3::expr zero = ctx.bv_val(0, func->module->ptr_offset_bits);
 	z3::expr sizes = bb2memory_sizes.at(inst->bb);
-	sizes = z3::store(sizes, arg1, ctx.bv_val(0, ptr_offset_bits));
 	bb2memory_sizes.erase(inst->bb);
-	bb2memory_sizes.insert({inst->bb, sizes});
+	bb2memory_sizes.insert({inst->bb, z3::store(sizes, arg1, zero)});
       }
       break;
     case Op::IS_CONST_MEM:
@@ -404,7 +408,8 @@ void Converter::build_bv_unary_smt(const Instruction *inst)
 	for (Instruction *id : const_ids)
 	  {
 	    z3::expr cond = arg1 == inst_as_bv(id);
-	    is_const = bool_or(is_const, cond);
+	    z3::expr new_is_const = bool_or(is_const, cond);
+	    is_const = new_is_const;
 	  }
 	inst2bool.insert({inst, is_const});
       }
@@ -590,17 +595,15 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
     case Op::SET_MEM_FLAG:
       {
 	z3::expr memory_flag = bb2memory_flag.at(inst->bb);
-	memory_flag = z3::store(memory_flag, arg1, arg2);
 	bb2memory_flag.erase(inst->bb);
-	bb2memory_flag.insert({inst->bb, memory_flag});
+	bb2memory_flag.insert({inst->bb, z3::store(memory_flag, arg1, arg2)});
       }
       break;
     case Op::SET_MEM_UNDEF:
       {
 	z3::expr memory_undef = bb2memory_undef.at(inst->bb);
-	memory_undef = z3::store(memory_undef, arg1, arg2);
 	bb2memory_undef.erase(inst->bb);
-	bb2memory_undef.insert({inst->bb, memory_undef});
+	bb2memory_undef.insert({inst->bb, z3::store(memory_undef, arg1, arg2)});
       }
       break;
     case Op::SHL:
@@ -622,16 +625,16 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
 	// at IR level (as the IR limits constant width to 128 bits), so
 	// we fold it here to get nicer SMT2 when debugging.
 	if (Z3_is_numeral_ast(ctx, arg1) && Z3_is_numeral_ast(ctx, arg2))
-	  res = res.simplify();
-	inst2bv.insert({inst, res});
+	  inst2bv.insert({inst, res.simplify()});
+	else
+	  inst2bv.insert({inst, res});
       }
       break;
     case Op::STORE:
       {
 	z3::expr memory = bb2memory.at(inst->bb);
-	memory = z3::store(memory, arg1, arg2);
 	bb2memory.erase(inst->bb);
-	bb2memory.insert({inst->bb, memory});
+	bb2memory.insert({inst->bb, z3::store(memory, arg1, arg2)});
       }
       break;
     default:
@@ -869,7 +872,8 @@ void Converter::build_mem_state(const Basic_block *bb, std::map<const Basic_bloc
   for (size_t i = 1; i < bb->preds.size(); i++)
     {
       const Basic_block *pred_bb = bb->preds[i];
-      expr = ite(bb2cond.at(pred_bb), map.at(pred_bb), expr);
+      z3::expr new_expr = ite(bb2cond.at(pred_bb), map.at(pred_bb), expr);
+      expr = new_expr;
     }
   map.insert({bb, expr});
 }
@@ -890,7 +894,8 @@ void Converter::generate_bb2cond(const Basic_block *bb)
       for (auto pred_bb : bb->preds)
 	{
 	  z3::expr edge_cond = get_full_edge_cond(pred_bb, bb);
-	  cond = bool_or(cond, edge_cond);
+	  z3::expr new_cond = bool_or(cond, edge_cond);
+	  cond = new_cond;
 	}
       bb2cond.insert({bb, cond});
     }
@@ -922,7 +927,8 @@ void Converter::convert_ir()
 	      z3::expr mem_id = ctx.bv_val(id, ptr_id_bits);
 	      uint64_t size_val = inst->arguments[1]->value();
 	      z3::expr size = ctx.bv_val(size_val, ptr_offset_bits);
-	      sizes = z3::store(sizes, mem_id, size);
+	      z3::expr new_sizes = z3::store(sizes, mem_id, size);
+	      sizes = new_sizes;
 
 	      uint32_t flags = inst->arguments[2]->value();
 	      if (flags & MEM_CONST)
@@ -933,7 +939,8 @@ void Converter::convert_ir()
 		  for (uint64_t i = 0; i < size_val; i++)
 		    {
 		      z3::expr ptr = ctx.bv_val(ptr_val + i, ptr_bits);
-		      undef = z3::store(undef, ptr, byte);
+		      z3::expr new_undef = z3::store(undef, ptr, byte);
+		      undef = new_undef;
 		    }
 		}
 	    }
@@ -972,7 +979,8 @@ void Converter::convert_ir()
 		  const Basic_block *pred_bb = phi->phi_args[i].bb;
 		  z3::expr cond = get_full_edge_cond(pred_bb, bb);
 		  z3::expr expr = inst_as_bool(phi->phi_args[i].inst);
-		  phi_expr = ite(cond, expr, phi_expr);
+		  z3::expr new_phi_expr = ite(cond, expr, phi_expr);
+		  phi_expr = new_phi_expr;
 		}
 	      inst2bool.insert({phi, phi_expr});
 	    }
@@ -985,7 +993,8 @@ void Converter::convert_ir()
 		  const Basic_block *pred_bb = phi->phi_args[i].bb;
 		  z3::expr cond = get_full_edge_cond(pred_bb, bb);
 		  z3::expr expr = inst_as_bv(phi->phi_args[i].inst);
-		  phi_expr = ite(cond, expr, phi_expr);
+		  z3::expr new_phi_expr = ite(cond, expr, phi_expr);
+		  phi_expr = new_phi_expr;
 		}
 	      inst2bv.insert({phi, phi_expr});
 	    }
@@ -1007,7 +1016,8 @@ z3::expr Converter::generate_ub()
 	continue;
 
       z3::expr is_ub = bool_and(bb2ub.at(bb), bb2cond.at(bb));
-      ub = bool_or(ub, is_ub);
+      z3::expr new_ub = bool_or(ub, is_ub);
+      ub = new_ub;
     }
   return ub;
 }
@@ -1021,7 +1031,8 @@ z3::expr Converter::generate_assert()
 	continue;
 
       z3::expr is_assrt = bool_and(bb2not_assert.at(bb), bb2cond.at(bb));
-      assrt = bool_or(assrt, is_assrt);
+      z3::expr new_assrt = bool_or(assrt, is_assrt);
+      assrt = new_assrt;
     }
   return assrt;
 }
@@ -1088,8 +1099,10 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *src, Function *tgt)
 	{
 	  src_undef = conv_src.inst_as_bv(conv_src.retval_undef);
 	  z3::expr src_mask = ~src_undef;
-	  src_expr = src_expr & src_mask;
-	  tgt_expr = tgt_expr & src_mask;
+	  z3::expr new_src_expr = src_expr & src_mask;
+	  src_expr = new_src_expr;
+	  z3::expr new_tgt_expr = tgt_expr & src_mask;
+	  tgt_expr = new_tgt_expr;
 
 	  // Check that tgt is not more undef than src.
 	  if (conv_tgt.retval_undef)
