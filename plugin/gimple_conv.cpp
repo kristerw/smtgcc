@@ -2988,8 +2988,20 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       Instruction *arg2 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 1));
       Instruction *is_nan = bb->build_inst(Op::IS_NAN, arg2);
       Instruction *cmp = bb->build_inst(Op::FGT, arg1, arg2);
-      Instruction *max = bb->build_inst(Op::ITE, cmp, arg1, arg2);
-      tree2instruction[lhs] = bb->build_inst(Op::ITE, is_nan, arg1, max);
+      Instruction *max1 = bb->build_inst(Op::ITE, cmp, arg1, arg2);
+      Instruction *max2 = bb->build_inst(Op::ITE, is_nan, arg1, max1);
+
+      // 0.0 and -0.0 is equal as floating point values, and fmax(0.0, -0.0)
+      // may return eiter of them. But we treat them as 0.0 > -0.0 here,
+      // otherwise we will report miscompilations when GCC switch the order
+      // of the arguments.
+      Instruction *zero = bb->value_inst(0, arg1->bitsize);
+      Instruction *is_zero1 = bb->build_inst(Op::FEQ, arg1, zero);
+      Instruction *is_zero2 = bb->build_inst(Op::FEQ, arg2, zero);
+      Instruction *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
+      Instruction *cmp2 = bb->build_inst(Op::SGT, arg1, arg2);
+      Instruction *max3 = bb->build_inst(Op::ITE, cmp2, arg1, arg2);
+      tree2instruction[lhs] = bb->build_inst(Op::ITE, is_zero, max3, max2);
       return;
     }
 
@@ -3007,8 +3019,20 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       Instruction *arg2 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 1));
       Instruction *is_nan = bb->build_inst(Op::IS_NAN, arg2);
       Instruction *cmp = bb->build_inst(Op::FLT, arg1, arg2);
-      Instruction *min = bb->build_inst(Op::ITE, cmp, arg1, arg2);
-      tree2instruction[lhs] = bb->build_inst(Op::ITE, is_nan, arg1, min);
+      Instruction *min1 = bb->build_inst(Op::ITE, cmp, arg1, arg2);
+      Instruction *min2 = bb->build_inst(Op::ITE, is_nan, arg1, min1);
+
+      // 0.0 and -0.0 is equal as floating point values, and fmin(0.0, -0.0)
+      // may return eiter of them. But we treat them as 0.0 > -0.0 here,
+      // otherwise we will report miscompilations when GCC switch the order
+      // of the arguments.
+      Instruction *zero = bb->value_inst(0, arg1->bitsize);
+      Instruction *is_zero1 = bb->build_inst(Op::FEQ, arg1, zero);
+      Instruction *is_zero2 = bb->build_inst(Op::FEQ, arg2, zero);
+      Instruction *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
+      Instruction *cmp2 = bb->build_inst(Op::SLT, arg1, arg2);
+      Instruction *min3 = bb->build_inst(Op::ITE, cmp2, arg1, arg2);
+      tree2instruction[lhs] = bb->build_inst(Op::ITE, is_zero, min3, min2);
       return;
     }
 
