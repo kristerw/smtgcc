@@ -127,6 +127,15 @@ void calculate_dominance(Function *func)
     }
 }
 
+void update_phi(Basic_block *dest_bb, Basic_block *orig_src_bb, Basic_block *new_src_bb)
+{
+  for (auto phi : dest_bb->phis)
+    {
+      Instruction *inst = phi->get_phi_arg(orig_src_bb);
+      phi->add_phi_arg(inst, new_src_bb);
+    }
+}
+
 } // end anonymous namespace
 
 Basic_block *nearest_dominator(const Basic_block *bb_in)
@@ -212,6 +221,8 @@ void simplify_cfg(Function *func)
 {
   for (auto bb : func->bbs)
     {
+      // br 0, .1, .2  ->  br .2
+      // br 1, .1, .2  ->  br .1
       if (bb->last_inst->opcode == Op::BR
 	  && bb->last_inst->nof_args == 1)
 	{
@@ -231,7 +242,53 @@ void simplify_cfg(Function *func)
 	      bb->build_br_inst(taken_bb);
 	    }
 	}
+
+      // Remove empty BBs ending in unconditional branch by letting the
+      // predecessors call the successor.
+      if (bb->first_inst->opcode == Op::BR
+	  && bb->first_inst->nof_args == 0
+	  && bb->phis.size() == 0)
+	{
+	  Basic_block *dest_bb = bb->first_inst->u.br1.dest_bb;
+	  std::vector<Basic_block *> preds = bb->preds;
+	  for (auto pred : preds)
+	    {
+	      assert(pred->last_inst->opcode == Op::BR);
+	      if (pred->last_inst->nof_args == 0)
+		{
+		  destroy_instruction(pred->last_inst);
+		  pred->build_br_inst(dest_bb);
+		  update_phi(dest_bb, bb, pred);
+		}
+	      else
+		{
+		  Instruction *cond = pred->last_inst->arguments[0];
+		  Basic_block *true_bb = pred->last_inst->u.br3.true_bb;
+		  Basic_block *false_bb = pred->last_inst->u.br3.false_bb;
+		  if (true_bb == bb)
+		    true_bb = dest_bb;
+		  if (false_bb == bb)
+		    false_bb = dest_bb;
+
+		  if (true_bb == false_bb)
+		    {
+		      if (dest_bb->phis.size() == 0)
+			{
+			  destroy_instruction(pred->last_inst);
+			  pred->build_br_inst(dest_bb);
+			}
+		    }
+		  else
+		    {
+		      destroy_instruction(pred->last_inst);
+		      pred->build_br_inst(cond, true_bb, false_bb);
+		      update_phi(dest_bb, bb, pred);
+		    }
+		}
+	    }
+	}
     }
+
   reverse_post_order(func);
 }
 
