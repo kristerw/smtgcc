@@ -672,17 +672,17 @@ Instruction *simplify_memory(Instruction *inst)
 
 Instruction *simplify_phi(Instruction *phi)
 {
-  // If phi only references itself or one other value, it can be replaced by
-  // that value, e.g. _1 = PHI<_1, _2, _1>;
+  // If phi only references itself or one other value it can be replaced by
+  // that value, e.g. %2 = phi [ %1, .1] [ %2, .2] [%1, .3]
 
-  Instruction *inst = NULL;
+  Instruction *inst = nullptr;
   for (auto phi_arg : phi->phi_args)
     {
       if (phi_arg.inst != phi)
 	{
-	  if (inst == NULL)
+	  if (!inst)
 	    inst = phi_arg.inst;
-	  else
+	  else if (phi_arg.inst != inst)
 	    return phi;
 	}
     }
