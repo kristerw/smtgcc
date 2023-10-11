@@ -114,7 +114,7 @@ Basic_block *find_simple_loop(Function *func)
 {
   for (auto bb : func->bbs)
     {
-      if (bb->preds.size() == 2 && bb->succs.size() == 2)
+      if (bb->succs.size() == 2)
 	{
 	  if (bb->succs[0] == bb || bb->succs[1] == bb)
 	    return bb;
@@ -196,7 +196,6 @@ void Unroller::unroll()
 	orig_phi->remove_phi_arg(loop_header);
 	orig_phi->add_phi_arg(phi, loop_exit);
       }
-    assert(loop_header->preds.size() == 2);
     assert(loop_header->last_inst->opcode == Op::BR);
     assert(loop_header->last_inst->nof_args == 1);
     Instruction *cond = loop_header->last_inst->arguments[0];
@@ -231,10 +230,9 @@ void Unroller::unroll()
   for (int i = 0; i < unroll_limit - 1; i++)
     {
       // We currently only support simple loops where we guarantee that
-      // the phi nodes have two arguments -- one is for loop entry, and
-      // the other for the looping case. So the duplicated blocks will
-      // only have the looping case, and we only update the translation
-      // table.
+      // the phi nodes have exactly one argument for the looping case.
+      // So the duplicated blocks will only have the looping case, and
+      // we only update the translation table.
       //
       // We must translate phi nodes in two steps, because we may have
       //   .2:
@@ -246,12 +244,10 @@ void Unroller::unroll()
       std::map<Instruction *, Instruction *> tmp_curr_inst;
       for (auto phi : loop_header->phis)
 	{
-	  assert(phi->phi_args.size() == 2);
-	  if (phi->phi_args[0].bb == loop_header
-	      || phi->phi_args[0].bb == loop_body)
-	    tmp_curr_inst[phi] = translate(phi->phi_args[0].inst);
+	  if (loop_body)
+	    tmp_curr_inst[phi] = translate(phi->get_phi_arg(loop_body));
 	  else
-	    tmp_curr_inst[phi] = translate(phi->phi_args[1].inst);
+	    tmp_curr_inst[phi] = translate(phi->get_phi_arg(loop_header));
 	}
       for (auto [phi, translated_phi] : tmp_curr_inst)
 	{
@@ -313,32 +309,18 @@ void Unroller::unroll()
   // Update the original loop to only do the first iteration.
   if (loop_body)
     {
-      Basic_block *prev_bb;
-      if (loop_header->preds[0] == loop_body)
-	prev_bb = loop_header->preds[1];
-      else
-	prev_bb = loop_header->preds[0];
-      while (!loop_header->phis.empty())
+      for (auto phi : loop_header->phis)
 	{
-	  Instruction *phi = loop_header->phis.back();
-	  phi->replace_all_uses_with(phi->get_phi_arg(prev_bb));
-	  destroy_instruction(phi);
+	  phi->remove_phi_arg(loop_body);
 	}
       destroy_instruction(loop_body->last_inst);
       loop_body->build_br_inst(bbs.at(0));
    }
   else
     {
-      Basic_block *prev_bb;
-      if (loop_header->preds[0] == loop_header)
-	prev_bb = loop_header->preds[1];
-      else
-	prev_bb = loop_header->preds[0];
-      while (!loop_header->phis.empty())
+      for (auto phi : loop_header->phis)
 	{
-	  Instruction *phi = loop_header->phis.back();
-	  phi->replace_all_uses_with(phi->get_phi_arg(prev_bb));
-	  destroy_instruction(phi);
+	  phi->remove_phi_arg(loop_header);
 	}
       Instruction *cond = loop_header->last_inst->arguments[0];
       Basic_block *true_bb = loop_header->last_inst->u.br3.true_bb;
