@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cassert>
 
 #include "smtgcc.h"
 
@@ -7,6 +8,7 @@ namespace {
 
 void rpo_walk(Basic_block *bb, std::vector<Basic_block *>& bbs, std::set<Basic_block *>& visited)
 {
+  assert(bb->last_inst->opcode == Op::BR || bb->last_inst->opcode == Op::RET);
   visited.insert(bb);
   if (bb->last_inst->opcode == Op::BR)
     {
@@ -22,8 +24,8 @@ void rpo_walk(Basic_block *bb, std::vector<Basic_block *>& bbs, std::set<Basic_b
 	  if (!visited.contains(bb->last_inst->u.br3.false_bb))
 	    rpo_walk(bb->last_inst->u.br3.false_bb, bbs, visited);
 	}
+      bbs.insert(bbs.begin(), bb);
     }
-  bbs.insert(bbs.begin(), bb);
 }
 
 void remove_dead_bbs(std::vector<Basic_block *>& dead_bbs)
@@ -162,10 +164,18 @@ bool post_dominates(const Basic_block *bb1, const Basic_block *bb2)
 
 void reverse_post_order(Function *func)
 {
+  auto it = std::find_if(func->bbs.begin(), func->bbs.end(),
+			 [](const Basic_block *bb) {
+			   return bb->last_inst->opcode == Op::RET;
+			 });
+  assert(it != func->bbs.end());
+  Basic_block *exit_bb = *it;
+
   std::vector<Basic_block *> bbs;
   std::set<Basic_block *> visited;
   rpo_walk(func->bbs[0], bbs, visited);
-  if (!visited.contains(func->bbs.back()))
+  bbs.push_back(exit_bb);
+  if (!visited.contains(exit_bb))
     throw Not_implemented("unreachable exit BB (infinite loop)");
   if (bbs.size() != func->bbs.size())
     {
