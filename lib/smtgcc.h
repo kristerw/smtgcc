@@ -261,7 +261,7 @@ struct Function {
 public:
   std::string name;
   std::vector<Basic_block *> bbs;
-  std::map<std::pair<unsigned __int128, uint32_t>, Instruction *> values;
+  std::map<std::pair<uint32_t, unsigned __int128>, Instruction *> values;
   Instruction *last_value_inst = nullptr;
 
   Basic_block *build_bb();

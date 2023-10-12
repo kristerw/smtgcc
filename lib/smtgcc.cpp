@@ -770,7 +770,7 @@ Instruction *Function::value_inst(unsigned __int128 value, uint32_t bitsize)
 
   if (bitsize < 128)
     value = (value << (128 - bitsize)) >> (128 - bitsize);
-  auto key = std::pair(value, bitsize);
+  auto key = std::pair(bitsize, value);
   auto it = values.find(key);
   if (it != values.end())
     return it->second;
@@ -802,27 +802,30 @@ Instruction *Function::value_inst(unsigned __int128 value, uint32_t bitsize)
 
   // We must insert the value instructions early in the basic block as they
   // may be used by e.g. memory initialization in the entry block.
-  // But we want to preserve the order (so the IR generated when parsing
-  // a file will be consistent with the original) so we cannot just insert
-  // it at the top of the BB.
-  if (!bbs[0]->last_inst || bbs[0]->last_inst->opcode == Op::VALUE)
-    bbs[0]->insert_last(new_inst);
-  else if (last_value_inst)
-    new_inst->insert_after(last_value_inst);
-  else
+  // We also want a consistent order (to make functional identical code
+  // identical in the IR, even if there are minor differences in the order
+  // that the constants has been created. This happens, for example, in the
+  // GCC cpp pass when moving constants into phi-nodes.)
+  // So we insert the value instructions at the top of the entry block,
+  // sorted after their values.
+  auto [it2, _] = values.insert({std::pair(bitsize, value), new_inst});
+  if (values.size() == 1)
     {
-      Instruction *inst = bbs[0]->first_inst;
-      while (inst && inst->opcode == Op::VALUE)
-	{
-	  inst = inst->next;
-	}
-      if (inst)
-	new_inst->insert_before(inst);
+      if (bbs[0]->first_inst)
+	new_inst->insert_before(bbs[0]->first_inst);
       else
 	bbs[0]->insert_last(new_inst);
     }
-  last_value_inst = new_inst;
-  values[key] = new_inst;
+  else if (it2 == values.begin())
+    {
+      Instruction *first_value_inst = (++it2)->second;
+      new_inst->insert_before(first_value_inst);
+    }
+  else
+    {
+      Instruction *prev_value_inst = (--it2)->second;
+      new_inst->insert_after(prev_value_inst);
+    }
   return new_inst;
 }
 
@@ -1111,7 +1114,7 @@ void destroy_instruction(Instruction *inst)
     {
       if (inst->opcode == Op::VALUE)
 	{
-	  auto key = std::pair(inst->value(), inst->bitsize);
+	  auto key = std::pair(inst->bitsize, inst->value());
 	  assert(inst->bb->func->values.contains(key));
 	  inst->bb->func->values.erase(key);
 
