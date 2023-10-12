@@ -672,13 +672,21 @@ Instruction *simplify_memory(Instruction *inst)
 
 Instruction *simplify_phi(Instruction *phi)
 {
-  // A phi node can be replaced with an argument if all of them are identical.
-  Instruction *inst = phi->phi_args[0].inst;
+  // If phi only references itself or one other value it can be replaced by
+  // that value, e.g. %2 = phi [ %1, .1] [ %2, .2] [%1, .3]
+
+  Instruction *inst = nullptr;
   for (auto phi_arg : phi->phi_args)
     {
-      if (phi_arg.inst != inst)
-	return phi;
+      if (phi_arg.inst != phi)
+	{
+	  if (!inst)
+	    inst = phi_arg.inst;
+	  else if (phi_arg.inst != inst)
+	    return phi;
+	}
     }
+
   return inst;
 }
 
