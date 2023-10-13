@@ -14,7 +14,7 @@ using namespace std::string_literals;
 namespace smtgcc {
 namespace {
 
-const int unroll_limit = 16;
+const int unroll_limit = 12;
 
 class Unroller
 {
