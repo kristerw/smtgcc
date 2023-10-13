@@ -1209,7 +1209,6 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *src, Function *tgt)
   {
     z3::solver solver(ctx);
     solver.add(!src_ub_expr);
-    solver.add(tgt_ub_expr);
     solver.add(src_ub_expr != tgt_ub_expr);
     uint64_t start_time = get_time();
     Solver_result solver_result = run_solver(solver, "UB");
