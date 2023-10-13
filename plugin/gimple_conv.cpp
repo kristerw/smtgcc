@@ -2847,19 +2847,30 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       tree lhs = gimple_call_lhs(stmt);
       if (!lhs)
 	return;
-      Instruction *arg = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
+      auto [arg, arg_undef] = tree2inst(bb, gimple_call_arg(stmt, 0));
       // Determine the width from lhs as bswap16 has 32-bit arg.
       int bitwidth = TYPE_PRECISION(TREE_TYPE(lhs));
       Instruction *inst = bb->build_trunc(arg, 8);
+      Instruction *inst_undef = nullptr;
+      if (arg_undef)
+	inst_undef = bb->build_trunc(arg_undef, 8);
       for (int i = 8; i < bitwidth; i += 8)
 	{
 	  Instruction *high = bb->value_inst(i + 7, 32);
 	  Instruction *low = bb->value_inst(i, 32);
 	  Instruction *byte = bb->build_inst(Op::EXTRACT, arg, high, low);
 	  inst = bb->build_inst(Op::CONCAT, inst, byte);
+	  if (arg_undef)
+	    {
+	      Instruction *byte_undef =
+		bb->build_inst(Op::EXTRACT, arg_undef, high, low);
+	      inst_undef = bb->build_inst(Op::CONCAT, inst_undef, byte_undef);
+	    }
 	}
       constrain_range(bb, lhs, inst);
       tree2instruction[lhs] = inst;
+      if (inst_undef)
+	tree2undef[lhs] = inst_undef;
       return;
     }
 
