@@ -2135,14 +2135,15 @@ Instruction *Converter::process_binary_int(enum tree_code code, bool is_unsigned
 	  bb->build_inst(Op::UB, cond);
 	}
 
-	// The resulting pointer cannot be NULL if arg2 != 0
-	// (but NULL + 0 seems to be OK in GIMPLE).
-	// TODO: Should we permit NULL + 0?
+	// The resulting pointer cannot be NULL if arg1 or arg2 is
+	// non-zero, but GIMPLE allows NULL + 0.
 	{
 	  Instruction *zero = bb->value_inst(0, ptr->bitsize);
 	  Instruction *cond1 = bb->build_inst(Op::EQ, ptr, zero);
-	  Instruction *cond2 = bb->build_inst(Op::NE, arg2, zero);
-	  Instruction *cond = bb->build_inst(Op::AND, cond1, cond2);
+	  Instruction *cond2 = bb->build_inst(Op::NE, arg1, zero);
+	  Instruction *cond3 = bb->build_inst(Op::NE, arg2, zero);
+	  Instruction *args_nonzero = bb->build_inst(Op::OR, cond2, cond3);
+	  Instruction *cond = bb->build_inst(Op::AND, cond1, args_nonzero);
 	  bb->build_inst(Op::UB, cond);
 	}
 	return ptr;
