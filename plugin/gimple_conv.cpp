@@ -3321,7 +3321,14 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       if (CLZ_DEFINED_VALUE_AT_ZERO(SCALAR_INT_TYPE_MODE(TREE_TYPE(arg_expr)), value))
 	val0 = bb->value_inst(value, bitsize);
       else
-	val0 = bb->build_inst(Op::SYMBOLIC, bb->value_inst(bitsize, 32));
+	{
+	  if (!state->clz_bitsize2idx.contains(bitsize))
+	    state->clz_bitsize2idx[bitsize] = state->symbolic_idx++;
+	  uint32_t idx = state->clz_bitsize2idx[bitsize];
+	  Instruction *idx_inst = bb->value_inst(idx, 32);
+	  Instruction *bitsize_inst = bb->value_inst(bitsize, 32);
+	  val0 = bb->build_inst(Op::SYMBOLIC, idx_inst, bitsize_inst);
+	}
 
       Instruction *inst = val0;
       for (unsigned i = 0; i < arg->bitsize; i++)
@@ -3349,7 +3356,14 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       if (CLZ_DEFINED_VALUE_AT_ZERO(SCALAR_INT_TYPE_MODE(TREE_TYPE(arg_expr)), value))
 	val0 = bb->value_inst(value, bitsize);
       else
-	val0 = bb->build_inst(Op::SYMBOLIC, bb->value_inst(bitsize, 32));
+	{
+	  if (!state->clz_bitsize2idx.contains(bitsize))
+	    state->clz_bitsize2idx[bitsize] = state->symbolic_idx++;
+	  uint32_t idx = state->clz_bitsize2idx[bitsize];
+	  Instruction *idx_inst = bb->value_inst(idx, 32);
+	  Instruction *bitsize_inst = bb->value_inst(bitsize, 32);
+	  val0 = bb->build_inst(Op::SYMBOLIC, idx_inst, bitsize_inst);
+	}
 
       Instruction *inst = val0;
       for (int i = arg->bitsize - 1; i >= 0; i--)
@@ -3393,7 +3407,9 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
     {
       tree lhs = gimple_call_lhs(stmt);
       assert(lhs);
-      Instruction *inst = bb->build_inst(Op::SYMBOLIC, bb->value_inst(1, 32));
+      Instruction *idx_inst = bb->value_inst(state->symbolic_idx++, 32);
+      Instruction *bitsize_inst = bb->value_inst(1, 32);
+      Instruction *inst = bb->build_inst(Op::SYMBOLIC, idx_inst, bitsize_inst);
       tree2instruction[lhs] = inst;
       return;
     }

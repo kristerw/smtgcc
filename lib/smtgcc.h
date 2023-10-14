@@ -64,7 +64,6 @@ enum class Op : uint8_t {
   NOT,
   READ,
   REGISTER,
-  SYMBOLIC,
   UB,
 
   // Floating-point unary
@@ -93,6 +92,7 @@ enum class Op : uint8_t {
   SSUB_WRAPS,
   STORE,
   SUB,
+  SYMBOLIC,
   UDIV,
   UMAX,
   UMIN,

@@ -2,7 +2,7 @@
 
 #if HAVE_LIBCVC5
 #include <cassert>
-#include <iostream>
+#include <cinttypes>
 #include <cvc5/cvc5.h>
 
 #include "smtgcc.h"
@@ -16,6 +16,7 @@ namespace {
 class Common {
 public:
   std::map<int, cvc5::Term> index2param;
+  std::map<uint32_t, cvc5::Term> index2symbolic;
   cvc5::Solver& solver;
   cvc5::Term memory;
   cvc5::Term memory_flag;
@@ -369,16 +370,6 @@ void Converter::build_bv_unary_smt(const Instruction *inst)
   cvc5::Term arg1 = inst_as_bv(inst->arguments[0]);
   switch (inst->opcode)
     {
-    case Op::SYMBOLIC:
-      {
-	static int symbolic_idx = 0;
-	char name[100];
-	sprintf(name, ".symbolic%d", symbolic_idx++);
-	cvc5::Sort sort = solver.mkBitVectorSort(inst->bitsize);
-	cvc5::Term symbolic = solver.mkConst(sort, name);
-	inst2bv.insert({inst, symbolic});
-      }
-      break;
     case Op::GET_MEM_FLAG:
       {
 	cvc5::Term mem_flag = bb2memory_flag.at(inst->bb);
@@ -497,6 +488,20 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
 	    inst2bv.insert({inst, param});
 	    common.index2param.insert({index, param});
 	  }
+      }
+      break;
+    case Op::SYMBOLIC:
+      {
+	uint32_t index = inst->arguments[0]->value();
+	if (!common.index2symbolic.contains(index))
+	  {
+	    char name[100];
+	    sprintf(name, ".symbolic%" PRIu32, index);
+	    cvc5::Sort sort = solver.mkBitVectorSort(inst->bitsize);
+	    cvc5::Term symbolic = solver.mkConst(sort, name);
+	    common.index2symbolic.insert({index, symbolic});
+	  }
+	inst2bv.insert({inst, common.index2symbolic.at(index)});
       }
       break;
     case Op::SDIV:

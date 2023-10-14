@@ -48,7 +48,6 @@ const std::array<Instruction_info, 79> inst_info{{
   {"not", Op::NOT, Inst_class::iunary, true, false},
   {"read", Op::READ, Inst_class::iunary, true, false},
   {"register", Op::REGISTER, Inst_class::iunary, true, false},
-  {"symbolic", Op::SYMBOLIC, Inst_class::iunary, true, false},
   {"ub", Op::UB, Inst_class::iunary, false, false},
 
   // Floating-point unary
@@ -77,6 +76,7 @@ const std::array<Instruction_info, 79> inst_info{{
   {"ssub_wraps", Op::SSUB_WRAPS, Inst_class::ibinary, true, false},
   {"store", Op::STORE, Inst_class::ibinary, false, false},
   {"sub", Op::SUB, Inst_class::ibinary, true, false},
+  {"symbolic", Op::SYMBOLIC, Inst_class::ibinary, true, false},
   {"udiv", Op::UDIV, Inst_class::ibinary, true, false},
   {"umax", Op::UMAX, Inst_class::ibinary, true, true},
   {"umin", Op::UMIN, Inst_class::ibinary, true, true},
@@ -162,9 +162,7 @@ Instruction *create_inst(Op opcode, Instruction *arg)
     inst->bitsize = 8;
   else if (opcode == Op::MEM_SIZE)
     inst->bitsize = arg->bb->func->module->ptr_offset_bits;
-  else if (opcode == Op::NAN
-	   || opcode == Op::REGISTER
-	   || opcode == Op::SYMBOLIC)
+  else if (opcode == Op::NAN || opcode == Op::REGISTER)
     inst->bitsize = arg->value();
   else if (opcode == Op::READ)
     {
@@ -211,7 +209,7 @@ Instruction *create_inst(Op opcode, Instruction *arg1, Instruction *arg2)
     {
       inst->bitsize = arg1->bitsize + arg2->bitsize;
     }
-  else if (opcode == Op::PARAM)
+  else if (opcode == Op::PARAM || opcode == Op::SYMBOLIC)
     {
       assert(arg1->opcode == Op::VALUE);
       assert(arg2->opcode == Op::VALUE);
@@ -1182,12 +1180,6 @@ bool identical(Instruction *inst1, Instruction *inst2)
 {
   if (inst1->opcode != inst2->opcode)
     return false;
-  if (inst1->opcode == Op::SYMBOLIC)
-    {
-      // The SYMBOLIC instruction represents "all" values, and we must handle
-      // that the inst1 and inst2 get different concrete values.
-      return false;
-    }
   if (inst1->bitsize != inst2->bitsize)
     return false;
   if (inst1->nof_args != inst2->nof_args)
