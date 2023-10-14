@@ -15,7 +15,7 @@ namespace {
 
 class Common {
 public:
-  std::map<int, cvc5::Term> index2param;
+  std::map<uint32_t, cvc5::Term> index2param;
   std::map<uint32_t, cvc5::Term> index2symbolic;
   cvc5::Solver& solver;
   cvc5::Term memory;
@@ -475,19 +475,15 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
     case Op::PARAM:
       {
 	uint32_t index = inst->arguments[0]->value();
-	if (common.index2param.contains(index))
-	  {
-	    inst2bv.insert({inst, common.index2param.at(index)});
-	  }
-	else
+	if (!common.index2param.contains(index))
 	  {
 	    char name[100];
-	    sprintf(name, ".param%d", index);
+	    sprintf(name, ".param%" PRIu32, index);
 	    cvc5::Sort sort = solver.mkBitVectorSort(inst->bitsize);
 	    cvc5::Term param = solver.mkConst(sort, name);
-	    inst2bv.insert({inst, param});
 	    common.index2param.insert({index, param});
 	  }
+	inst2bv.insert({inst, common.index2param.at(index)});
       }
       break;
     case Op::SYMBOLIC:

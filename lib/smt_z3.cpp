@@ -17,7 +17,7 @@ enum class mem_kind {memory, memory_flag, memory_undef, memory_sizes};
 
 class Common {
 public:
-  std::map<int, z3::expr> index2param;
+  std::map<uint32_t, z3::expr> index2param;
   std::map<uint32_t, z3::expr> index2symbolic;
   z3::context& ctx;
   std::map<mem_kind, z3::expr> mem;
@@ -513,18 +513,14 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
     case Op::PARAM:
       {
 	uint32_t index = inst->arguments[0]->value();
-	if (common.index2param.contains(index))
-	  {
-	    inst2bv.insert({inst, common.index2param.at(index)});
-	  }
-	else
+	if (!common.index2param.contains(index))
 	  {
 	    char name[100];
-	    sprintf(name, ".param%d", index);
+	    sprintf(name, ".param%" PRIu32, index);
 	    z3::expr param = ctx.bv_const(name, inst->bitsize);
-	    inst2bv.insert({inst, param});
 	    common.index2param.insert({index, param});
 	  }
+	inst2bv.insert({inst, common.index2param.at(index)});
       }
       break;
     case Op::SYMBOLIC:
