@@ -2124,15 +2124,20 @@ Instruction *Converter::process_binary_int(enum tree_code code, bool is_unsigned
 	  bb->build_inst(Op::UB, is_ub);
 	}
 
+	// The documentation is a bit unclear what "overflow" really mean.
+	// Pointers are unsigned, and POINTER_PLUS_EXPR is used for
+	// subtraction too, so "p - 1" will always overflow in some sense.
+	// So we interpret the addition as a subtraction if the second
+	// operand is interpreted as a negative number.
+	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	{
-	  uint32_t ptr_offset_bits = func->module->ptr_offset_bits;
-	  uint64_t max_off = ((uint64_t)1 << ptr_offset_bits) - 1;
-	  Instruction *max = bb->value_inst(max_off, arg2->bitsize);
-	  Instruction *min = bb->build_inst(Op::NEG, max);
-	  Instruction *cond1 = bb->build_inst(Op::SGT, arg2, max);
-	  Instruction *cond2 = bb->build_inst(Op::SLT, arg2, min);
-	  Instruction *cond = bb->build_inst(Op::OR, cond1, cond2);
-	  bb->build_inst(Op::UB, cond);
+	  Instruction *sub_overflow = bb->build_inst(Op::UGT, ptr, arg1);
+	  Instruction *add_overflow = bb->build_inst(Op::ULT, ptr, arg1);
+	  Instruction *zero = bb->value_inst(0, arg2->bitsize);
+	  Instruction *is_sub = bb->build_inst(Op::SLT, arg2, zero);
+	  Instruction *is_ub =
+	    bb->build_inst(Op::ITE, is_sub, sub_overflow, add_overflow);
+	  bb->build_inst(Op::UB, is_ub);
 	}
 
 	// The resulting pointer cannot be NULL if arg1 or arg2 is
