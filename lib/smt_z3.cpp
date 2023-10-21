@@ -888,8 +888,10 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *func)
 	  // Check that tgt is not more undef than src.
 	  if (conv.tgt_retval_undef != conv.src_retval_undef)
 	    {
-	      tgt_undef = conv.inst_as_bv(conv.tgt_retval_undef);
-	      is_more_undef = (src_mask & tgt_undef) != 0;
+	      z3::expr new_tgt_undef = conv.inst_as_bv(conv.tgt_retval_undef);
+	      tgt_undef = new_tgt_undef;
+	      z3::expr new_is_more_undef = (src_mask & tgt_undef) != 0;
+	      is_more_undef = new_is_more_undef;
 	    }
 	}
 
