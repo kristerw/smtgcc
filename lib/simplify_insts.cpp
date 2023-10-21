@@ -1046,7 +1046,7 @@ void simplify_mem(Function *func)
 	    case Op::IS_CONST_MEM:
 	      res = simplify_is_const_mem(inst, id2mem_inst, has_const_mem);
 	      break;
-	    case Op::MEM_SIZE:
+	    case Op::GET_MEM_SIZE:
 	      res = simplify_mem_size(inst, id2size);
 	      break;
 	    case Op::FREE:

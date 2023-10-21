@@ -49,21 +49,31 @@ enum class Op : uint8_t {
   FLT,
   FNE,
 
+  // Nullary
+  MEM_ARRAY,
+  MEM_FLAG_ARRAY,
+  MEM_SIZE_ARRAY,
+  MEM_UNDEF_ARRAY,
+
   // Integer unary
   ASSERT,
   FREE,
   GET_MEM_FLAG,
+  GET_MEM_SIZE,
   GET_MEM_UNDEF,
   IS_CONST_MEM,
   IS_NAN,
   IS_NONCANONICAL_NAN,
   LOAD,
-  MEM_SIZE,
   MOV,
   NEG,
   NOT,
   READ,
   REGISTER,
+  SRC_ASSERT,
+  TGT_ASSERT,
+  SRC_UB,
+  TGT_UB,
   UB,
 
   // Floating-point unary
@@ -74,6 +84,10 @@ enum class Op : uint8_t {
   // Integer binary
   ADD,
   AND,
+  ARRAY_GET_FLAG,
+  ARRAY_GET_SIZE,
+  ARRAY_GET_UNDEF,
+  ARRAY_LOAD,
   ASHR,
   CONCAT,
   LSHR,
@@ -88,11 +102,17 @@ enum class Op : uint8_t {
   SMAX,
   SMIN,
   SMUL_WRAPS,
+  SRC_MEM1,
+  SRC_MEM2,
+  SRC_RETVAL,
   SREM,
   SSUB_WRAPS,
   STORE,
   SUB,
   SYMBOLIC,
+  TGT_MEM1,
+  TGT_MEM2,
+  TGT_RETVAL,
   UDIV,
   UMAX,
   UMIN,
@@ -107,6 +127,10 @@ enum class Op : uint8_t {
   FSUB,
 
   // Ternary
+  ARRAY_SET_FLAG,
+  ARRAY_SET_SIZE,
+  ARRAY_SET_UNDEF,
+  ARRAY_STORE,
   EXTRACT,
   ITE,
   MEMORY,
@@ -128,6 +152,9 @@ enum class Op : uint8_t {
 };
 
 enum class Inst_class : uint8_t {
+  // Nullary operations
+  nullary,
+
   // Unary operations
   iunary,
   funary,
@@ -154,7 +181,7 @@ struct Instruction_info {
   bool is_commutative;
 };
 
-extern const std::array<Instruction_info, 79> inst_info;
+extern const std::array<Instruction_info, 101> inst_info;
 
 struct Module;
 struct Function;
@@ -237,6 +264,7 @@ struct Basic_block {
 
   void insert_last(Instruction *inst);
   void insert_phi(Instruction *inst);
+  Instruction *build_inst(Op opcode);
   Instruction *build_inst(Op opcode, Instruction *arg);
   Instruction *build_inst(Op opcode, Instruction *arg1, Instruction *arg2);
   Instruction *build_inst(Op opcode, Instruction *arg1, Instruction *arg2,
@@ -318,6 +346,7 @@ void destroy_function(Function *);
 void destroy_basic_block(Basic_block *);
 void destroy_instruction(Instruction *);
 
+Instruction *create_inst(Op opcode);
 Instruction *create_inst(Op opcode, Instruction *arg);
 Instruction *create_inst(Op opcode, Instruction *arg1, Instruction *arg2);
 Instruction *create_inst(Op opcode, Instruction *arg1, Instruction *arg2,
@@ -344,9 +373,6 @@ struct SStats {
 };
 
 uint64_t get_time();
-Solver_result check_refine(Module *module);
-Solver_result check_assert(Function *func);
-Solver_result check_ub(Function *func);
 
 // cfg.cpp
 void reverse_post_order(Function *func);
@@ -355,6 +381,11 @@ void simplify_cfg(Function *func);
 Basic_block *nearest_dominator(const Basic_block *bb);
 bool dominates(const Basic_block *bb1, const Basic_block *bb2);
 bool post_dominates(const Basic_block *bb1, const Basic_block *bb2);
+
+// check.cpp
+Solver_result check_refine(Module *module);
+Solver_result check_assert(Function *func);
+Solver_result check_ub(Function *func);
 
 // dead_code_elimination.cpp
 void dead_code_elimination(Function *func);
@@ -386,12 +417,12 @@ void simplify_mem(Function *func);
 void simplify_mem(Module *module);
 
 // smt_cvc5.cpp
-std::pair<SStats, Solver_result> check_refine_cvc5(Function *src, Function *tgt);
+std::pair<SStats, Solver_result> check_refine_cvc5(Function *func);
 std::pair<SStats, Solver_result> check_assert_cvc5(Function *func);
 std::pair<SStats, Solver_result> check_ub_cvc5(Function *func);
 
 // smt_z3.cpp
-std::pair<SStats, Solver_result> check_refine_z3(Function *src, Function *tgt);
+std::pair<SStats, Solver_result> check_refine_z3(Function *func);
 std::pair<SStats, Solver_result> check_assert_z3(Function *func);
 std::pair<SStats, Solver_result> check_ub_z3(Function *func);
 

@@ -19,6 +19,7 @@ plugins = \
 
 lib_sources = \
 	lib/cfg.cpp \
+	lib/check.cpp \
 	lib/dead_code_elimination.cpp \
 	lib/loop_unroll.cpp \
 	lib/memory_opt.cpp \

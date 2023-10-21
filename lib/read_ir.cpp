@@ -447,8 +447,14 @@ Op parser::parse_instruction()
 	throw Parse_error("redefinition of " + token_string(tokens[0]),
 			  line_number);
 
-      if (info.iclass == Inst_class::iunary
-	  || info.iclass == Inst_class::funary)
+      if (info.iclass == Inst_class::nullary)
+	{
+	  get_end_of_line(4);
+
+	  id2inst[lhs_id] = current_bb->build_inst(info.opcode);
+	}
+      else if (info.iclass == Inst_class::iunary
+	       || info.iclass == Inst_class::funary)
 	{
 	  Instruction *arg1 = get_arg(3);
 	  get_end_of_line(4);

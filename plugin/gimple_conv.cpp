@@ -546,7 +546,7 @@ void store_ub_check(Basic_block *bb, Instruction *ptr, uint64_t size)
   Instruction *id_end = bb->build_extract_id(end);
   Instruction *overflow = bb->build_inst(Op::NE, id, id_end);
   bb->build_inst(Op::UB, overflow);
-  Instruction *mem_size = bb->build_inst(Op::MEM_SIZE, id);
+  Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, id);
   Instruction *offset = bb->build_extract_offset(end);
   Instruction *out_of_bound = bb->build_inst(Op::UGT, offset, mem_size);
   bb->build_inst(Op::UB, out_of_bound);
@@ -562,7 +562,7 @@ void load_ub_check(Basic_block *bb, Instruction *ptr, uint64_t size)
   Instruction *id_end = bb->build_extract_id(end);
   Instruction *overflow = bb->build_inst(Op::NE, id, id_end);
   bb->build_inst(Op::UB, overflow);
-  Instruction *mem_size = bb->build_inst(Op::MEM_SIZE, id);
+  Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, id);
   Instruction *offset = bb->build_extract_offset(end);
   Instruction *out_of_bound = bb->build_inst(Op::UGT, offset, mem_size);
   bb->build_inst(Op::UB, out_of_bound);

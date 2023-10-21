@@ -12,7 +12,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Instruction_info, 79> inst_info{{
+const std::array<Instruction_info, 101> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -33,21 +33,31 @@ const std::array<Instruction_info, 79> inst_info{{
   {"flt", Op::FLT, Inst_class::fcomparison, true, false},
   {"fne", Op::FNE, Inst_class::fcomparison, true, true},
 
+  // Nullary
+  {"mem_array", Op::MEM_ARRAY, Inst_class::nullary, true, false},
+  {"mem_flag_array", Op::MEM_FLAG_ARRAY, Inst_class::nullary, true, false},
+  {"mem_size_array", Op::MEM_SIZE_ARRAY, Inst_class::nullary, true, false},
+  {"mem_undef_array", Op::MEM_UNDEF_ARRAY, Inst_class::nullary, true, false},
+
   // Integer unary
   {"assert", Op::ASSERT, Inst_class::iunary, false, false},
   {"free", Op::FREE, Inst_class::iunary, false, false},
   {"get_mem_flag", Op::GET_MEM_FLAG, Inst_class::iunary, true, false},
+  {"get_mem_size", Op::GET_MEM_SIZE, Inst_class::iunary, true, false},
   {"get_mem_undef", Op::GET_MEM_UNDEF, Inst_class::iunary, true, false},
   {"is_const_mem", Op::IS_CONST_MEM, Inst_class::iunary, true, false},
   {"is_nan", Op::IS_NAN, Inst_class::iunary, true, false},
   {"is_noncanonical_nan", Op::IS_NONCANONICAL_NAN, Inst_class::iunary, true, false},
   {"load", Op::LOAD, Inst_class::iunary, true, false},
-  {"mem_size", Op::MEM_SIZE, Inst_class::iunary, true, false},
   {"mov", Op::MOV, Inst_class::iunary, true, false},
   {"neg", Op::NEG, Inst_class::iunary, true, false},
   {"not", Op::NOT, Inst_class::iunary, true, false},
   {"read", Op::READ, Inst_class::iunary, true, false},
   {"register", Op::REGISTER, Inst_class::iunary, true, false},
+  {"src_assert", Op::SRC_ASSERT, Inst_class::iunary, false, false},
+  {"tgt_assert", Op::TGT_ASSERT, Inst_class::iunary, false, false},
+  {"src_ub", Op::SRC_UB, Inst_class::iunary, false, false},
+  {"tgt_ub", Op::TGT_UB, Inst_class::iunary, false, false},
   {"ub", Op::UB, Inst_class::iunary, false, false},
 
   // Floating-point unary
@@ -58,6 +68,10 @@ const std::array<Instruction_info, 79> inst_info{{
   // Integer binary
   {"add", Op::ADD, Inst_class::ibinary, true, true},
   {"and", Op::AND, Inst_class::ibinary, true, true},
+  {"array_get_flag", Op::ARRAY_GET_FLAG, Inst_class::ibinary, true, false},
+  {"array_get_size", Op::ARRAY_GET_SIZE, Inst_class::ibinary, true, false},
+  {"array_get_undef", Op::ARRAY_GET_UNDEF, Inst_class::ibinary, true, false},
+  {"array_load", Op::ARRAY_LOAD, Inst_class::ibinary, true, false},
   {"ashr", Op::ASHR, Inst_class::ibinary, true, false},
   {"concat", Op::CONCAT, Inst_class::ibinary, true, false},
   {"lshr", Op::LSHR, Inst_class::ibinary, true, false},
@@ -72,11 +86,17 @@ const std::array<Instruction_info, 79> inst_info{{
   {"smax", Op::SMAX, Inst_class::ibinary, true, true},
   {"smin", Op::SMIN, Inst_class::ibinary, true, true},
   {"smul_wraps", Op::SMUL_WRAPS, Inst_class::ibinary, true, true},
+  {"src_mem1", Op::SRC_MEM1, Inst_class::ibinary, false, false},
+  {"src_mem2", Op::SRC_MEM2, Inst_class::ibinary, false, false},
+  {"src_retval", Op::SRC_RETVAL, Inst_class::ibinary, false, false},
   {"srem", Op::SREM, Inst_class::ibinary, true, false},
   {"ssub_wraps", Op::SSUB_WRAPS, Inst_class::ibinary, true, false},
   {"store", Op::STORE, Inst_class::ibinary, false, false},
   {"sub", Op::SUB, Inst_class::ibinary, true, false},
   {"symbolic", Op::SYMBOLIC, Inst_class::ibinary, true, false},
+  {"tgt_mem1", Op::TGT_MEM1, Inst_class::ibinary, false, false},
+  {"tgt_mem2", Op::TGT_MEM2, Inst_class::ibinary, false, false},
+  {"tgt_retval", Op::TGT_RETVAL, Inst_class::ibinary, false, false},
   {"udiv", Op::UDIV, Inst_class::ibinary, true, false},
   {"umax", Op::UMAX, Inst_class::ibinary, true, true},
   {"umin", Op::UMIN, Inst_class::ibinary, true, true},
@@ -91,6 +111,10 @@ const std::array<Instruction_info, 79> inst_info{{
   {"fsub", Op::FSUB, Inst_class::fbinary, true, false},
 
   // Ternary
+  {"array_set_flag", Op::ARRAY_SET_FLAG, Inst_class::ternary, true, false},
+  {"array_set_size", Op::ARRAY_SET_SIZE, Inst_class::ternary, true, false},
+  {"array_set_undef", Op::ARRAY_SET_UNDEF, Inst_class::ternary, true, false},
+  {"array_store", Op::ARRAY_STORE, Inst_class::ternary, true, false},
   {"extract", Op::EXTRACT, Inst_class::ternary, true, false},
   {"ite", Op::ITE, Inst_class::ternary, true, false},
   {"memory", Op::MEMORY, Inst_class::ternary, true, false},
@@ -147,6 +171,15 @@ Config::Config()
 
 Config config;
 
+Instruction *create_inst(Op opcode)
+{
+  Instruction *inst = new Instruction;
+  inst->opcode = opcode;
+  inst->nof_args = 0;
+  inst->bitsize = 0;
+  return inst;
+}
+
 Instruction *create_inst(Op opcode, Instruction *arg)
 {
   Instruction *inst = new Instruction;
@@ -160,7 +193,7 @@ Instruction *create_inst(Op opcode, Instruction *arg)
     inst->bitsize = 1;
   else if (opcode == Op::GET_MEM_UNDEF || opcode == Op::LOAD)
     inst->bitsize = 8;
-  else if (opcode == Op::MEM_SIZE)
+  else if (opcode == Op::GET_MEM_SIZE)
     inst->bitsize = arg->bb->func->module->ptr_offset_bits;
   else if (opcode == Op::NAN || opcode == Op::REGISTER)
     inst->bitsize = arg->value();
@@ -215,6 +248,12 @@ Instruction *create_inst(Op opcode, Instruction *arg1, Instruction *arg2)
       assert(arg2->opcode == Op::VALUE);
       inst->bitsize = arg2->value();
     }
+  else if (opcode == Op::ARRAY_LOAD || opcode == Op::ARRAY_GET_UNDEF)
+    inst->bitsize = 8;
+  else if (opcode == Op::ARRAY_GET_FLAG)
+    inst->bitsize = 1;
+  else if (opcode == Op::ARRAY_GET_SIZE)
+    inst->bitsize = arg2->bb->func->module->ptr_offset_bits;
   else if (opcode == Op::STORE || opcode == Op::SET_MEM_UNDEF)
     {
       assert(arg1->bitsize == arg1->bb->func->module->ptr_bits);
@@ -255,6 +294,13 @@ Instruction *create_inst(Op opcode, Instruction *arg1, Instruction *arg2, Instru
       assert(high >= low);
       assert(high < arg1->bitsize);
       inst->bitsize = 1 + high - low;
+    }
+  else if (opcode == Op::ARRAY_SET_FLAG
+	   || opcode == Op::ARRAY_SET_SIZE
+	   || opcode == Op::ARRAY_SET_UNDEF
+	   || opcode == Op::ARRAY_STORE)
+    {
+      inst->bitsize = 0;
     }
   else if (opcode == Op::MEMORY)
     {
@@ -617,6 +663,13 @@ void Basic_block::insert_phi(Instruction *inst)
   inst->update_uses();
 }
 
+Instruction *Basic_block::build_inst(Op opcode)
+{
+  Instruction *inst = create_inst(opcode);
+  insert_last(inst);
+  return inst;
+}
+
 Instruction *Basic_block::build_inst(Op opcode, Instruction *arg)
 {
   Instruction *inst = create_inst(opcode, arg);
@@ -836,24 +889,9 @@ void Function::canonicalize()
 {
   reset_ir_id();
 
-  // Sort arguments for commutative instructions so that the argument with
-  // lowerest ID is first. This speeds up Z3 verification (for cases where
-  // GCC passes, such as ccp, has made pointless argument swaps) as it then
-  // apparently easier can see that the result are identical, and can prune
-  // that part of the search space.
   for (Basic_block *bb : bbs)
     {
-      for (Instruction *inst = bb->first_inst; inst; inst = inst->next)
-	{
-	  if (inst->is_commutative())
-	    {
-	      assert(inst->nof_args == 2);
-	      if (inst->arguments[0]->id > inst->arguments[1]->id)
-		std::swap(inst->arguments[0], inst->arguments[1]);
-	    }
-	}
-
-      // The code generating SMT2 assumes the phi nodes and BB preds are
+      // The code lowering the IR assumes the phi nodes and BB preds are
       // sorted in reverse post order.
       for (auto phi : bb->phis)
 	{
@@ -1293,148 +1331,6 @@ uint64_t get_time()
   struct timeval tv;
   gettimeofday(&tv, 0);
   return tv.tv_sec * 1000 + tv.tv_usec / 1000;
-}
-
-Solver_result check_refine(Module *module)
-{
-  struct VStats {
-    SStats cvc5;
-    SStats z3;
-  } stats;
-
-  assert(module->functions.size() == 2);
-  Function *src = module->functions[0];
-  Function *tgt = module->functions[1];
-  if (src->name != "src")
-    std::swap(src, tgt);
-  assert(src->name == "src" && tgt->name == "tgt");
-
-  if (identical(src, tgt))
-    return {};
-
-  if (config.verbose > 1)
-    module->print(stderr);
-
-  Solver_result result = {Result_status::correct, {}};
-#if 0
-  auto [stats_cvc5, result_cvc5] = check_refine_cvc5(src, tgt);
-  stats.cvc5 = stats_cvc5;
-  if (result_cvc5.status != Result_status::correct)
-    result = result_cvc5;
-#endif
-#if 1
-  auto [stats_z3, result_z3] = check_refine_z3(src, tgt);
-  stats.z3 = stats_z3;
-  if (result_z3.status != Result_status::correct)
-    result = result_z3;
-#endif
-
-  if (config.verbose > 0)
-    {
-      if (!stats.cvc5.skipped || !stats.z3.skipped)
-	{
-	  fprintf(stderr, "SMTGCC: time: ");
-	  for (int i = 0; i < 3; i++)
-	    {
-	      fprintf(stderr, "%s%" PRIu64, i ? "," : "", stats.cvc5.time[i]);
-	    }
-	  for (int i = 0; i < 3; i++)
-	    {
-	      fprintf(stderr, "%s%" PRIu64, ",", stats.z3.time[i]);
-	    }
-	  fprintf(stderr, "\n");
-	}
-    }
-
-  return result;
-}
-
-Solver_result check_ub(Function *func)
-{
-  struct VStats {
-    SStats cvc5;
-    SStats z3;
-  } stats;
-
-  if (config.verbose > 1)
-    func->print(stderr);
-
-  Solver_result result = {Result_status::correct, {}};
-#if 0
-  auto [stats_cvc5, result_cvc5] = check_ub_cvc5(func);
-  stats.cvc5 = stats_cvc5;
-  if (result_cvc5.status != Result_status::correct)
-    result = result_cvc5;
-#endif
-#if 1
-  auto [stats_z3, result_z3] = check_ub_z3(func);
-  stats.z3 = stats_z3;
-  if (result_z3.status != Result_status::correct)
-    result = result_z3;
-#endif
-
-  if (config.verbose > 0)
-    {
-      if (!stats.cvc5.skipped || !stats.z3.skipped)
-	{
-	  fprintf(stderr, "SMTGCC: time: ");
-	  for (int i = 0; i < 3; i++)
-	    {
-	      fprintf(stderr, "%s%" PRIu64, i ? "," : "", stats.cvc5.time[i]);
-	    }
-	  for (int i = 0; i < 3; i++)
-	    {
-	      fprintf(stderr, "%s%" PRIu64, ",", stats.z3.time[i]);
-	    }
-	  fprintf(stderr, "\n");
-	}
-    }
-
-  return result;
-}
-
-Solver_result check_assert(Function *func)
-{
-  struct VStats {
-    SStats cvc5;
-    SStats z3;
-  } stats;
-
-  if (config.verbose > 1)
-    func->print(stderr);
-
-  Solver_result result = {Result_status::correct, {}};
-#if 0
-  auto [stats_cvc5, result_cvc5] = check_assert_cvc5(func);
-  stats.cvc5 = stats_cvc5;
-  if (result_cvc5.status != Result_status::correct)
-    result = result_cvc5;
-#endif
-#if 1
-  auto [stats_z3, result_z3] = check_assert_z3(func);
-  stats.z3 = stats_z3;
-  if (result_z3.status != Result_status::correct)
-    result = result_z3;
-#endif
-
-  if (config.verbose > 0)
-    {
-      if (!stats.cvc5.skipped || !stats.z3.skipped)
-	{
-	  fprintf(stderr, "SMTGCC: time: ");
-	  for (int i = 0; i < 3; i++)
-	    {
-	      fprintf(stderr, "%s%" PRIu64, i ? "," : "", stats.cvc5.time[i]);
-	    }
-	  for (int i = 0; i < 3; i++)
-	    {
-	      fprintf(stderr, "%s%" PRIu64, ",", stats.z3.time[i]);
-	    }
-	  fprintf(stderr, "\n");
-	}
-    }
-
-  return result;
 }
 
 } // end namespace smtgcc
