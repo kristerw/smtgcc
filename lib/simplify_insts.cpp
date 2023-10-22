@@ -582,9 +582,16 @@ Instruction *simplify_sadd_wraps(Instruction *inst)
 
 Instruction *simplify_ssub_wraps(Instruction *inst)
 {
-  // ssub_wraps 0, x -> false
+  // ssub_wraps 0, x -> x == minint
   if (is_value_zero(inst->arguments[0]))
-    return inst->bb->value_inst(0, 1);
+    {
+      Instruction *arg2 = inst->arguments[1];
+      unsigned __int128 minint = ((unsigned __int128)1) << (arg2->bitsize - 1);
+      Instruction *minint_inst = inst->bb->value_inst(minint, arg2->bitsize);
+      Instruction *new_inst = create_inst(Op::EQ, arg2, minint_inst);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
 
   // ssub_wraps x, 0 -> false
   if (is_value_zero(inst->arguments[1]))
