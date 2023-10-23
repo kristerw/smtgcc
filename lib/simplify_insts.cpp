@@ -15,6 +15,16 @@ namespace {
 
 Instruction *simplify_inst(Instruction *inst);
 
+bool is_boolean_sext(Instruction *inst)
+{
+  return inst->opcode == Op::SEXT && inst->arguments[0]->bitsize == 1;
+}
+
+bool is_boolean_zext(Instruction *inst)
+{
+  return inst->opcode == Op::ZEXT && inst->arguments[0]->bitsize == 1;
+}
+
 bool is_value_zero(Instruction *inst)
 {
   return inst->opcode == Op::VALUE && inst->value() == 0;
@@ -344,6 +354,32 @@ Instruction *simplify_and(Instruction *inst)
       arg2->opcode == Op::VALUE && (arg2->value() & 1) == 0)
     return inst->bb->value_inst(0, inst->bitsize);
 
+  // and (sext x) (sext y) -> sext (and x, y) if x and y are Boolean
+  if (is_boolean_sext(arg1) && is_boolean_sext(arg2))
+    {
+      Instruction *new_inst1 =
+	create_inst(Op::AND, arg1->arguments[0], arg2->arguments[0]);
+      new_inst1 = simplify_inst(new_inst1);
+      new_inst1->insert_before(inst);
+      Instruction *new_inst2 =
+	create_inst(Op::SEXT, new_inst1, arg1->arguments[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  // and (zext x) (zext y) -> zext (and x, y) if x and y are Boolean
+  if (is_boolean_zext(arg1) && is_boolean_zext(arg2))
+    {
+      Instruction *new_inst1 =
+	create_inst(Op::AND, arg1->arguments[0], arg2->arguments[0]);
+      new_inst1 = simplify_inst(new_inst1);
+      new_inst1->insert_before(inst);
+      Instruction *new_inst2 =
+	create_inst(Op::ZEXT, new_inst1, arg1->arguments[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
   // Optimize UB check for signed Boolean to false when it is obvious it
   // is not UB.
   //   %3 = sext %1, %2
@@ -478,21 +514,84 @@ Instruction *simplify_lshr(Instruction *inst)
 
 Instruction *simplify_or(Instruction *inst)
 {
-  // or 0, x -> x
-  if (is_value_zero(inst->arguments[0]))
-    return inst->arguments[1];
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+  if (arg2->opcode != Op::VALUE)
+    std::swap(arg1, arg2);
 
   // or x, 0 -> x
-  if (is_value_zero(inst->arguments[1]))
-    return inst->arguments[0];
-
-  // or -1, x -> -1
-  if (is_value_m1(inst->arguments[0]))
-    return inst->arguments[0];
+  if (is_value_zero(arg2))
+    return arg1;
 
   // or x, -1 -> -1
-  if (is_value_m1(inst->arguments[1]))
-    return inst->arguments[1];
+  if (is_value_m1(arg2))
+    return arg2;
+
+  // or (sext x) (sext y) -> sext (or x, y) if x and y are Boolean
+  if (is_boolean_sext(arg1) && is_boolean_sext(arg2))
+    {
+      Instruction *new_inst1 =
+	create_inst(Op::OR, arg1->arguments[0], arg2->arguments[0]);
+      new_inst1 = simplify_inst(new_inst1);
+      new_inst1->insert_before(inst);
+      Instruction *new_inst2 =
+	create_inst(Op::SEXT, new_inst1, arg1->arguments[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  // or (zext x) (zext y) -> zext (or x, y) if x and y are Boolean
+  if (is_boolean_zext(arg1) && is_boolean_zext(arg2))
+    {
+      Instruction *new_inst1 =
+	create_inst(Op::OR, arg1->arguments[0], arg2->arguments[0]);
+      new_inst1 = simplify_inst(new_inst1);
+      new_inst1->insert_before(inst);
+      Instruction *new_inst2 =
+	create_inst(Op::ZEXT, new_inst1, arg1->arguments[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  return inst;
+}
+
+Instruction *simplify_xor(Instruction *inst)
+{
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+  if (arg2->opcode != Op::VALUE)
+    std::swap(arg1, arg2);
+
+  // xor x, 0 -> x
+  if (is_value_zero(arg2))
+    return arg1;
+
+  // xor (sext x) (sext y) -> sext (xor x, y) if x and y are Boolean
+  if (is_boolean_sext(arg1) && is_boolean_sext(arg2))
+    {
+      Instruction *new_inst1 =
+	create_inst(Op::XOR, arg1->arguments[0], arg2->arguments[0]);
+      new_inst1 = simplify_inst(new_inst1);
+      new_inst1->insert_before(inst);
+      Instruction *new_inst2 =
+	create_inst(Op::SEXT, new_inst1, arg1->arguments[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  // xor (zext x) (zext y) -> zext (xor x, y) if x and y are Boolean
+  if (is_boolean_zext(arg1) && is_boolean_zext(arg2))
+    {
+      Instruction *new_inst1 =
+	create_inst(Op::XOR, arg1->arguments[0], arg2->arguments[0]);
+      new_inst1 = simplify_inst(new_inst1);
+      new_inst1->insert_before(inst);
+      Instruction *new_inst2 =
+	create_inst(Op::ZEXT, new_inst1, arg1->arguments[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
 
   return inst;
 }
@@ -519,6 +618,25 @@ Instruction *simplify_mul(Instruction *inst)
   // mul x, 1 -> x
   if (is_value_one(inst->arguments[1]))
     return inst->arguments[0];
+
+  return inst;
+}
+
+Instruction *simplify_not(Instruction *inst)
+{
+  Instruction *arg1 = inst->arguments[0];
+
+  // not (sext x) -> sext (not x) if x is a Boolean
+  if (is_boolean_sext(arg1))
+    {
+      Instruction *new_inst1 = create_inst(Op::NOT, arg1->arguments[0]);
+      new_inst1 = simplify_inst(new_inst1);
+      new_inst1->insert_before(inst);
+      Instruction *new_inst2 =
+	create_inst(Op::SEXT, new_inst1, arg1->arguments[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
 
   return inst;
 }
@@ -630,6 +748,14 @@ Instruction *simplify_ite(Instruction *inst)
       return new_inst;
     }
 
+  // ite a, -1, 0 -> sext a
+  if (is_value_m1(inst->arguments[1]) && is_value_zero(inst->arguments[2]))
+    {
+      Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
+      Instruction *new_inst = create_inst(Op::SEXT, inst->arguments[0], bs);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
   return inst;
 }
 
@@ -928,6 +1054,9 @@ Instruction *simplify_inst(Instruction *inst)
     case Op::MUL:
       inst = simplify_mul(inst);
       break;
+    case Op::NOT:
+      inst = simplify_not(inst);
+      break;
     case Op::OR:
       inst = simplify_or(inst);
       break;
@@ -948,6 +1077,9 @@ Instruction *simplify_inst(Instruction *inst)
       break;
     case Op::UGT:
       inst = simplify_ugt(inst);
+      break;
+    case Op::XOR:
+      inst = simplify_xor(inst);
       break;
     default:
       break;
