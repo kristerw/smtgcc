@@ -5,11 +5,12 @@
 //    - Including changing LOAD/STORE/etc. to ARRAY_LOAD/ARRAY_STORE/etc.
 //      that takes the memory state as an input parameter.
 //  * For check_refine, it combines the two functions into one (where
-//    the values to check are inticated by special instructions, such
+//    the values to check are indicated by special instructions, such
 //    as SRC_RETVAL and TGT_RETVAL.
 //  * Running CSE. This helps the SMT solver, as many GCC optimizations
 //    only makes minor changes to the IR, so most of the code is identical
 //    for src and tgt.
+#include <algorithm>
 #include <cassert>
 #include <cinttypes>
 
@@ -72,8 +73,8 @@ class Converter {
   // Maps basic blocks to an expression telling if it is executed.
   std::map<Basic_block *, Instruction *> bb2cond;
 
-  // Maps basic blocks to an expression determining if it contain UB.
-  std::map<Basic_block *, Instruction *> bb2ub;
+  // Maps basic blocks to the expressions determining if it contain UB.
+  std::map<Basic_block *, std::vector<Instruction *>> bb2ub;
 
   // Maps basic blocks to an expression determining if it contain an
   // assertion failure.
@@ -320,12 +321,7 @@ Instruction *Converter::bool_and(Instruction *a, Instruction *b)
 
 void Converter::add_ub(Basic_block *bb, Instruction *cond)
 {
-  if (bb2ub.contains(bb))
-    {
-      cond = bool_or(bb2ub.at(bb), cond);
-      bb2ub.erase(bb);
-    }
-  bb2ub.insert({bb, cond});
+  bb2ub[bb].push_back(cond);
 }
 
 void Converter::add_assert(Basic_block *bb, Instruction *cond)
@@ -339,15 +335,41 @@ void Converter::add_assert(Basic_block *bb, Instruction *cond)
   bb2not_assert.insert({bb, cond});
 }
 
+// Generate the UB expression for the function.
+//
+// We generate the instructions in the order of conditions and UB check
+// instruction ID. This makes it more likely that the generated code
+// can be CSE:ed between src and tgt.
 Instruction *Converter::generate_ub(Function *func)
 {
-  Instruction *ub = value_inst(0, 1);
+  auto comp = [](Instruction *a, Instruction *b) { return a->id < b->id; };
+  std::map<Instruction *, std::vector<Instruction *>, decltype(comp)> bbcond2ub(comp);
+
+  // Merge the UB from the basic blocks having the same condition.
   for (auto bb : func->bbs)
     {
       if (!bb2ub.contains(bb))
 	continue;
 
-      ub = bool_or(ub, bool_and(bb2ub.at(bb), bb2cond.at(bb)));
+      const std::vector<Instruction *>& bb_ub = bb2ub[bb];
+      std::vector<Instruction *>& cond_ub = bbcond2ub[bb2cond.at(bb)];
+      cond_ub.insert(cond_ub.end(), bb_ub.begin(), bb_ub.end());
+    }
+
+  // Generate the UB condition for the function.
+  Instruction *ub = value_inst(0, 1);
+  for (auto& [cond, ub_vec] : bbcond2ub)
+    {
+      // Eliminate duplicated UB conditions.
+      std::sort(ub_vec.begin(), ub_vec.end(), comp);
+      ub_vec.erase(std::unique(ub_vec.begin(), ub_vec.end()), ub_vec.end());
+
+      Instruction *bb_ub = value_inst(0, 1);
+      for (auto inst : ub_vec)
+	{
+	  bb_ub = bool_or(bb_ub, inst);
+	}
+      ub = bool_or(ub, bool_and(cond, bb_ub));
     }
 
   return ub;
