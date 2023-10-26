@@ -65,6 +65,12 @@ enum class Function_role {
   src, tgt
 };
 
+struct Inst_comp {
+  bool operator()(const Instruction *a, const Instruction *b) const {
+    return a->id < b->id;
+  }
+};
+
 // Convert the IR of a function to a form having essentially 1-1
 // correspondence to what the SMT solver is using. In particular
 // eliminate control flow, and change the memory operations to use
@@ -95,6 +101,10 @@ class Converter {
 
   std::map<Cse_key, Instruction*> key2inst;
 
+  std::map<Instruction *, std::vector<Instruction *>, Inst_comp> src_bbcond2ub;
+  std::map<Instruction *, std::vector<Instruction *>, Inst_comp> tgt_bbcond2ub;
+  bool has_tgt = false;
+
   // The memory state before src and tgt. This is used to have identical
   // start state for both src and tgt.
   Instruction *memory;
@@ -109,7 +119,8 @@ class Converter {
   Instruction *bool_and(Instruction *a, Instruction *b);
   void add_ub(Basic_block *bb, Instruction *cond);
   void add_assert(Basic_block *bb, Instruction *cond);
-  Instruction *generate_ub(Function *func);
+  std::map<Instruction *, std::vector<Instruction *>, Inst_comp> prepare_ub(Function *func);
+  void generate_ub();
   Instruction *generate_assert(Function *func);
   Instruction *get_full_edge_cond(Basic_block *src, Basic_block *dest);
   void build_mem_state(Basic_block *bb, std::map<Basic_block*, Instruction*>& map);
@@ -335,15 +346,10 @@ void Converter::add_assert(Basic_block *bb, Instruction *cond)
   bb2not_assert.insert({bb, cond});
 }
 
-// Generate the UB expression for the function.
-//
-// We generate the instructions in the order of conditions and UB check
-// instruction ID. This makes it more likely that the generated code
-// can be CSE:ed between src and tgt.
-Instruction *Converter::generate_ub(Function *func)
+std::map<Instruction *, std::vector<Instruction *>, Inst_comp> Converter::prepare_ub(Function *func)
 {
-  auto comp = [](Instruction *a, Instruction *b) { return a->id < b->id; };
-  std::map<Instruction *, std::vector<Instruction *>, decltype(comp)> bbcond2ub(comp);
+  Inst_comp comp;
+  std::map<Instruction *, std::vector<Instruction *>, Inst_comp> bbcond2ub;
 
   // Merge the UB from the basic blocks having the same condition.
   for (auto bb : func->bbs)
@@ -357,22 +363,122 @@ Instruction *Converter::generate_ub(Function *func)
     }
 
   // Generate the UB condition for the function.
-  Instruction *ub = value_inst(0, 1);
   for (auto& [cond, ub_vec] : bbcond2ub)
     {
       // Eliminate duplicated UB conditions.
       std::sort(ub_vec.begin(), ub_vec.end(), comp);
       ub_vec.erase(std::unique(ub_vec.begin(), ub_vec.end()), ub_vec.end());
+    }
+
+  return bbcond2ub;
+}
+
+// Generate the UB expression for the function.
+//
+// For basic blocks with a common condition in src and tgt, we split
+// the list of UB into three sets:
+//  * the ones identical in both
+//  * the set unique to src
+//  * the set unique to tgt
+// The common UB is generated first (so it is CSE'd between src and tgt),
+// followed by the other two sets.
+//
+// This greatly assists the SMT solver when checking that tgt does not
+// have more UB than src, especially since it only needs to examine the
+// UB that are unique to tgt.
+void Converter::generate_ub()
+{
+  std::vector<Instruction *> src_cond;
+  std::vector<Instruction *> tgt_cond;
+
+  for (auto [cond, _] : src_bbcond2ub)
+    {
+      src_cond.push_back(cond);
+    }
+  for (auto [cond, _] : tgt_bbcond2ub)
+    {
+      tgt_cond.push_back(cond);
+    }
+
+  std::vector<Instruction *> cond_common;
+  std::vector<Instruction *> cond_src_unique;
+  std::vector<Instruction *> cond_tgt_unique;
+  std::set_intersection(src_cond.begin(), src_cond.end(),
+			tgt_cond.begin(), tgt_cond.end(),
+			std::back_inserter(cond_common));
+  std::set_difference(src_cond.begin(), src_cond.end(),
+		      cond_common.begin(), cond_common.end(),
+		      std::back_inserter(cond_src_unique));
+  std::set_difference(tgt_cond.begin(), tgt_cond.end(),
+		      cond_common.begin(), cond_common.end(),
+		      std::back_inserter(cond_tgt_unique));
+
+  Instruction *src_ub = value_inst(0, 1);
+  Instruction *tgt_ub = value_inst(0, 1);
+  Instruction *common_ub = value_inst(0, 1);
+  for (auto cond : cond_common)
+    {
+      std::vector<Instruction *>& src_ub_vec = src_bbcond2ub.at(cond);
+      std::vector<Instruction *>& tgt_ub_vec = tgt_bbcond2ub.at(cond);
+
+      std::vector<Instruction *> ub_common;
+      std::vector<Instruction *> ub_src_unique;
+      std::vector<Instruction *> ub_tgt_unique;
+      std::set_intersection(src_ub_vec.begin(), src_ub_vec.end(),
+			    tgt_ub_vec.begin(), tgt_ub_vec.end(),
+			    std::back_inserter(ub_common));
+      std::set_difference(src_ub_vec.begin(), src_ub_vec.end(),
+			  ub_common.begin(), ub_common.end(),
+			  std::back_inserter(ub_src_unique));
+      std::set_difference(tgt_ub_vec.begin(), tgt_ub_vec.end(),
+			  ub_common.begin(), ub_common.end(),
+			  std::back_inserter(ub_tgt_unique));
 
       Instruction *bb_ub = value_inst(0, 1);
-      for (auto inst : ub_vec)
+      for (auto inst : ub_common)
 	{
 	  bb_ub = bool_or(bb_ub, inst);
 	}
-      ub = bool_or(ub, bool_and(cond, bb_ub));
+      common_ub = bool_or(common_ub, bool_and(cond, bb_ub));
+
+      bb_ub = value_inst(0, 1);
+      for (auto inst : ub_src_unique)
+	{
+	  bb_ub = bool_or(bb_ub, inst);
+	}
+      src_ub = bool_or(src_ub, bool_and(cond, bb_ub));
+
+      bb_ub = value_inst(0, 1);
+      for (auto inst : ub_tgt_unique)
+	{
+	  bb_ub = bool_or(bb_ub, inst);
+	}
+      tgt_ub = bool_or(tgt_ub, bool_and(cond, bb_ub));
     }
 
-  return ub;
+  for (auto cond : cond_src_unique)
+    {
+      Instruction *bb_ub = value_inst(0, 1);
+      for (auto inst : src_bbcond2ub.at(cond))
+	{
+	  bb_ub = bool_or(bb_ub, inst);
+	}
+      src_ub = bool_or(src_ub, bool_and(cond, bb_ub));
+    }
+
+  for (auto cond : cond_tgt_unique)
+    {
+      Instruction *bb_ub = value_inst(0, 1);
+      for (auto inst : tgt_bbcond2ub.at(cond))
+	{
+	  bb_ub = bool_or(bb_ub, inst);
+	}
+      tgt_ub = bool_or(tgt_ub, bool_and(cond, bb_ub));
+    }
+
+  build_inst(Op::SRC_UB, src_ub, common_ub);
+  if (has_tgt)
+    build_inst(Op::TGT_UB, tgt_ub, common_ub);
 }
 
 Instruction *Converter::generate_assert(Function *func)
@@ -658,8 +764,13 @@ void Converter::convert_function(Function *func, Function_role role)
 	}
     }
 
-  Op ub_op = role == Function_role::src ? Op::SRC_UB : Op::TGT_UB;
-  build_inst(ub_op, generate_ub(func));
+  if (role == Function_role::src)
+    src_bbcond2ub = prepare_ub(func);
+  else
+    {
+      tgt_bbcond2ub = prepare_ub(func);
+      has_tgt = true;
+    }
 
   Op assert_op = role == Function_role::src ? Op::SRC_ASSERT : Op::TGT_ASSERT;
   build_inst(assert_op, generate_assert(func));
@@ -688,6 +799,8 @@ void Converter::convert_function(Function *func, Function_role role)
 
 void Converter::finalize()
 {
+  generate_ub();
+
   build_inst(Op::RET);
 
   dead_code_elimination(dest_func);

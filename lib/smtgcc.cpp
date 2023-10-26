@@ -56,8 +56,6 @@ const std::array<Instruction_info, 101> inst_info{{
   {"register", Op::REGISTER, Inst_class::iunary, true, false},
   {"src_assert", Op::SRC_ASSERT, Inst_class::iunary, false, false},
   {"tgt_assert", Op::TGT_ASSERT, Inst_class::iunary, false, false},
-  {"src_ub", Op::SRC_UB, Inst_class::iunary, false, false},
-  {"tgt_ub", Op::TGT_UB, Inst_class::iunary, false, false},
   {"ub", Op::UB, Inst_class::iunary, false, false},
 
   // Floating-point unary
@@ -89,6 +87,7 @@ const std::array<Instruction_info, 101> inst_info{{
   {"src_mem1", Op::SRC_MEM1, Inst_class::ibinary, false, false},
   {"src_mem2", Op::SRC_MEM2, Inst_class::ibinary, false, false},
   {"src_retval", Op::SRC_RETVAL, Inst_class::ibinary, false, false},
+  {"src_ub", Op::SRC_UB, Inst_class::ibinary, false, false},
   {"srem", Op::SREM, Inst_class::ibinary, true, false},
   {"ssub_wraps", Op::SSUB_WRAPS, Inst_class::ibinary, true, false},
   {"store", Op::STORE, Inst_class::ibinary, false, false},
@@ -97,6 +96,7 @@ const std::array<Instruction_info, 101> inst_info{{
   {"tgt_mem1", Op::TGT_MEM1, Inst_class::ibinary, false, false},
   {"tgt_mem2", Op::TGT_MEM2, Inst_class::ibinary, false, false},
   {"tgt_retval", Op::TGT_RETVAL, Inst_class::ibinary, false, false},
+  {"tgt_ub", Op::TGT_UB, Inst_class::ibinary, false, false},
   {"udiv", Op::UDIV, Inst_class::ibinary, true, false},
   {"umax", Op::UMAX, Inst_class::ibinary, true, true},
   {"umin", Op::UMIN, Inst_class::ibinary, true, true},

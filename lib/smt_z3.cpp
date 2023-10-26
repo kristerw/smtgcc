@@ -56,7 +56,8 @@ public:
   Instruction *src_memory_undef = nullptr;
   Instruction *src_retval = nullptr;
   Instruction *src_retval_undef = nullptr;
-  Instruction *src_ub = nullptr;
+  Instruction *src_unique_ub = nullptr;
+  Instruction *src_common_ub = nullptr;
 
   Instruction *tgt_assert = nullptr;
   Instruction *tgt_memory = nullptr;
@@ -65,7 +66,8 @@ public:
   Instruction *tgt_memory_undef = nullptr;
   Instruction *tgt_retval = nullptr;
   Instruction *tgt_retval_undef = nullptr;
-  Instruction *tgt_ub = nullptr;
+  Instruction *tgt_unique_ub = nullptr;
+  Instruction *tgt_common_ub = nullptr;
 };
 
 z3::expr Converter::ite(z3::expr c, z3::expr a, z3::expr b)
@@ -343,17 +345,9 @@ void Converter::build_bv_unary_smt(const Instruction *inst)
       assert(!src_assert);
       src_assert = inst->arguments[0];
       break;
-    case Op::SRC_UB:
-      assert(!src_ub);
-      src_ub = inst->arguments[0];
-      break;
     case Op::TGT_ASSERT:
       assert(!tgt_assert);
       tgt_assert = inst->arguments[0];
-      break;
-    case Op::TGT_UB:
-      assert(!tgt_ub);
-      tgt_ub = inst->arguments[0];
       break;
     default:
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
@@ -433,6 +427,16 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
       assert(!tgt_retval_undef);
       tgt_retval = inst->arguments[0];
       tgt_retval_undef = inst->arguments[1];
+      return;
+    case Op::SRC_UB:
+      assert(!src_unique_ub && !src_common_ub);
+      src_unique_ub = inst->arguments[0];
+      src_common_ub = inst->arguments[1];
+      return;
+    case Op::TGT_UB:
+      assert(!tgt_unique_ub && !tgt_common_ub);
+      tgt_unique_ub = inst->arguments[0];
+      tgt_common_ub = inst->arguments[1];
       return;
     default:
       break;
@@ -863,8 +867,9 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *func)
   stats.skipped = false;
 
   Converter conv(ctx, func);
-  z3::expr src_ub_expr = conv.inst_as_bool(conv.src_ub);
-  z3::expr tgt_ub_expr = conv.inst_as_bool(conv.tgt_ub);
+  z3::expr src_common_ub_expr = conv.inst_as_bool(conv.src_common_ub);
+  z3::expr src_unique_ub_expr = conv.inst_as_bool(conv.src_unique_ub);
+  z3::expr tgt_unique_ub_expr = conv.inst_as_bool(conv.tgt_unique_ub);
 
   std::string warning;
   if (conv.src_retval != conv.tgt_retval
@@ -896,7 +901,8 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *func)
 	}
 
       z3::solver solver(ctx);
-      solver.add(!src_ub_expr);
+      solver.add(!src_common_ub_expr);
+      solver.add(!src_unique_ub_expr);
       solver.add((src_expr != tgt_expr) || is_more_undef);
       uint64_t start_time = get_time();
       Solver_result solver_result = run_solver(solver, "retval");
@@ -946,7 +952,8 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *func)
     z3::expr offset = ptr.extract(ptr_offset_high, ptr_offset_low);
 
     z3::solver solver(ctx);
-    solver.add(!src_ub_expr);
+    solver.add(!src_common_ub_expr);
+    solver.add(!src_unique_ub_expr);
 
     // Only check global memory.
     solver.add(id > 0);
@@ -993,11 +1000,15 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *func)
   //
   // This should be the last check as UB that does not change the result
   // has low priority.
-  if (conv.src_ub != conv.tgt_ub)
+  assert(conv.src_common_ub == conv.tgt_common_ub);
+  if (conv.src_unique_ub != conv.tgt_unique_ub
+      && !(conv.tgt_unique_ub->opcode == Op::VALUE
+	   && conv.tgt_unique_ub->value() == 0))
   {
     z3::solver solver(ctx);
-    solver.add(!src_ub_expr);
-    solver.add(src_ub_expr != tgt_ub_expr);
+    solver.add(!src_common_ub_expr);
+    solver.add(!src_unique_ub_expr);
+    solver.add(tgt_unique_ub_expr);
     uint64_t start_time = get_time();
     Solver_result solver_result = run_solver(solver, "UB");
     stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
@@ -1029,10 +1040,11 @@ std::pair<SStats, Solver_result> check_ub_z3(Function *func)
   stats.skipped = false;
 
   Converter conv(ctx, func);
-  z3::expr ub_expr = conv.inst_as_bool(conv.src_ub);
+  z3::expr src_unique_ub_expr = conv.inst_as_bool(conv.src_unique_ub);
+  z3::expr src_common_ub_expr = conv.inst_as_bool(conv.src_common_ub);
 
   z3::solver solver(ctx);
-  solver.add(ub_expr);
+  solver.add(src_common_ub_expr || src_unique_ub_expr);
   uint64_t start_time = get_time();
   Solver_result solver_result = run_solver(solver, "UB");
   stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
@@ -1050,11 +1062,13 @@ std::pair<SStats, Solver_result> check_assert_z3(Function *func)
   stats.skipped = false;
 
   Converter conv(ctx, func);
-  z3::expr ub_expr = conv.inst_as_bool(conv.src_ub);
+  z3::expr src_unique_ub_expr = conv.inst_as_bool(conv.src_unique_ub);
+  z3::expr src_common_ub_expr = conv.inst_as_bool(conv.src_common_ub);
   z3::expr assert_expr = conv.inst_as_bool(conv.src_assert);
 
   z3::solver solver(ctx);
-  solver.add(!ub_expr);
+  solver.add(!src_common_ub_expr);
+  solver.add(!src_unique_ub_expr);
   solver.add(assert_expr);
   uint64_t start_time = get_time();
   Solver_result solver_result = run_solver(solver, "ASSERT");

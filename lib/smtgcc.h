@@ -72,8 +72,6 @@ enum class Op : uint8_t {
   REGISTER,
   SRC_ASSERT,
   TGT_ASSERT,
-  SRC_UB,
-  TGT_UB,
   UB,
 
   // Floating-point unary
@@ -105,6 +103,7 @@ enum class Op : uint8_t {
   SRC_MEM1,
   SRC_MEM2,
   SRC_RETVAL,
+  SRC_UB,
   SREM,
   SSUB_WRAPS,
   STORE,
@@ -113,6 +112,7 @@ enum class Op : uint8_t {
   TGT_MEM1,
   TGT_MEM2,
   TGT_RETVAL,
+  TGT_UB,
   UDIV,
   UMAX,
   UMIN,

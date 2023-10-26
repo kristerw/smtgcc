@@ -56,7 +56,8 @@ public:
   Instruction *src_memory_undef = nullptr;
   Instruction *src_retval = nullptr;
   Instruction *src_retval_undef = nullptr;
-  Instruction *src_ub = nullptr;
+  Instruction *src_unique_ub = nullptr;
+  Instruction *src_common_ub = nullptr;
 
   Instruction *tgt_assert = nullptr;
   Instruction *tgt_memory = nullptr;
@@ -65,7 +66,8 @@ public:
   Instruction *tgt_memory_undef = nullptr;
   Instruction *tgt_retval = nullptr;
   Instruction *tgt_retval_undef = nullptr;
-  Instruction *tgt_ub = nullptr;
+  Instruction *tgt_unique_ub = nullptr;
+  Instruction *tgt_common_ub = nullptr;
 };
 
 cvc5::Term Converter::ite(cvc5::Term c, cvc5::Term a, cvc5::Term b)
@@ -333,17 +335,9 @@ void Converter::build_bv_unary_smt(const Instruction *inst)
       assert(!src_assert);
       src_assert = inst->arguments[0];
       break;
-    case Op::SRC_UB:
-      assert(!src_ub);
-      src_ub = inst->arguments[0];
-      break;
     case Op::TGT_ASSERT:
       assert(!tgt_assert);
       tgt_assert = inst->arguments[0];
-      break;
-    case Op::TGT_UB:
-      assert(!tgt_ub);
-      tgt_ub = inst->arguments[0];
       break;
     default:
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
@@ -420,6 +414,16 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
       assert(!tgt_retval_undef);
       tgt_retval = inst->arguments[0];
       tgt_retval_undef = inst->arguments[1];
+      return;
+    case Op::SRC_UB:
+      assert(!src_unique_ub && !src_common_ub);
+      src_unique_ub = inst->arguments[0];
+      src_common_ub = inst->arguments[1];
+      return;
+    case Op::TGT_UB:
+      assert(!tgt_unique_ub && !tgt_common_ub);
+      tgt_unique_ub = inst->arguments[0];
+      tgt_common_ub = inst->arguments[1];
       return;
     default:
       break;
@@ -818,9 +822,13 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
   stats.skipped = false;
 
   Converter conv(solver, func);
-  cvc5::Term src_ub_term = conv.inst_as_bool(conv.src_ub);
-  cvc5::Term not_src_ub_term = solver.mkTerm(cvc5::NOT, {src_ub_term});
-  cvc5::Term tgt_ub_term = conv.inst_as_bool(conv.tgt_ub);
+  cvc5::Term src_common_ub_term = conv.inst_as_bool(conv.src_common_ub);
+  cvc5::Term src_unique_ub_term = conv.inst_as_bool(conv.src_unique_ub);
+  cvc5::Term not_src_common_ub_term =
+    solver.mkTerm(cvc5::NOT, {src_common_ub_term});
+  cvc5::Term not_src_unique_ub_term =
+    solver.mkTerm(cvc5::NOT, {src_unique_ub_term});
+  cvc5::Term tgt_unique_ub_term = conv.inst_as_bool(conv.tgt_unique_ub);
 
   std::string warning;
   if (conv.src_retval != conv.tgt_retval
@@ -840,7 +848,7 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	  tgt_term = solver.mkTerm(cvc5::BITVECTOR_AND, {tgt_term, src_mask});
 
 	  // Check that tgt is not more undef than src.
-	  if (conv.tgt_retval_undef)
+	  if (conv.tgt_retval_undef != conv.src_retval_undef)
 	    {
 	      cvc5::Term tgt_undef = conv.inst_as_bv(conv.tgt_retval_undef);
 	      cvc5::Term undef_result =
@@ -851,7 +859,8 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	    }
 	}
 
-      solver.assertFormula(not_src_ub_term);
+      solver.assertFormula(not_src_common_ub_term);
+      solver.assertFormula(not_src_unique_ub_term);
       cvc5::Term res1 = solver.mkTerm(cvc5::DISTINCT, {src_term, tgt_term});
       cvc5::Term res2 = solver.mkTerm(cvc5::OR, {res1, is_more_undef});
       solver.assertFormula(res2);
@@ -892,7 +901,8 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
       || conv.src_memory_undef != conv.tgt_memory_undef)
   {
     solver.push();
-    solver.assertFormula(not_src_ub_term);
+    solver.assertFormula(not_src_common_ub_term);
+    solver.assertFormula(not_src_unique_ub_term);
     cvc5::Term src_mem = conv.inst_as_array(conv.src_memory);
     cvc5::Term src_mem_size = conv.inst_as_array(conv.src_memory_size);
     cvc5::Term src_mem_undef = conv.inst_as_array(conv.src_memory_undef);
@@ -973,12 +983,15 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
   //
   // This should be the last check as UB that does not change the result
   // has low priority.
-  if (conv.src_ub != conv.tgt_ub)
+  assert(conv.src_common_ub == conv.tgt_common_ub);
+  if (conv.src_unique_ub != conv.tgt_unique_ub
+      && !(conv.tgt_unique_ub->opcode == Op::VALUE
+	   && conv.tgt_unique_ub->value() == 0))
   {
     solver.push();
-    solver.assertFormula(not_src_ub_term);
-    cvc5::Term res1 = solver.mkTerm(cvc5::DISTINCT, {src_ub_term, tgt_ub_term});
-    solver.assertFormula(res1);
+    solver.assertFormula(not_src_common_ub_term);
+    solver.assertFormula(not_src_unique_ub_term);
+    solver.assertFormula(tgt_unique_ub_term);
     uint64_t start_time = get_time();
     Solver_result solver_result = run_solver(solver, "UB");
     stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
@@ -1011,8 +1024,10 @@ std::pair<SStats, Solver_result> check_ub_cvc5(Function *func)
   stats.skipped = false;
 
   Converter conv(solver, func);
-  cvc5::Term ub_term = conv.inst_as_bool(conv.src_ub);
-
+  cvc5::Term common_ub_term = conv.inst_as_bool(conv.src_common_ub);
+  cvc5::Term unique_ub_term = conv.inst_as_bool(conv.src_unique_ub);
+  cvc5::Term ub_term = solver.mkTerm(cvc5::BITVECTOR_OR,
+				     {common_ub_term, unique_ub_term});
   solver.push();
   solver.assertFormula(ub_term);
   uint64_t start_time = get_time();
@@ -1032,12 +1047,15 @@ std::pair<SStats, Solver_result> check_assert_cvc5(Function *func)
   stats.skipped = false;
 
   Converter conv(solver, func);
-  cvc5::Term ub_term = conv.inst_as_bool(conv.src_ub);
-  cvc5::Term not_ub_term = solver.mkTerm(cvc5::NOT, {ub_term});
+  cvc5::Term common_ub_term = conv.inst_as_bool(conv.src_common_ub);
+  cvc5::Term unique_ub_term = conv.inst_as_bool(conv.src_unique_ub);
+  cvc5::Term not_common_ub_term = solver.mkTerm(cvc5::NOT, {common_ub_term});
+  cvc5::Term not_unique_ub_term = solver.mkTerm(cvc5::NOT, {unique_ub_term});
   cvc5::Term assert_term = conv.inst_as_bool(conv.src_assert);
 
   solver.push();
-  solver.assertFormula(not_ub_term);
+  solver.assertFormula(not_common_ub_term);
+  solver.assertFormula(not_unique_ub_term);
   solver.assertFormula(assert_term);
   uint64_t start_time = get_time();
   Solver_result solver_result = run_solver(solver, "UB");
