@@ -359,8 +359,6 @@ Instruction *create_br_inst(Basic_block *dest_bb);
 Instruction *create_br_inst(Instruction *cond, Basic_block *true_bb,
 			    Basic_block *false_bb);
 
-bool identical(Function *func1, Function *func2);
-
 /* Opt level runs all optimization <= the level:
  *  0: Dead code elimination
  *  1: Registers are eliminated. Simple peephole optimizations. */

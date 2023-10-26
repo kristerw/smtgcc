@@ -114,6 +114,23 @@ class Converter {
 
   Basic_block *dest_bb;
 
+  Instruction *src_memory = nullptr;
+  Instruction *src_memory_flag = nullptr;
+  Instruction *src_memory_size = nullptr;
+  Instruction *src_memory_undef = nullptr;
+  Instruction *src_retval = nullptr;
+  Instruction *src_retval_undef = nullptr;
+  Instruction *src_unique_ub = nullptr;
+  Instruction *src_common_ub = nullptr;
+  Instruction *tgt_memory = nullptr;
+  Instruction *tgt_memory_flag = nullptr;
+  Instruction *tgt_memory_size = nullptr;
+  Instruction *tgt_memory_undef = nullptr;
+  Instruction *tgt_retval = nullptr;
+  Instruction *tgt_retval_undef = nullptr;
+  Instruction *tgt_unique_ub = nullptr;
+  Instruction *tgt_common_ub = nullptr;
+
   Instruction *ite(Instruction *c, Instruction *a, Instruction *b);
   Instruction *bool_or(Instruction *a, Instruction *b);
   Instruction *bool_and(Instruction *a, Instruction *b);
@@ -145,6 +162,7 @@ public:
 
   void convert_function(Function *func, Function_role role);
   void finalize();
+  bool need_checking();
 
   Module *module = nullptr;
   Function *dest_func = nullptr;
@@ -477,8 +495,14 @@ void Converter::generate_ub()
     }
 
   build_inst(Op::SRC_UB, src_ub, common_ub);
+  src_unique_ub = src_ub;
+  src_common_ub = common_ub;
   if (has_tgt)
-    build_inst(Op::TGT_UB, tgt_ub, common_ub);
+    {
+      build_inst(Op::TGT_UB, tgt_ub, common_ub);
+      tgt_unique_ub = tgt_ub;
+      tgt_common_ub = common_ub;
+    }
 }
 
 Instruction *Converter::generate_assert(Function *func)
@@ -680,6 +704,16 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 	    arg2 = value_inst(0, inst->arguments[0]->bitsize);
 	  Op op = role == Function_role::src ? Op::SRC_RETVAL : Op::TGT_RETVAL;
 	  build_inst(op, arg1, arg2);
+	  if (role == Function_role::src)
+	    {
+	      src_retval = arg1;
+	      src_retval_undef = arg2;
+	    }
+	  else
+	    {
+	      tgt_retval = arg1;
+	      tgt_retval_undef = arg2;
+	    }
 	}
       return;
     }
@@ -725,6 +759,8 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 
 void Converter::convert_function(Function *func, Function_role role)
 {
+  func->canonicalize();
+
   for (auto bb : func->bbs)
     {
       if (bb == func->bbs[0])
@@ -782,6 +818,20 @@ void Converter::convert_function(Function *func, Function_role role)
 		      bb2memory_size.at(exit_block));
   build_inst(mem2_op, bb2memory_flag.at(exit_block),
 		      bb2memory_undef.at(exit_block));
+  if (role == Function_role::src)
+    {
+      src_memory = bb2memory.at(exit_block);
+      src_memory_flag = bb2memory_flag.at(exit_block);
+      src_memory_size = bb2memory_size.at(exit_block);
+      src_memory_undef = bb2memory_undef.at(exit_block);
+    }
+  else
+    {
+      tgt_memory = bb2memory.at(exit_block);
+      tgt_memory_flag = bb2memory_flag.at(exit_block);
+      tgt_memory_size = bb2memory_size.at(exit_block);
+      tgt_memory_undef = bb2memory_undef.at(exit_block);
+    }
 
   // Clear the arrays. This is needed for check_refine to get a clean slate
   // when converting the second function. But it also reduces memory usage
@@ -805,9 +855,26 @@ void Converter::finalize()
 
   dead_code_elimination(dest_func);
   dest_func->canonicalize();
+}
 
-  if (config.verbose > 1)
-    module->print(stderr);
+bool Converter::need_checking()
+{
+  if (src_retval != tgt_retval
+      || src_retval_undef != tgt_retval_undef)
+    return true;
+
+  if (src_memory != tgt_memory
+      || src_memory_size != tgt_memory_size
+      || src_memory_undef != tgt_memory_undef)
+    return true;
+
+  assert(src_common_ub == tgt_common_ub);
+  if (src_unique_ub != tgt_unique_ub
+      && !(tgt_unique_ub->opcode == Op::VALUE
+	   && tgt_unique_ub->value() == 0))
+    return true;
+
+  return false;
 }
 
 } // end anonymous namespace
@@ -826,16 +893,19 @@ Solver_result check_refine(Module *module)
     std::swap(src, tgt);
   assert(src->name == "src" && tgt->name == "tgt");
 
-  if (identical(src, tgt))
-    return {};
-
-  if (config.verbose > 1)
-    module->print(stderr);
-
   Converter converter(module);
   converter.convert_function(src, Function_role::src);
   converter.convert_function(tgt, Function_role::tgt);
   converter.finalize();
+
+  if (!converter.need_checking())
+    return {};
+
+  if (config.verbose > 1)
+    {
+      module->print(stderr);
+      converter.module->print(stderr);
+    }
 
   Solver_result result = {Result_status::correct, {}};
 #if 0
@@ -878,12 +948,15 @@ Solver_result check_ub(Function *func)
     SStats z3;
   } stats;
 
-  if (config.verbose > 1)
-    func->print(stderr);
-
   Converter converter(func->module);
   converter.convert_function(func, Function_role::src);
   converter.finalize();
+
+  if (config.verbose > 1)
+    {
+      func->print(stderr);
+      converter.module->print(stderr);
+    }
 
   Solver_result result = {Result_status::correct, {}};
 #if 0
@@ -926,12 +999,15 @@ Solver_result check_assert(Function *func)
     SStats z3;
   } stats;
 
-  if (config.verbose > 1)
-    func->print(stderr);
-
   Converter converter(func->module);
   converter.convert_function(func, Function_role::src);
   converter.finalize();
+
+  if (config.verbose > 1)
+    {
+      func->print(stderr);
+      converter.module->print(stderr);
+    }
 
   Solver_result result = {Result_status::correct, {}};
 #if 0
