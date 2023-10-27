@@ -292,4 +292,10 @@ void simplify_cfg(Function *func)
   reverse_post_order(func);
 }
 
+void simplify_cfg(Module *module)
+{
+  for (auto func : module->functions)
+    simplify_cfg(func);
+}
+
 } // end namespace smtgcc

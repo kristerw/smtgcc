@@ -376,6 +376,7 @@ uint64_t get_time();
 void reverse_post_order(Function *func);
 bool has_loops(Function *func);
 void simplify_cfg(Function *func);
+void simplify_cfg(Module *module);
 Basic_block *nearest_dominator(const Basic_block *bb);
 bool dominates(const Basic_block *bb1, const Basic_block *bb2);
 bool post_dominates(const Basic_block *bb1, const Basic_block *bb2);
