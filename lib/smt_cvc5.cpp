@@ -417,13 +417,13 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
       return;
     case Op::SRC_UB:
       assert(!src_unique_ub && !src_common_ub);
-      src_unique_ub = inst->arguments[0];
-      src_common_ub = inst->arguments[1];
+      src_common_ub = inst->arguments[0];
+      src_unique_ub = inst->arguments[1];
       return;
     case Op::TGT_UB:
       assert(!tgt_unique_ub && !tgt_common_ub);
-      tgt_unique_ub = inst->arguments[0];
-      tgt_common_ub = inst->arguments[1];
+      tgt_common_ub = inst->arguments[0];
+      tgt_unique_ub = inst->arguments[1];
       return;
     default:
       break;

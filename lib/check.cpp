@@ -494,12 +494,12 @@ void Converter::generate_ub()
       tgt_ub = bool_or(tgt_ub, bool_and(cond, bb_ub));
     }
 
-  build_inst(Op::SRC_UB, src_ub, common_ub);
+  build_inst(Op::SRC_UB, common_ub, src_ub);
   src_unique_ub = src_ub;
   src_common_ub = common_ub;
   if (has_tgt)
     {
-      build_inst(Op::TGT_UB, tgt_ub, common_ub);
+      build_inst(Op::TGT_UB, common_ub, tgt_ub);
       tgt_unique_ub = tgt_ub;
       tgt_common_ub = common_ub;
     }
