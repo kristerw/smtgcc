@@ -407,6 +407,28 @@ Instruction *simplify_and(Instruction *inst)
   return inst;
 }
 
+Instruction *simplify_concat(Instruction *inst)
+{
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+
+  // concat (extract %x, %v1, %v2), (extract %x, %v3, %v4)
+  //   -> extract %x, %v1, %v4) if %v2 = %v3 + 1
+  if (arg1->opcode == Op::EXTRACT
+      && arg2->opcode == Op::EXTRACT
+      && arg1->arguments[0] == arg2->arguments[0]
+      && arg1->arguments[2]->value() == arg2->arguments[1]->value() + 1)
+    {
+      Instruction *new_inst = create_inst(Op::EXTRACT, arg1->arguments[0],
+					  arg1->arguments[1],
+					  arg2->arguments[2]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  return inst;
+}
+
 Instruction *simplify_eq(Instruction *inst)
 {
   Instruction *arg1 = inst->arguments[0];
@@ -1035,6 +1057,9 @@ Instruction *simplify_inst(Instruction *inst)
       break;
     case Op::ASHR:
       inst = simplify_ashr(inst);
+      break;
+    case Op::CONCAT:
+      inst = simplify_concat(inst);
       break;
     case Op::EQ:
       inst = simplify_eq(inst);
