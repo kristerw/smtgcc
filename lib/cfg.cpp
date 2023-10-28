@@ -61,7 +61,7 @@ void remove_dead_bbs(std::vector<Basic_block *>& dead_bbs)
 	  for (Instruction *inst = bb->last_inst; inst;)
 	    {
 	      Instruction *next_inst = inst->prev;
-	      if (!inst->has_lhs() || inst->used_by.empty())
+	      if (inst->used_by.empty())
 		destroy_instruction(inst);
 	      inst = next_inst;
 	    }
