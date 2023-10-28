@@ -4413,13 +4413,13 @@ Function *Converter::process_function()
 
   reverse_post_order(func);
   simplify_insts(func);
-  simplify_cfg(func);
   dead_code_elimination(func);
+  simplify_cfg(func);
   if (loop_unroll(func))
     {
       simplify_insts(func);
-      simplify_cfg(func);
       dead_code_elimination(func);
+      simplify_cfg(func);
     }
   validate(func);
 
