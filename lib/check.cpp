@@ -418,18 +418,19 @@ void Converter::generate_ub()
       tgt_cond.push_back(cond);
     }
 
+  Inst_comp comp;
   std::vector<Instruction *> cond_common;
   std::vector<Instruction *> cond_src_unique;
   std::vector<Instruction *> cond_tgt_unique;
   std::set_intersection(src_cond.begin(), src_cond.end(),
 			tgt_cond.begin(), tgt_cond.end(),
-			std::back_inserter(cond_common));
+			std::back_inserter(cond_common), comp);
   std::set_difference(src_cond.begin(), src_cond.end(),
 		      cond_common.begin(), cond_common.end(),
-		      std::back_inserter(cond_src_unique));
+		      std::back_inserter(cond_src_unique), comp);
   std::set_difference(tgt_cond.begin(), tgt_cond.end(),
 		      cond_common.begin(), cond_common.end(),
-		      std::back_inserter(cond_tgt_unique));
+		      std::back_inserter(cond_tgt_unique), comp);
 
   Instruction *src_ub = value_inst(0, 1);
   Instruction *tgt_ub = value_inst(0, 1);
@@ -444,13 +445,13 @@ void Converter::generate_ub()
       std::vector<Instruction *> ub_tgt_unique;
       std::set_intersection(src_ub_vec.begin(), src_ub_vec.end(),
 			    tgt_ub_vec.begin(), tgt_ub_vec.end(),
-			    std::back_inserter(ub_common));
+			    std::back_inserter(ub_common), comp);
       std::set_difference(src_ub_vec.begin(), src_ub_vec.end(),
 			  ub_common.begin(), ub_common.end(),
-			  std::back_inserter(ub_src_unique));
+			  std::back_inserter(ub_src_unique), comp);
       std::set_difference(tgt_ub_vec.begin(), tgt_ub_vec.end(),
 			  ub_common.begin(), ub_common.end(),
-			  std::back_inserter(ub_tgt_unique));
+			  std::back_inserter(ub_tgt_unique), comp);
 
       Instruction *bb_ub = value_inst(0, 1);
       for (auto inst : ub_common)
