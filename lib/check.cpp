@@ -134,6 +134,7 @@ class Converter {
   Instruction *ite(Instruction *c, Instruction *a, Instruction *b);
   Instruction *bool_or(Instruction *a, Instruction *b);
   Instruction *bool_and(Instruction *a, Instruction *b);
+  Instruction *bool_not(Instruction *a);
   void add_ub(Basic_block *bb, Instruction *cond);
   void add_assert(Basic_block *bb, Instruction *cond);
   std::map<Instruction *, std::vector<Instruction *>, Inst_comp> prepare_ub(Function *func);
@@ -144,7 +145,7 @@ class Converter {
   void generate_bb2cond(Basic_block *bb);
   void convert(Basic_block *bb, Instruction *inst, Function_role role);
 
-  Instruction *get_inst(const Cse_key& key);
+  Instruction *get_inst(const Cse_key& key, bool may_add_insts = true);
   Instruction *value_inst(unsigned __int128 value, uint32_t bitsize);
   Instruction *build_inst(Op opcode);
   Instruction *build_inst(Op opcode, Instruction *arg);
@@ -168,7 +169,7 @@ public:
   Function *dest_func = nullptr;
 };
 
-Instruction *Converter::get_inst(const Cse_key& key)
+Instruction *Converter::get_inst(const Cse_key& key, bool may_add_insts)
 {
   auto I = key2inst.find(key);
   if (I != key2inst.end())
@@ -233,6 +234,53 @@ Instruction *Converter::get_inst(const Cse_key& key)
       I = key2inst.find(tmp_key);
       if (I != key2inst.end())
 	return I->second;
+    }
+
+  // Check if this is a negation of an existing comparison.
+  if (may_add_insts
+      && inst_info[(int)key.opcode].iclass == Inst_class::icomparison)
+    {
+      Op op;
+      switch (key.opcode)
+	{
+	case Op::EQ:
+	  op = Op::NE;
+	  break;
+	case Op::NE:
+	  op = Op::EQ;
+	  break;
+	case Op::SGE:
+	  op = Op::SLT;
+	  break;
+	case Op::SGT:
+	  op = Op::SLE;
+	  break;
+	case Op::SLE:
+	  op = Op::SGT;
+	  break;
+	case Op::SLT:
+	  op = Op::SGE;
+	  break;
+	case Op::UGE:
+	  op = Op::ULT;
+	  break;
+	case Op::UGT:
+	  op = Op::ULE;
+	  break;
+	case Op::ULE:
+	  op = Op::UGT;
+	  break;
+	case Op::ULT:
+	  op = Op::UGE;
+	  break;
+	default:
+	  throw Not_implemented("Converter::get_inst: unknown comparison");
+	}
+      Cse_key tmp_key = key;
+      tmp_key.opcode = op;
+      Instruction *inst = get_inst(tmp_key, false);
+      if (inst)
+	return bool_not(inst);
     }
 
   return nullptr;
@@ -307,45 +355,46 @@ Instruction *Converter::ite(Instruction *c, Instruction *a, Instruction *b)
 {
   if (a == b)
     return a;
+  if (c->opcode == Op::VALUE)
+    return c->value() ? a : b;
   return build_inst(Op::ITE, c, a, b);
 }
 
 Instruction *Converter::bool_or(Instruction *a, Instruction *b)
 {
   if (a->opcode == Op::VALUE)
-    {
-      if (a->value())
-	return a;
-      else
-	return b;
-    }
+    return a->value() ? a : b;
   if (b->opcode == Op::VALUE)
-    {
-      if (b->value())
-	return b;
-      else
-	return a;
-    }
+    return b->value() ? b : a;
+  if (a == b)
+    return a;
+  if (a->opcode == Op::NOT && a->arguments[0] == b)
+    return value_inst(1, 1);
+  if (b->opcode == Op::NOT && b->arguments[0] == a)
+    return value_inst(1, 1);
   return build_inst(Op::OR, a, b);
 }
 
 Instruction *Converter::bool_and(Instruction *a, Instruction *b)
 {
   if (a->opcode == Op::VALUE)
-    {
-      if (a->value())
-	return b;
-      else
-	return a;
-    }
+    return a->value() ? b : a;
   if (b->opcode == Op::VALUE)
-    {
-      if (b->value())
-	return a;
-      else
-	return b;
-    }
+    return b->value() ? a : b;
+  if (a == b)
+    return a;
+  if (a->opcode == Op::NOT && a->arguments[0] == b)
+    return value_inst(0, 1);
+  if (b->opcode == Op::NOT && b->arguments[0] == a)
+    return value_inst(0, 1);
   return build_inst(Op::AND, a, b);
+}
+
+Instruction *Converter::bool_not(Instruction *a)
+{
+  if (a->opcode == Op::NOT)
+    return a->arguments[0];
+  return build_inst(Op::NOT, a);
 }
 
 void Converter::add_ub(Basic_block *bb, Instruction *cond)
@@ -529,7 +578,7 @@ Instruction *Converter::get_full_edge_cond(Basic_block *src, Basic_block *dest)
   assert(src->last_inst->nof_args == 1);
   Instruction *cond = translate.at(src->last_inst->arguments[0]);
   if (dest != src->succs[0])
-    cond = build_inst(Op::NOT, cond);
+    cond = bool_not(cond);
   return bool_and(bb2cond.at(src), cond);
 }
 
@@ -718,6 +767,27 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 	}
       return;
     }
+  else if (inst->opcode == Op::ITE)
+    {
+      Instruction *arg1 = translate.at(inst->arguments[0]);
+      Instruction *arg2 = translate.at(inst->arguments[1]);
+      Instruction *arg3 = translate.at(inst->arguments[2]);
+      new_inst = ite(arg1, arg2, arg3);
+    }
+  else if (inst->opcode == Op::AND && inst->bitsize == 1)
+    {
+      Instruction *arg1 = translate.at(inst->arguments[0]);
+      Instruction *arg2 = translate.at(inst->arguments[1]);
+      new_inst = bool_and(arg1, arg2);
+    }
+  else if (inst->opcode == Op::OR && inst->bitsize == 1)
+    {
+      Instruction *arg1 = translate.at(inst->arguments[0]);
+      Instruction *arg2 = translate.at(inst->arguments[1]);
+      new_inst = bool_or(arg1, arg2);
+    }
+  else if (inst->opcode == Op::NOT && inst->bitsize == 1)
+    new_inst = bool_not(translate.at(inst->arguments[0]));
   else
     {
       assert(inst->has_lhs());
