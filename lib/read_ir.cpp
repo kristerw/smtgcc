@@ -68,6 +68,7 @@ private:
   std::map<Basic_block *, uint32_t> bb2id;
   std::map<uint32_t, Instruction *> id2inst;
   std::map<Basic_block *, br_inst> bb2br_args;
+  std::map<Instruction *, std::vector<std::pair<uint32_t, std::string>>> phi2phi_args;
 
   void lex_line(void);
   void lex_label_or_label_def(void);
@@ -86,7 +87,7 @@ private:
   uint32_t get_uint32(unsigned idx);
   unsigned __int128 get_hex_or_integer(unsigned idx);
   Instruction *get_arg(unsigned idx);
-  Basic_block *get_bb(unsigned idx);
+  uint32_t get_arg_id(unsigned idx);
   std::string get_bb_string(unsigned idx);
   Basic_block *get_bb_from_string(std::string str);
   void get_comma(unsigned idx);
@@ -281,21 +282,15 @@ Instruction *parser::get_arg(unsigned idx)
   return id2inst.at(arg_id);
 }
 
-Basic_block *parser::get_bb(unsigned idx)
+uint32_t parser::get_arg_id(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
- if (tokens[idx].kind != lexeme::label)
-   throw Parse_error("expected a label instead of "
-		     + token_string(tokens[idx]), line_number);
-  uint32_t id = get_u32(&buf[tokens[idx].pos + 1]);
-  auto I = id2bb.find(id);
-  if (I != id2bb.end())
-    return I->second;
-  Basic_block *bb = current_func->build_bb();
-  id2bb[id] = bb;
-  bb2id[bb] = id;
-  return bb;
+  if (tokens[idx].kind != lexeme::reg)
+    throw Parse_error("expected a reg instead of "
+		      + token_string(tokens[idx]), line_number);
+  uint32_t arg_id = get_u32(&buf[tokens[idx].pos + 1]);
+  return arg_id;
 }
 
 std::string parser::get_bb_string(unsigned idx)
@@ -488,33 +483,38 @@ Op parser::parse_instruction()
 	}
       else if (info.opcode == Op::PHI)
 	{
-	  // TODO: This assumes there are no loops.
-	  // TODO: Need to test (and improve) error handling.
-	  unsigned idx = 3;
+	  std::vector<std::pair<uint32_t, std::string>> phi_args;
 
-	  // Read the first phi arg to get the bitsize needed to create the
-	  // phi instruction.
-	  get_left_bracket(idx++);
-	  Instruction *arg_inst = get_arg(idx++);
-	  get_comma(idx++);
-	  Basic_block *arg_bb = get_bb(idx++);
-	  get_right_bracket(idx++);
-
-	  Instruction *phi = current_bb->build_phi_inst(arg_inst->bitsize);
-	  phi->add_phi_arg(arg_inst, arg_bb);
-	  id2inst[lhs_id] = phi;
-
-	  // Add the remaining phi args.
-	  while (idx < tokens.size())
+	  for (unsigned idx = 3; idx < tokens.size();)
 	    {
-	      get_comma(idx++);
+	      if (idx != 3)
+		get_comma(idx++);
 	      get_left_bracket(idx++);
-	      Instruction *arg_inst = get_arg(idx++);
+	      uint32_t arg_id = get_arg_id(idx++);
 	      get_comma(idx++);
-	      Basic_block *arg_bb = get_bb(idx++);
+	      std::string arg_bb_string = get_bb_string(idx++);
 	      get_right_bracket(idx++);
-	      phi->add_phi_arg(arg_inst, arg_bb);
+	      phi_args.push_back({arg_id, arg_bb_string});
 	    }
+
+	  // We must obtain the bitsize from one of the arguments to be able
+	  // to create the phi node. The basic blocks are sorted in reverse
+	  // post-order, so at least one argument must be defined before
+	  // we reach this basic block.
+	  uint32_t bitsize = 0;
+	  for (auto [arg_id, _] : phi_args)
+	    {
+	      if (id2inst.contains(arg_id))
+		{
+		  bitsize = id2inst.at(arg_id)->bitsize;
+		  break;
+		}
+	    }
+	  assert(bitsize != 0);
+
+	  Instruction *phi = current_bb->build_phi_inst(bitsize);
+	  id2inst[lhs_id] = phi;
+	  phi2phi_args[phi] = phi_args;
 	}
       else if (info.opcode == Op::VALUE)
 	{
@@ -680,31 +680,42 @@ void parser::parse(std::string const& file_name)
 	Op opcode = parse_instruction();
 	if (opcode == Op::RET)
 	  {
-	    // We are done with the functions. I.e. all basic blocks are
-	    // created, so we can add the branches.
+	    // We have completed the functions. That is, all basic blocks
+	    // have been created, so we can add the branches and phi node
+	    // arguments.
 	    for (auto bb : current_func->bbs)
 	      {
-		if (bb == current_bb)
-		  continue;
-
-		br_inst br_args = bb2br_args.at(bb);
-		if (br_args.args.size() == 0)
+		for (auto phi : bb->phis)
 		  {
-		    assert(br_args.labels.size() == 1);
-		    Basic_block *dest_bb =
-		      get_bb_from_string(br_args.labels[0]);
-		    bb->build_br_inst(dest_bb);
+		    for (auto [id, bb_string] : phi2phi_args.at(phi))
+		      {
+			Instruction *arg_inst = id2inst.at(id);
+			Basic_block *arg_bb = get_bb_from_string(bb_string);
+			phi->add_phi_arg(arg_inst, arg_bb);
+		      }
 		  }
-		else
+
+		if (bb != current_bb)
 		  {
-		    assert(br_args.args.size() == 1);
-		    assert(br_args.labels.size() == 2);
-		    Instruction *cond = br_args.args[0];
-		    Basic_block *true_bb =
-		      get_bb_from_string(br_args.labels[0]);
-		    Basic_block *false_bb =
-		      get_bb_from_string(br_args.labels[1]);
-		    bb->build_br_inst(cond, true_bb, false_bb);
+		    br_inst br_args = bb2br_args.at(bb);
+		    if (br_args.args.size() == 0)
+		      {
+			assert(br_args.labels.size() == 1);
+			Basic_block *dest_bb =
+			  get_bb_from_string(br_args.labels[0]);
+			bb->build_br_inst(dest_bb);
+		      }
+		    else
+		      {
+			assert(br_args.args.size() == 1);
+			assert(br_args.labels.size() == 2);
+			Instruction *cond = br_args.args[0];
+			Basic_block *true_bb =
+			  get_bb_from_string(br_args.labels[0]);
+			Basic_block *false_bb =
+			  get_bb_from_string(br_args.labels[1]);
+			bb->build_br_inst(cond, true_bb, false_bb);
+		      }
 		  }
 	      }
 

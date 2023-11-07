@@ -925,38 +925,18 @@ void Function::reset_ir_id()
     }
 }
 
-void Function::print(FILE *stream) const
+Function *Function::clone(Module *dest_module)
 {
-  fprintf(stream, "\nfunction %s\n", name.c_str());
-  for (auto bb : bbs)
-    {
-      if (bb != bbs[0])
-	fprintf(stream, "\n");
-      bb->print(stream);
-    }
-}
-
-Function *Module::build_function(const std::string& name)
-{
-  Function *func = new Function;
-  func->module = this;
-  func->name = name;
-  functions.push_back(func);
-  return func;
-}
-
-Function *Module::clone(Function *src_func)
-{
-  Function *tgt_func = build_function(src_func->name);
+  Function *tgt_func = dest_module->build_function(name);
 
   std::map<Basic_block*, Basic_block*> src2tgt_bb;
   std::map<Instruction*, Instruction*> src2tgt_inst;
-  for (auto src_bb : src_func->bbs)
+  for (auto src_bb : bbs)
     {
       src2tgt_bb[src_bb] = tgt_func->build_bb();
     }
 
-  for (auto src_bb : src_func->bbs)
+  for (auto src_bb : bbs)
     {
       Basic_block *tgt_bb = src2tgt_bb.at(src_bb);
       for (auto src_phi : src_bb->phis)
@@ -971,6 +951,9 @@ Function *Module::clone(Function *src_func)
 	  Inst_class iclass = src_inst->iclass();
 	  switch (iclass)
 	    {
+	    case Inst_class::nullary:
+	      tgt_inst = tgt_bb->build_inst(src_inst->opcode);
+	      break;
 	    case Inst_class::iunary:
 	    case Inst_class::funary:
 	      {
@@ -1003,17 +986,20 @@ Function *Module::clone(Function *src_func)
 		{
 		  if (src_inst->nof_args == 0)
 		    {
-		      tgt_inst = tgt_bb->build_br_inst(src_inst->u.br1.dest_bb);
+		      Basic_block *dest_bb =
+			src2tgt_bb.at(src_inst->u.br1.dest_bb);
+		      tgt_inst = tgt_bb->build_br_inst(dest_bb);
 		    }
 		  else
 		    {
-		      assert(src_inst->nof_args == 2);
+		      assert(src_inst->nof_args == 1);
 		      Instruction *arg1 =
 			src2tgt_inst.at(src_inst->arguments[0]);
-		      tgt_inst =
-			tgt_bb->build_br_inst(arg1,
-					      src_inst->u.br3.true_bb,
-					      src_inst->u.br3.false_bb);
+		      Basic_block *true_bb =
+			src2tgt_bb.at(src_inst->u.br3.true_bb);
+		      Basic_block *false_bb =
+			src2tgt_bb.at(src_inst->u.br3.false_bb);
+		      tgt_inst = tgt_bb->build_br_inst(arg1, true_bb, false_bb);
 		    }
 		}
 	      else if (src_inst->opcode == Op::RET)
@@ -1053,8 +1039,50 @@ Function *Module::clone(Function *src_func)
 	  src2tgt_inst[src_inst] = tgt_inst;
 	}
     }
+  for (auto src_bb : bbs)
+    {
+      for (auto src_phi : src_bb->phis)
+	{
+	  Instruction *tgt_phi = src2tgt_inst.at(src_phi);
+	  for (auto [src_arg_inst, src_arg_bb] : src_phi->phi_args)
+	    {
+	      Instruction *arg_inst = src2tgt_inst.at(src_arg_inst);
+	      Basic_block *arg_bb = src2tgt_bb.at(src_arg_bb);
+	      tgt_phi->add_phi_arg(arg_inst, arg_bb);
+	    }
+	}
+    }
+  reverse_post_order(tgt_func);
 
   return tgt_func;
+}
+
+void Function::print(FILE *stream) const
+{
+  fprintf(stream, "\nfunction %s\n", name.c_str());
+  for (auto bb : bbs)
+    {
+      if (bb != bbs[0])
+	fprintf(stream, "\n");
+      bb->print(stream);
+    }
+}
+
+Function *Module::build_function(const std::string& name)
+{
+  Function *func = new Function;
+  func->module = this;
+  func->name = name;
+  functions.push_back(func);
+  return func;
+}
+
+Module *Module::clone()
+{
+  Module *m = create_module(ptr_bits, ptr_id_bits, ptr_offset_bits);
+  for (auto func : functions)
+    func->clone(m);
+  return m;
 }
 
 void Module::print(FILE *stream) const

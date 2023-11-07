@@ -297,6 +297,7 @@ public:
   void rename(const std::string& str);
   void canonicalize();
   void reset_ir_id();
+  Function *clone(Module *dest_module);
   void print(FILE *stream) const;
   Module *module;
 private:
@@ -306,7 +307,7 @@ private:
 struct Module {
   std::vector<Function *> functions;
   Function *build_function(const std::string& name);
-  Function *clone(Function *func);
+  Module *clone();
   void print(FILE *stream) const;
   uint32_t ptr_bits;
   uint32_t ptr_id_bits;
@@ -385,6 +386,7 @@ bool post_dominates(const Basic_block *bb1, const Basic_block *bb2);
 Solver_result check_refine(Module *module);
 Solver_result check_assert(Function *func);
 Solver_result check_ub(Function *func);
+void convert(Module *module);
 
 // dead_code_elimination.cpp
 void dead_code_elimination(Function *func);

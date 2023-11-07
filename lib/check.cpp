@@ -794,6 +794,9 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
       Inst_class iclass = inst->iclass();
       switch (iclass)
 	{
+	case Inst_class::nullary:
+	  new_inst = build_inst(inst->opcode);
+	  break;
 	case Inst_class::iunary:
 	case Inst_class::funary:
 	  {
@@ -1112,6 +1115,25 @@ Solver_result check_assert(Function *func)
     }
 
   return result;
+}
+
+void convert(Module *module)
+{
+  assert(module->functions.size() == 2);
+  Function *src = module->functions[0];
+  Function *tgt = module->functions[1];
+  if (src->name != "src")
+    std::swap(src, tgt);
+  assert(src->name == "src" && tgt->name == "tgt");
+
+  Converter converter(module);
+  converter.convert_function(src, Function_role::src);
+  converter.convert_function(tgt, Function_role::tgt);
+  converter.finalize();
+
+  destroy_function(module->functions[1]);
+  destroy_function(module->functions[0]);
+  converter.dest_func->clone(module);
 }
 
 } // end namespace smtgcc
