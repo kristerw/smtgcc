@@ -687,7 +687,16 @@ bool is_ext(Instruction *inst)
   return false;
 }
 
-Instruction *simplift_sgt(Instruction *inst)
+Instruction *simplify_sge(Instruction *inst)
+{
+  // sge x, x -> true
+  if (inst->arguments[0] == inst->arguments[1])
+    return inst->bb->value_inst(1, 1);
+
+  return inst;
+}
+
+Instruction *simplify_sgt(Instruction *inst)
 {
   // sgt signed_min_val, x -> false
   if (is_value_signed_min(inst->arguments[0]))
@@ -695,6 +704,28 @@ Instruction *simplift_sgt(Instruction *inst)
 
   // sgt x, signed_max_val -> false
   if (is_value_signed_max(inst->arguments[1]))
+    return inst->bb->value_inst(0, 1);
+
+  // sgt x, x -> false
+  if (inst->arguments[0] == inst->arguments[1])
+    return inst->bb->value_inst(0, 1);
+
+  return inst;
+}
+
+Instruction *simplify_sle(Instruction *inst)
+{
+  // sle x, x -> true
+  if (inst->arguments[0] == inst->arguments[1])
+    return inst->bb->value_inst(1, 1);
+
+  return inst;
+}
+
+Instruction *simplify_slt(Instruction *inst)
+{
+  // slt x, x -> false
+  if (inst->arguments[0] == inst->arguments[1])
     return inst->bb->value_inst(0, 1);
 
   return inst;
@@ -781,6 +812,18 @@ Instruction *simplify_ite(Instruction *inst)
   return inst;
 }
 
+Instruction *simplify_uge(Instruction *inst)
+{
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+
+  // uge x, x -> true
+  if (arg1 == arg2)
+    return inst->bb->value_inst(1, 1);
+
+  return inst;
+}
+
 Instruction *simplify_ugt(Instruction *inst)
 {
   Instruction *arg1 = inst->arguments[0];
@@ -799,6 +842,34 @@ Instruction *simplify_ugt(Instruction *inst)
   // has been extended to an integer.
   if (arg1->opcode == Op::ZEXT && arg1->arguments[0]->bitsize == 1 &&
       arg2->opcode == Op::VALUE && arg2->value() > 0)
+    return inst->bb->value_inst(0, 1);
+
+  // ugt x, x -> false
+  if (arg1 == arg2)
+    return inst->bb->value_inst(0, 1);
+
+  return inst;
+}
+
+Instruction *simplify_ule(Instruction *inst)
+{
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+
+  // ule x, x -> true
+  if (arg1 == arg2)
+    return inst->bb->value_inst(1, 1);
+
+  return inst;
+}
+
+Instruction *simplify_ult(Instruction *inst)
+{
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+
+  // ult x, x -> false
+  if (arg1 == arg2)
     return inst->bb->value_inst(0, 1);
 
   return inst;
@@ -1085,11 +1156,20 @@ Instruction *simplify_inst(Instruction *inst)
     case Op::OR:
       inst = simplify_or(inst);
       break;
-    case Op::SGT:
-      inst = simplift_sgt(inst);
-      break;
     case Op::SADD_WRAPS:
       inst = simplify_sadd_wraps(inst);
+      break;
+    case Op::SGE:
+      inst = simplify_sge(inst);
+      break;
+    case Op::SGT:
+      inst = simplify_sgt(inst);
+      break;
+    case Op::SLE:
+      inst = simplify_sle(inst);
+      break;
+    case Op::SLT:
+      inst = simplify_slt(inst);
       break;
     case Op::ITE:
       inst = simplify_ite(inst);
@@ -1100,8 +1180,17 @@ Instruction *simplify_inst(Instruction *inst)
     case Op::SSUB_WRAPS:
       inst = simplify_ssub_wraps(inst);
       break;
+    case Op::UGE:
+      inst = simplify_uge(inst);
+      break;
     case Op::UGT:
       inst = simplify_ugt(inst);
+      break;
+    case Op::ULE:
+      inst = simplify_ule(inst);
+      break;
+    case Op::ULT:
+      inst = simplify_ult(inst);
       break;
     case Op::XOR:
       inst = simplify_xor(inst);
