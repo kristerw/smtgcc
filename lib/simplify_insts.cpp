@@ -13,8 +13,6 @@ namespace smtgcc {
 
 namespace {
 
-Instruction *simplify_inst(Instruction *inst);
-
 bool is_boolean_sext(Instruction *inst)
 {
   return inst->opcode == Op::SEXT && inst->arguments[0]->bitsize == 1;
@@ -1143,6 +1141,17 @@ Instruction *simplify_is_const_mem(Instruction *inst, const std::map<uint64_t,In
   return inst;
 }
 
+void destroy(Instruction *inst)
+{
+  // Memory removal is done in memory-specific passes.
+  if (inst->opcode == Op::MEMORY)
+    return;
+
+  destroy_instruction(inst);
+}
+
+} // end anonymous namespace
+
 Instruction *simplify_inst(Instruction *inst)
 {
   Instruction *original_inst = inst;
@@ -1237,17 +1246,6 @@ Instruction *simplify_inst(Instruction *inst)
 
   return inst;
 }
-
-void destroy(Instruction *inst)
-{
-  // Memory removal is done in memory-specific passes.
-  if (inst->opcode == Op::MEMORY)
-    return;
-
-  destroy_instruction(inst);
-}
-
-} // end anonymous namespace
 
 void simplify_insts(Function *func)
 {

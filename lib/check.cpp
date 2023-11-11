@@ -147,6 +147,8 @@ class Converter {
 
   Instruction *get_inst(const Cse_key& key, bool may_add_insts = true);
   Instruction *value_inst(unsigned __int128 value, uint32_t bitsize);
+  Instruction *update_key2inst(Instruction *inst);
+  Instruction *simplify(Instruction *inst);
   Instruction *build_inst(Op opcode);
   Instruction *build_inst(Op opcode, Instruction *arg);
   Instruction *build_inst(Op opcode, Instruction *arg1, Instruction *arg2);
@@ -291,6 +293,80 @@ Instruction *Converter::value_inst(unsigned __int128 value, uint32_t bitsize)
   return dest_bb->value_inst(value, bitsize);
 }
 
+// Checks if we already have an equivalent instruction. If we do,
+// all uses of 'inst' are changed to use the existing instruction.
+// If not, 'inst' is added to the CSE table.
+Instruction *Converter::update_key2inst(Instruction *inst)
+{
+  Cse_key key(inst->opcode);
+  switch (inst->iclass())
+    {
+    case Inst_class::nullary:
+      break;
+    case Inst_class::iunary:
+    case Inst_class::funary:
+      key.arg1 = inst->arguments[0];
+      break;
+    case Inst_class::icomparison:
+    case Inst_class::fcomparison:
+    case Inst_class::ibinary:
+    case Inst_class::fbinary:
+    case Inst_class::conv:
+      key.arg1 = inst->arguments[0];
+      key.arg2 = inst->arguments[1];
+      break;
+    case Inst_class::ternary:
+      key.arg1 = inst->arguments[0];
+      key.arg2 = inst->arguments[1];
+      key.arg3 = inst->arguments[2];
+      break;
+    default:
+      return inst;
+    }
+
+  Instruction *existing_inst = get_inst(key);
+  if (existing_inst)
+    {
+      inst->replace_all_uses_with(existing_inst);
+      return existing_inst;
+    }
+
+  key2inst.insert({key, inst});
+  return inst;
+}
+
+Instruction *Converter::simplify(Instruction *inst)
+{
+  // The canonical form for comparisons in the converter is using
+  // Op::NOT for the negation of a comparison instead of changing the
+  // opcode, so we do not want simplify_inst optimizing this to a plain
+  // comparison.
+  if (inst->opcode == Op::NOT
+      && inst->arguments[0]->iclass() == Inst_class::icomparison)
+    return inst;
+
+  Instruction *orig_inst = inst;
+  Instruction *prev_inst = inst->prev;
+  inst = simplify_inst(inst);
+  if (inst == orig_inst)
+    return inst;
+
+  // 'simplify_inst' may have added new instructions, so we must add them to
+  // the CSE table (or replace them with an already existing instruction).
+  // The instructions are always inserted right before the instruction
+  // being simplified, so the instructions to examine are between the
+  // 'prev_inst' and 'orig_inst'.
+  for (Instruction *i = prev_inst->next; i != orig_inst; i = i->next)
+    {
+      if (i == inst)
+	inst = update_key2inst(i);
+      else
+	update_key2inst(i);
+    }
+
+  return inst;
+}
+
 Instruction *Converter::build_inst(Op opcode)
 {
   const Cse_key key(opcode);
@@ -310,6 +386,7 @@ Instruction *Converter::build_inst(Op opcode, Instruction *arg)
   if (!inst)
     {
       inst = dest_bb->build_inst(opcode, arg);
+      inst = simplify(inst);
       key2inst.insert({key, inst});
     }
   return inst;
@@ -322,6 +399,7 @@ Instruction *Converter::build_inst(Op opcode, Instruction *arg1, Instruction *ar
   if (!inst)
     {
       inst = dest_bb->build_inst(opcode, arg1, arg2);
+      inst = simplify(inst);
       key2inst.insert({key, inst});
     }
   return inst;
@@ -334,6 +412,7 @@ Instruction *Converter::build_inst(Op opcode, Instruction *arg1, Instruction *ar
   if (!inst)
     {
       inst = dest_bb->build_inst(opcode, arg1, arg2, arg3);
+      inst = simplify(inst);
       key2inst.insert({key, inst});
     }
   return inst;

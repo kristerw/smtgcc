@@ -412,6 +412,7 @@ struct riscv_state {
 Function *parse_riscv(std::string const& file_name, riscv_state *state);
 
 // simplify_insts.cpp
+Instruction *simplify_inst(Instruction *inst);
 void simplify_insts(Function *func);
 void simplify_insts(Module *module);
 void simplify_mem(Function *func);
