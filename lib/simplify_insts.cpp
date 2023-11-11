@@ -795,6 +795,8 @@ Instruction *simplify_ite(Instruction *inst)
   // ite a, 1, 0 -> zext a
   if (is_value_one(inst->arguments[1]) && is_value_zero(inst->arguments[2]))
     {
+      if (inst->bitsize == 1)
+	return inst->arguments[0];
       Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
       Instruction *new_inst = create_inst(Op::ZEXT, inst->arguments[0], bs);
       new_inst->insert_before(inst);
@@ -804,6 +806,8 @@ Instruction *simplify_ite(Instruction *inst)
   // ite a, -1, 0 -> sext a
   if (is_value_m1(inst->arguments[1]) && is_value_zero(inst->arguments[2]))
     {
+      if (inst->bitsize == 1)
+	return inst->arguments[0];
       Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
       Instruction *new_inst = create_inst(Op::SEXT, inst->arguments[0], bs);
       new_inst->insert_before(inst);
