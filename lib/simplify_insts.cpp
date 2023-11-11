@@ -803,6 +803,20 @@ Instruction *simplify_ite(Instruction *inst)
       return new_inst;
     }
 
+  // ite a, 0, 1 -> zext (not a)
+  if (is_value_one(inst->arguments[2]) && is_value_zero(inst->arguments[1]))
+    {
+      Instruction *cond = create_inst(Op::NOT, inst->arguments[0]);
+      cond->insert_before(inst);
+      cond = simplify_inst(cond);
+      if (inst->bitsize == 1)
+	return cond;
+      Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
+      Instruction *new_inst = create_inst(Op::ZEXT, cond, bs);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   // ite a, -1, 0 -> sext a
   if (is_value_m1(inst->arguments[1]) && is_value_zero(inst->arguments[2]))
     {
@@ -813,6 +827,21 @@ Instruction *simplify_ite(Instruction *inst)
       new_inst->insert_before(inst);
       return new_inst;
     }
+
+  // ite a, 0, -1 -> sext (not a)
+  if (is_value_m1(inst->arguments[2]) && is_value_zero(inst->arguments[1]))
+    {
+      Instruction *cond = create_inst(Op::NOT, inst->arguments[0]);
+      cond->insert_before(inst);
+      cond = simplify_inst(cond);
+      if (inst->bitsize == 1)
+	return cond;
+      Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
+      Instruction *new_inst = create_inst(Op::SEXT, cond, bs);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   return inst;
 }
 
