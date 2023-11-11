@@ -504,13 +504,22 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Instruction *inst, I
   for (unsigned i = 0; i < r.num_pairs(); i++)
     {
       unsigned __int128 low_val = get_wide_int_val(r.lower_bound(i));
-      Instruction *low = bb->value_inst(low_val, inst->bitsize);
       unsigned __int128 high_val = get_wide_int_val(r.upper_bound(i));
-      Instruction *high = bb->value_inst(high_val, inst->bitsize);
-      Op op = TYPE_UNSIGNED(type) ? Op::UGT : Op::SGT;
-      Instruction *cmp_low = bb->build_inst(op, low, inst);
-      Instruction *cmp_high = bb->build_inst(op, inst, high);
-      Instruction *is_not_in_range = bb->build_inst(Op::OR, cmp_low, cmp_high);
+      Instruction *is_not_in_range;
+      if (low_val == high_val)
+	{
+	  Instruction *val = bb->value_inst(low_val, inst->bitsize);
+	  is_not_in_range = bb->build_inst(Op::NE, inst, val);
+	}
+      else
+	{
+	  Instruction *low = bb->value_inst(low_val, inst->bitsize);
+	  Instruction *high = bb->value_inst(high_val, inst->bitsize);
+	  Op op = TYPE_UNSIGNED(type) ? Op::UGT : Op::SGT;
+	  Instruction *cmp_low = bb->build_inst(op, low, inst);
+	  Instruction *cmp_high = bb->build_inst(op, inst, high);
+	  is_not_in_range = bb->build_inst(Op::OR, cmp_low, cmp_high);
+	}
       if (is_ub2)
 	is_ub2 = bb->build_inst(Op::AND, is_not_in_range, is_ub2);
       else
