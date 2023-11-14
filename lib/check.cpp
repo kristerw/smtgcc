@@ -704,15 +704,63 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
   else if (inst->opcode == Op::LOAD)
     {
       Instruction *array = bb2memory.at(bb);
-      Instruction *ptr = translate.at(inst->arguments[0]);
-      new_inst = build_inst(Op::ARRAY_LOAD, array, ptr);
+      Instruction *addr = translate.at(inst->arguments[0]);
+      for (;;)
+	{
+	  if (array->opcode != Op::ARRAY_STORE)
+	    break;
+
+	  Instruction *store_array = array->arguments[0];
+	  Instruction *store_addr = array->arguments[1];
+	  Instruction *store_value = array->arguments[2];
+	  if (addr == store_addr)
+	    {
+	      new_inst = store_value;
+	      break;
+	    }
+	  else if (addr->opcode == Op::VALUE && store_addr->opcode == Op::VALUE
+		   && addr != store_addr)
+	    array = store_array;
+	  else
+	    break;
+	}
+      if (!new_inst)
+	new_inst = build_inst(Op::ARRAY_LOAD, array, addr);
     }
   else if (inst->opcode == Op::STORE)
     {
       Instruction *array = bb2memory.at(bb);
-      Instruction *ptr = translate.at(inst->arguments[0]);
+      Instruction *addr = translate.at(inst->arguments[0]);
       Instruction *value = translate.at(inst->arguments[1]);
-      array = build_inst(Op::ARRAY_STORE, array, ptr, value);
+
+      // Traverse the list of previous updates to the array to determine
+      // whether the current value is already the same as 'value'.
+      for (Instruction *tmp_array = array;;)
+	{
+	  if (tmp_array->opcode == Op::ARRAY_STORE)
+	    {
+	      Instruction *tmp_addr = tmp_array->arguments[1];
+	      Instruction *tmp_value = tmp_array->arguments[2];
+	      if (addr == tmp_addr && value == tmp_value)
+		{
+		  // The array element has the correct value already.
+		  return;
+		}
+	      else if (addr != tmp_addr
+		       && addr->opcode == Op::VALUE
+		       && tmp_addr->opcode == Op::VALUE)
+		{
+		  // If the addresses are distinct Op::VALUE, then we know
+		  // that they do not alias, so we continue traversing the
+		  // list.
+		  tmp_array = tmp_array->arguments[0];
+		  continue;
+		}
+	    }
+	  break;
+	}
+
+      array = build_inst(Op::ARRAY_STORE, array, addr, value);
       bb2memory[bb] = array;
       return;
     }
@@ -729,18 +777,88 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
   else if (inst->opcode == Op::SET_MEM_FLAG)
     {
       Instruction *array = bb2memory_flag.at(bb);
-      Instruction *ptr = translate.at(inst->arguments[0]);
+      Instruction *addr = translate.at(inst->arguments[0]);
       Instruction *value = translate.at(inst->arguments[1]);
-      array = build_inst(Op::ARRAY_SET_FLAG, array, ptr, value);
+
+      // Traverse the list of previous updates to the array to determine
+      // whether the current value is already the same as 'value'.
+      for (Instruction *tmp_array = array;;)
+	{
+	  if (tmp_array->opcode == Op::MEM_FLAG_ARRAY
+	      && value->opcode == Op::VALUE
+	      && value->value() == 0)
+	    {
+	      // The array element has the correct value already.
+	      return;
+	    }
+	  if (tmp_array->opcode == Op::ARRAY_SET_FLAG)
+	    {
+	      Instruction *tmp_addr = tmp_array->arguments[1];
+	      Instruction *tmp_value = tmp_array->arguments[2];
+	      if (addr == tmp_addr && value == tmp_value)
+		{
+		  // The array element has the correct value already.
+		  return;
+		}
+	      else if (addr != tmp_addr
+		       && addr->opcode == Op::VALUE
+		       && tmp_addr->opcode == Op::VALUE)
+		{
+		  // If the addresses are distinct Op::VALUE, then we know
+		  // that they do not alias, so we continue traversing the
+		  // list.
+		  tmp_array = tmp_array->arguments[0];
+		  continue;
+		}
+	    }
+	  break;
+	}
+
+      array = build_inst(Op::ARRAY_SET_FLAG, array, addr, value);
       bb2memory_flag[bb] = array;
       return;
     }
   else if (inst->opcode == Op::SET_MEM_UNDEF)
     {
       Instruction *array = bb2memory_undef.at(bb);
-      Instruction *ptr = translate.at(inst->arguments[0]);
+      Instruction *addr = translate.at(inst->arguments[0]);
       Instruction *value = translate.at(inst->arguments[1]);
-      array = build_inst(Op::ARRAY_SET_UNDEF, array, ptr, value);
+
+      // Traverse the list of previous updates to the array to determine
+      // whether the current value is already the same as 'value'.
+      for (Instruction *tmp_array = array;;)
+	{
+	  if (tmp_array->opcode == Op::MEM_UNDEF_ARRAY
+	      && value->opcode == Op::VALUE
+	      && value->value() == 0)
+	    {
+	      // The array element has the correct value already.
+	      return;
+	    }
+	  if (tmp_array->opcode == Op::ARRAY_SET_UNDEF)
+	    {
+	      Instruction *tmp_addr = tmp_array->arguments[1];
+	      Instruction *tmp_value = tmp_array->arguments[2];
+	      if (addr == tmp_addr && value == tmp_value)
+		{
+		  // The array element has the correct value already.
+		  return;
+		}
+	      else if (addr != tmp_addr
+		       && addr->opcode == Op::VALUE
+		       && tmp_addr->opcode == Op::VALUE)
+		{
+		  // If the addresses are distinct Op::VALUE, then we know
+		  // that they do not alias, so we continue traversing the
+		  // list.
+		  tmp_array = tmp_array->arguments[0];
+		  continue;
+		}
+	    }
+	  break;
+	}
+
+      array = build_inst(Op::ARRAY_SET_UNDEF, array, addr, value);
       bb2memory_undef[bb] = array;
       return;
     }
@@ -756,20 +874,99 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
    else if (inst->opcode == Op::GET_MEM_UNDEF)
      {
       Instruction *array = bb2memory_undef.at(bb);
-      Instruction *arg1 = translate.at(inst->arguments[0]);
-      new_inst = build_inst(Op::ARRAY_GET_UNDEF, array, arg1);
+      Instruction *addr = translate.at(inst->arguments[0]);
+      for (;;)
+	{
+	  if (array->opcode == Op::MEM_UNDEF_ARRAY)
+	    {
+	      new_inst = value_inst(0, 8);
+	      break;
+	    }
+
+	  if (array->opcode != Op::ARRAY_SET_UNDEF)
+	    break;
+
+	  Instruction *tmp_array = array->arguments[0];
+	  Instruction *tmp_addr = array->arguments[1];
+	  Instruction *tmp_value = array->arguments[2];
+	  if (addr == tmp_addr)
+	    {
+	      new_inst = tmp_value;
+	      break;
+	    }
+	  else if (addr->opcode == Op::VALUE && tmp_addr->opcode == Op::VALUE
+		   && addr != tmp_addr)
+	    array = tmp_array;
+	  else
+	    break;
+	}
+      if (!new_inst)
+	new_inst = build_inst(Op::ARRAY_GET_UNDEF, array, addr);
      }
    else if (inst->opcode == Op::GET_MEM_FLAG)
      {
       Instruction *array = bb2memory_flag.at(bb);
-      Instruction *arg1 = translate.at(inst->arguments[0]);
-      new_inst = build_inst(Op::ARRAY_GET_FLAG, array, arg1);
+      Instruction *addr = translate.at(inst->arguments[0]);
+      for (;;)
+	{
+	  if (array->opcode == Op::MEM_FLAG_ARRAY)
+	    {
+	      new_inst = value_inst(0, 1);
+	      break;
+	    }
+
+	  if (array->opcode != Op::ARRAY_SET_FLAG)
+	    break;
+
+	  Instruction *tmp_array = array->arguments[0];
+	  Instruction *tmp_addr = array->arguments[1];
+	  Instruction *tmp_value = array->arguments[2];
+	  if (addr == tmp_addr)
+	    {
+	      new_inst = tmp_value;
+	      break;
+	    }
+	  else if (addr->opcode == Op::VALUE && tmp_addr->opcode == Op::VALUE
+		   && addr != tmp_addr)
+	    array = tmp_array;
+	  else
+	    break;
+	}
+      if (!new_inst)
+	new_inst = build_inst(Op::ARRAY_GET_FLAG, array, addr);
      }
    else if (inst->opcode == Op::GET_MEM_SIZE)
     {
       Instruction *array = bb2memory_size.at(bb);
-      Instruction *arg1 = translate.at(inst->arguments[0]);
-      new_inst = build_inst(Op::ARRAY_GET_SIZE, array, arg1);
+      Instruction *mem_id = translate.at(inst->arguments[0]);
+      for (;;)
+	{
+	  if (array->opcode == Op::MEM_SIZE_ARRAY)
+	    {
+	      new_inst = value_inst(0, inst->bitsize);
+	      break;
+	    }
+
+	  if (array->opcode != Op::ARRAY_SET_SIZE)
+	    break;
+
+	  Instruction *tmp_array = array->arguments[0];
+	  Instruction *tmp_mem_id = array->arguments[1];
+	  Instruction *tmp_value = array->arguments[2];
+	  if (mem_id == tmp_mem_id)
+	    {
+	      new_inst = tmp_value;
+	      break;
+	    }
+	  else if (mem_id->opcode == Op::VALUE
+		   && tmp_mem_id->opcode == Op::VALUE
+		   && mem_id != tmp_mem_id)
+	    array = tmp_array;
+	  else
+	    break;
+	}
+      if (!new_inst)
+	new_inst = build_inst(Op::ARRAY_GET_SIZE, array, mem_id);
     }
   else if (inst->opcode == Op::IS_CONST_MEM)
     {
