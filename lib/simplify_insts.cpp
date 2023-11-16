@@ -318,13 +318,29 @@ Instruction *simplify_mem_size(Instruction *inst, const std::map<uint64_t,uint64
 
 Instruction *simplify_add(Instruction *inst)
 {
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+
   // add 0, x -> x
-  if (is_value_zero(inst->arguments[0]))
-    return inst->arguments[1];
+  if (is_value_zero(arg1))
+    return arg2;
 
   // add x, 0 -> x
-  if (is_value_zero(inst->arguments[1]))
-    return inst->arguments[0];
+  if (is_value_zero(arg2))
+    return arg1;
+
+  // add (add, x, c2), c1 -> add x, (c1 + c2)
+  if (arg2->opcode == Op::VALUE &&
+      arg1->opcode == Op::ADD &&
+      arg1->arguments[1]->opcode == Op::VALUE)
+    {
+      unsigned __int128 c1 = arg2->value();
+      unsigned __int128 c2 = arg1->arguments[1]->value();
+      Instruction *val = inst->bb->value_inst(c1 + c2, inst->bitsize);
+      Instruction *new_inst = create_inst(Op::ADD, arg1->arguments[0], val);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
 
   return inst;
 }
@@ -341,6 +357,19 @@ Instruction *simplify_and(Instruction *inst)
   // and x, -1 -> x
   if (is_value_m1(arg2))
     return arg1;
+
+  // and (and, x, c2), c1 -> and x, (c1 & c2)
+  if (arg2->opcode == Op::VALUE &&
+      arg1->opcode == Op::AND &&
+      arg1->arguments[1]->opcode == Op::VALUE)
+    {
+      unsigned __int128 c1 = arg2->value();
+      unsigned __int128 c2 = arg1->arguments[1]->value();
+      Instruction *val = inst->bb->value_inst(c1 & c2, inst->bitsize);
+      Instruction *new_inst = create_inst(Op::AND, arg1->arguments[0], val);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
 
   // and (zext x, s), c -> 0 if x is Boolean and c is a constant with least
   // significant bit 0.
@@ -758,6 +787,23 @@ Instruction *simplify_ssub_wraps(Instruction *inst)
   // promoted to int.
   if (is_ext(inst->arguments[0]) && is_ext(inst->arguments[1]))
     return inst->bb->value_inst(0, 1);
+
+  return inst;
+}
+
+Instruction *simplify_sub(Instruction *inst)
+{
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+
+  // sub x, c -> add x, -c
+  if (arg2->opcode == Op::VALUE)
+    {
+      Instruction *val = inst->bb->value_inst(-arg2->value(), inst->bitsize);
+      Instruction *new_inst = create_inst(Op::ADD, arg1, val);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
 
   return inst;
 }
@@ -1221,6 +1267,9 @@ Instruction *simplify_inst(Instruction *inst)
       break;
     case Op::SSUB_WRAPS:
       inst = simplify_ssub_wraps(inst);
+      break;
+    case Op::SUB:
+      inst = simplify_sub(inst);
       break;
     case Op::UGE:
       inst = simplify_uge(inst);
