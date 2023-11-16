@@ -333,8 +333,6 @@ Instruction *simplify_and(Instruction *inst)
 {
   Instruction *arg1 = inst->arguments[0];
   Instruction *arg2 = inst->arguments[1];
-  if (arg2->opcode != Op::VALUE)
-    std::swap(arg1, arg2);
 
   // and x, 0 -> 0
   if (is_value_zero(arg2))
@@ -388,12 +386,8 @@ Instruction *simplify_and(Instruction *inst)
     {
       Instruction *arg1_arg1 = arg1->arguments[0];
       Instruction *arg1_arg2 = arg1->arguments[1];
-      if (arg1_arg2->opcode != Op::VALUE)
-	std::swap(arg1_arg1, arg1_arg2);
       Instruction *arg2_arg1 = arg2->arguments[0];
       Instruction *arg2_arg2 = arg2->arguments[1];
-      if (arg2_arg2->opcode != Op::VALUE)
-	std::swap(arg2_arg1, arg2_arg2);
       if (arg1_arg1 == arg2_arg1
 	  && arg1_arg1->opcode == Op::SEXT
 	  && arg1_arg1->arguments[0]->bitsize == 1
@@ -431,8 +425,6 @@ Instruction *simplify_eq(Instruction *inst)
 {
   Instruction *arg1 = inst->arguments[0];
   Instruction *arg2 = inst->arguments[1];
-  if (arg2->opcode != Op::VALUE)
-    std::swap(arg1, arg2);
 
   // Comparing an MININT with a ZEXT/SEXT value is always false.
   // This is common when code is negating a promoted char/short.
@@ -460,8 +452,6 @@ Instruction *simplify_ne(Instruction *inst)
 {
   Instruction *arg1 = inst->arguments[0];
   Instruction *arg2 = inst->arguments[1];
-  if (arg2->opcode != Op::VALUE)
-    std::swap(arg1, arg2);
 
   // Boolean x != 0 -> x
   if (arg1->bitsize == 1 && is_value_zero(arg2))
@@ -536,8 +526,6 @@ Instruction *simplify_or(Instruction *inst)
 {
   Instruction *arg1 = inst->arguments[0];
   Instruction *arg2 = inst->arguments[1];
-  if (arg2->opcode != Op::VALUE)
-    std::swap(arg1, arg2);
 
   // or x, 0 -> x
   if (is_value_zero(arg2))
@@ -580,8 +568,6 @@ Instruction *simplify_xor(Instruction *inst)
 {
   Instruction *arg1 = inst->arguments[0];
   Instruction *arg2 = inst->arguments[1];
-  if (arg2->opcode != Op::VALUE)
-    std::swap(arg1, arg2);
 
   // xor x, 0 -> x
   if (is_value_zero(arg2))

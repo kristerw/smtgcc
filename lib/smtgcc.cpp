@@ -213,6 +213,9 @@ Instruction::Instruction()
 
 Instruction *create_inst(Op opcode, Instruction *arg1, Instruction *arg2)
 {
+  if (inst_info[(int)opcode].is_commutative
+      && arg2->opcode != Op::VALUE && arg1->opcode == Op::VALUE)
+    std::swap(arg1, arg2);
   Instruction *inst = new Instruction;
   inst->opcode = opcode;
   inst->nof_args = 2;
