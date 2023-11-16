@@ -115,7 +115,6 @@ class Converter {
   Basic_block *dest_bb;
 
   Instruction *src_memory = nullptr;
-  Instruction *src_memory_flag = nullptr;
   Instruction *src_memory_size = nullptr;
   Instruction *src_memory_undef = nullptr;
   Instruction *src_retval = nullptr;
@@ -123,7 +122,6 @@ class Converter {
   Instruction *src_unique_ub = nullptr;
   Instruction *src_common_ub = nullptr;
   Instruction *tgt_memory = nullptr;
-  Instruction *tgt_memory_flag = nullptr;
   Instruction *tgt_memory_size = nullptr;
   Instruction *tgt_memory_undef = nullptr;
   Instruction *tgt_retval = nullptr;
@@ -1162,23 +1160,18 @@ void Converter::convert_function(Function *func, Function_role role)
   build_inst(assert_op, generate_assert(func));
 
   Basic_block *exit_block = func->bbs.back();
-  Op mem1_op = role == Function_role::src ? Op::SRC_MEM1 : Op::TGT_MEM1;
-  Op mem2_op = role == Function_role::src ? Op::SRC_MEM2 : Op::TGT_MEM2;
-  build_inst(mem1_op, bb2memory.at(exit_block),
-		      bb2memory_size.at(exit_block));
-  build_inst(mem2_op, bb2memory_flag.at(exit_block),
-		      bb2memory_undef.at(exit_block));
+  Op mem_op = role == Function_role::src ? Op::SRC_MEM : Op::TGT_MEM;
+  build_inst(mem_op, bb2memory.at(exit_block),bb2memory_size.at(exit_block),
+	     bb2memory_undef.at(exit_block));
   if (role == Function_role::src)
     {
       src_memory = bb2memory.at(exit_block);
-      src_memory_flag = bb2memory_flag.at(exit_block);
       src_memory_size = bb2memory_size.at(exit_block);
       src_memory_undef = bb2memory_undef.at(exit_block);
     }
   else
     {
       tgt_memory = bb2memory.at(exit_block);
-      tgt_memory_flag = bb2memory_flag.at(exit_block);
       tgt_memory_size = bb2memory_size.at(exit_block);
       tgt_memory_undef = bb2memory_undef.at(exit_block);
     }

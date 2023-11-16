@@ -12,7 +12,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Instruction_info, 101> inst_info{{
+const std::array<Instruction_info, 99> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -84,8 +84,6 @@ const std::array<Instruction_info, 101> inst_info{{
   {"smax", Op::SMAX, Inst_class::ibinary, true, true},
   {"smin", Op::SMIN, Inst_class::ibinary, true, true},
   {"smul_wraps", Op::SMUL_WRAPS, Inst_class::ibinary, true, true},
-  {"src_mem1", Op::SRC_MEM1, Inst_class::ibinary, false, false},
-  {"src_mem2", Op::SRC_MEM2, Inst_class::ibinary, false, false},
   {"src_retval", Op::SRC_RETVAL, Inst_class::ibinary, false, false},
   {"src_ub", Op::SRC_UB, Inst_class::ibinary, false, false},
   {"srem", Op::SREM, Inst_class::ibinary, true, false},
@@ -93,8 +91,6 @@ const std::array<Instruction_info, 101> inst_info{{
   {"store", Op::STORE, Inst_class::ibinary, false, false},
   {"sub", Op::SUB, Inst_class::ibinary, true, false},
   {"symbolic", Op::SYMBOLIC, Inst_class::ibinary, true, false},
-  {"tgt_mem1", Op::TGT_MEM1, Inst_class::ibinary, false, false},
-  {"tgt_mem2", Op::TGT_MEM2, Inst_class::ibinary, false, false},
   {"tgt_retval", Op::TGT_RETVAL, Inst_class::ibinary, false, false},
   {"tgt_ub", Op::TGT_UB, Inst_class::ibinary, false, false},
   {"udiv", Op::UDIV, Inst_class::ibinary, true, false},
@@ -118,6 +114,8 @@ const std::array<Instruction_info, 101> inst_info{{
   {"extract", Op::EXTRACT, Inst_class::ternary, true, false},
   {"ite", Op::ITE, Inst_class::ternary, true, false},
   {"memory", Op::MEMORY, Inst_class::ternary, true, false},
+  {"src_mem", Op::SRC_MEM, Inst_class::ternary, false, false},
+  {"tgt_mem", Op::TGT_MEM, Inst_class::ternary, false, false},
 
   // Conversions
   {"f2s", Op::F2S, Inst_class::conv, true, false},
@@ -298,7 +296,9 @@ Instruction *create_inst(Op opcode, Instruction *arg1, Instruction *arg2, Instru
   else if (opcode == Op::ARRAY_SET_FLAG
 	   || opcode == Op::ARRAY_SET_SIZE
 	   || opcode == Op::ARRAY_SET_UNDEF
-	   || opcode == Op::ARRAY_STORE)
+	   || opcode == Op::ARRAY_STORE
+	   || opcode == Op::SRC_MEM
+	   || opcode == Op::TGT_MEM)
     {
       inst->bitsize = 0;
     }

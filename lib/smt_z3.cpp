@@ -51,7 +51,6 @@ public:
 
   Instruction *src_assert = nullptr;
   Instruction *src_memory = nullptr;
-  Instruction *src_memory_flag = nullptr;
   Instruction *src_memory_size = nullptr;
   Instruction *src_memory_undef = nullptr;
   Instruction *src_retval = nullptr;
@@ -61,7 +60,6 @@ public:
 
   Instruction *tgt_assert = nullptr;
   Instruction *tgt_memory = nullptr;
-  Instruction *tgt_memory_flag = nullptr;
   Instruction *tgt_memory_size = nullptr;
   Instruction *tgt_memory_undef = nullptr;
   Instruction *tgt_retval = nullptr;
@@ -392,30 +390,6 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
 	inst2bv.insert({inst, z3::select(arg1, arg2)});
       }
       return;
-    case Op::SRC_MEM1:
-      assert(!src_memory);
-      assert(!src_memory_size);
-      src_memory = inst->arguments[0];
-      src_memory_size = inst->arguments[1];
-      return;
-    case Op::SRC_MEM2:
-      assert(!src_memory_flag);
-      assert(!src_memory_undef);
-      src_memory_flag = inst->arguments[0];
-      src_memory_undef = inst->arguments[1];
-      return;
-    case Op::TGT_MEM1:
-      assert(!tgt_memory);
-      assert(!tgt_memory_size);
-      tgt_memory = inst->arguments[0];
-      tgt_memory_size = inst->arguments[1];
-      return;
-    case Op::TGT_MEM2:
-      assert(!tgt_memory_flag);
-      assert(!tgt_memory_undef);
-      tgt_memory_flag = inst->arguments[0];
-      tgt_memory_undef = inst->arguments[1];
-      return;
     case Op::SRC_RETVAL:
       assert(!src_retval);
       assert(!src_retval_undef);
@@ -654,6 +628,20 @@ void Converter::build_ternary_smt(const Instruction *inst)
 	  inst2bv.insert({inst, ite(arg1, arg2, arg3)});
 	}
       break;
+    case Op::SRC_MEM:
+      assert(!src_memory);
+      assert(!src_memory_size);
+      src_memory = inst->arguments[0];
+      src_memory_size = inst->arguments[1];
+      src_memory_undef = inst->arguments[2];
+      return;
+    case Op::TGT_MEM:
+      assert(!tgt_memory);
+      assert(!tgt_memory_size);
+      tgt_memory = inst->arguments[0];
+      tgt_memory_size = inst->arguments[1];
+      tgt_memory_undef = inst->arguments[2];
+      return;
     default:
       throw Not_implemented("build_ternary_smt: "s + inst->name());
     }

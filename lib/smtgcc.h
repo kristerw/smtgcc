@@ -100,8 +100,6 @@ enum class Op : uint8_t {
   SMAX,
   SMIN,
   SMUL_WRAPS,
-  SRC_MEM1,
-  SRC_MEM2,
   SRC_RETVAL,
   SRC_UB,
   SREM,
@@ -109,8 +107,6 @@ enum class Op : uint8_t {
   STORE,
   SUB,
   SYMBOLIC,
-  TGT_MEM1,
-  TGT_MEM2,
   TGT_RETVAL,
   TGT_UB,
   UDIV,
@@ -134,6 +130,8 @@ enum class Op : uint8_t {
   EXTRACT,
   ITE,
   MEMORY,
+  SRC_MEM,
+  TGT_MEM,
 
   // Conversions
   F2S,
@@ -181,7 +179,7 @@ struct Instruction_info {
   bool is_commutative;
 };
 
-extern const std::array<Instruction_info, 101> inst_info;
+extern const std::array<Instruction_info, 99> inst_info;
 
 struct Module;
 struct Function;
