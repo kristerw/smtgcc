@@ -908,14 +908,28 @@ Instruction *simplify_ult(Instruction *inst)
 
 Instruction *simplify_shl(Instruction *inst)
 {
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+
   // shl x, 0 -> x
-  if (is_value_zero(inst->arguments[1]))
+  if (is_value_zero(arg2))
     return inst->arguments[0];
 
   // shl x, c -> 0 if c >= bitsize
-  if (inst->arguments[1]->opcode == Op::VALUE
-      && inst->arguments[1]->value() >= inst->bitsize)
+  if (arg2->opcode == Op::VALUE && arg2->value() >= inst->bitsize)
     return inst->bb->value_inst(0, inst->bitsize);
+
+  // shl (lshr x, c), c -> and x, (-1 << c)
+  if (arg2->opcode == Op::VALUE
+      && arg1->opcode == Op::LSHR
+      && arg1->arguments[1] == arg2)
+    {
+      unsigned __int128 shift = arg2->value();
+      Instruction *mask = inst->bb->value_inst(-1 << shift, inst->bitsize);
+      Instruction *new_inst = create_inst(Op::AND, arg1->arguments[0], mask);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
 
   return inst;
 }
