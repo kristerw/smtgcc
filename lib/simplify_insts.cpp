@@ -638,6 +638,9 @@ Instruction *simplify_mov(Instruction *inst)
 
 Instruction *simplify_mul(Instruction *inst)
 {
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+
   // mul 0, x -> 0
   if (is_value_zero(inst->arguments[0]))
     return inst->arguments[0];
@@ -653,6 +656,22 @@ Instruction *simplify_mul(Instruction *inst)
   // mul x, 1 -> x
   if (is_value_one(inst->arguments[1]))
     return inst->arguments[0];
+
+  // mul (add, x, c2), c1 -> add (mul x, c1), (c1 * c2)
+  if (arg2->opcode == Op::VALUE &&
+      arg1->opcode == Op::ADD &&
+      arg1->arguments[1]->opcode == Op::VALUE)
+    {
+      unsigned __int128 c1 = arg2->value();
+      unsigned __int128 c2 = arg1->arguments[1]->value();
+      Instruction *new_inst1 = create_inst(Op::MUL, arg1->arguments[0], arg2);
+      new_inst1 = simplify_inst(new_inst1);
+      new_inst1->insert_before(inst);
+      Instruction *val = inst->bb->value_inst(c1 * c2, inst->bitsize);
+      Instruction *new_inst2 = create_inst(Op::ADD, new_inst1, val);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
 
   return inst;
 }
