@@ -598,10 +598,8 @@ Instruction *to_mem_repr(Basic_block *bb, Instruction *inst, tree type)
   if (INTEGRAL_TYPE_P(type))
     {
       Instruction *bitsize_inst = bb->value_inst(bitsize, 32);
-      if (TYPE_UNSIGNED(type))
-	inst = bb->build_inst(Op::ZEXT, inst, bitsize_inst);
-      else
-	inst = bb->build_inst(Op::SEXT, inst, bitsize_inst);
+      Op op = TYPE_UNSIGNED(type) ? Op::ZEXT : Op::SEXT;
+      inst = bb->build_inst(op, inst, bitsize_inst);
     }
   return inst;
 }
@@ -626,21 +624,28 @@ Instruction *from_mem_repr(Basic_block *bb, Instruction *inst, tree type)
 {
   uint64_t bitsize = bitsize_for_type(type);
   assert(bitsize <= inst->bitsize);
-  if (inst->bitsize != bitsize)
+  if (inst->bitsize == bitsize)
+    return inst;
+
+  Instruction *orig_inst = inst;
+  inst = bb->build_trunc(inst, bitsize);
+
+  // GIMPLE does not care about the extra bits, but the ABI requires that
+  // the unused bits of _Bool be 0. Therefore, smtgcc-tv-backend.so
+  // may report errors when the symbolic values in memory violate the
+  // constraints if the assembly code takes advantage of this.
+  // We therefore mark it as UB here if the padding is incorrect,
+  // which will force the initial symbolic memory state to be correct.
+  // TODO: Should that be done for BITINT_TYPE too?
+  // TODO: The requirement may be different for other architectures?
+  if (TREE_CODE(type) == BOOLEAN_TYPE && bitsize == 1)
     {
-      if (TREE_CODE(type) == BOOLEAN_TYPE && bitsize == 1)
-	{
-	  // A boolean must have value 0 or 1.
-	  // TODO: This is a special cases here as this always happen when
-	  // storing Booleans in memory. May want to do it in a better way,
-	  // and also checking wide Booleans in other places where this
-	  // function may be called.
-	  Instruction *one = bb->value_inst(1, inst->bitsize);
-	  Instruction *cond = bb->build_inst(Op::UGT, inst, one);
-	  bb->build_inst(Op::UB, cond);
-	}
-      inst = bb->build_trunc(inst, bitsize);
+      Instruction *bitsize_inst = bb->value_inst(orig_inst->bitsize, 32);
+      Op op = TYPE_UNSIGNED(type) ? Op::ZEXT : Op::SEXT;
+      Instruction *ext = bb->build_inst(op, inst, bitsize_inst);
+      bb->build_inst(Op::UB, bb->build_inst(Op::NE, orig_inst, ext));
     }
+
   return inst;
 }
 
