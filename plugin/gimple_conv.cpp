@@ -142,6 +142,8 @@ unsigned __int128 get_widest_int_val(widest_int v)
 {
   unsigned int len = v.get_len();
   const HOST_WIDE_INT *p = v.get_val();
+  if (len != 1 && len != 2)
+    throw Not_implemented("get_widest_int_val: precision > 128");
   assert(len == 1 || len == 2);
   unsigned __int128 value = 0;
   if (len == 2)
@@ -159,6 +161,8 @@ unsigned __int128 get_wide_int_val(wide_int v)
 {
   unsigned int len = v.get_len();
   const HOST_WIDE_INT *p = v.get_val();
+  if (len != 1 && len != 2)
+    throw Not_implemented("get_wide_int_val: precision > 128");
   assert(len == 1 || len == 2);
   unsigned __int128 value = 0;
   if (len == 2)
@@ -176,6 +180,8 @@ unsigned __int128 get_int_cst_val(tree expr)
 {
   assert(TREE_CODE(expr) == INTEGER_CST);
   uint32_t precision = TYPE_PRECISION(TREE_TYPE(expr));
+  if (precision > 128)
+    throw Not_implemented("get_int_cst_val: INTEGER_CST precision > 128");
   assert(precision > 0 && precision <= 128);
   unsigned __int128 value = 0;
   if (TREE_INT_CST_NUNITS(expr) == 2)
@@ -197,8 +203,6 @@ void check_type(tree type)
   // unused structures/arrays.
   if (DECIMAL_FLOAT_TYPE_P(type))
     throw Not_implemented("check_type: DECIMAL_FLOAT_TYPE");
-  else if (INTEGRAL_TYPE_P(type) && TYPE_PRECISION(type) > 128)
-    throw Not_implemented("check_type: integral type with precision > 128");
   else if (VECTOR_TYPE_P(type) || TREE_CODE(type) == COMPLEX_TYPE)
     check_type(TREE_TYPE(type));
   else if (FLOAT_TYPE_P(type))
@@ -469,6 +473,10 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Instruction *inst, I
   int_range_max r;
   get_range_query(cfun)->range_of_expr(r, expr);
   if (r.undefined_p() || r.varying_p())
+    return;
+
+  // TODO: Implement wide types.
+  if (inst->bitsize > 128)
     return;
 
   // TODO: get_nonzero_bits is deprecated if I understand correctly. This
@@ -808,7 +816,6 @@ std::pair<Instruction *, Instruction *> Converter::tree2inst(Basic_block *bb, tr
     case INTEGER_CST:
       {
 	uint32_t precision = bitsize_for_type(TREE_TYPE(expr));
-	assert(precision > 0 && precision <= 128);
 	unsigned __int128 value = get_int_cst_val(expr);
 	Instruction *inst = bb->value_inst(value, precision);
 	return {inst, nullptr};
@@ -1669,6 +1676,8 @@ Instruction *Converter::process_unary_int(enum tree_code code, Instruction *arg1
       {
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
+	    if (arg1->bitsize > 128)
+	      throw Not_implemented("process_unary_int: precision > 128");
 	    unsigned __int128 min_int =
 	      ((unsigned __int128)1) << (arg1->bitsize - 1);
 	    Instruction *min_int_inst =
@@ -1698,6 +1707,8 @@ Instruction *Converter::process_unary_int(enum tree_code code, Instruction *arg1
     case NEGATE_EXPR:
       if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	{
+	  if (arg1->bitsize > 128)
+	    throw Not_implemented("process_unary_int: precision > 128");
 	  unsigned __int128 min_int =
 	    ((unsigned __int128)1) << (arg1->bitsize - 1);
 	  Instruction *min_int_inst =
@@ -2121,6 +2132,8 @@ Instruction *Converter::process_binary_int(enum tree_code code, bool is_unsigned
       {
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
+	    if (arg1->bitsize > 128)
+	      throw Not_implemented("process_binary_int: precision > 128");
 	    unsigned __int128 min_int =
 	      ((unsigned __int128)1) << (arg1->bitsize - 1);
 	    Instruction *min_int_inst = bb->value_inst(min_int, arg1->bitsize);
@@ -2279,6 +2292,8 @@ Instruction *Converter::process_binary_int(enum tree_code code, bool is_unsigned
       {
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
+	    if (arg1->bitsize > 128)
+	      throw Not_implemented("process_binary_int: precision > 128");
 	    unsigned __int128 min_int =
 	      ((unsigned __int128)1) << (arg1->bitsize - 1);
 	    Instruction *min_int_inst = bb->value_inst(min_int, arg1->bitsize);
@@ -2298,6 +2313,8 @@ Instruction *Converter::process_binary_int(enum tree_code code, bool is_unsigned
       {
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
+	    if (arg1->bitsize > 128)
+	      throw Not_implemented("process_binary_int: precision > 128");
 	    unsigned __int128 min_int =
 	      ((unsigned __int128)1) << (arg1->bitsize - 1);
 	    Instruction *min_int_inst = bb->value_inst(min_int, arg1->bitsize);
@@ -4459,7 +4476,8 @@ void Converter::process_func_args()
 	  // we get value == 0xf0fe and mask == 0xf01
 	  tree value;
 	  widest_int mask;
-	  if (ipcp_get_parm_bits(decl, &value, &mask))
+	  if (param_inst->bitsize <= 128  // TODO: Implement wide types.
+	      && ipcp_get_parm_bits(decl, &value, &mask))
 	    {
 	      unsigned __int128 m = get_widest_int_val(mask);
 	      unsigned __int128 v = get_int_cst_val(value);
