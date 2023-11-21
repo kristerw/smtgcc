@@ -39,12 +39,6 @@ unsigned int get_object_alignment(tree exp);
 // so that function pointer arguments have memory to point to).
 #define ANON_MEM_SIZE 128
 
-// The maximum number of basic blocks allowed in a function.
-#define MAX_BBS  1000
-
-// The maximum number of instructions in one basic block.
-#define MAX_NOF_INSTS  100000
-
 using namespace std::string_literals;
 using namespace smtgcc;
 
@@ -4674,26 +4668,6 @@ Function *Converter::process_function()
   }
 
   validate(func);
-
-  // Some tests in the GCC test suite are far too large for the SMT solver
-  // to handle. For example, gcc.c-torture/compile/20001226-1.c has 16390
-  // basic blocks (after switch expansion) and gcc.dg/pr48141.c has a basic
-  // block containing 3960038 instructions (after memory expansion).
-  // It is useless to continue simplifying/checking such IR.
-  //
-  // Note: It would be more efficient to do these checks earlier, but I
-  // want to build as much as possible in order to stress the converter.
-  if (func->bbs.size() > MAX_BBS)
-    throw Not_implemented("too many basic blocks");
-  for (Basic_block *bb : func->bbs)
-    {
-      uint64_t nof_insts = 0;
-      for (Instruction *inst = bb->first_inst; inst; inst = inst->next)
-	{
-	  if (++nof_insts > MAX_NOF_INSTS)
-	    throw Not_implemented("too many instructions in a BB");
-	}
-    }
 
   reverse_post_order(func);
   simplify_insts(func);
