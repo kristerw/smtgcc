@@ -14,9 +14,6 @@ struct CommonState {
 
   // The next free index for a symbolic instruction.
   uint32_t symbolic_idx = 0;
-
-  std::map<uint32_t, uint32_t> clz_bitsize2idx;
-  std::map<uint32_t, uint32_t> ctz_bitsize2idx;
 };
 
 smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun);
