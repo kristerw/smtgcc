@@ -3119,9 +3119,9 @@ void Converter::process_gimple_asm(gimple *stmt)
 void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
 {
   tree fn = gimple_call_fndecl(stmt);
-  const std::string name = fndecl_name(fn);
+  combined_fn cfn = gimple_call_combined_fn(stmt);
 
-  if (name == "__builtin_assume_aligned"s)
+  if (cfn == CFN_BUILT_IN_ASSUME_ALIGNED)
     {
       Instruction *arg1 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
       Instruction *arg2 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 1));
@@ -3141,10 +3141,10 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_bswap16"s ||
-      name == "__builtin_bswap32"s ||
-      name == "__builtin_bswap64"s ||
-      name == "__builtin_bswap128"s)
+  if (cfn == CFN_BUILT_IN_BSWAP16 ||
+      cfn == CFN_BUILT_IN_BSWAP32 ||
+      cfn == CFN_BUILT_IN_BSWAP64 ||
+      cfn == CFN_BUILT_IN_BSWAP128)
     {
       tree lhs = gimple_call_lhs(stmt);
       if (!lhs)
@@ -3176,9 +3176,9 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_clrsb"s ||
-      name == "__builtin_clrsbl"s ||
-      name == "__builtin_clrsbll"s)
+  if (cfn == CFN_BUILT_IN_CLRSB ||
+      cfn == CFN_BUILT_IN_CLRSBL ||
+      cfn == CFN_BUILT_IN_CLRSBLL)
     {
       tree lhs = gimple_call_lhs(stmt);
       if (!lhs)
@@ -3200,9 +3200,9 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_clz"s ||
-      name == "__builtin_clzl"s ||
-      name == "__builtin_clzll"s)
+  if (cfn == CFN_BUILT_IN_CLZ ||
+      cfn == CFN_BUILT_IN_CLZL ||
+      cfn == CFN_BUILT_IN_CLZLL)
     {
       Instruction *arg = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
       Instruction *zero = bb->value_inst(0, arg->bitsize);
@@ -3224,16 +3224,14 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_copysign"s ||
-      name == "__builtin_copysignf"s ||
-      name == "__builtin_copysignl"s ||
-      name == "__builtin_copysignf16"s ||
-      name == "__builtin_copysignf32"s ||
-      name == "__builtin_copysignf32x"s ||
-      name == "__builtin_copysignf64"s ||
-      name == "__builtin_copysignf128"s ||
-      name == "copysign"s ||
-      name == "copysignf"s)
+  if (cfn == CFN_BUILT_IN_COPYSIGN ||
+      cfn == CFN_BUILT_IN_COPYSIGNF ||
+      cfn == CFN_BUILT_IN_COPYSIGNL ||
+      cfn == CFN_BUILT_IN_COPYSIGNF16 ||
+      cfn == CFN_BUILT_IN_COPYSIGNF32 ||
+      cfn == CFN_BUILT_IN_COPYSIGNF32X ||
+      cfn == CFN_BUILT_IN_COPYSIGNF64 ||
+      cfn == CFN_BUILT_IN_COPYSIGNF128)
     {
       Instruction *arg1 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
       Instruction *arg2 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 1));
@@ -3251,9 +3249,9 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_ctz"s ||
-      name == "__builtin_ctzl"s ||
-      name == "__builtin_ctzll"s)
+  if (cfn == CFN_BUILT_IN_CTZ ||
+      cfn == CFN_BUILT_IN_CTZL ||
+      cfn == CFN_BUILT_IN_CTZLL)
     {
       Instruction *arg = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
       Instruction *zero = bb->value_inst(0, arg->bitsize);
@@ -3275,8 +3273,8 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_expect"s ||
-      name == "__builtin_expect_with_probability"s)
+  if (cfn == CFN_BUILT_IN_EXPECT ||
+      cfn == CFN_BUILT_IN_EXPECT_WITH_PROBABILITY)
     {
       tree lhs = gimple_call_lhs(stmt);
       if (!lhs)
@@ -3287,12 +3285,9 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_fmax"s ||
-      name == "__builtin_fmaxf"s ||
-      name == "__builtin_fmaxl"s ||
-      name == "fmax"s ||
-      name == "fmaxf"s ||
-      name == "fmaxl"s)
+  if (cfn == CFN_BUILT_IN_FMAX ||
+      cfn == CFN_BUILT_IN_FMAXF ||
+      cfn == CFN_BUILT_IN_FMAXL)
     {
       tree lhs = gimple_call_lhs(stmt);
       if (!lhs)
@@ -3318,12 +3313,9 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_fmin"s ||
-      name == "__builtin_fminf"s ||
-      name == "__builtin_fminl"s ||
-      name == "fmin"s ||
-      name == "fminf"s ||
-      name == "fminl"s)
+  if (cfn == CFN_BUILT_IN_FMIN ||
+      cfn == CFN_BUILT_IN_FMINF ||
+      cfn == CFN_BUILT_IN_FMINL)
     {
       tree lhs = gimple_call_lhs(stmt);
       if (!lhs)
@@ -3349,8 +3341,7 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_memcpy"s ||
-      name == "memcpy"s)
+  if (cfn == CFN_BUILT_IN_MEMCPY)
     {
       if (TREE_CODE(gimple_call_arg(stmt, 2)) != INTEGER_CST)
 	throw Not_implemented("non-constant memcpy size");
@@ -3390,12 +3381,9 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_nan"s ||
-      name == "__builtin_nanf"s ||
-      name == "__builtin_nanl"s ||
-      name == "nan"s ||
-      name == "nanf"s ||
-      name == "nanl"s)
+  if (cfn == CFN_BUILT_IN_NAN ||
+      cfn == CFN_BUILT_IN_NANF ||
+      cfn == CFN_BUILT_IN_NANL)
     {
       // TODO: Implement the argument setting NaN payload when support for
       // noncanonical NaNs is implemented in the SMT solvers.
@@ -3408,8 +3396,7 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_memset"s ||
-      name == "memset"s)
+  if (cfn == CFN_BUILT_IN_MEMSET)
     {
       if (TREE_CODE(gimple_call_arg(stmt, 2)) != INTEGER_CST)
 	throw Not_implemented("non-constant memset size");
@@ -3444,9 +3431,9 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_parity"s ||
-      name == "__builtin_parityl"s ||
-      name == "__builtin_parityll"s)
+  if (cfn == CFN_BUILT_IN_PARITY ||
+      cfn == CFN_BUILT_IN_PARITYL ||
+      cfn == CFN_BUILT_IN_PARITYLL)
     {
       tree lhs = gimple_call_lhs(stmt);
       if (!lhs)
@@ -3467,9 +3454,9 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_popcount"s ||
-      name == "__builtin_popcountl"s ||
-      name == "__builtin_popcountll"s)
+  if (cfn == CFN_BUILT_IN_POPCOUNT ||
+      cfn == CFN_BUILT_IN_POPCOUNTL ||
+      cfn == CFN_BUILT_IN_POPCOUNTLL)
     {
       tree lhs = gimple_call_lhs(stmt);
       if (!lhs)
@@ -3493,10 +3480,8 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_signbit"s ||
-      name == "__builtin_signbitf"s ||
-      name == "signbit"s ||
-      name == "signbitf"s)
+  if (cfn == CFN_BUILT_IN_SIGNBIT ||
+      cfn == CFN_BUILT_IN_SIGNBITF)
     {
       Instruction *arg1 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
       Instruction *cond = bb->build_inst(Op::IS_NONCANONICAL_NAN, arg1);
@@ -3513,14 +3498,14 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "__builtin_unreachable" ||
-      name == "__builtin_unreachable trap")
+  if (cfn == CFN_BUILT_IN_UNREACHABLE ||
+      cfn == CFN_BUILT_IN_UNREACHABLE_TRAP)
     {
       bb->build_inst(Op::UB, bb->value_inst(1, 1));
       return;
     }
 
-  if (name == "__builtin_trap")
+  if (cfn == CFN_BUILT_IN_TRAP)
     {
       // TODO: Some passes add __builtin_trap for cases that are UB (so that
       // the program terminates instead of continuing in a random state).
@@ -3530,7 +3515,7 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  throw Not_implemented("process_gimple_call_builtin: "s + name);
+  throw Not_implemented("process_gimple_call_builtin: "s + fndecl_name(fn));
 }
 
 void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
