@@ -590,47 +590,48 @@ void load_ub_check(Basic_block *bb, Instruction *ptr, uint64_t size)
   bb->build_inst(Op::UB, out_of_bound);
 }
 
-Instruction *to_mem_repr(Basic_block *bb, Instruction *inst, tree type)
+std::pair<Instruction *, Instruction *> to_mem_repr(Basic_block *bb, Instruction *inst, Instruction *undef, tree type)
 {
   uint64_t bitsize = bytesize_for_type(type) * 8;
   if (inst->bitsize == bitsize)
-    return inst;
+    return {inst, undef};
 
   assert(inst->bitsize < bitsize);
   if (INTEGRAL_TYPE_P(type))
     {
+      uint64_t orig_bitsize = inst->bitsize;
       Instruction *bitsize_inst = bb->value_inst(bitsize, 32);
       Op op = TYPE_UNSIGNED(type) ? Op::ZEXT : Op::SEXT;
       inst = bb->build_inst(op, inst, bitsize_inst);
+      if (!undef)
+	undef = bb->value_inst(0, orig_bitsize);
+      uint64_t nof_padding_bits = bitsize - orig_bitsize;
+      assert(nof_padding_bits <= 128);
+      Instruction *undef_pad = bb->value_inst(-1, nof_padding_bits);
+      undef = bb->build_inst(Op::CONCAT, undef_pad, undef);
     }
-  return inst;
+  return {inst, undef};
 }
 
-// TODO: Are the new bits initialized if the value was uninitialized?
-//       What if partially uninitialized?
-Instruction *uninit_to_mem_repr(Basic_block *bb, Instruction *inst, tree type)
+Instruction *to_mem_repr(Basic_block *bb, Instruction *inst, tree type)
 {
-  uint64_t bitsize = bytesize_for_type(type) * 8;
-  assert(inst->bitsize <= bitsize);
-  if (inst->bitsize != bitsize)
-    {
-      Instruction *bitsize_inst = bb->value_inst(bitsize, 32);
-      inst = bb->build_inst(Op::SEXT, inst, bitsize_inst);
-    }
-  return inst;
+  auto [new_inst, undef] = to_mem_repr(bb, inst, nullptr, type);
+  return new_inst;
 }
 
 // TODO: Imput does not necessaily be mem_repr -- it can be BITFIELD_REF reads
 // from vector elements. So should probably be "to_ir_repr" or similar.
-Instruction *from_mem_repr(Basic_block *bb, Instruction *inst, tree type)
+std::pair<Instruction *, Instruction *> from_mem_repr(Basic_block *bb, Instruction *inst, Instruction *undef, tree type)
 {
   uint64_t bitsize = bitsize_for_type(type);
   assert(bitsize <= inst->bitsize);
   if (inst->bitsize == bitsize)
-    return inst;
+    return {inst, undef};
 
   Instruction *orig_inst = inst;
   inst = bb->build_trunc(inst, bitsize);
+  if (undef)
+    undef = bb->build_trunc(undef, bitsize);
 
   // GIMPLE does not care about the extra bits, but the ABI requires that
   // the unused bits of _Bool be 0. Therefore, smtgcc-tv-backend.so
@@ -648,7 +649,13 @@ Instruction *from_mem_repr(Basic_block *bb, Instruction *inst, tree type)
       bb->build_inst(Op::UB, bb->build_inst(Op::NE, orig_inst, ext));
     }
 
-  return inst;
+  return {inst, undef};
+}
+
+Instruction *from_mem_repr(Basic_block *bb, Instruction *inst, tree type)
+{
+  auto [new_inst, undef] = from_mem_repr(bb, inst, nullptr, type);
+  return new_inst;
 }
 
 // Helper function to padding_at_offset.
@@ -896,13 +903,8 @@ std::pair<Instruction *, Instruction *> Converter::tree2inst(Basic_block *bb, tr
 	auto [arg, undef] = tree2inst(bb, TREE_OPERAND(expr, 0));
 	tree src_type = TREE_TYPE(TREE_OPERAND(expr, 0));
 	tree dest_type = TREE_TYPE(expr);
-	arg = to_mem_repr(bb, arg, src_type);
-	arg = from_mem_repr(bb, arg, dest_type);
-	if (undef)
-	  {
-	    undef = uninit_to_mem_repr(bb, undef, src_type);
-	    undef = from_mem_repr(bb, undef, dest_type);
-	  }
+	std::tie(arg, undef) = to_mem_repr(bb, arg, undef, src_type);
+	std::tie(arg, undef) = from_mem_repr(bb, arg, undef, dest_type);
 	// TODO: Do we need a local pointer check too?
 	canonical_nan_check(bb, arg, dest_type, undef);
 	return {arg, undef};
@@ -1506,8 +1508,7 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
   else
     {
       size = bytesize_for_type(value_type);
-      value = to_mem_repr(bb, value, value_type);
-      undef = uninit_to_mem_repr(bb, undef, value_type);
+      std::tie(value, undef) = to_mem_repr(bb, value, undef, value_type);
     }
 
   // TODO: Adjust for bitfield?
