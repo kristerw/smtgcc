@@ -145,8 +145,7 @@ struct Converter {
   void process_cfn_vcond(gimple *stmt, Basic_block *bb);
   void process_cfn_vcond_mask(gimple *stmt, Basic_block *bb);
   void process_cfn_vec_convert(gimple *stmt, Basic_block *bb);
-  void process_gimple_call_builtin(gimple *stmt, Basic_block *bb);
-  void process_gimple_call_internal(gimple *stmt, Basic_block *bb);
+  void process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb);
   void process_gimple_call(gimple *stmt, Basic_block *bb);
   void process_gimple_return(gimple *stmt, Basic_block *bb);
   Instruction *build_label_cond(tree index_expr, tree label,
@@ -3762,12 +3761,13 @@ void Converter::process_cfn_unreachable(gimple *, Basic_block *bb)
   bb->build_inst(Op::UB, bb->value_inst(1, 1));
 }
 
-void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
+void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
 {
-  combined_fn cfn = gimple_call_combined_fn(stmt);
-
-  switch (cfn)
+  switch (gimple_call_combined_fn(stmt))
     {
+    case CFN_ADD_OVERFLOW:
+      process_cfn_add_overflow(stmt, bb);
+      break;
     case CFN_BUILT_IN_ASSUME_ALIGNED:
       process_cfn_assume_aligned(stmt, bb);
       break;
@@ -3819,13 +3819,13 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
     case CFN_BUILT_IN_MEMCPY:
       process_cfn_memcpy(stmt, bb);
       break;
+    case CFN_BUILT_IN_MEMSET:
+      process_cfn_memset(stmt, bb);
+      break;
     case CFN_BUILT_IN_NAN:
     case CFN_BUILT_IN_NANF:
     case CFN_BUILT_IN_NANL:
       process_cfn_nan(stmt, bb);
-      break;
-    case CFN_BUILT_IN_MEMSET:
-      process_cfn_memset(stmt, bb);
       break;
     case CFN_BUILT_IN_PARITY:
     case CFN_BUILT_IN_PARITYL:
@@ -3842,34 +3842,12 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
     case CFN_BUILT_IN_SIGNBITL:
       process_cfn_signbit(stmt, bb);
       break;
-    case CFN_BUILT_IN_UNREACHABLE:
-    case CFN_BUILT_IN_UNREACHABLE_TRAP:
-      process_cfn_unreachable(stmt, bb);
-      break;
     case CFN_BUILT_IN_TRAP:
       process_cfn_trap(stmt, bb);
       break;
-    default:
-      throw Not_implemented("process_gimple_call_builtin: "s
-			    + fndecl_name(gimple_call_fndecl(stmt)));
-    }
-}
-
-void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
-{
-  switch (gimple_call_combined_fn(stmt))
-    {
-    case CFN_ADD_OVERFLOW:
-      process_cfn_add_overflow(stmt, bb);
-      break;
-    case CFN_BUILTIN_EXPECT:
-      process_cfn_expect(stmt, bb);
-      break;
-    case CFN_CLZ:
-      process_cfn_clz(stmt, bb);
-      break;
-    case CFN_CTZ:
-      process_cfn_ctz(stmt, bb);
+    case CFN_BUILT_IN_UNREACHABLE:
+    case CFN_BUILT_IN_UNREACHABLE_TRAP:
+      process_cfn_unreachable(stmt, bb);
       break;
     case CFN_DIVMOD:
       process_cfn_divmod(stmt, bb);
@@ -3896,17 +3874,15 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       process_cfn_vec_convert(stmt, bb);
       break;
     default:
-      throw Not_implemented("process_gimple_call_internal: "s
-			    + internal_fn_name(gimple_call_internal_fn(stmt)));
+      throw Not_implemented("process_gimple_call_combined_fn: "s
+			    + fndecl_name(gimple_call_fndecl(stmt)));
     }
 }
 
 void Converter::process_gimple_call(gimple *stmt, Basic_block *bb)
 {
-  if (gimple_call_builtin_p(stmt))
-    process_gimple_call_builtin(stmt, bb);
-  else if (gimple_call_internal_p(stmt))
-    process_gimple_call_internal(stmt, bb);
+  if (gimple_call_builtin_p(stmt) || gimple_call_internal_p(stmt))
+    process_gimple_call_combined_fn(stmt, bb);
   else
     throw Not_implemented("gimple_call");
 }
