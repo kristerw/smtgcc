@@ -3535,14 +3535,14 @@ void Converter::process_gimple_call_builtin(gimple *stmt, Basic_block *bb)
 
 void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
 {
-  const std::string name = internal_fn_name(gimple_call_internal_fn(stmt));
+  enum internal_fn fn = gimple_call_internal_fn(stmt);
 
-  if (name == "FALLTHROUGH"s)
+  if (fn == IFN_FALLTHROUGH)
     return;
 
-  if (name == "ADD_OVERFLOW"s
-      || name == "SUB_OVERFLOW"s
-      || name == "MUL_OVERFLOW"s)
+  if (fn == IFN_ADD_OVERFLOW
+      || fn == IFN_SUB_OVERFLOW
+      || fn == IFN_MUL_OVERFLOW)
     {
       tree arg1_expr = gimple_call_arg(stmt, 0);
       tree arg1_type = TREE_TYPE(arg1_expr);
@@ -3556,7 +3556,7 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       Instruction *arg2 = tree2inst_undefcheck(bb, arg2_expr);
       unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
       unsigned bitsize;
-      if (name == "MUL_OVERFLOW"s)
+      if (fn == IFN_MUL_OVERFLOW)
 	bitsize = 1 + std::max(arg1->bitsize + arg2->bitsize, lhs_elem_bitsize);
       else
 	{
@@ -3573,9 +3573,9 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       else
 	arg2 = bb->build_inst(Op::SEXT, arg2, bitsize_inst);
       Instruction *inst;
-      if (name == "ADD_OVERFLOW"s)
+      if (fn == IFN_ADD_OVERFLOW)
 	inst = bb->build_inst(Op::ADD, arg1, arg2);
-      else if (name == "SUB_OVERFLOW"s)
+      else if (fn == IFN_SUB_OVERFLOW)
 	inst = bb->build_inst(Op::SUB, arg1, arg2);
       else
 	inst = bb->build_inst(Op::MUL, arg1, arg2);
@@ -3596,7 +3596,7 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "BUILTIN_EXPECT"s)
+  if (fn == IFN_BUILTIN_EXPECT)
     {
       tree lhs = gimple_call_lhs(stmt);
       if (!lhs)
@@ -3608,7 +3608,7 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "CLZ"s)
+  if (fn == IFN_CLZ)
     {
       tree lhs = gimple_call_lhs(stmt);
       if (!lhs)
@@ -3643,7 +3643,7 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "CTZ"s)
+  if (fn == IFN_CTZ)
     {
       tree lhs = gimple_call_lhs(stmt);
       if (!lhs)
@@ -3678,7 +3678,7 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "DIVMOD"s)
+  if (fn == IFN_DIVMOD)
     {
       tree arg1_expr = gimple_call_arg(stmt, 0);
       tree arg1_type = TREE_TYPE(arg1_expr);
@@ -3704,7 +3704,7 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "LOOP_VECTORIZED"s)
+  if (fn == IFN_LOOP_VECTORIZED)
     {
       tree lhs = gimple_call_lhs(stmt);
       assert(lhs);
@@ -3715,7 +3715,7 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "VCOND_MASK"s)
+  if (fn == IFN_VCOND_MASK)
     {
       tree arg1_expr = gimple_call_arg(stmt, 0);
       tree arg1_type = TREE_TYPE(arg1_expr);
@@ -3739,7 +3739,7 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "VCOND"s || name == "VCONDU"s)
+  if (fn == IFN_VCOND || fn == IFN_VCONDU)
     {
       tree arg1_expr = gimple_call_arg(stmt, 0);
       tree arg1_type = TREE_TYPE(arg1_expr);
@@ -3769,7 +3769,7 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       assert(arg3->bitsize == arg4->bitsize);
 
       enum tree_code code = (enum tree_code)get_int_cst_val(arg5_expr);
-      bool is_unsigned = name == "VCONDU";
+      bool is_unsigned = fn == IFN_VCONDU;
 
       uint32_t elem_bitsize1 = bitsize_for_type(arg1_elem_type);
       uint32_t elem_bitsize3 = bitsize_for_type(arg3_elem_type);
@@ -3817,7 +3817,7 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  if (name == "VEC_CONVERT"s)
+  if (fn == IFN_VEC_CONVERT)
     {
       tree arg1_expr = gimple_call_arg(stmt, 0);
       Instruction *arg1 = tree2inst_undefcheck(bb, arg1_expr);
@@ -3835,7 +3835,8 @@ void Converter::process_gimple_call_internal(gimple *stmt, Basic_block *bb)
       return;
     }
 
-  throw Not_implemented("process_gimple_call_internal: "s + name);
+  throw Not_implemented("process_gimple_call_internal: "s
+			+ internal_fn_name(gimple_call_internal_fn(stmt)));
 }
 
 void Converter::process_gimple_call(gimple *stmt, Basic_block *bb)
