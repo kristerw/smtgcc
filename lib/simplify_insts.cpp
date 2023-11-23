@@ -1225,6 +1225,14 @@ Instruction *simplify_inst(Instruction *inst)
   if (inst != original_inst)
     return inst;
 
+  // Commutative instructions should have constants as the 2nd argument.
+  // This is enforced when the instruction is created, but this may change
+  // when optimization passes modify the instructions.
+  if (inst->is_commutative()
+      && inst->arguments[0]->opcode == Op::VALUE
+      && inst->arguments[1]->opcode != Op::VALUE)
+    std::swap(inst->arguments[0], inst->arguments[1]);
+
   switch (inst->opcode)
     {
     case Op::ADD:
