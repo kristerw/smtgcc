@@ -384,8 +384,8 @@ Instruction *simplify_and(Instruction *inst)
     {
       Instruction *new_inst1 =
 	create_inst(Op::AND, arg1->arguments[0], arg2->arguments[0]);
-      new_inst1 = simplify_inst(new_inst1);
       new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
       Instruction *new_inst2 =
 	create_inst(Op::SEXT, new_inst1, arg1->arguments[1]);
       new_inst2->insert_before(inst);
@@ -397,8 +397,8 @@ Instruction *simplify_and(Instruction *inst)
     {
       Instruction *new_inst1 =
 	create_inst(Op::AND, arg1->arguments[0], arg2->arguments[0]);
-      new_inst1 = simplify_inst(new_inst1);
       new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
       Instruction *new_inst2 =
 	create_inst(Op::ZEXT, new_inst1, arg1->arguments[1]);
       new_inst2->insert_before(inst);
@@ -569,8 +569,8 @@ Instruction *simplify_or(Instruction *inst)
     {
       Instruction *new_inst1 =
 	create_inst(Op::OR, arg1->arguments[0], arg2->arguments[0]);
-      new_inst1 = simplify_inst(new_inst1);
       new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
       Instruction *new_inst2 =
 	create_inst(Op::SEXT, new_inst1, arg1->arguments[1]);
       new_inst2->insert_before(inst);
@@ -582,8 +582,8 @@ Instruction *simplify_or(Instruction *inst)
     {
       Instruction *new_inst1 =
 	create_inst(Op::OR, arg1->arguments[0], arg2->arguments[0]);
-      new_inst1 = simplify_inst(new_inst1);
       new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
       Instruction *new_inst2 =
 	create_inst(Op::ZEXT, new_inst1, arg1->arguments[1]);
       new_inst2->insert_before(inst);
@@ -607,8 +607,8 @@ Instruction *simplify_xor(Instruction *inst)
     {
       Instruction *new_inst1 =
 	create_inst(Op::XOR, arg1->arguments[0], arg2->arguments[0]);
-      new_inst1 = simplify_inst(new_inst1);
       new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
       Instruction *new_inst2 =
 	create_inst(Op::SEXT, new_inst1, arg1->arguments[1]);
       new_inst2->insert_before(inst);
@@ -620,8 +620,8 @@ Instruction *simplify_xor(Instruction *inst)
     {
       Instruction *new_inst1 =
 	create_inst(Op::XOR, arg1->arguments[0], arg2->arguments[0]);
-      new_inst1 = simplify_inst(new_inst1);
       new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
       Instruction *new_inst2 =
 	create_inst(Op::ZEXT, new_inst1, arg1->arguments[1]);
       new_inst2->insert_before(inst);
@@ -665,8 +665,8 @@ Instruction *simplify_mul(Instruction *inst)
       unsigned __int128 c1 = arg2->value();
       unsigned __int128 c2 = arg1->arguments[1]->value();
       Instruction *new_inst1 = create_inst(Op::MUL, arg1->arguments[0], arg2);
-      new_inst1 = simplify_inst(new_inst1);
       new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
       Instruction *val = inst->bb->value_inst(c1 * c2, inst->bitsize);
       Instruction *new_inst2 = create_inst(Op::ADD, new_inst1, val);
       new_inst2->insert_before(inst);
@@ -684,8 +684,8 @@ Instruction *simplify_not(Instruction *inst)
   if (is_boolean_sext(arg1))
     {
       Instruction *new_inst1 = create_inst(Op::NOT, arg1->arguments[0]);
-      new_inst1 = simplify_inst(new_inst1);
       new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
       Instruction *new_inst2 =
 	create_inst(Op::SEXT, new_inst1, arg1->arguments[1]);
       new_inst2->insert_before(inst);
