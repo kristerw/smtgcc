@@ -3255,14 +3255,22 @@ void Converter::process_cfn_clrsb(gimple *stmt, Basic_block *bb)
 void Converter::process_cfn_clz(gimple *stmt, Basic_block *bb)
 {
   Instruction *arg = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
-  Instruction *zero = bb->value_inst(0, arg->bitsize);
-  Instruction *ub = bb->build_inst(Op::EQ, arg, zero);
-  bb->build_inst(Op::UB, ub);
+  int nargs = gimple_call_num_args(stmt);
+  if (nargs == 1)
+    {
+      Instruction *zero = bb->value_inst(0, arg->bitsize);
+      Instruction *ub = bb->build_inst(Op::EQ, arg, zero);
+      bb->build_inst(Op::UB, ub);
+    }
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
   int bitsize = bitsize_for_type(TREE_TYPE(lhs));
-  Instruction *inst = bb->value_inst(arg->bitsize, bitsize);
+  Instruction *inst;
+  if (nargs == 1)
+    inst = bb->value_inst(arg->bitsize, bitsize);
+  else
+    inst = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 1));
   for (unsigned i = 0; i < arg->bitsize; i++)
     {
       Instruction *bit = bb->build_extract_bit(arg, i);
@@ -3293,14 +3301,22 @@ void Converter::process_cfn_copysign(gimple *stmt, Basic_block *bb)
 void Converter::process_cfn_ctz(gimple *stmt, Basic_block *bb)
 {
   Instruction *arg = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
-  Instruction *zero = bb->value_inst(0, arg->bitsize);
-  Instruction *ub = bb->build_inst(Op::EQ, arg, zero);
-  bb->build_inst(Op::UB, ub);
+  int nargs = gimple_call_num_args(stmt);
+  if (nargs == 1)
+    {
+      Instruction *zero = bb->value_inst(0, arg->bitsize);
+      Instruction *ub = bb->build_inst(Op::EQ, arg, zero);
+      bb->build_inst(Op::UB, ub);
+    }
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
   int bitsize = bitsize_for_type(TREE_TYPE(lhs));
-  Instruction *inst = bb->value_inst(arg->bitsize, bitsize);
+  Instruction *inst;
+  if (nargs == 1)
+    inst = bb->value_inst(arg->bitsize, bitsize);
+  else
+    inst = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 1));
   for (int i = arg->bitsize - 1; i >= 0; i--)
     {
       Instruction *bit = bb->build_extract_bit(arg, i);
@@ -3785,6 +3801,7 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
     case CFN_BUILT_IN_CLZ:
     case CFN_BUILT_IN_CLZL:
     case CFN_BUILT_IN_CLZLL:
+    case CFN_CLZ:
       process_cfn_clz(stmt, bb);
       break;
     case CFN_BUILT_IN_COPYSIGN:
@@ -3795,11 +3812,13 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
     case CFN_BUILT_IN_COPYSIGNF32X:
     case CFN_BUILT_IN_COPYSIGNF64:
     case CFN_BUILT_IN_COPYSIGNF128:
+    case CFN_COPYSIGN:
       process_cfn_copysign(stmt, bb);
       break;
     case CFN_BUILT_IN_CTZ:
     case CFN_BUILT_IN_CTZL:
     case CFN_BUILT_IN_CTZLL:
+    case CFN_CTZ:
       process_cfn_ctz(stmt, bb);
       break;
     case CFN_BUILT_IN_EXPECT:
@@ -3830,11 +3849,13 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
     case CFN_BUILT_IN_PARITY:
     case CFN_BUILT_IN_PARITYL:
     case CFN_BUILT_IN_PARITYLL:
+    case CFN_PARITY:
       process_cfn_parity(stmt, bb);
       break;
     case CFN_BUILT_IN_POPCOUNT:
     case CFN_BUILT_IN_POPCOUNTL:
     case CFN_BUILT_IN_POPCOUNTLL:
+    case CFN_POPCOUNT:
       process_cfn_popcount(stmt, bb);
       break;
     case CFN_BUILT_IN_SIGNBIT:
@@ -3874,8 +3895,14 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
       process_cfn_vec_convert(stmt, bb);
       break;
     default:
-      throw Not_implemented("process_gimple_call_combined_fn: "s
-			    + fndecl_name(gimple_call_fndecl(stmt)));
+      {
+	const char *name;
+	if (gimple_call_builtin_p(stmt))
+	  name = fndecl_name(gimple_call_fndecl(stmt));
+	else
+	  name = internal_fn_name(gimple_call_internal_fn(stmt));
+	throw Not_implemented("process_gimple_call_combined_fn: "s + name);
+      }
     }
 }
 
