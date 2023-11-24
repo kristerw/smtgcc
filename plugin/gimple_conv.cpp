@@ -129,6 +129,7 @@ struct Converter {
   void process_cfn_ctz(gimple *stmt, Basic_block *bb);
   void process_cfn_divmod(gimple *stmt, Basic_block *bb);
   void process_cfn_expect(gimple *stmt, Basic_block *bb);
+  void process_cfn_ffs(gimple *stmt, Basic_block *bb);
   void process_cfn_fmax(gimple *stmt, Basic_block *bb);
   void process_cfn_fmin(gimple *stmt, Basic_block *bb);
   void process_cfn_loop_vectorized(gimple *stmt, Basic_block *bb);
@@ -3362,6 +3363,25 @@ void Converter::process_cfn_expect(gimple *stmt, Basic_block *bb)
   tree2instruction[lhs] = arg;
 }
 
+void Converter::process_cfn_ffs(gimple *stmt, Basic_block *bb)
+{
+  Instruction *arg = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+  int bitsize = bitsize_for_type(TREE_TYPE(lhs));
+  Instruction *inst;
+  inst = bb->value_inst(0, bitsize);
+  for (int i = arg->bitsize - 1; i >= 0; i--)
+    {
+      Instruction *bit = bb->build_extract_bit(arg, i);
+      Instruction *val = bb->value_inst(i + 1, bitsize);
+      inst = bb->build_inst(Op::ITE, bit, val, inst);
+    }
+  constrain_range(bb, lhs, inst);
+  tree2instruction[lhs] = inst;
+}
+
 void Converter::process_cfn_fmax(gimple *stmt, Basic_block *bb)
 {
   tree lhs = gimple_call_lhs(stmt);
@@ -3824,6 +3844,12 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
     case CFN_BUILT_IN_EXPECT:
     case CFN_BUILT_IN_EXPECT_WITH_PROBABILITY:
       process_cfn_expect(stmt, bb);
+      break;
+    case CFN_BUILT_IN_FFS:
+    case CFN_BUILT_IN_FFSL:
+    case CFN_BUILT_IN_FFSLL:
+    case CFN_FFS:
+      process_cfn_ffs(stmt, bb);
       break;
     case CFN_BUILT_IN_FMAX:
     case CFN_BUILT_IN_FMAXF:
