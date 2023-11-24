@@ -142,7 +142,9 @@ struct Converter {
   void process_cfn_signbit(gimple *stmt, Basic_block *bb);
   void process_cfn_sub_overflow(gimple *stmt, Basic_block *bb);
   void process_cfn_trap(gimple *stmt, Basic_block *bb);
+  void process_cfn_uaddc(gimple *stmt, Basic_block *bb);
   void process_cfn_unreachable(gimple *stmt, Basic_block *bb);
+  void process_cfn_usubc(gimple *stmt, Basic_block *bb);
   void process_cfn_vcond(gimple *stmt, Basic_block *bb);
   void process_cfn_vcond_mask(gimple *stmt, Basic_block *bb);
   void process_cfn_vec_convert(gimple *stmt, Basic_block *bb);
@@ -3792,9 +3794,77 @@ void Converter::process_cfn_vec_convert(gimple *stmt, Basic_block *bb)
   tree2instruction[lhs] = inst;
 }
 
+void Converter::process_cfn_uaddc(gimple *stmt, Basic_block *bb)
+{
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+  tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
+  unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
+  Instruction *arg1 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
+  Instruction *arg2 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 1));
+  Instruction *arg3 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 2));
+  assert(arg1->bitsize == arg2->bitsize);
+  assert(arg1->bitsize == arg3->bitsize);
+  assert(lhs_elem_bitsize == arg1->bitsize);
+
+  Instruction *bitsize_inst = bb->value_inst(arg1->bitsize + 2, 32);
+  arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize_inst);
+  arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize_inst);
+  arg3 = bb->build_inst(Op::ZEXT, arg3, bitsize_inst);
+  Instruction *sum = bb->build_inst(Op::ADD, arg1, arg2);
+  sum = bb->build_inst(Op::ADD, sum, arg3);
+  Instruction *res = bb->build_trunc(sum, lhs_elem_bitsize);
+
+  Instruction *high = bb->value_inst(sum->bitsize - 1, 32);
+  Instruction *low = bb->value_inst(sum->bitsize - 2, 32);
+  Instruction *overflow = bb->build_inst(Op::EXTRACT, sum, high, low);
+  Instruction *zero = bb->value_inst(0, overflow->bitsize);
+  overflow = bb->build_inst(Op::NE, overflow, zero);
+  Instruction *lhs_elem_bitsize_inst = bb->value_inst(lhs_elem_bitsize, 32);
+  overflow = bb->build_inst(Op::ZEXT, overflow, lhs_elem_bitsize_inst);
+  res = bb->build_inst(Op::CONCAT, overflow, res);
+  constrain_range(bb, lhs, res);
+  tree2instruction[lhs] = res;
+}
+
 void Converter::process_cfn_unreachable(gimple *, Basic_block *bb)
 {
   bb->build_inst(Op::UB, bb->value_inst(1, 1));
+}
+
+void Converter::process_cfn_usubc(gimple *stmt, Basic_block *bb)
+{
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+  tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
+  unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
+  Instruction *arg1 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 0));
+  Instruction *arg2 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 1));
+  Instruction *arg3 = tree2inst_undefcheck(bb, gimple_call_arg(stmt, 2));
+  assert(arg1->bitsize == arg2->bitsize);
+  assert(arg1->bitsize == arg3->bitsize);
+  assert(lhs_elem_bitsize == arg1->bitsize);
+
+  Instruction *bitsize_inst = bb->value_inst(arg1->bitsize + 2, 32);
+  arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize_inst);
+  arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize_inst);
+  arg3 = bb->build_inst(Op::ZEXT, arg3, bitsize_inst);
+  Instruction *sum = bb->build_inst(Op::SUB, arg1, arg2);
+  sum = bb->build_inst(Op::SUB, sum, arg3);
+  Instruction *res = bb->build_trunc(sum, lhs_elem_bitsize);
+
+  Instruction *high = bb->value_inst(sum->bitsize - 1, 32);
+  Instruction *low = bb->value_inst(sum->bitsize - 2, 32);
+  Instruction *overflow = bb->build_inst(Op::EXTRACT, sum, high, low);
+  Instruction *zero = bb->value_inst(0, overflow->bitsize);
+  overflow = bb->build_inst(Op::NE, overflow, zero);
+  Instruction *lhs_elem_bitsize_inst = bb->value_inst(lhs_elem_bitsize, 32);
+  overflow = bb->build_inst(Op::ZEXT, overflow, lhs_elem_bitsize_inst);
+  res = bb->build_inst(Op::CONCAT, overflow, res);
+  constrain_range(bb, lhs, res);
+  tree2instruction[lhs] = res;
 }
 
 void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
@@ -3909,6 +3979,12 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
       break;
     case CFN_SUB_OVERFLOW:
       process_cfn_sub_overflow(stmt, bb);
+      break;
+    case CFN_UADDC:
+      process_cfn_uaddc(stmt, bb);
+      break;
+    case CFN_USUBC:
+      process_cfn_usubc(stmt, bb);
       break;
     case CFN_VCOND:
     case CFN_VCONDU:
