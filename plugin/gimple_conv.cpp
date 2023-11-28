@@ -589,29 +589,43 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Instruction *inst, I
 
 void store_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size)
 {
+  // It is UB to write to constant memory.
+  Instruction *is_const = bb->build_inst(Op::IS_CONST_MEM, provenance);
+  bb->build_inst(Op::UB, is_const);
+
   // It is UB if the pointer provenance does not correspond to the address.
   Instruction *ptr_mem_id = bb->build_extract_id(ptr);
   Instruction *is_ub = bb->build_inst(Op::NE, provenance, ptr_mem_id);
   bb->build_inst(Op::UB, is_ub);
 
-  // It is UB if the size overflows the offset field.
-  Instruction *size_inst = bb->value_inst(size, ptr->bitsize);
-  Instruction *end = bb->build_inst(Op::ADD, ptr, size_inst);
-  Instruction *end_mem_id = bb->build_extract_id(end);
-  Instruction *overflow = bb->build_inst(Op::NE, ptr_mem_id, end_mem_id);
-  bb->build_inst(Op::UB, overflow);
+  if (size != 0)
+    {
+      // It is UB if the size overflows the offset field.
+      assert(size != 0);
+      Instruction *size_inst = bb->value_inst(size - 1, ptr->bitsize);
+      Instruction *end = bb->build_inst(Op::ADD, ptr, size_inst);
+      Instruction *end_mem_id = bb->build_extract_id(end);
+      Instruction *overflow = bb->build_inst(Op::NE, provenance, end_mem_id);
+      bb->build_inst(Op::UB, overflow);
 
-  // It is UB if the end is outside the memory object.
-  // Note: ptr is within the memory object; otherwise, the provenance check
-  // or the offset overflow check would have failed.
-  Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
-  Instruction *offset = bb->build_extract_offset(end);
-  Instruction *out_of_bound = bb->build_inst(Op::UGT, offset, mem_size);
-  bb->build_inst(Op::UB, out_of_bound);
-
-  // It is UB to write to constant memory.
-  Instruction *is_const = bb->build_inst(Op::IS_CONST_MEM, ptr_mem_id);
-  bb->build_inst(Op::UB, is_const);
+      // It is UB if the end is outside the memory object.
+      // Note: ptr is within the memory object; otherwise, the provenance check
+      // or the offset overflow check would have failed.
+      Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
+      Instruction *offset = bb->build_extract_offset(end);
+      Instruction *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
+      bb->build_inst(Op::UB, out_of_bound);
+    }
+  else
+    {
+      // The pointer must point to valid memory, or be one position past
+      // valid memory.
+      // TODO: Handle zero-sized memory blocks (such as malloc(0)).
+      Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
+      Instruction *offset = bb->build_extract_offset(ptr);
+      Instruction *out_of_bound = bb->build_inst(Op::UGT, offset, mem_size);
+      bb->build_inst(Op::UB, out_of_bound);
+    }
 }
 
 void load_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size)
@@ -621,20 +635,33 @@ void load_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, u
   Instruction *is_ub = bb->build_inst(Op::NE, provenance, ptr_mem_id);
   bb->build_inst(Op::UB, is_ub);
 
-  // It is UB if the size overflows the offset field.
-  Instruction *size_inst = bb->value_inst(size, ptr->bitsize);
-  Instruction *end = bb->build_inst(Op::ADD, ptr, size_inst);
-  Instruction *end_mem_id = bb->build_extract_id(end);
-  Instruction *overflow = bb->build_inst(Op::NE, ptr_mem_id, end_mem_id);
-  bb->build_inst(Op::UB, overflow);
+  if (size != 0)
+    {
+      // It is UB if the size overflows the offset field.
+      Instruction *size_inst = bb->value_inst(size - 1, ptr->bitsize);
+      Instruction *end = bb->build_inst(Op::ADD, ptr, size_inst);
+      Instruction *end_mem_id = bb->build_extract_id(end);
+      Instruction *overflow = bb->build_inst(Op::NE, provenance, end_mem_id);
+      bb->build_inst(Op::UB, overflow);
 
-  // It is UB if the end is outside the memory object.
-  // Note: ptr is within the memory object; otherwise, the provenance check
-  // or the offset overflow check would have failed.
-  Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
-  Instruction *offset = bb->build_extract_offset(end);
-  Instruction *out_of_bound = bb->build_inst(Op::UGT, offset, mem_size);
-  bb->build_inst(Op::UB, out_of_bound);
+      // It is UB if the end is outside the memory object.
+      // Note: ptr is within the memory object; otherwise, the provenance check
+      // or the offset overflow check would have failed.
+      Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
+      Instruction *offset = bb->build_extract_offset(end);
+      Instruction *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
+      bb->build_inst(Op::UB, out_of_bound);
+    }
+  else
+    {
+      // The pointer must point to valid memory, or be one position past
+      // valid memory.
+      // TODO: Handle zero-sized memory blocks (such as malloc(0)).
+      Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
+      Instruction *offset = bb->build_extract_offset(ptr);
+      Instruction *out_of_bound = bb->build_inst(Op::UGT, offset, mem_size);
+      bb->build_inst(Op::UB, out_of_bound);
+    }
 }
 
 std::pair<Instruction *, Instruction *> to_mem_repr(Basic_block *bb, Instruction *inst, Instruction *undef, tree type)
