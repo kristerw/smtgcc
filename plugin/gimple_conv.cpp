@@ -141,6 +141,7 @@ struct Converter {
   void process_cfn_popcount(gimple *stmt, Basic_block *bb);
   void process_cfn_signbit(gimple *stmt, Basic_block *bb);
   void process_cfn_sub_overflow(gimple *stmt, Basic_block *bb);
+  void process_cfn_reduc(gimple *stmt, Basic_block *bb);
   void process_cfn_trap(gimple *stmt, Basic_block *bb);
   void process_cfn_uaddc(gimple *stmt, Basic_block *bb);
   void process_cfn_unreachable(gimple *stmt, Basic_block *bb);
@@ -292,6 +293,16 @@ Instruction *extract_vec_elem(Basic_block *bb, Instruction *inst, uint32_t elem_
   Instruction *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
   Instruction *low = bb->value_inst(idx * elem_bitsize, 32);
   return bb->build_inst(Op::EXTRACT, inst, high, low);
+}
+
+std::tuple<Instruction *, Instruction *, Instruction *> extract_vec_elem(Basic_block *bb, Instruction *inst, Instruction *undef, Instruction *prov, uint32_t elem_bitsize, uint32_t idx)
+{
+  inst = extract_vec_elem(bb, inst, elem_bitsize, idx);
+  if (undef)
+    undef = extract_vec_elem(bb, undef, elem_bitsize, idx);
+  if (prov)
+    prov = extract_vec_elem(bb, prov, elem_bitsize, idx);
+  return {inst, undef, prov};
 }
 
 Instruction *extract_elem(Basic_block *bb, Instruction *vec, uint32_t elem_bitsize, Instruction *idx)
@@ -3863,6 +3874,66 @@ void Converter::process_cfn_sub_overflow(gimple *stmt, Basic_block *bb)
   tree2instruction.insert({lhs, res});
 }
 
+void Converter::process_cfn_reduc(gimple *stmt, Basic_block *bb)
+{
+  tree arg_expr = gimple_call_arg(stmt, 0);
+  tree arg_type = TREE_TYPE(arg_expr);
+  assert(VECTOR_TYPE_P(arg_type));
+  tree elem_type = TREE_TYPE(arg_type);
+  auto[arg, arg_undef, arg_prov] = tree2inst_undef_prov(bb, arg_expr);
+  tree lhs = gimple_call_lhs(stmt);
+
+  tree_code code;
+  switch (gimple_call_combined_fn(stmt))
+    {
+    case CFN_REDUC_AND:
+      code = BIT_AND_EXPR;
+      break;
+    case CFN_REDUC_IOR:
+      code = BIT_IOR_EXPR;
+      break;
+    case CFN_REDUC_MAX:
+      code = MAX_EXPR;
+      break;
+    case CFN_REDUC_MIN:
+      code = MIN_EXPR;
+      break;
+    case CFN_REDUC_PLUS:
+      code = PLUS_EXPR;
+      break;
+    case CFN_REDUC_XOR:
+      code = BIT_XOR_EXPR;
+      break;
+    default:
+      {
+	const char *name = internal_fn_name(gimple_call_internal_fn(stmt));
+	throw Not_implemented("process_cfn_reduc: "s + name);
+      }
+    }
+
+  uint32_t elem_bitsize = bitsize_for_type(elem_type);
+  uint32_t nof_elt = bitsize_for_type(arg_type) / elem_bitsize;
+  auto [inst, undef, prov] =
+    extract_vec_elem(bb, arg, arg_undef, arg_prov, elem_bitsize, 0);
+  for (uint64_t i = 1; i < nof_elt; i++)
+    {
+      auto [elem, elem_undef, elem_prov] =
+	extract_vec_elem(bb, arg, arg_undef, arg_prov, elem_bitsize, i);
+      std::tie(inst, undef, prov) =
+	process_binary_scalar(code, inst, undef, prov, elem, elem_undef,
+			      elem_prov, elem_type, elem_type, elem_type, bb);
+    }
+
+  if (lhs)
+    {
+      tree2instruction.insert({lhs, inst});
+      if (undef)
+	tree2undef.insert({lhs, undef});
+      if (prov)
+	tree2provenance.insert({lhs, prov});
+    }
+}
+
 void Converter::process_cfn_trap(gimple *, Basic_block *bb)
 {
   // TODO: Some passes add __builtin_trap for cases that are UB (so that
@@ -4171,6 +4242,14 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
       break;
     case CFN_MUL_OVERFLOW:
       process_cfn_mul_overflow(stmt, bb);
+      break;
+    case CFN_REDUC_AND:
+    case CFN_REDUC_IOR:
+    case CFN_REDUC_MAX:
+    case CFN_REDUC_MIN:
+    case CFN_REDUC_PLUS:
+    case CFN_REDUC_XOR:
+      process_cfn_reduc(stmt, bb);
       break;
     case CFN_SUB_OVERFLOW:
       process_cfn_sub_overflow(stmt, bb);
