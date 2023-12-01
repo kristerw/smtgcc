@@ -1064,7 +1064,7 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
     new_inst = bool_not(translate.at(inst->arguments[0]));
   else
     {
-      assert(inst->has_lhs());
+      assert(inst->opcode == Op::PRINT || inst->has_lhs());
       Inst_class iclass = inst->iclass();
       switch (iclass)
 	{

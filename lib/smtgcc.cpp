@@ -12,7 +12,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Instruction_info, 99> inst_info{{
+const std::array<Instruction_info, 100> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -76,6 +76,7 @@ const std::array<Instruction_info, 99> inst_info{{
   {"mul", Op::MUL, Inst_class::ibinary, true, true},
   {"or", Op::OR, Inst_class::ibinary, true, true},
   {"param", Op::PARAM, Inst_class::ibinary, true, false},
+  {"print", Op::PRINT, Inst_class::ibinary, false, false},
   {"sadd_wraps", Op::SADD_WRAPS, Inst_class::ibinary, true, true},
   {"sdiv", Op::SDIV, Inst_class::ibinary, true, false},
   {"set_mem_flag", Op::SET_MEM_FLAG, Inst_class::ibinary, false, false},

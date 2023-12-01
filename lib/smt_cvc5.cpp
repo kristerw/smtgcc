@@ -49,6 +49,8 @@ public:
   cvc5::Term inst_as_fp(const Instruction *inst);
   cvc5::Term inst_as_bool(const Instruction *inst);
 
+  std::vector<const Instruction *> print;
+
   Instruction *src_assert = nullptr;
   Instruction *src_memory = nullptr;
   Instruction *src_memory_size = nullptr;
@@ -425,6 +427,9 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
 	cvc5::Term param = solver.mkConst(sort, name);
 	inst2bv.insert({inst, param});
       }
+      break;
+    case Op::PRINT:
+      print.push_back(inst);
       break;
     case Op::SYMBOLIC:
       {

@@ -49,6 +49,8 @@ public:
   z3::expr inst_as_fp(const Instruction *inst);
   z3::expr inst_as_bool(const Instruction *inst);
 
+  std::vector<const Instruction *> print;
+
   Instruction *src_assert = nullptr;
   Instruction *src_memory = nullptr;
   Instruction *src_memory_size = nullptr;
@@ -460,6 +462,9 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
 	inst2bv.insert({inst, param});
       }
       break;
+    case Op::PRINT:
+      print.push_back(inst);
+      break;
     case Op::SYMBOLIC:
       {
 	uint32_t index = inst->arguments[0]->value();
@@ -842,6 +847,21 @@ void set_solver_limits()
   Z3_global_param_set("memory_high_watermark", buf);
 }
 
+void add_print(std::string& msg, Converter& conv, z3::solver& solver)
+{
+  if (conv.print.empty())
+    return;
+
+  z3::model model = solver.get_model();
+  for (auto inst : conv.print)
+    {
+      z3::expr id = conv.inst_as_bv(inst->arguments[0]);
+      z3::expr value = conv.inst_as_bv(inst->arguments[1]);
+      msg += "print " + model.eval(id).to_string() + ": ";
+      msg += model.eval(value).to_string() + "\n";
+    }
+}
+
 } // end anonymous namespace
 
 std::pair<SStats, Solver_result> check_refine_z3(Function *func)
@@ -909,6 +929,7 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *func)
 	      msg = msg + "src undef: " + model.eval(src_undef).to_string() + "\n";
 	      msg = msg +  "tgt undef: " + model.eval(tgt_undef).to_string() + "\n";
 	    }
+	  add_print(msg, conv, solver);
 	  Solver_result result = {Result_status::incorrect, msg};
 	  return std::pair<SStats, Solver_result>(stats, result);
 	}
@@ -974,6 +995,7 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *func)
 	msg = msg + "tgt *.ptr: " + tgt_byte.to_string() + "\n";
 	msg = msg + "src undef: " + src_undef.to_string() + "\n";
 	msg = msg + "tgt undef: " + tgt_undef.to_string() + "\n";
+	add_print(msg, conv, solver);
 	Solver_result result = {Result_status::incorrect, msg};
 	return std::pair<SStats, Solver_result>(stats, result);
       }
@@ -1001,7 +1023,13 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *func)
     Solver_result solver_result = run_solver(solver, "UB");
     stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
     if (solver_result.status == Result_status::incorrect)
-      return std::pair<SStats, Solver_result>(stats, solver_result);
+      {
+	assert(solver_result.message);
+	std::string msg = *solver_result.message;
+	add_print(msg, conv, solver);
+	Solver_result result = {Result_status::incorrect, msg};
+	return std::pair<SStats, Solver_result>(stats, result);
+      }
     if (solver_result.status == Result_status::unknown)
       {
 	assert(solver_result.message);

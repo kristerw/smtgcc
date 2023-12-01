@@ -92,6 +92,7 @@ enum class Op : uint8_t {
   MUL,
   OR,
   PARAM,
+  PRINT,
   SADD_WRAPS,
   SDIV,
   SET_MEM_FLAG,
@@ -179,7 +180,7 @@ struct Instruction_info {
   bool is_commutative;
 };
 
-extern const std::array<Instruction_info, 99> inst_info;
+extern const std::array<Instruction_info, 100> inst_info;
 
 struct Module;
 struct Function;
