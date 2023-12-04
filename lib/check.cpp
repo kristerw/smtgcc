@@ -141,6 +141,7 @@ class Converter {
   Instruction *get_full_edge_cond(Basic_block *src, Basic_block *dest);
   void build_mem_state(Basic_block *bb, std::map<Basic_block*, Instruction*>& map);
   void generate_bb2cond(Basic_block *bb);
+  std::pair<Instruction *, Instruction *> simplify_array_access(Instruction *array, Instruction *addr, std::map<Instruction *, std::pair<Instruction *, Instruction *>>& cache);
   void convert(Basic_block *bb, Instruction *inst, Function_role role);
 
   Instruction *get_inst(const Cse_key& key, bool may_add_insts = true);
@@ -692,6 +693,69 @@ void Converter::generate_bb2cond(Basic_block *bb)
     }
 }
 
+std::pair<Instruction *, Instruction *> Converter::simplify_array_access(Instruction *array, Instruction *addr, std::map<Instruction *, std::pair<Instruction *, Instruction *>>& cache)
+{
+  auto I = cache.find(array);
+  if (I != cache.end())
+    return I->second;
+
+  Instruction *value = nullptr;
+  for (;;)
+    {
+      if (array->opcode == Op::ITE)
+	{
+	  Instruction *cond = array->arguments[0];
+	  Instruction *arg2 = array->arguments[1];
+	  Instruction *arg3 = array->arguments[2];
+	  auto [value2, array2] = simplify_array_access(arg2, addr, cache);
+	  auto [value3, array3] = simplify_array_access(arg3, addr, cache);
+	  if (value2 && value3)
+	    value = ite(cond, value2, value3);
+	  if (array2 != arg2 || array3 != arg3)
+	    array = ite(cond, array2, array3);
+	  break;
+	}
+      else if (array->opcode == Op::ARRAY_STORE
+	       || array->opcode == Op::ARRAY_SET_SIZE
+	       || array->opcode == Op::ARRAY_SET_FLAG
+	       || array->opcode == Op::ARRAY_SET_UNDEF)
+	{
+	  Instruction *store_array = array->arguments[0];
+	  Instruction *store_addr = array->arguments[1];
+	  Instruction *store_value = array->arguments[2];
+	  if (addr == store_addr)
+	    {
+	      value = store_value;
+	      break;
+	    }
+	  else if (addr->opcode == Op::VALUE && store_addr->opcode == Op::VALUE
+		   && addr != store_addr)
+	    array = store_array;
+	  else
+	    break;
+	}
+      else if (array->opcode == Op::MEM_UNDEF_ARRAY)
+	{
+	  value = value_inst(0, 8);
+	  break;
+	}
+      else if (array->opcode == Op::MEM_FLAG_ARRAY)
+	{
+	  value = value_inst(0, 1);
+	  break;
+	}
+      else if (array->opcode == Op::MEM_SIZE_ARRAY)
+	{
+	  value = value_inst(0, array->bb->func->module->ptr_offset_bits);
+	  break;
+	}
+      else
+	break;
+    }
+  cache.insert({array, {value, array}});
+  return {value, array};
+}
+
 void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 {
   Instruction *new_inst = nullptr;
@@ -701,27 +765,10 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
     }
   else if (inst->opcode == Op::LOAD)
     {
+      std::map<Instruction *, std::pair<Instruction *, Instruction *>> cache;
       Instruction *array = bb2memory.at(bb);
       Instruction *addr = translate.at(inst->arguments[0]);
-      for (;;)
-	{
-	  if (array->opcode != Op::ARRAY_STORE)
-	    break;
-
-	  Instruction *store_array = array->arguments[0];
-	  Instruction *store_addr = array->arguments[1];
-	  Instruction *store_value = array->arguments[2];
-	  if (addr == store_addr)
-	    {
-	      new_inst = store_value;
-	      break;
-	    }
-	  else if (addr->opcode == Op::VALUE && store_addr->opcode == Op::VALUE
-		   && addr != store_addr)
-	    array = store_array;
-	  else
-	    break;
-	}
+      std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
       if (!new_inst)
 	new_inst = build_inst(Op::ARRAY_LOAD, array, addr);
     }
@@ -871,100 +918,30 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
     }
    else if (inst->opcode == Op::GET_MEM_UNDEF)
      {
-      Instruction *array = bb2memory_undef.at(bb);
-      Instruction *addr = translate.at(inst->arguments[0]);
-      for (;;)
-	{
-	  if (array->opcode == Op::MEM_UNDEF_ARRAY)
-	    {
-	      new_inst = value_inst(0, 8);
-	      break;
-	    }
-
-	  if (array->opcode != Op::ARRAY_SET_UNDEF)
-	    break;
-
-	  Instruction *tmp_array = array->arguments[0];
-	  Instruction *tmp_addr = array->arguments[1];
-	  Instruction *tmp_value = array->arguments[2];
-	  if (addr == tmp_addr)
-	    {
-	      new_inst = tmp_value;
-	      break;
-	    }
-	  else if (addr->opcode == Op::VALUE && tmp_addr->opcode == Op::VALUE
-		   && addr != tmp_addr)
-	    array = tmp_array;
-	  else
-	    break;
-	}
-      if (!new_inst)
-	new_inst = build_inst(Op::ARRAY_GET_UNDEF, array, addr);
+       std::map<Instruction *, std::pair<Instruction *, Instruction *>> cache;
+       Instruction *array = bb2memory_undef.at(bb);
+       Instruction *addr = translate.at(inst->arguments[0]);
+       std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
+       if (!new_inst)
+	 new_inst = build_inst(Op::ARRAY_GET_UNDEF, array, addr);
      }
    else if (inst->opcode == Op::GET_MEM_FLAG)
      {
-      Instruction *array = bb2memory_flag.at(bb);
-      Instruction *addr = translate.at(inst->arguments[0]);
-      for (;;)
-	{
-	  if (array->opcode == Op::MEM_FLAG_ARRAY)
-	    {
-	      new_inst = value_inst(0, 1);
-	      break;
-	    }
-
-	  if (array->opcode != Op::ARRAY_SET_FLAG)
-	    break;
-
-	  Instruction *tmp_array = array->arguments[0];
-	  Instruction *tmp_addr = array->arguments[1];
-	  Instruction *tmp_value = array->arguments[2];
-	  if (addr == tmp_addr)
-	    {
-	      new_inst = tmp_value;
-	      break;
-	    }
-	  else if (addr->opcode == Op::VALUE && tmp_addr->opcode == Op::VALUE
-		   && addr != tmp_addr)
-	    array = tmp_array;
-	  else
-	    break;
-	}
-      if (!new_inst)
-	new_inst = build_inst(Op::ARRAY_GET_FLAG, array, addr);
+       std::map<Instruction *, std::pair<Instruction *, Instruction *>> cache;
+       Instruction *array = bb2memory_flag.at(bb);
+       Instruction *addr = translate.at(inst->arguments[0]);
+       std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
+       if (!new_inst)
+	 new_inst = build_inst(Op::ARRAY_GET_FLAG, array, addr);
      }
    else if (inst->opcode == Op::GET_MEM_SIZE)
     {
-      Instruction *array = bb2memory_size.at(bb);
-      Instruction *mem_id = translate.at(inst->arguments[0]);
-      for (;;)
-	{
-	  if (array->opcode == Op::MEM_SIZE_ARRAY)
-	    {
-	      new_inst = value_inst(0, inst->bitsize);
-	      break;
-	    }
-
-	  if (array->opcode != Op::ARRAY_SET_SIZE)
-	    break;
-
-	  Instruction *tmp_array = array->arguments[0];
-	  Instruction *tmp_mem_id = array->arguments[1];
-	  Instruction *tmp_value = array->arguments[2];
-	  if (mem_id == tmp_mem_id)
-	    {
-	      new_inst = tmp_value;
-	      break;
-	    }
-	  else if (mem_id->opcode == Op::VALUE
-		   && tmp_mem_id->opcode == Op::VALUE
-		   && mem_id != tmp_mem_id)
-	    array = tmp_array;
-	  else
-	    break;
-	}
-      if (!new_inst)
-	new_inst = build_inst(Op::ARRAY_GET_SIZE, array, mem_id);
+       std::map<Instruction *, std::pair<Instruction *, Instruction *>> cache;
+       Instruction *array = bb2memory_size.at(bb);
+       Instruction *addr = translate.at(inst->arguments[0]);
+       std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
+       if (!new_inst)
+	 new_inst = build_inst(Op::ARRAY_GET_SIZE, array, addr);
     }
   else if (inst->opcode == Op::IS_CONST_MEM)
     {
