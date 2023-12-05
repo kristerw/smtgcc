@@ -273,6 +273,10 @@ Instruction *create_inst(Op opcode, Instruction *arg1, Instruction *arg2)
       assert(arg1->opcode == Op::REGISTER);
       inst->bitsize = 0;
     }
+  else if (opcode == Op::PRINT)
+    {
+      inst->bitsize = 0;
+    }
   else
     {
       assert(arg1->bitsize == arg2->bitsize);
