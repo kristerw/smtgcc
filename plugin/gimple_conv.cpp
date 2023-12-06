@@ -1552,7 +1552,7 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
       assert(!addr.bitoffset);
       Instruction *ptr = addr.ptr;
       Instruction *one = bb->value_inst(1, ptr->bitsize);
-      Instruction *memory_flag = bb->value_inst(1, 1);
+      Instruction *memory_flag = bb->value_inst(0, 1);
       Instruction *undef = bb->value_inst(0, 8);
       if (size > MAX_MEMORY_UNROLL_LIMIT)
 	throw Not_implemented("process_gimple_assign: too large string");
@@ -1575,7 +1575,7 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
   Addr addr = process_address(bb, addr_expr);
   assert(is_bitfield || addr.bitoffset == 0);
   assert(addr.bitoffset < 8);
-  auto [value, undef] = tree2inst_undef(bb, value_expr);
+  auto [value, undef, provenance] = tree2inst_undef_prov(bb, value_expr);
   if (!undef)
     undef = bb->value_inst(0, value->bitsize);
 
@@ -1663,7 +1663,7 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
 	  memory_flag = bb->build_inst(Op::NE, memory_flag, zero);
 	}
       else
-	memory_flag = bb->value_inst(1, 1);
+	memory_flag = bb->value_inst(provenance != nullptr, 1);
       bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
     }
 
@@ -3061,7 +3061,7 @@ void Converter::process_constructor(tree lhs, tree rhs, Basic_block *bb)
     {
       Instruction *ptr = addr.ptr;
       Instruction *zero = bb->value_inst(0, 8);
-      Instruction *memory_flag = bb->value_inst(1, 1);
+      Instruction *memory_flag = bb->value_inst(0, 1);
       for (uint64_t i = 0; i < size; i++)
 	{
 	  uint8_t padding = padding_at_offset(TREE_TYPE(rhs), i);
@@ -3710,7 +3710,7 @@ void Converter::process_cfn_memset(gimple *stmt, Basic_block *bb)
   if (value->bitsize > 8)
     value = bb->build_trunc(value, 8);
   Instruction *one = bb->value_inst(1, ptr->bitsize);
-  Instruction *mem_flag = bb->value_inst(1, 1);
+  Instruction *mem_flag = bb->value_inst(0, 1);
   Instruction *undef = bb->value_inst(0, 8);
   for (size_t i = 0; i < size; i++)
     {
