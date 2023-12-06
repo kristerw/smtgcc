@@ -487,6 +487,16 @@ unsigned __int128 Instruction::value() const
   return u.value.value;
 }
 
+__int128 Instruction::signed_value() const
+{
+  assert(opcode == Op::VALUE);
+  assert(bitsize <= 128);
+  __int128 value = u.value.value;
+  if (bitsize < 128)
+    value = (value << (128 - bitsize)) >> (128 - bitsize);
+  return value;
+}
+
 void Instruction::update_uses()
 {
   assert(nof_args <= 3);

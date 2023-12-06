@@ -234,6 +234,7 @@ struct Instruction {
     return inst_info[(int)opcode].is_commutative;
   }
   unsigned __int128 value() const;
+  __int128 signed_value() const;
   void insert_after(Instruction *inst);
   void insert_before(Instruction *inst);
   void move_before(Instruction *inst);

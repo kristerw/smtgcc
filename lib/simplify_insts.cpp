@@ -730,16 +730,31 @@ Instruction *simplify_sge(Instruction *inst)
 
 Instruction *simplify_sgt(Instruction *inst)
 {
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+
   // sgt signed_min_val, x -> false
-  if (is_value_signed_min(inst->arguments[0]))
+  if (is_value_signed_min(arg1))
     return inst->bb->value_inst(0, 1);
 
   // sgt x, signed_max_val -> false
-  if (is_value_signed_max(inst->arguments[1]))
+  if (is_value_signed_max(arg2))
+    return inst->bb->value_inst(0, 1);
+
+  // sgt (zext x, s), c -> false if x is Boolean and c is a constant > 0.
+  // This is rather common in UB checks of range information where a Boolean
+  // has been extended to an integer.
+  if (arg1->opcode == Op::ZEXT && arg1->arguments[0]->bitsize == 1 &&
+      arg2->opcode == Op::VALUE && arg2->signed_value() > 0)
+    return inst->bb->value_inst(0, 1);
+
+  // sgt c, (zext x, s) -> false if x is Boolean and c is a constant <= 0.
+  if (arg1->opcode == Op::VALUE && arg1->signed_value() <= 0 &&
+      arg2->opcode == Op::ZEXT && arg2->arguments[0]->bitsize == 1)
     return inst->bb->value_inst(0, 1);
 
   // sgt x, x -> false
-  if (inst->arguments[0] == inst->arguments[1])
+  if (arg1 == arg2)
     return inst->bb->value_inst(0, 1);
 
   return inst;
