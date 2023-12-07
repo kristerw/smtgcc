@@ -2656,11 +2656,12 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
     case WIDEN_MULT_EXPR:
       {
 	assert(arg1->bitsize == arg2->bitsize);
-	assert(TYPE_UNSIGNED(arg1_type) == TYPE_UNSIGNED(arg2_type));
-	Instruction *new_bitsize_inst = bb->value_inst(2 * arg1->bitsize, 32);
-	Op op = is_unsigned ? Op::ZEXT : Op::SEXT;
-	arg1 = bb->build_inst(op, arg1, new_bitsize_inst);
-	arg2 = bb->build_inst(op, arg2, new_bitsize_inst);
+	Instruction *new_bitsize_inst =
+	  bb->value_inst(bitsize_for_type(lhs_type), 32);
+	Op op1 = TYPE_UNSIGNED(arg1_type) ? Op::ZEXT : Op::SEXT;
+	arg1 = bb->build_inst(op1, arg1, new_bitsize_inst);
+	Op op2 = TYPE_UNSIGNED(arg2_type) ? Op::ZEXT : Op::SEXT;
+	arg2 = bb->build_inst(op2, arg2, new_bitsize_inst);
 	return {bb->build_inst(Op::MUL, arg1, arg2), nullptr, nullptr};
       }
     case MULT_HIGHPART_EXPR:
