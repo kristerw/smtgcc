@@ -5,7 +5,11 @@
 
 #include "smtgcc.h"
 
+#if TARGET_64BIT
 #define BITSIZE 64
+#else
+#define BITSIZE 32
+#endif
 
 using namespace std::string_literals;
 
@@ -1037,6 +1041,8 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
 		      current_func->bbs[0]->value_inst(inst->bitsize, 32);
 		    Instruction *param =
 		      current_func->bbs[0]->build_inst(Op::PARAM, param_nbr, param_bitsize);
+		    if (inst->bitsize > BITSIZE)
+		      throw Not_implemented("Parameter size > register size");
 		    if (inst->bitsize != BITSIZE)
 		      {
 			Instruction *bitsize_inst = entry_bb->value_inst(BITSIZE, 32);
@@ -1100,6 +1106,8 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
   assert(src_last_bb->last_inst->nof_args > 0);
   uint32_t ret_size = src_last_bb->last_inst->arguments[0]->bitsize;
   Instruction *retval = exit_bb->build_inst(Op::READ, registers[10]);
+  if (ret_size > retval->bitsize)
+    throw Not_implemented("return size > register size");
   if (ret_size < retval->bitsize)
     retval = exit_bb->build_trunc(retval, ret_size);
   exit_bb->build_ret_inst(retval);
