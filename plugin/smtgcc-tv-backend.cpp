@@ -243,6 +243,12 @@ static void finish(void *, void *data)
       simplify_insts(func);
       dead_code_elimination(func);
 
+      canonicalize_memory(module);
+      simplify_mem(module);
+      ls_elim(module);
+      simplify_insts(module);
+      dead_code_elimination(module);
+
       Solver_result result = check_refine(module);
       if (result.status != Result_status::correct)
 	{

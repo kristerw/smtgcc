@@ -12,6 +12,8 @@ using namespace smtgcc;
 namespace smtgcc {
 namespace {
 
+const int stack_size = 1024;
+
 // TODO: Check that all instructions are supported by asm. For example,
 // I am not sure that the "w" version of sgt is supported...
 
@@ -26,7 +28,9 @@ struct parser {
     comma,
     assign,
     left_bracket,
-    right_bracket
+    right_bracket,
+    left_paren,
+    right_paren
   };
 
   struct token {
@@ -76,9 +80,17 @@ private:
   Instruction *get_reg_value(unsigned idx);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
+  std::string get_name(unsigned idx);
   void get_comma(unsigned idx);
+  void get_left_paren(unsigned idx);
+  void get_right_paren(unsigned idx);
   void get_end_of_line(unsigned idx);
   void gen_cond_branch(Op opcode);
+  void gen_call();
+  void store_ub_check(Instruction *ptr, uint64_t size);
+  void load_ub_check(Instruction *ptr, uint64_t size);
+  void gen_load(int size);
+  void gen_store(int size);
 
   void parse_function();
 
@@ -180,6 +192,15 @@ std::string parser::get_name(const char *p)
   return name;
 }
 
+std::string parser::get_name(unsigned idx)
+{
+  assert(idx > 0);
+  if (tokens.size() <= idx || tokens[idx].kind != lexeme::name)
+    throw Parse_error("expected a ',' after " + token_string(tokens[idx - 1]),
+		      line_number);
+  return get_name(&buf[tokens[idx].pos]);
+}
+
 uint32_t parser::get_u32(const char *p)
 {
   assert(isdigit(*p));
@@ -240,7 +261,18 @@ Instruction *parser::get_reg(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
-  if (tokens[idx].kind != lexeme::name || (buf[tokens[idx].pos] != 'a' && buf[tokens[idx].pos] != 't'))
+  if (tokens[idx].size == 2
+      && buf[tokens[idx].pos + 0] == 's'
+      && buf[tokens[idx].pos + 1] == 'p')
+    return registers[2];
+  if (tokens[idx].size == 2
+      && buf[tokens[idx].pos + 0] == 'r'
+      && buf[tokens[idx].pos + 1] == 'a')
+    return registers[1];
+  if (tokens[idx].kind != lexeme::name
+      || (buf[tokens[idx].pos] != 'a'
+	  && buf[tokens[idx].pos] != 's'
+	  && buf[tokens[idx].pos] != 't'))
     throw Parse_error("expected a register instead of "
 		      + token_string(tokens[idx]), line_number);
   // TODO: Check length.
@@ -249,6 +281,13 @@ Instruction *parser::get_reg(unsigned idx)
     value = value * 10 + (buf[tokens[idx].pos + 1] - '0');
   if (buf[tokens[idx].pos] == 'a')
     return registers[10 + value];
+  else if (buf[tokens[idx].pos] == 's')
+    {
+      if (value < 2)
+	return registers[8 + value];
+      else
+	return registers[18 - 2 + value];
+    }
   else if (buf[tokens[idx].pos] == 't')
     {
       if (value < 3)
@@ -279,7 +318,18 @@ Instruction *parser::get_reg_value(unsigned idx)
       && buf[tokens[idx].pos + 2] == 'r'
       && buf[tokens[idx].pos + 3] == 'o')
     return current_bb->value_inst(0, reg_bitsize);
-  if (tokens[idx].kind != lexeme::name || (buf[tokens[idx].pos] != 'a' && buf[tokens[idx].pos] != 't'))
+  if (tokens[idx].size == 2
+      && buf[tokens[idx].pos + 0] == 'r'
+      && buf[tokens[idx].pos + 1] == 'a')
+    return current_bb->build_inst(Op::READ, registers[1]);
+  if (tokens[idx].size == 2
+      && buf[tokens[idx].pos + 0] == 's'
+      && buf[tokens[idx].pos + 1] == 'p')
+    return current_bb->build_inst(Op::READ, registers[2]);
+  if (tokens[idx].kind != lexeme::name
+      || (buf[tokens[idx].pos] != 'a'
+	  && buf[tokens[idx].pos] != 's'
+	  && buf[tokens[idx].pos] != 't'))
     throw Parse_error("expected a register instead of "
 		      + token_string(tokens[idx]), line_number);
   // TODO: Check length.
@@ -288,6 +338,13 @@ Instruction *parser::get_reg_value(unsigned idx)
     value = value * 10 + (buf[tokens[idx].pos + 1] - '0');
   if (buf[tokens[idx].pos] == 'a')
     return current_bb->build_inst(Op::READ, registers[10 + value]);
+  else if (buf[tokens[idx].pos] == 's')
+    {
+      if (value < 2)
+	return current_bb->build_inst(Op::READ, registers[8 + value]);
+      else
+	return current_bb->build_inst(Op::READ, registers[18 - 2 + value]);
+    }
   else if (buf[tokens[idx].pos] == 't')
     {
       if (value < 3)
@@ -342,6 +399,22 @@ void parser::get_comma(unsigned idx)
 		      line_number);
 }
 
+void parser::get_left_paren(unsigned idx)
+{
+  assert(idx > 0);
+  if (tokens.size() <= idx || tokens[idx].kind != lexeme::left_paren)
+    throw Parse_error("expected a '(' after " + token_string(tokens[idx - 1]),
+		      line_number);
+}
+
+void parser::get_right_paren(unsigned idx)
+{
+  assert(idx > 0);
+  if (tokens.size() <= idx || tokens[idx].kind != lexeme::right_paren)
+    throw Parse_error("expected a ')' after " + token_string(tokens[idx - 1]),
+		      line_number);
+}
+
 void parser::get_end_of_line(unsigned idx)
 {
   assert(idx > 0);
@@ -363,6 +436,106 @@ void parser::gen_cond_branch(Op opcode)
   Instruction *cond = current_bb->build_inst(opcode, arg1, arg2);
   current_bb->build_br_inst(cond, true_bb, false_bb);
   current_bb = false_bb;
+}
+
+void parser::gen_call()
+{
+  std::string name = get_name(1);
+  get_end_of_line(2);
+
+  throw Not_implemented("call " + name);
+}
+
+void parser::store_ub_check(Instruction *ptr, uint64_t size)
+{
+  Instruction *ptr_mem_id = current_bb->build_extract_id(ptr);
+
+  // It is UB to write to constant memory.
+  Instruction *is_const = current_bb->build_inst(Op::IS_CONST_MEM, ptr_mem_id);
+  current_bb->build_inst(Op::UB, is_const);
+
+  // It is UB if the store overflow a memory object.
+  Instruction *size_inst = current_bb->value_inst(size - 1, 32);
+  Instruction *last_addr = current_bb->build_inst(Op::ADD, ptr, size_inst);
+  Instruction *last_mem_id = current_bb->build_extract_id(last_addr);
+  Instruction *is_ub = current_bb->build_inst(Op::NE, ptr_mem_id, last_mem_id);
+  current_bb->build_inst(Op::UB, is_ub);
+
+  // It is UB if the end is outside the memory object.
+  Instruction *mem_size = current_bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
+  Instruction *offset = current_bb->build_extract_offset(last_addr);
+  Instruction *out_of_bound = current_bb->build_inst(Op::UGE, offset, mem_size);
+  current_bb->build_inst(Op::UB, out_of_bound);
+}
+
+void parser::load_ub_check(Instruction *ptr, uint64_t size)
+{
+  Instruction *ptr_mem_id = current_bb->build_extract_id(ptr);
+
+  // It is UB if the load overflow a memory object.
+  Instruction *size_inst = current_bb->value_inst(size - 1, 32);
+  Instruction *last_addr = current_bb->build_inst(Op::ADD, ptr, size_inst);
+  Instruction *last_mem_id = current_bb->build_extract_id(last_addr);
+  Instruction *is_ub = current_bb->build_inst(Op::NE, ptr_mem_id, last_mem_id);
+  current_bb->build_inst(Op::UB, is_ub);
+
+  // It is UB if the end is outside the memory object.
+  Instruction *mem_size = current_bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
+  Instruction *offset = current_bb->build_extract_offset(last_addr);
+  Instruction *out_of_bound = current_bb->build_inst(Op::UGE, offset, mem_size);
+  current_bb->build_inst(Op::UB, out_of_bound);
+}
+
+void parser::gen_load(int size)
+{
+  Instruction *dest = get_reg(1);
+  get_comma(2);
+  Instruction *offset = get_imm(3);
+  get_left_paren(4);
+  Instruction *base = get_reg_value(5);
+  get_right_paren(6);
+  get_end_of_line(7);
+
+  Instruction *ptr = current_bb->build_inst(Op::ADD, base, offset);
+  load_ub_check(ptr, size);
+  Instruction *value = nullptr;
+  for (int i = 0; i < size; i++)
+    {
+      Instruction *addr = current_bb->build_inst(Op::ADD, ptr, offset);
+      Instruction *byte = current_bb->build_inst(Op::LOAD, addr);
+      if (value)
+	value = current_bb->build_inst(Op::CONCAT, byte, value);
+      else
+	value = byte;
+    }
+  if (value->bitsize < reg_bitsize)
+    {
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
+      value = current_bb->build_inst(Op::SEXT, value, bitsize);
+    }
+  current_bb->build_inst(Op::WRITE, dest, value);
+}
+
+void parser::gen_store(int size)
+{
+  Instruction *value = get_reg_value(1);
+  get_comma(2);
+  Instruction *offset = get_imm(3);
+  get_left_paren(4);
+  Instruction *base = get_reg_value(5);
+  get_right_paren(6);
+  get_end_of_line(7);
+
+  Instruction *ptr = current_bb->build_inst(Op::ADD, base, offset);
+  store_ub_check(ptr, size);
+  for (int i = 0; i < size; i++)
+    {
+      Instruction *addr = current_bb->build_inst(Op::ADD, ptr, offset);
+      Instruction *high = current_bb->value_inst(i * 8 + 7, 32);
+      Instruction *low = current_bb->value_inst(i * 8, 32);
+      Instruction *byte = current_bb->build_inst(Op::EXTRACT, value, high, low);
+      current_bb->build_inst(Op::STORE, addr, byte);
+    }
 }
 
 void parser::parse_function()
@@ -902,6 +1075,24 @@ void parser::parse_function()
 
       current_bb->build_inst(Op::WRITE, dest, arg1);
     }
+  else if (name == "call")
+    gen_call();
+  else if (name == "ld" && reg_bitsize == 64)
+    gen_load(8);
+  else if (name == "lw")
+    gen_load(4);
+  else if (name == "lh")
+    gen_load(2);
+  else if (name == "lb")
+    gen_load(1);
+  else if (name == "sd" && reg_bitsize == 64)
+    gen_store(8);
+  else if (name == "sw")
+    gen_store(4);
+  else if (name == "sh")
+    gen_store(2);
+  else if (name == "sb")
+    gen_store(1);
   else if (name == "beq")
     gen_cond_branch(Op::EQ);
   else if (name == "bne")
@@ -936,8 +1127,10 @@ void parser::parse_function()
       ret_bbs.push_back(current_bb);
       current_bb = nullptr;
     }
-  else if (name == "ret")
+  else if (name == "ret" || name == "jr")
     {
+      // TODO: jr and ret are pseudoinstructions. Verify that they
+      // jump to the correct location.
       ret_bbs.push_back(current_bb);
       current_bb = nullptr;
     }
@@ -978,6 +1171,16 @@ void parser::lex_line(void)
       else if (buf[pos] == ']')
 	{
 	  tokens.emplace_back(lexeme::right_bracket, pos, 1);
+	  pos++;
+	}
+      else if (buf[pos] == '(')
+	{
+	  tokens.emplace_back(lexeme::left_paren, pos, 1);
+	  pos++;
+	}
+      else if (buf[pos] == ')')
+	{
+	  tokens.emplace_back(lexeme::right_paren, pos, 1);
 	  pos++;
 	}
       else
@@ -1027,6 +1230,19 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
 	    entry_bb->build_br_inst(bb);
 
 	    current_bb = bb;
+
+	    // Set up the stack.
+	    uint32_t ptr_id_bits = module->ptr_id_bits;
+	    uint32_t ptr_offset_bits = module->ptr_offset_bits;
+	    // TODO: Set up memory consistent with the src function.
+	    Instruction *id = bb->value_inst(-128, ptr_id_bits);
+	    Instruction *mem_size = bb->value_inst(stack_size, ptr_offset_bits);
+	    Instruction *flags = bb->value_inst(0, 32);
+	    Instruction *stack =
+	      bb->build_inst(Op::MEMORY, id, mem_size, flags);
+	    Instruction *size = bb->value_inst(stack_size, stack->bitsize);
+	    stack = bb->build_inst(Op::ADD, stack, size);
+	    current_bb->build_inst(Op::WRITE, registers[2], stack);
 
 	    parser_state = state::function;
 	  }
