@@ -10,7 +10,8 @@ struct CommonState {
   int64_t id_local = 0;
   int64_t id_global = 2;
   std::map<tree, int64_t> decl2id;
-  std::vector<bool> param_is_unsigned;
+
+  std::vector<smtgcc::Param_info> params;
 
   // The next free index for a symbolic instruction.
   uint32_t symbolic_idx = 0;

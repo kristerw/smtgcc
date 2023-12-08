@@ -4850,15 +4850,14 @@ void Converter::process_func_args()
   for (decl = DECL_ARGUMENTS(fun->decl); decl; decl = DECL_CHAIN(decl))
     {
       check_type(TREE_TYPE(decl));
-      int bitsize = bitsize_for_type(TREE_TYPE(decl));
+      uint32_t bitsize = bitsize_for_type(TREE_TYPE(decl));
       if (bitsize <= 0)
 	throw Not_implemented("Parameter size == 0");
 
       bool type_is_unsigned =
 	TREE_CODE(TREE_TYPE(decl)) == INTEGER_TYPE
-	&& TYPE_UNSIGNED(TREE_TYPE(decl))
-	&& TYPE_PRECISION(TREE_TYPE(decl)) != 32;
-      state->param_is_unsigned.push_back(type_is_unsigned);
+	&& TYPE_UNSIGNED(TREE_TYPE(decl));
+      state->params.push_back({bitsize, type_is_unsigned, 0, 0});
 
       // TODO: There must be better ways to determine if this is the "this"
       // pointer of a C++ constructor.

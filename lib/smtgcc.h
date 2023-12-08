@@ -404,10 +404,21 @@ void ls_elim(Module *module);
 // read_ir.cpp
 Module *parse_ir(std::string const& file_name);
 
+struct Param_info
+{
+  uint32_t bitsize;
+  bool is_unsigned;
+
+  uint32_t reg_nbr;
+  uint32_t num_regs;
+};
+
 // read_riscv.cpp
 struct riscv_state {
+  std::vector<Instruction *> registers;
   Module *module;
-  std::vector<bool> param_is_unsigned;
+  uint32_t reg_bitsize;
+  std::vector<Param_info> params;
 };
 Function *parse_riscv(std::string const& file_name, riscv_state *state);
 

@@ -50,7 +50,7 @@ unsigned int tv_pass::execute(function *fun)
       CommonState state;
       process_function(module, &state, fun);
       rstate->module = module;
-      rstate->param_is_unsigned = state.param_is_unsigned;
+      rstate->params = state.params;
     }
   catch (Not_implemented& error)
     {
@@ -134,6 +134,92 @@ static void eliminate_registers(Function *func)
     }
 }
 
+Instruction *extract(Instruction *inst, uint32_t reg_bitsize, uint32_t idx)
+{
+  Instruction *high = inst->bb->value_inst((idx + 1) * reg_bitsize - 1, 32);
+  Instruction *low = inst->bb->value_inst(idx * reg_bitsize, 32);
+  return create_inst(Op::EXTRACT, inst, high, low);
+}
+
+static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
+{
+  Basic_block *src_last_bb = src_func->bbs.back();
+  Basic_block *entry_bb = func->bbs[0];
+
+  // Find the first instruction that is not a VALUE instruction.
+  Instruction *first_inst = entry_bb->first_inst;
+  while (first_inst->opcode == Op::VALUE)
+    first_inst = first_inst->next;
+
+  // Determine the register to use for each function parameter.
+  int reg_nbr = 10;
+  for (auto& param_info : state->params)
+    {
+      param_info.reg_nbr = reg_nbr;
+      param_info.num_regs =
+	(param_info.bitsize + state->reg_bitsize - 1) / state->reg_bitsize;
+      reg_nbr += param_info.num_regs;
+    }
+
+  // Create an Op::PARAM instruction for each function parameter and store
+  // it in the registers.
+  Basic_block *src_entry_bb = src_func->bbs[0];
+  Instruction *reg_bitsize_inst = entry_bb->value_inst(state->reg_bitsize, 32);
+  for (Instruction *inst = src_entry_bb->first_inst; inst; inst = inst->next)
+    {
+      if (inst->opcode != Op::PARAM)
+	continue;
+
+      // Create a copy of the source function's Op::PARAM instruction.
+      int param_number = inst->arguments[0]->value();
+      Param_info& param_info = state->params.at(param_number);
+      Instruction *param_nbr = entry_bb->value_inst(param_number, 32);
+      Instruction *param_bitsize = entry_bb->value_inst(inst->bitsize, 32);
+      Instruction *param = create_inst(Op::PARAM, param_nbr, param_bitsize);
+      param->insert_before(first_inst);
+
+      // Pad it out to a multiple of the register size.
+      if (param->bitsize < state->reg_bitsize * param_info.num_regs)
+	{
+	  if (param_info.is_unsigned && param->bitsize != 32)
+	    param = create_inst(Op::ZEXT, param, reg_bitsize_inst);
+	  else
+	    param = create_inst(Op::SEXT, param, reg_bitsize_inst);
+	  param->insert_before(first_inst);
+	}
+
+      // Write the parameter value to the registers.
+      for (uint32_t i = 0; i < param_info.num_regs; i++)
+	{
+	  Instruction *reg_value = extract(param, state->reg_bitsize, i);
+	  reg_value->insert_before(first_inst);
+	  Instruction *reg = state->registers[param_info.reg_nbr + i];
+	  Instruction *write = create_inst(Op::WRITE, reg, reg_value);
+	  write->insert_before(first_inst);
+	}
+    }
+
+  // Generate the return value from the registers.
+  assert(src_last_bb->last_inst->opcode == Op::RET);
+  if (src_last_bb->last_inst->nof_args > 0)
+    {
+      Basic_block *exit_bb = func->bbs.back();
+      uint32_t ret_size = src_last_bb->last_inst->arguments[0]->bitsize;
+      Instruction *retval =
+	exit_bb->build_inst(Op::READ, state->registers[10]);
+      for (int reg_nbr = 11; retval->bitsize < ret_size; reg_nbr++)
+	{
+	  Instruction *inst =
+	    exit_bb->build_inst(Op::READ, state->registers[reg_nbr]);
+	  retval = exit_bb->build_inst(Op::CONCAT, inst, retval);
+	}
+      if (ret_size < retval->bitsize)
+	retval = exit_bb->build_trunc(retval, ret_size);
+      destroy_instruction(exit_bb->last_inst);
+      exit_bb->build_ret_inst(retval);
+    }
+}
+
 static void finish(void *, void *data)
 {
   // TODO: Check that we are generating a .s file, and use the name of the
@@ -149,8 +235,10 @@ static void finish(void *, void *data)
       riscv_state *state = my_pass->rstate;
       Module *module = state->module;
       module->functions[0]->name = "src";
+      state->reg_bitsize = TARGET_64BIT ? 64 : 32;
       Function *func = parse_riscv("k.s", state);
       reverse_post_order(func);
+      adjust_abi(func, module->functions[0], state);
       eliminate_registers(func);
       simplify_insts(func);
       dead_code_elimination(func);

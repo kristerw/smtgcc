@@ -5,12 +5,6 @@
 
 #include "smtgcc.h"
 
-#if TARGET_64BIT
-#define BITSIZE 64
-#else
-#define BITSIZE 32
-#endif
-
 using namespace std::string_literals;
 
 using namespace smtgcc;
@@ -52,7 +46,8 @@ struct parser {
 
   Function *parse(std::string const& file_name, riscv_state *state);
 
-  Module *modul;
+  Module *module;
+  uint32_t reg_bitsize;
   Function *src_func;
 
 private:
@@ -270,7 +265,7 @@ Instruction *parser::get_imm(unsigned idx)
 {
   uint32_t value = get_hex_or_integer(idx);
   Instruction *inst =  current_bb->value_inst(value, 12);
-  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
   return current_bb->build_inst(Op::SEXT, inst, bitsize);
 }
 
@@ -283,7 +278,7 @@ Instruction *parser::get_reg_value(unsigned idx)
       && buf[tokens[idx].pos + 1] == 'e'
       && buf[tokens[idx].pos + 2] == 'r'
       && buf[tokens[idx].pos + 3] == 'o')
-    return current_bb->value_inst(0, BITSIZE);
+    return current_bb->value_inst(0, reg_bitsize);
   if (tokens[idx].kind != lexeme::name || (buf[tokens[idx].pos] != 'a' && buf[tokens[idx].pos] != 't'))
     throw Parse_error("expected a register instead of "
 		      + token_string(tokens[idx]), line_number);
@@ -405,7 +400,7 @@ void parser::parse_function()
       Instruction *res = current_bb->build_inst(Op::ADD, arg1, arg2);
       if (name == "addw" || name == "addiw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -427,7 +422,7 @@ void parser::parse_function()
       Instruction *res = current_bb->build_inst(Op::MUL, arg1, arg2);
       if (name == "mulw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -449,7 +444,7 @@ void parser::parse_function()
       Instruction *res = current_bb->build_inst(Op::SDIV, arg1, arg2);
       if (name == "divw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -471,7 +466,7 @@ void parser::parse_function()
       Instruction *res = current_bb->build_inst(Op::UDIV, arg1, arg2);
       if (name == "divuw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -493,7 +488,7 @@ void parser::parse_function()
       Instruction *res = current_bb->build_inst(Op::SREM, arg1, arg2);
       if (name == "remw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -515,7 +510,7 @@ void parser::parse_function()
       Instruction *res = current_bb->build_inst(Op::UREM, arg1, arg2);
       if (name == "remuw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -539,7 +534,7 @@ void parser::parse_function()
 	  arg2 = current_bb->build_trunc(arg2, 32);
 	}
       Instruction *res = current_bb->build_inst(Op::SLT, arg1, arg2);
-      Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
       res = current_bb->build_inst(Op::ZEXT, res, bitsize);
       current_bb->build_inst(Op::WRITE, dest, res);
     }
@@ -563,7 +558,7 @@ void parser::parse_function()
 	  arg2 = current_bb->build_trunc(arg2, 32);
 	}
       Instruction *res = current_bb->build_inst(Op::ULT, arg1, arg2);
-      Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
       res = current_bb->build_inst(Op::ZEXT, res, bitsize);
       current_bb->build_inst(Op::WRITE, dest, res);
     }
@@ -583,7 +578,7 @@ void parser::parse_function()
 	  arg2 = current_bb->build_trunc(arg2, 32);
 	}
       Instruction *res = current_bb->build_inst(Op::SGT, arg1, arg2);
-      Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
       res = current_bb->build_inst(Op::ZEXT, res, bitsize);
       current_bb->build_inst(Op::WRITE, dest, res);
     }
@@ -603,7 +598,7 @@ void parser::parse_function()
 	  arg2 = current_bb->build_trunc(arg2, 32);
 	}
       Instruction *res = current_bb->build_inst(Op::UGT, arg1, arg2);
-      Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
       res = current_bb->build_inst(Op::ZEXT, res, bitsize);
       current_bb->build_inst(Op::WRITE, dest, res);
     }
@@ -621,7 +616,7 @@ void parser::parse_function()
 	}
       Instruction *zero = current_bb->value_inst(0, arg1->bitsize);
       Instruction *res = current_bb->build_inst(Op::EQ, arg1, zero);
-      Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
       res = current_bb->build_inst(Op::ZEXT, res, bitsize);
       current_bb->build_inst(Op::WRITE, dest, res);
     }
@@ -639,7 +634,7 @@ void parser::parse_function()
 	}
       Instruction *zero = current_bb->value_inst(0, arg1->bitsize);
       Instruction *res = current_bb->build_inst(Op::NE, arg1, zero);
-      Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
       res = current_bb->build_inst(Op::ZEXT, res, bitsize);
       current_bb->build_inst(Op::WRITE, dest, res);
     }
@@ -664,7 +659,7 @@ void parser::parse_function()
       Instruction *res = current_bb->build_inst(Op::AND, arg1, arg2);
       if (name == "andw" || name == "andiw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -690,7 +685,7 @@ void parser::parse_function()
       Instruction *res = current_bb->build_inst(Op::OR, arg1, arg2);
       if (name == "orw" || name == "oriw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -716,7 +711,7 @@ void parser::parse_function()
       Instruction *res = current_bb->build_inst(Op::XOR, arg1, arg2);
       if (name == "xorw" || name == "xoriw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -734,7 +729,7 @@ void parser::parse_function()
 	arg2 = get_reg_value(5);
       get_end_of_line(6);
 
-      if (BITSIZE == 32 || name == "sllw" || name == "slliw")
+      if (reg_bitsize == 32 || name == "sllw" || name == "slliw")
 	{
 	  arg1 = current_bb->build_trunc(arg1, 32);
 	  arg2 = current_bb->build_trunc(arg2, 5);
@@ -744,13 +739,13 @@ void parser::parse_function()
       else
 	{
 	  arg2 = current_bb->build_trunc(arg2, 6);
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
 	}
       Instruction *res = current_bb->build_inst(Op::SHL, arg1, arg2);
       if (name == "sllw" || name == "slliw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -768,7 +763,7 @@ void parser::parse_function()
 	arg2 = get_reg_value(5);
       get_end_of_line(6);
 
-      if (BITSIZE == 32 || name == "srlw" || name == "srliw")
+      if (reg_bitsize == 32 || name == "srlw" || name == "srliw")
 	{
 	  arg1 = current_bb->build_trunc(arg1, 32);
 	  arg2 = current_bb->build_trunc(arg2, 5);
@@ -778,13 +773,13 @@ void parser::parse_function()
       else
 	{
 	  arg2 = current_bb->build_trunc(arg2, 6);
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
 	}
       Instruction *res = current_bb->build_inst(Op::LSHR, arg1, arg2);
       if (name == "srlw" || name == "srliw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -802,7 +797,7 @@ void parser::parse_function()
 	arg2 = get_reg_value(5);
       get_end_of_line(6);
 
-      if (BITSIZE == 32 || name == "sraw" || name == "sraiw")
+      if (reg_bitsize == 32 || name == "sraw" || name == "sraiw")
 	{
 	  arg1 = current_bb->build_trunc(arg1, 32);
 	  arg2 = current_bb->build_trunc(arg2, 5);
@@ -812,13 +807,13 @@ void parser::parse_function()
       else
 	{
 	  arg2 = current_bb->build_trunc(arg2, 6);
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
 	}
       Instruction *res = current_bb->build_inst(Op::ASHR, arg1, arg2);
       if (name == "sraw" || name == "sraiw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -840,7 +835,7 @@ void parser::parse_function()
       Instruction *res = current_bb->build_inst(Op::SUB, arg1, arg2);
       if (name == "subw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -859,7 +854,7 @@ void parser::parse_function()
       Instruction *res = current_bb->build_inst(Op::NEG, arg1);
       if (name == "negw")
 	{
-	  Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
 	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
@@ -872,7 +867,7 @@ void parser::parse_function()
       get_end_of_line(4);
 
       Instruction *res = current_bb->build_trunc(arg1, 32);
-      Instruction *bitsize = current_bb->value_inst(BITSIZE, 32);
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
       res = current_bb->build_inst(Op::SEXT, res, bitsize);
       current_bb->build_inst(Op::WRITE, dest, res);
     }
@@ -902,7 +897,7 @@ void parser::parse_function()
       // TODO: Use a correct wrapper.
       //       Sort of get_imm(3); but with correct size.
       unsigned __int128 value = get_hex_or_integer(3);
-      Instruction *arg1 = current_bb->value_inst(value, BITSIZE);
+      Instruction *arg1 = current_bb->value_inst(value, reg_bitsize);
       get_end_of_line(4);
 
       current_bb->build_inst(Op::WRITE, dest, arg1);
@@ -1004,9 +999,10 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
   if (!in)
     throw Parse_error("Could not open file.", 0);
 
-  modul = rstate->module;
-  assert(modul->functions.size() == 1);
-  src_func = modul->functions[0];
+  module = rstate->module;
+  reg_bitsize = rstate->reg_bitsize;
+  assert(module->functions.size() == 1);
+  src_func = module->functions[0];
 
   state parser_state = state::global;
   while (parser_state != state::done && in.getline(buf, max_line_len)) {
@@ -1018,45 +1014,14 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
 	// Just eat lines until we find "foo:" for now.
 	if (buf[0] == 'f' && buf[1] == 'o' && buf[2] == 'o' && buf[3] == ':')
 	  {
-	    current_func = modul->build_function("tgt");
+	    current_func = module->build_function("tgt");
 	    Basic_block *entry_bb = current_func->build_bb();
 	    for (int i = 0; i < 32; i++)
 	      {
-		Instruction *bitsize = entry_bb->value_inst(BITSIZE, 32);
+		Instruction *bitsize = entry_bb->value_inst(reg_bitsize, 32);
 		Instruction *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
 		registers.push_back(reg);
 	      }
-
-	    Basic_block *src_entry_bb = src_func->bbs[0];
-	    for (Instruction *inst = src_entry_bb->first_inst;
-		 inst;
-		 inst = inst->next)
-	      {
-		if (inst->opcode == Op::PARAM)
-		  {
-		    int param_number = inst->arguments[0]->value();
-		    Instruction *param_nbr =
-		      current_func->bbs[0]->value_inst(param_number, 32);
-		    Instruction *param_bitsize =
-		      current_func->bbs[0]->value_inst(inst->bitsize, 32);
-		    Instruction *param =
-		      current_func->bbs[0]->build_inst(Op::PARAM, param_nbr, param_bitsize);
-		    if (inst->bitsize > BITSIZE)
-		      throw Not_implemented("Parameter size > register size");
-		    if (inst->bitsize != BITSIZE)
-		      {
-			Instruction *bitsize_inst = entry_bb->value_inst(BITSIZE, 32);
-			if (rstate->param_is_unsigned.at(param_number))
-			  param = entry_bb->build_inst(Op::ZEXT, param, bitsize_inst);
-			else
-			  param = entry_bb->build_inst(Op::SEXT, param, bitsize_inst);
-		      }
-		    entry_bb->build_inst(Op::WRITE, registers[10 + param_number], param);
-		  }
-	      }
-
-
-
 
 	    Basic_block *bb = current_func->build_bb();
 	    entry_bb->build_br_inst(bb);
@@ -1101,18 +1066,11 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
   // }
   // Hmm. But we should treat the ebreak as a return in that case.
   Basic_block *exit_bb = current_func->build_bb();
-  Basic_block *src_last_bb = src_func->bbs.back();
-  assert(src_last_bb->last_inst->opcode == Op::RET);
-  assert(src_last_bb->last_inst->nof_args > 0);
-  uint32_t ret_size = src_last_bb->last_inst->arguments[0]->bitsize;
-  Instruction *retval = exit_bb->build_inst(Op::READ, registers[10]);
-  if (ret_size > retval->bitsize)
-    throw Not_implemented("return size > register size");
-  if (ret_size < retval->bitsize)
-    retval = exit_bb->build_trunc(retval, ret_size);
-  exit_bb->build_ret_inst(retval);
   for (auto bb : ret_bbs)
     bb->build_br_inst(exit_bb);
+  exit_bb->build_ret_inst();
+
+  rstate->registers = registers;
 
   return current_func;
 }
