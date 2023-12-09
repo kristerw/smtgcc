@@ -600,6 +600,33 @@ void parser::parse_function()
 	}
       current_bb->build_inst(Op::WRITE, dest, res);
     }
+  else if (name == "mulh" || name == "mulhu" || name == "mulhsu")
+    {
+      Instruction *dest = get_reg(1);
+      get_comma(2);
+      Instruction *arg1 = get_reg_value(3);
+      get_comma(4);
+      Instruction *arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      Op op1 = Op::SEXT;
+      Op op2 = Op::SEXT;
+      if (name == "mulhsu")
+	op2 = Op::ZEXT;
+      else if (name == "mulhu")
+	{
+	  op1 = Op::ZEXT;
+	  op2 = Op::ZEXT;
+	}
+      Instruction *bitsize = current_bb->value_inst(2 * reg_bitsize, 32);
+      arg1 = current_bb->build_inst(op1, arg1, bitsize);
+      arg2 = current_bb->build_inst(op2, arg2, bitsize);
+      Instruction *res = current_bb->build_inst(Op::MUL, arg1, arg2);
+      Instruction *high = current_bb->value_inst(2 * reg_bitsize - 1, 32);
+      Instruction *low = current_bb->value_inst(reg_bitsize, 32);
+      res = current_bb->build_inst(Op::EXTRACT, res, high, low);
+      current_bb->build_inst(Op::WRITE, dest, res);
+    }
   else if (name == "div" || name == "divw")
     {
       Instruction *dest = get_reg(1);
