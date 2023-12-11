@@ -5147,6 +5147,16 @@ Function *Converter::process_function()
 
     process_variables();
     process_func_args();
+
+    // GCC assumes that __builtin functions have the specified semantics
+    // (see GCC PR 112949), so in practice, it is undefined behavior to
+    // create a __builtin function. Mark such functions as always invoking
+    // undefined behavior.
+    // TODO: We encounter similar issues with normal functions, such as
+    // memcpy. We should also detect such cases.
+    if (!strncmp(function_name(cfun), "__builtin_", 10))
+      func->bbs[0]->build_inst(Op::UB, func->bbs[0]->value_inst(1, 1));
+
     process_instructions(nof_blocks, postorder);
 
     free(postorder);
