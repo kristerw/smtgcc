@@ -548,6 +548,22 @@ Instruction *simplify_lshr(Instruction *inst)
       inst->arguments[1]->value() >= inst->bitsize)
     return inst->bb->value_inst(0, inst->bitsize);
 
+  // lshr (lshr x, c1), c2 -> lshr x, (c1 + c2)
+  if (inst->arguments[1]->opcode == Op::VALUE &&
+      inst->arguments[0]->opcode == Op::LSHR &&
+      inst->arguments[0]->arguments[1]->opcode == Op::VALUE)
+    {
+      Instruction *x = inst->arguments[0]->arguments[0];
+      unsigned __int128 c1 = inst->arguments[0]->arguments[1]->value();
+      unsigned __int128 c2 = inst->arguments[1]->value();
+      assert(c1 < inst->bitsize);
+      assert(c2 < inst->bitsize);
+      Instruction *c = inst->bb->value_inst(c1 + c2, inst->bitsize);
+      Instruction *new_inst = create_inst(Op::LSHR, x, c);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   return inst;
 }
 
@@ -993,6 +1009,22 @@ Instruction *simplify_shl(Instruction *inst)
       unsigned __int128 shift = arg2->value();
       Instruction *mask = inst->bb->value_inst(-1 << shift, inst->bitsize);
       Instruction *new_inst = create_inst(Op::AND, arg1->arguments[0], mask);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // shl (shl x, c1), c2 -> shl x, (c1 + c2)
+  if (inst->arguments[1]->opcode == Op::VALUE &&
+      inst->arguments[0]->opcode == Op::SHL &&
+      inst->arguments[0]->arguments[1]->opcode == Op::VALUE)
+    {
+      Instruction *x = inst->arguments[0]->arguments[0];
+      unsigned __int128 c1 = inst->arguments[0]->arguments[1]->value();
+      unsigned __int128 c2 = inst->arguments[1]->value();
+      assert(c1 < inst->bitsize);
+      assert(c2 < inst->bitsize);
+      Instruction *c = inst->bb->value_inst(c1 + c2, inst->bitsize);
+      Instruction *new_inst = create_inst(Op::SHL, x, c);
       new_inst->insert_before(inst);
       return new_inst;
     }
