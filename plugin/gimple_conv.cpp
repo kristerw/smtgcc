@@ -1912,6 +1912,16 @@ Instruction *Converter::process_unary_float(enum tree_code code, Instruction *ar
     case FLOAT_EXPR:
       return type_convert(arg1, arg1_type, lhs_type, bb);
     case NEGATE_EXPR:
+      // SMT solvers has only one NaN value, so NEGATE_EXPR of NaN does not
+      // change the value. This leads to incorrect reports of miscompilations
+      // for transformations like -ABS_EXPR(x) -> .COPYSIGN(x, -1.0), either
+      // because the returned/memory values differ or because copysign has
+      // introduceed a non-canonical NaN (as our implementation of copysign
+      // works on the bitvector instead of working on a floating point value).
+      // For now, treat negation of NaN as UB to avoid these false reports of
+      // miscompilation.
+      // TODO: Solve this in a better way.
+      bb->build_inst(Op::UB, bb->build_inst(Op::IS_NAN, arg1));
       return bb->build_inst(Op::FNEG, arg1);
     case CONVERT_EXPR:
     case NOP_EXPR:
