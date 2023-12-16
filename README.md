@@ -17,7 +17,8 @@ I am still figuring out how to implement correct memory semantics, so most of th
 [110760](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=110760),
 [111257](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111257),
 [111280](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111280),
-[111494](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111494)).
+[111494](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111494),
+[112736](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=112736)).
 
 # Compiling `smtgcc`
 You must have the Z3 SMT solver installed. For example, as
