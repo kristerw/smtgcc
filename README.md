@@ -133,6 +133,5 @@ Some of the major limitations in the current version:
 * Only simple loops are handled.
 * Memory semantics is not correct
   - Strict aliasing does not work, so you must pass `-fno-strict-aliasing` to the compiler.
-  - Handling of ponter provenance is too restrictive.
-  - Handling of uninitialized memory is somewhat different compared to the GIMPLE IR semantics.
+  - Handling of pointer provenance is too restrictive.
   - ...
