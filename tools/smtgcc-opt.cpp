@@ -157,6 +157,7 @@ int main(int argc, char **argv)
 	  }
       }
 
+    module->canonicalize();
     module->print(stdout);
 
     destroy_module(module);

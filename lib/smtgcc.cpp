@@ -1048,10 +1048,10 @@ Function *Function::clone(Module *dest_module)
 						src_inst->bitsize);
 		}
 	      else
-		throw Not_implemented("Module::clone: "s + src_inst->name());
+		throw Not_implemented("Function::clone: "s + src_inst->name());
 	      break;
 	    default:
-	      throw Not_implemented("Module::clone: "s + src_inst->name());
+	      throw Not_implemented("Function::clone: "s + src_inst->name());
 	    }
 	  assert(tgt_inst);
 	  src2tgt_inst[src_inst] = tgt_inst;
@@ -1093,6 +1093,14 @@ Function *Module::build_function(const std::string& name)
   func->name = name;
   functions.push_back(func);
   return func;
+}
+
+void Module::canonicalize()
+{
+  for (auto func : functions)
+    {
+      func->canonicalize();
+    }
 }
 
 Module *Module::clone()

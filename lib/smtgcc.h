@@ -307,6 +307,7 @@ private:
 struct Module {
   std::vector<Function *> functions;
   Function *build_function(const std::string& name);
+  void canonicalize();
   Module *clone();
   void print(FILE *stream) const;
   uint32_t ptr_bits;
