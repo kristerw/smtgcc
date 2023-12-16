@@ -307,6 +307,14 @@ std::tuple<Instruction *, Instruction *, Instruction *> extract_vec_elem(Basic_b
 
 Instruction *extract_elem(Basic_block *bb, Instruction *vec, uint32_t elem_bitsize, Instruction *idx)
 {
+  // The shift calculation below may overflow if idx is not wide enough,
+  // so we extend it to a safe width.
+  // Note: We could have extended it to the full vector bit size, but that
+  // would limit optimizations such as constant folding for the shift
+  // calculation for vectors wider than 128 bits.
+  if (idx->bitsize < 32)
+    idx = bb->build_inst(Op::ZEXT, idx, bb->value_inst(32, 32));
+
   Instruction *elm_bsize = bb->value_inst(elem_bitsize, idx->bitsize);
   Instruction *shift = bb->build_inst(Op::MUL, idx, elm_bsize);
   if (shift->bitsize > vec->bitsize)
