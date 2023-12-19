@@ -1920,16 +1920,6 @@ Instruction *Converter::process_unary_float(enum tree_code code, Instruction *ar
     case FLOAT_EXPR:
       return type_convert(arg1, arg1_type, lhs_type, bb);
     case NEGATE_EXPR:
-      // SMT solvers has only one NaN value, so NEGATE_EXPR of NaN does not
-      // change the value. This leads to incorrect reports of miscompilations
-      // for transformations like -ABS_EXPR(x) -> .COPYSIGN(x, -1.0), either
-      // because the returned/memory values differ or because copysign has
-      // introduceed a non-canonical NaN (as our implementation of copysign
-      // works on the bitvector instead of working on a floating point value).
-      // For now, treat negation of NaN as UB to avoid these false reports of
-      // miscompilation.
-      // TODO: Solve this in a better way.
-      bb->build_inst(Op::UB, bb->build_inst(Op::IS_NAN, arg1));
       return bb->build_inst(Op::FNEG, arg1);
     case CONVERT_EXPR:
     case NOP_EXPR:
@@ -3512,15 +3502,23 @@ void Converter::process_cfn_copysign(gimple *stmt, Basic_block *bb)
   Instruction *arg1 = tree2inst(bb, gimple_call_arg(stmt, 0));
   Instruction *arg2 = tree2inst(bb, gimple_call_arg(stmt, 1));
   Instruction *signbit = bb->build_extract_bit(arg2, arg2->bitsize - 1);
-  arg1 = bb->build_trunc(arg1, arg1->bitsize - 1);
-  arg1 = bb->build_inst(Op::CONCAT, signbit, arg1);
-  Instruction *cond = bb->build_inst(Op::IS_NONCANONICAL_NAN, arg1);
-  bb->build_inst(Op::UB, cond);
+  Instruction *res = bb->build_trunc(arg1, arg1->bitsize - 1);
+  res = bb->build_inst(Op::CONCAT, signbit, res);
+
+  // SMT solvers has only one NaN value, so NEGATE_EXPR of NaN does not
+  // change the value. This leads to incorrect reports of miscompilations
+  // for transformations like -ABS_EXPR(x) -> .COPYSIGN(x, -1.0) because
+  // copysign has introduceed a non-canonical NaN.
+  // For now, treat copying the sign to NaN as always produce the original
+  // canonical NaN.
+  // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
+  Instruction *is_nan = bb->build_inst(Op::IS_NAN, arg1);
+  res = bb->build_inst(Op::ITE, is_nan, arg1, res);
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
     {
-      constrain_range(bb, lhs, arg1);
-      tree2instruction.insert({lhs, arg1});
+      constrain_range(bb, lhs, res);
+      tree2instruction.insert({lhs, res});
     }
 }
 
