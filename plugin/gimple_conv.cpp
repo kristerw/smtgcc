@@ -3051,7 +3051,7 @@ void Converter::process_constructor(tree lhs, tree rhs, Basic_block *bb)
   Addr addr = process_address(bb, lhs);
   assert(!addr.bitoffset);
 
-  if (TREE_CLOBBER_P(rhs) && CLOBBER_KIND(rhs) == CLOBBER_EOL)
+  if (TREE_CLOBBER_P(rhs) && CLOBBER_KIND(rhs) == CLOBBER_STORAGE_END)
     {
       bb->build_inst(Op::FREE, bb->build_extract_id(addr.ptr));
       return;
