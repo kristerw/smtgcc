@@ -108,7 +108,7 @@ void calculate_dominance(Function *func)
     }
 
   // Post dominators
-  func->bbs[nof_bbs - 1]->dom.insert(func->bbs[nof_bbs - 1]);
+  func->bbs[nof_bbs - 1]->post_dom.insert(func->bbs[nof_bbs - 1]);
   for (int i = nof_bbs - 2; i >= 0; i--)
     {
       Basic_block *bb = func->bbs[i];
