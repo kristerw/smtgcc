@@ -525,6 +525,9 @@ bool loop_unroll(Function *func)
       Unroller unroller(*loop);
       unroller.unroll();
       reverse_post_order(func);
+      simplify_insts(func);
+      dead_code_elimination(func);
+      simplify_cfg(func);
       unrolled = true;
     }
 
