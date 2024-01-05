@@ -824,9 +824,13 @@ Solver_result run_solver(z3::solver& s, const char *str)
       for (unsigned i = 0; i < m.size(); i++)
 	{
 	  z3::func_decl v = m[i];
-	  std::string name = v.name().str();
-	  std::string value = m.get_const_interp(v).to_string();
-	  msg = msg + name + " = " + value + "\n";
+	  z3::symbol sym = v.name();
+	  if (sym.kind() == Z3_STRING_SYMBOL)
+	    {
+	      std::string name = sym.str();
+	      std::string value = m.get_const_interp(v).to_string();
+	      msg = msg + name + " = " + value + "\n";
+	    }
 	}
       return {Result_status::incorrect, msg};
     }
