@@ -699,6 +699,7 @@ std::pair<Instruction *, Instruction *> Converter::simplify_array_access(Instruc
   if (I != cache.end())
     return I->second;
 
+  Instruction *orig_array = array;
   Instruction *value = nullptr;
   for (;;)
     {
@@ -752,7 +753,7 @@ std::pair<Instruction *, Instruction *> Converter::simplify_array_access(Instruc
       else
 	break;
     }
-  cache.insert({array, {value, array}});
+  cache.insert({orig_array, {value, array}});
   return {value, array};
 }
 
