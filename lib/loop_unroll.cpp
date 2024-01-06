@@ -27,6 +27,29 @@ struct Loop
   Basic_block *loop_exit;
 };
 
+class Loop_finder
+{
+  Function *func;
+
+  // Map between BB and its index in the function.
+  std::map<Basic_block *, size_t> idx;
+
+  // State for Tarjan's algorithm for calculating strongly connected
+  // components.
+  std::map<Basic_block *, int> dfn;
+  std::map<Basic_block *, int> lowlink;
+  std::vector<Basic_block *> stack;
+  std::vector<std::vector<Basic_block *>> sccs;
+  int dfnum = 0;
+
+  Basic_block *get_loop_exit(std::vector<Basic_block *>& scc);
+  void strong_connect(Basic_block *bb);
+
+public:
+  Loop_finder(Function *func);
+  std::optional<Loop> find_loop();
+};
+
 class Unroller
 {
   Loop& loop;
@@ -72,7 +95,8 @@ void Unroller::ensure_lcssa(Instruction *inst)
   if (!invalid_use.empty())
     {
       Instruction *phi = loop.loop_exit->build_phi_inst(inst->bitsize);
-      phi->add_phi_arg(inst, loop.loop_exit->preds[0]);
+      for (auto pred : loop.loop_exit->preds)
+	phi->add_phi_arg(inst, pred);
       while (!invalid_use.empty())
 	{
 	  Instruction *use = invalid_use.back();
@@ -100,115 +124,125 @@ void Unroller::create_lcssa()
     }
 }
 
-// Find a loop we can unroll. There are two cases:
-// 1. The loop consist of one basic block.
-//    If one such loop is found, then that BB is returned.
-// 2. The loop consist of two basic blocks, where the loop body has
-//    one predecessor and one successor.
-//    If one such loop is found, then that loop body BB is returned.
-// Otherwise nullptr is returned.
-std::optional<Loop> find_simple_loop(Function *func)
+Loop_finder::Loop_finder(Function *func) : func{func}
 {
-  Loop loop;
-
+  for (size_t i = 0; i < func->bbs.size(); i++)
+    {
+      idx.insert({func->bbs[i], i});
+    }
   for (auto bb : func->bbs)
     {
-      if (bb->succs.size() == 2)
+      if (!dfn.contains(bb))
+	strong_connect(bb);
+    }
+}
+
+std::optional<Loop> Loop_finder::find_loop()
+{
+  for (auto& ssc : sccs)
+    {
+      Basic_block *loop_exit = get_loop_exit(ssc);
+      if (loop_exit)
 	{
-	  if (bb->succs[0] == bb || bb->succs[1] == bb)
-	    {
-	      loop.bbs.push_back(bb);
-	      if (bb->succs[0] == bb)
-		loop.loop_exit = bb->succs[1];
-	      else
-		loop.loop_exit = bb->succs[0];
-	      return loop;
-	    }
-
-	  for (auto succ : bb->succs)
-	    {
-	      if (succ->preds.size() != 1 || succ->succs.size() != 1)
-		continue;
-
-	      if (succ->preds[0] == bb && succ->succs[0] == bb)
-		{
-		  loop.bbs.push_back(bb);
-		  loop.bbs.push_back(succ);
-		  if (bb->succs[0] == succ)
-		    loop.loop_exit = bb->succs[1];
-		  else
-		    loop.loop_exit = bb->succs[0];
-		  return loop;
-		}
-	    }
+	  Loop loop;
+	  loop.bbs = ssc;
+	  loop.loop_exit = loop_exit;
+	  return loop;
 	}
     }
   return {};
 }
 
-// Find an 'advanced loop' -- a loop that looks like this:
-//
-//      \|/
-//   +- HEAD<---+
-//   |   |      |
-//   |  MID     |
-//   |   |      |
-//   +->LATCH --+
-//       |
-//      exit
-//
-// Given a block L if these conditions hold, L is the latch of an advanced
-// loop:
-// 1 L has two predecessors H and M
-// 2 L has two successors
-// 3 H is the sole predecessor of M
-// 4 H is a successor of L
-// 5 M has exactly one successor
-std::optional<Loop> find_advanced_loop(Function *func)
+void Loop_finder::strong_connect(Basic_block *bb)
 {
-  for (auto l : func->bbs)
-    {
-      // Condition 1
-      if (l->preds.size() != 2)
-	continue;
-      // Condition 2
-      if (l->succs.size() != 2)
-	continue;
-      // Condition 3
-      Basic_block *h = l->preds[0];
-      Basic_block *m = l->preds[1];
-      if (m->preds.size() != 1 || m->preds[0] != h)
-	{
-	  std::swap(h, m);
-	  if (m->preds.size() != 1 || m->preds[0] != h)
-	    continue;
-	}
-      // Condition 4
-      if (h != l->succs[0] && h != l->succs[1])
-	continue;
-      // Condition 5
-      if (m->succs.size() != 1)
-	continue;
+  dfn.insert({bb, dfnum});
+  lowlink.insert({bb, dfnum});
+  stack.push_back(bb);
+  dfnum++;
 
-      Loop loop;
-      loop.bbs.push_back(h);
-      loop.bbs.push_back(m);
-      loop.bbs.push_back(l);
-      if (h == l->succs[0])
-	loop.loop_exit = l->succs[1];
-      else
-	loop.loop_exit = l->succs[0];
-      return loop;
+  for (auto succ : bb->succs)
+    {
+      if (!dfn.contains(succ))
+	{
+	  strong_connect(succ);
+	  lowlink[bb] = std::min(lowlink.at(bb), lowlink.at(succ));
+	}
+      else if (dfn.at(succ) < dfn.at(bb)
+	       && std::find(stack.begin(), stack.end(), succ) != stack.end())
+	{
+	  lowlink[bb] = std::min(lowlink.at(bb), dfn.at(succ));
+	}
     }
-  return {};
+
+  if (lowlink.at(bb) == dfn.at(bb))
+    {
+      auto it = std::find(stack.begin(), stack.end(), bb);
+      sccs.emplace_back(it, stack.end());
+      stack.erase(it, stack.end());
+
+      // Sort the blocks in reverse post order.
+      std::vector<Basic_block*>& scc = sccs.back();
+      std::sort(scc.begin(), scc.end(),
+		[this](Basic_block *a, Basic_block *b) {
+		  return idx.at(a) < idx.at(b);
+		});
+    }
+}
+
+Basic_block *Loop_finder::get_loop_exit(std::vector<Basic_block *>& scc)
+{
+  // The loop must have at least one back edge, and all back edges must
+  // be to the loop header.
+  Basic_block *loop_header = scc.front();
+  bool found_back_edge = false;
+  for (auto bb : scc)
+    {
+      for (auto succ : bb->succs)
+	{
+	  if (idx.at(succ) <= idx.at(bb))
+	    {
+	      found_back_edge = true;
+	      if (succ != loop_header)
+		return nullptr;
+	    }
+	}
+    }
+  if (!found_back_edge)
+    return nullptr;
+
+  // Only the loop header may have predecessors outside the loop.
+  for (size_t i = 1; i < scc.size(); i++)
+    {
+      for (auto pred : scc[i]->preds)
+	{
+	  if (std::find(scc.begin(), scc.end(), pred) == scc.end())
+	    return nullptr;
+	}
+    }
+
+  // All successors must be in the loop, or the exit_block.
+  Basic_block *loop_exit = nullptr;
+  for (auto bb : scc)
+    {
+      for (auto succ : bb->succs)
+	{
+	  if (std::find(scc.begin(), scc.end(), succ) == scc.end())
+	    {
+	      if (!loop_exit)
+		loop_exit = succ;
+	      else if (succ != loop_exit)
+		return nullptr;
+	    }
+	}
+    }
+
+  return loop_exit;
 }
 
 std::optional<Loop> find_loop(Function *func)
 {
-  std::optional<Loop> loop = find_simple_loop(func);
-  if (loop)
-    return loop;
-  return find_advanced_loop(func);
+  Loop_finder loop_finder(func);
+  return loop_finder.find_loop();
 }
 
 // Get the SSA variable (i.e., instruction) corresponding to the input SSA
