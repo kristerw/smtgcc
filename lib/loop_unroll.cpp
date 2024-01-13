@@ -1,6 +1,4 @@
 // Unroll loops.
-//
-// Only very simple loops (consisting of 1, 2 or 3 basic blocks) are handled.
 
 #include <algorithm>
 #include <cassert>
@@ -23,8 +21,8 @@ struct Loop
   // The basic blocks of the loop, in reverse post order.
   std::vector<Basic_block *> bbs;
 
-  // The basic block after the loop (we only allow one exit block for now).
-  Basic_block *loop_exit;
+  // The exit blocks for the original loop.
+  std::vector<Basic_block *> exit_blocks;
 };
 
 class Loop_finder
@@ -42,7 +40,7 @@ class Loop_finder
   std::vector<std::vector<Basic_block *>> sccs;
   int dfnum = 0;
 
-  Basic_block *get_loop_exit(std::vector<Basic_block *>& scc);
+  std::optional<Loop> get_loop(std::vector<Basic_block *>& scc);
   void strong_connect(Basic_block *bb);
 
 public:
@@ -59,10 +57,13 @@ class Unroller
   Basic_block *next_loop_header = nullptr;
 
   void build_new_loop_exit();
-  void update_loop_exit(Basic_block *src_bb, Basic_block *dst_bb);
+  void update_loop_exit(Basic_block *orig_loop_bb,
+			Basic_block *current_iter_bb, Basic_block *exit_bb);
   void duplicate(Instruction *inst, Basic_block *bb);
   Instruction *translate(Instruction *inst);
   Basic_block *translate(Basic_block *bb);
+  Instruction *get_phi(std::map<Basic_block*, Instruction*>& bb2phi,
+		       Basic_block *bb, Instruction *inst);
   void ensure_lcssa(Instruction *inst);
   void create_lcssa();
   void unroll_one_iteration();
@@ -72,9 +73,39 @@ public:
   void unroll();
 };
 
+template <typename T>
+bool contains(std::vector<T>& vec, const T& value)
+{
+  return std::find(vec.begin(), vec.end(), value) != vec.end();
+}
+
+template <typename T>
+void push_unique(std::vector<T>& vec, const T& value)
+{
+  if (std::find(vec.begin(), vec.end(), value) == vec.end())
+    vec.push_back(value);
+}
+
 Unroller::Unroller(Loop& loop) : loop{loop}
 {
   func = loop.bbs.back()->func;
+}
+
+Instruction *Unroller::get_phi(std::map<Basic_block*, Instruction*>& bb2phi, Basic_block *bb, Instruction *inst)
+{
+  if (bb2phi.contains(bb))
+    return bb2phi[bb];
+  assert(!contains(loop.exit_blocks, bb));
+
+  Instruction *phi = bb->build_phi_inst(inst->bitsize);
+  bb2phi.insert({bb, phi});
+  assert(bb->preds.size() > 0);
+  for (auto pred : bb->preds)
+    {
+      phi->add_phi_arg(get_phi(bb2phi, pred, inst), pred);
+    }
+
+  return phi;
 }
 
 // Check that the instruction is used in LCSSA-safe way (i.e., all uses are
@@ -85,24 +116,39 @@ void Unroller::ensure_lcssa(Instruction *inst)
   std::vector<Instruction *> invalid_use;
   for (auto use : inst->used_by)
     {
-      if (use->bb == loop.loop_exit && use->opcode == Op::PHI)
-	continue;
-      auto I = std::find(loop.bbs.begin(), loop.bbs.end(), use->bb);
-      if (I == loop.bbs.end())
-	invalid_use.push_back(use);
+      if (!contains(loop.bbs, use->bb))
+	push_unique(invalid_use, use);
     }
 
-  if (!invalid_use.empty())
+  if (invalid_use.empty())
+    return;
+
+  std::map<Basic_block*, Instruction*> bb2phi;
+  for (auto exit_block : loop.exit_blocks)
     {
-      Instruction *phi = loop.loop_exit->build_phi_inst(inst->bitsize);
-      for (auto pred : loop.loop_exit->preds)
+      Instruction *phi = exit_block->build_phi_inst(inst->bitsize);
+      bb2phi.insert({exit_block, phi});
+      for (auto pred : exit_block->preds)
 	phi->add_phi_arg(inst, pred);
-      while (!invalid_use.empty())
+    }
+  while (!invalid_use.empty())
+    {
+      Instruction *use = invalid_use.back();
+      invalid_use.pop_back();
+      if (use->opcode == Op::PHI)
 	{
-	  Instruction *use = invalid_use.back();
-	  invalid_use.pop_back();
-	  inst->replace_use_with(use, phi);
+	  for (auto phi_arg : use->phi_args)
+	    {
+	      if (phi_arg.inst == inst
+		  && !contains(loop.bbs, phi_arg.bb))
+		{
+		  Instruction *arg_inst = get_phi(bb2phi, phi_arg.bb, inst);
+		  use->update_phi_arg(arg_inst, phi_arg.bb);
+		}
+	    }
 	}
+      else
+	inst->replace_use_with(use, get_phi(bb2phi, use->bb, inst));
     }
 }
 
@@ -141,14 +187,9 @@ std::optional<Loop> Loop_finder::find_loop()
 {
   for (auto& ssc : sccs)
     {
-      Basic_block *loop_exit = get_loop_exit(ssc);
-      if (loop_exit)
-	{
-	  Loop loop;
-	  loop.bbs = ssc;
-	  loop.loop_exit = loop_exit;
-	  return loop;
-	}
+      std::optional<Loop> loop = get_loop(ssc);
+      if (loop)
+	return loop;
     }
   return {};
 }
@@ -167,11 +208,8 @@ void Loop_finder::strong_connect(Basic_block *bb)
 	  strong_connect(succ);
 	  lowlink[bb] = std::min(lowlink.at(bb), lowlink.at(succ));
 	}
-      else if (dfn.at(succ) < dfn.at(bb)
-	       && std::find(stack.begin(), stack.end(), succ) != stack.end())
-	{
-	  lowlink[bb] = std::min(lowlink.at(bb), dfn.at(succ));
-	}
+      else if (dfn.at(succ) < dfn.at(bb) && contains(stack, succ))
+	lowlink[bb] = std::min(lowlink.at(bb), dfn.at(succ));
     }
 
   if (lowlink.at(bb) == dfn.at(bb))
@@ -189,7 +227,7 @@ void Loop_finder::strong_connect(Basic_block *bb)
     }
 }
 
-Basic_block *Loop_finder::get_loop_exit(std::vector<Basic_block *>& scc)
+std::optional<Loop> Loop_finder::get_loop(std::vector<Basic_block *>& scc)
 {
   // The loop must have at least one back edge, and all back edges must
   // be to the loop header.
@@ -203,40 +241,44 @@ Basic_block *Loop_finder::get_loop_exit(std::vector<Basic_block *>& scc)
 	    {
 	      found_back_edge = true;
 	      if (succ != loop_header)
-		return nullptr;
+		return {};
 	    }
 	}
     }
   if (!found_back_edge)
-    return nullptr;
+    return {};
 
   // Only the loop header may have predecessors outside the loop.
   for (size_t i = 1; i < scc.size(); i++)
     {
       for (auto pred : scc[i]->preds)
 	{
-	  if (std::find(scc.begin(), scc.end(), pred) == scc.end())
-	    return nullptr;
+	  if (!contains(scc, pred))
+	    return {};
 	}
     }
 
-  // All successors must be in the loop, or the exit_block.
-  Basic_block *loop_exit = nullptr;
+  // Find the exit_blocks.
+  std::vector<Basic_block *> exit_blocks;
   for (auto bb : scc)
     {
       for (auto succ : bb->succs)
 	{
-	  if (std::find(scc.begin(), scc.end(), succ) == scc.end())
-	    {
-	      if (!loop_exit)
-		loop_exit = succ;
-	      else if (succ != loop_exit)
-		return nullptr;
-	    }
+	  if (!contains(scc, succ))
+	    push_unique(exit_blocks, succ);
 	}
     }
+  if (exit_blocks.size() == 0)
+    throw Not_implemented("infinite loop");
+  std::sort(exit_blocks.begin(), exit_blocks.end(),
+	    [this](Basic_block *a, Basic_block *b) {
+	      return idx.at(a) < idx.at(b);
+	    });
 
-  return loop_exit;
+  Loop loop;
+  loop.bbs = scc;
+  loop.exit_blocks = exit_blocks;
+  return loop;
 }
 
 std::optional<Loop> find_loop(Function *func)
@@ -263,70 +305,77 @@ Basic_block *Unroller::translate(Basic_block *bb)
   return bb;
 }
 
+// Insert new exit blocks to ensure that all predecessors in the exit block
+// are within the loop and that no other basic block (except the loop header)
+// has predecessors within the loop.
 void Unroller::build_new_loop_exit()
 {
-  Basic_block *orig_loop_exit = loop.loop_exit;
-
-  loop.loop_exit = func->build_bb();
-  loop.loop_exit->build_br_inst(orig_loop_exit);
-  std::map<Instruction *, Instruction *> phi_map;
-  for (auto phi : orig_loop_exit->phis)
+  for (size_t i = 0; i < loop.exit_blocks.size(); i++)
     {
-      Instruction *new_phi = loop.loop_exit->build_phi_inst(phi->bitsize);
-      phi_map.insert({phi, new_phi});
-      phi->add_phi_arg(new_phi, loop.loop_exit);
-    }
+      Basic_block *orig_exit_block = loop.exit_blocks[i];
+      Basic_block *exit_block = func->build_bb();
+      exit_block->build_br_inst(orig_exit_block);
+      std::map<Instruction *, Instruction *> phi_map;
+      for (auto phi : orig_exit_block->phis)
+	{
+	  Instruction *new_phi = exit_block->build_phi_inst(phi->bitsize);
+	  phi_map.insert({phi, new_phi});
+	  phi->add_phi_arg(new_phi, exit_block);
+	}
+      loop.exit_blocks[i] = exit_block;
 
-  // Update exiting branches within the loop to point to the new
-  // loop exit.
-  for (auto bb : loop.bbs)
-    {
-      assert(bb->last_inst->opcode == Op::BR);
-      bool updated = false;
-      if (bb->last_inst->nof_args == 0)
+      // Update the branches within the loop to use the new loop exit.
+      for (auto bb : loop.bbs)
 	{
-	  Basic_block *dest_bb = bb->last_inst->u.br1.dest_bb;
-	  if (dest_bb == orig_loop_exit)
+	  assert(bb->last_inst->opcode == Op::BR);
+	  bool updated = false;
+	  if (bb->last_inst->nof_args == 0)
 	    {
-	      destroy_instruction(bb->last_inst);
-	      bb->build_br_inst(loop.loop_exit);
-	      updated = true;
+	      Basic_block *dest_bb = bb->last_inst->u.br1.dest_bb;
+	      if (dest_bb == orig_exit_block)
+		{
+		  destroy_instruction(bb->last_inst);
+		  bb->build_br_inst(exit_block);
+		  updated = true;
+		}
 	    }
-	}
-      else
-	{
-	  Instruction *arg = bb->last_inst->arguments[0];
-	  Basic_block *true_bb = bb->last_inst->u.br3.true_bb;
-	  Basic_block *false_bb = bb->last_inst->u.br3.false_bb;
-	  if (true_bb == orig_loop_exit || false_bb == orig_loop_exit)
+	  else
 	    {
-	      if (true_bb == orig_loop_exit)
-		true_bb = loop.loop_exit;
-	      if (false_bb == orig_loop_exit)
-		false_bb = loop.loop_exit;
-	      destroy_instruction(bb->last_inst);
-	      bb->build_br_inst(arg, true_bb, false_bb);
-	      updated = true;
+	      Instruction *arg = bb->last_inst->arguments[0];
+	      Basic_block *true_bb = bb->last_inst->u.br3.true_bb;
+	      Basic_block *false_bb = bb->last_inst->u.br3.false_bb;
+	      if (true_bb == orig_exit_block || false_bb == orig_exit_block)
+		{
+		  if (true_bb == orig_exit_block)
+		    true_bb = exit_block;
+		  if (false_bb == orig_exit_block)
+		    false_bb = exit_block;
+		  destroy_instruction(bb->last_inst);
+		  bb->build_br_inst(arg, true_bb, false_bb);
+		  updated = true;
+		}
 	    }
-	}
-      if (updated)
-	{
-	  for (auto phi : orig_loop_exit->phis)
+	  if (updated)
 	    {
-	      Instruction *phi_arg = phi->get_phi_arg(bb);
-	      phi->remove_phi_arg(bb);
-	      phi_map.at(phi)->add_phi_arg(phi_arg, bb);
+	      for (auto phi : orig_exit_block->phis)
+		{
+		  Instruction *phi_arg = phi->get_phi_arg(bb);
+		  phi->remove_phi_arg(bb);
+		  phi_map.at(phi)->add_phi_arg(phi_arg, bb);
+		}
 	    }
 	}
     }
 }
 
-void Unroller::update_loop_exit(Basic_block *src_bb, Basic_block *dst_bb)
+// Update phi nodes in the exit block to handle a new predecessor for the
+// current iteration of the loop.
+void Unroller::update_loop_exit(Basic_block *orig_loop_bb, Basic_block *current_iter_bb, Basic_block *exit_bb)
 {
-  for (auto phi : loop.loop_exit->phis)
+  for (auto phi : exit_bb->phis)
     {
-      Instruction *inst = phi->get_phi_arg(src_bb);
-      phi->add_phi_arg(translate(inst), dst_bb);
+      Instruction *inst = phi->get_phi_arg(orig_loop_bb);
+      phi->add_phi_arg(translate(inst), current_iter_bb);
     }
 }
 
@@ -369,8 +418,8 @@ void Unroller::duplicate(Instruction *inst, Basic_block *bb)
 	    {
 	      Basic_block *dest_bb = translate(inst->u.br1.dest_bb);
 	      bb->build_br_inst(dest_bb);
-	      if (dest_bb == loop.loop_exit)
-		update_loop_exit(inst->bb, bb);
+	      if (contains(loop.exit_blocks, dest_bb))
+		update_loop_exit(inst->bb, bb, dest_bb);
 	    }
 	  else
 	    {
@@ -378,10 +427,10 @@ void Unroller::duplicate(Instruction *inst, Basic_block *bb)
 	      Basic_block *true_bb = translate(inst->u.br3.true_bb);
 	      Basic_block *false_bb = translate(inst->u.br3.false_bb);
 	      bb->build_br_inst(arg, true_bb, false_bb);
-	      if (true_bb == loop.loop_exit)
-		update_loop_exit(inst->bb, bb);
-	      if (false_bb == loop.loop_exit)
-		update_loop_exit(inst->bb, bb);
+	      if (contains(loop.exit_blocks, true_bb))
+		update_loop_exit(inst->bb, bb, true_bb);
+	      if (contains(loop.exit_blocks, false_bb))
+		update_loop_exit(inst->bb, bb, false_bb);
 	    }
 	  return;
 	}
@@ -423,11 +472,8 @@ void Unroller::unroll_one_iteration()
 	tmp_curr_inst.insert({src_phi, dst_phi});
 	for (auto [arg_inst, arg_bb] : src_phi->phi_args)
 	  {
-	    auto I = std::find(loop.bbs.begin(), loop.bbs.end(), arg_bb);
-	    if (I != loop.bbs.end())
-	      {
-		dst_phi->add_phi_arg(translate(arg_inst), translate(arg_bb));
-	      }
+	    if (contains(loop.bbs, arg_bb))
+	      dst_phi->add_phi_arg(translate(arg_inst), translate(arg_bb));
 	  }
       }
     for (auto [phi, translated_phi] : tmp_curr_inst)
@@ -497,10 +543,14 @@ void Unroller::unroll()
 
   // The last block is for cases the program loops more than our unroll limit.
   // This makes our analysis invalid, so we mark this as UB.
+  // We must make it branch to an extit block. It does not matter which
+  // exit block we use, but it seems likely that the last exit block is
+  // the best.
+  Basic_block *last_exit_block = loop.exit_blocks.back();
   Basic_block *last_bb = next_loop_header;
   last_bb->build_inst(Op::UB, last_bb->value_inst(1, 1));
-  last_bb->build_br_inst(loop.loop_exit);
-  for (auto phi : loop.loop_exit->phis)
+  last_bb->build_br_inst(last_exit_block);
+  for (auto phi : last_exit_block->phis)
     {
       phi->add_phi_arg(last_bb->value_inst(0, phi->bitsize), last_bb);
     }

@@ -354,6 +354,26 @@ Instruction *Instruction::get_phi_arg(Basic_block *bb)
   return (*it).inst;
 }
 
+void Instruction::update_phi_arg(Instruction *inst, Basic_block *bb)
+{
+  auto it = std::find_if(phi_args.begin(), phi_args.end(), [bb](const Phi_arg& arg) {
+    return arg.bb == bb;
+  });
+  assert(it != phi_args.end());
+  Instruction *orig_arg_inst = (*it).inst;
+
+  (*it).inst = inst;
+  inst->used_by.insert(this);
+
+  // Remove this phi nodes from the original arg_inst if it is not used
+  // any longer.
+  it = std::find_if(phi_args.begin(), phi_args.end(), [orig_arg_inst](const Phi_arg& arg) {
+    return arg.inst == orig_arg_inst;
+  });
+  if (it == phi_args.end())
+    orig_arg_inst->used_by.erase(this);
+}
+
 void Instruction::add_phi_arg(Instruction *inst, Basic_block *bb)
 {
   Phi_arg phi_arg;

@@ -242,6 +242,7 @@ struct Instruction {
   void replace_all_uses_with(Instruction *inst);
   void update_uses();
   Instruction *get_phi_arg(Basic_block *bb);
+  void update_phi_arg(Instruction *inst, Basic_block *bb);
   void add_phi_arg(Instruction *inst, Basic_block *bb);
   void remove_phi_arg(Basic_block *bb);
   void remove_phi_args();
