@@ -149,6 +149,7 @@ struct Converter {
   void process_cfn_vcond(gimple *stmt, Basic_block *bb);
   void process_cfn_vcond_mask(gimple *stmt, Basic_block *bb);
   void process_cfn_vec_convert(gimple *stmt, Basic_block *bb);
+  void process_cfn_xorsign(gimple *stmt, Basic_block *bb);
   void process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb);
   void process_gimple_call(gimple *stmt, Basic_block *bb);
   void process_gimple_return(gimple *stmt, Basic_block *bb);
@@ -4137,6 +4138,29 @@ void Converter::process_cfn_usubc(gimple *stmt, Basic_block *bb)
   tree2instruction.insert({lhs, res});
 }
 
+void Converter::process_cfn_xorsign(gimple *stmt, Basic_block *bb)
+{
+  Instruction *arg1 = tree2inst(bb, gimple_call_arg(stmt, 0));
+  Instruction *arg2 = tree2inst(bb, gimple_call_arg(stmt, 1));
+  Instruction *signbit1 = bb->build_extract_bit(arg1, arg1->bitsize - 1);
+  Instruction *signbit2 = bb->build_extract_bit(arg2, arg2->bitsize - 1);
+  Instruction *signbit = bb->build_inst(Op::XOR, signbit1, signbit2);
+  Instruction *res = bb->build_trunc(arg1, arg1->bitsize - 1);
+  res = bb->build_inst(Op::CONCAT, signbit, res);
+
+  // For now, treat copying the sign to NaN as always produce the original
+  // canonical NaN.
+  // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
+  Instruction *is_nan = bb->build_inst(Op::IS_NAN, arg1);
+  res = bb->build_inst(Op::ITE, is_nan, arg1, res);
+  tree lhs = gimple_call_lhs(stmt);
+  if (lhs)
+    {
+      constrain_range(bb, lhs, res);
+      tree2instruction.insert({lhs, res});
+    }
+}
+
 void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
 {
   switch (gimple_call_combined_fn(stmt))
@@ -4273,6 +4297,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
       break;
     case CFN_VEC_CONVERT:
       process_cfn_vec_convert(stmt, bb);
+      break;
+    case CFN_XORSIGN:
+      process_cfn_xorsign(stmt, bb);
       break;
     default:
       {
