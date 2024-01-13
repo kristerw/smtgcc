@@ -166,6 +166,17 @@ struct Converter {
   Function *process_function();
 };
 
+// Build the minimal signed integer value for the bitsize.
+// The bitsize may be larger than 128.
+Instruction *build_min_int(Basic_block *bb, uint64_t bitsize)
+{
+  Instruction *top_bit = bb->value_inst(1, 1);
+  if (bitsize == 1)
+    return top_bit;
+  Instruction *zero = bb->value_inst(0, bitsize - 1);
+  return bb->build_inst(Op::CONCAT, top_bit, zero);
+}
+
 unsigned __int128 get_widest_int_val(widest_int v)
 {
   unsigned int len = v.get_len();
@@ -1861,14 +1872,8 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_unary
       {
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
-	    if (arg1->bitsize > 128)
-	      throw Not_implemented("process_unary_int: precision > 128");
-	    unsigned __int128 min_int =
-	      ((unsigned __int128)1) << (arg1->bitsize - 1);
-	    Instruction *min_int_inst =
-	      bb->value_inst(min_int, arg1->bitsize);
-	    Instruction *cond =
-	      bb->build_inst(Op::EQ, arg1, min_int_inst);
+	    Instruction *min_int_inst = build_min_int(bb, arg1->bitsize);
+	    Instruction *cond = bb->build_inst(Op::EQ, arg1, min_int_inst);
 	    bb->build_inst(Op::UB, cond);
 	  }
 	assert(!TYPE_UNSIGNED(arg1_type));
@@ -1892,14 +1897,8 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_unary
     case NEGATE_EXPR:
       if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	{
-	  if (arg1->bitsize > 128)
-	    throw Not_implemented("process_unary_int: precision > 128");
-	  unsigned __int128 min_int =
-	    ((unsigned __int128)1) << (arg1->bitsize - 1);
-	  Instruction *min_int_inst =
-	    bb->value_inst(min_int, arg1->bitsize);
-	  Instruction *cond =
-	    bb->build_inst(Op::EQ, arg1, min_int_inst);
+	  Instruction *min_int_inst = build_min_int(bb, arg1->bitsize);
+	  Instruction *cond = bb->build_inst(Op::EQ, arg1, min_int_inst);
 	  bb->build_inst(Op::UB, cond);
 	}
       return {bb->build_inst(Op::NEG, arg1), nullptr, nullptr};
@@ -2513,11 +2512,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
       {
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
-	    if (arg1->bitsize > 128)
-	      throw Not_implemented("process_binary_int: precision > 128");
-	    unsigned __int128 min_int =
-	      ((unsigned __int128)1) << (arg1->bitsize - 1);
-	    Instruction *min_int_inst = bb->value_inst(min_int, arg1->bitsize);
+	    Instruction *min_int_inst = build_min_int(bb, arg1->bitsize);
 	    Instruction *minus1_inst = bb->value_inst(-1, arg1->bitsize);
 	    Instruction *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
 	    Instruction *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
@@ -2623,11 +2618,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
       {
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
-	    if (arg1->bitsize > 128)
-	      throw Not_implemented("process_binary_int: precision > 128");
-	    unsigned __int128 min_int =
-	      ((unsigned __int128)1) << (arg1->bitsize - 1);
-	    Instruction *min_int_inst = bb->value_inst(min_int, arg1->bitsize);
+	    Instruction *min_int_inst = build_min_int(bb, arg1->bitsize);
 	    Instruction *minus1_inst = bb->value_inst(-1, arg1->bitsize);
 	    Instruction *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
 	    Instruction *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
@@ -2644,11 +2635,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
       {
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
-	    if (arg1->bitsize > 128)
-	      throw Not_implemented("process_binary_int: precision > 128");
-	    unsigned __int128 min_int =
-	      ((unsigned __int128)1) << (arg1->bitsize - 1);
-	    Instruction *min_int_inst = bb->value_inst(min_int, arg1->bitsize);
+	    Instruction *min_int_inst = build_min_int(bb, arg1->bitsize);
 	    Instruction *minus1_inst = bb->value_inst(-1, arg1->bitsize);
 	    Instruction *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
 	    Instruction *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
