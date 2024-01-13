@@ -1744,6 +1744,7 @@ std::pair<Instruction *, Instruction *> Converter::type_convert(Instruction *ins
   if (FLOAT_TYPE_P(src_type))
     {
       if (TREE_CODE(dest_type) == INTEGER_TYPE
+	  || TREE_CODE(dest_type) == BITINT_TYPE
 	  || TREE_CODE(dest_type) == ENUMERAL_TYPE)
 	{
 	  // The result is UB if the floating point value is out of range
