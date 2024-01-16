@@ -1532,8 +1532,11 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_load(
       inst2memory_flagsx.insert({value, mem_flags2});
     }
 
-  constrain_pointer(bb, value, TREE_TYPE(expr), mem_flags2);
-  canonical_nan_check(bb, value, TREE_TYPE(expr), undef);
+  if (expr != DECL_RESULT(fun->decl))
+    {
+      constrain_pointer(bb, value, TREE_TYPE(expr), mem_flags2);
+      canonical_nan_check(bb, value, TREE_TYPE(expr), undef);
+    }
 
   Instruction *provenance = nullptr;
   if (POINTER_TYPE_P(TREE_TYPE(expr)))
