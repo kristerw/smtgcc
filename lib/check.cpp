@@ -142,6 +142,7 @@ class Converter {
   void build_mem_state(Basic_block *bb, std::map<Basic_block*, Instruction*>& map);
   void generate_bb2cond(Basic_block *bb);
   std::pair<Instruction *, Instruction *> simplify_array_access(Instruction *array, Instruction *addr, std::map<Instruction *, std::pair<Instruction *, Instruction *>>& cache);
+  Instruction *strip_local_mem(Instruction *array, std::map<Instruction *, Instruction *>& cache);
   void convert(Basic_block *bb, Instruction *inst, Function_role role);
 
   Instruction *get_inst(const Cse_key& key, bool may_add_insts = true);
@@ -757,6 +758,67 @@ std::pair<Instruction *, Instruction *> Converter::simplify_array_access(Instruc
   return {value, array};
 }
 
+Instruction *Converter::strip_local_mem(Instruction *array, std::map<Instruction *, Instruction *>& cache)
+{
+  auto I = cache.find(array);
+  if (I != cache.end())
+    return I->second;
+
+  Instruction *orig_array = array;
+  for (;;)
+    {
+      if (array->opcode == Op::ITE)
+	{
+	  Instruction *cond = array->arguments[0];
+	  Instruction *arg2 = array->arguments[1];
+	  Instruction *arg3 = array->arguments[2];
+	  Instruction *array2 = strip_local_mem(arg2, cache);
+	  Instruction *array3 = strip_local_mem(arg3, cache);
+	  if (array2 != arg2 || array3 != arg3)
+	    array = ite(cond, array2, array3);
+	  break;
+	}
+      else if (array->opcode == Op::ARRAY_STORE
+	       || array->opcode == Op::ARRAY_SET_FLAG
+	       || array->opcode == Op::ARRAY_SET_UNDEF)
+	{
+	  Instruction *store_array = array->arguments[0];
+	  Instruction *store_addr = array->arguments[1];
+	  if (store_addr->opcode == Op::VALUE)
+	    {
+	      uint64_t id = store_addr->value() >> module->ptr_id_low;
+	      bool is_local = (id >> (module->ptr_id_bits - 1)) != 0;
+	      if (is_local)
+		{
+		  array = store_array;
+		  continue;
+		}
+	    }
+	  break;
+	}
+      else if (array->opcode == Op::ARRAY_SET_SIZE)
+	{
+	  Instruction *set_size_array = array->arguments[0];
+	  Instruction *set_size_id = array->arguments[1];
+	  if (set_size_id->opcode == Op::VALUE)
+	    {
+	      uint64_t id = set_size_id->value();
+	      bool is_local = (id >> (module->ptr_id_bits - 1)) != 0;
+	      if (is_local)
+		{
+		  array = set_size_array;
+		  continue;
+		}
+	    }
+	  break;
+	}
+      else
+	break;
+    }
+  cache.insert({orig_array, array});
+  return array;
+}
+
 void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 {
   Instruction *new_inst = nullptr;
@@ -1139,19 +1201,33 @@ void Converter::convert_function(Function *func, Function_role role)
 
   Basic_block *exit_block = func->bbs.back();
   Op mem_op = role == Function_role::src ? Op::SRC_MEM : Op::TGT_MEM;
-  build_inst(mem_op, bb2memory.at(exit_block),bb2memory_size.at(exit_block),
-	     bb2memory_undef.at(exit_block));
+  Instruction *memory = bb2memory.at(exit_block);
+  Instruction *memory_size = bb2memory_size.at(exit_block);
+  Instruction *memory_undef = bb2memory_undef.at(exit_block);
+  {
+    std::map<Instruction *, Instruction *> cache;
+    memory = strip_local_mem(memory, cache);
+  }
+  {
+    std::map<Instruction *, Instruction *> cache;
+    memory_size = strip_local_mem(memory_size, cache);
+  }
+  {
+    std::map<Instruction *, Instruction *> cache;
+    memory_undef = strip_local_mem(memory_undef, cache);
+  }
+  build_inst(mem_op, memory, memory_size, memory_undef);
   if (role == Function_role::src)
     {
-      src_memory = bb2memory.at(exit_block);
-      src_memory_size = bb2memory_size.at(exit_block);
-      src_memory_undef = bb2memory_undef.at(exit_block);
+      src_memory = memory;
+      src_memory_size = memory_size;
+      src_memory_undef = memory_undef;
     }
   else
     {
-      tgt_memory = bb2memory.at(exit_block);
-      tgt_memory_size = bb2memory_size.at(exit_block);
-      tgt_memory_undef = bb2memory_undef.at(exit_block);
+      tgt_memory = memory;
+      tgt_memory_size = memory_size;
+      tgt_memory_undef = memory_undef;
     }
 
   // Clear the arrays. This is needed for check_refine to get a clean slate
