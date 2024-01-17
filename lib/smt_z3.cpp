@@ -141,9 +141,15 @@ z3::expr Converter::inst_as_fp(const Instruction *inst)
   Z3_ast r = Z3_mk_fpa_to_fp_bv(ctx, bv, sort);
   z3::expr expr = z3::expr(ctx, r);
   if (Z3_is_numeral_ast(ctx, bv))
-    inst2fp.insert({inst, expr.simplify()});
-  else
-    inst2fp.insert({inst, expr});
+    {
+      // Constants are not recorded to inst2fp, since they are used
+      // as all types. Recording them could cause, for example, Op::ITE
+      // to generate integer ITE as floating point if a constant with
+      // the same value as one of the arguments has already been converted
+      // to fp.
+      return expr.simplify();
+    }
+  inst2fp.insert({inst, expr});
   return expr;
 }
 
@@ -624,6 +630,18 @@ void Converter::build_ternary_smt(const Instruction *inst)
 	  z3::expr arg2 = inst_as_bool(inst->arguments[1]);
 	  z3::expr arg3 = inst_as_bool(inst->arguments[2]);
 	  inst2bool.insert({inst, ite(arg1, arg2, arg3)});
+	}
+      else if ((inst2fp.contains(inst->arguments[1])
+		&& inst2fp.contains(inst->arguments[2]))
+	       || (inst2fp.contains(inst->arguments[1])
+		   && inst->arguments[2]->opcode == Op::VALUE)
+	       || (inst2fp.contains(inst->arguments[2])
+		   && inst->arguments[1]->opcode == Op::VALUE))
+	{
+	  z3::expr arg1 = inst_as_bool(inst->arguments[0]);
+	  z3::expr arg2 = inst_as_fp(inst->arguments[1]);
+	  z3::expr arg3 = inst_as_fp(inst->arguments[2]);
+	  inst2fp.insert({inst, ite(arg1, arg2, arg3)});
 	}
       else
 	{
