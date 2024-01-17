@@ -588,7 +588,7 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Instruction *inst, I
   assert(is_ub2 != nullptr);
 
   // Ranges do not take undefined values into account, so, e.g., a phi node
-  // may get a range, evem if one of the arguments is undefined. We therefore
+  // may get a range, even if one of the arguments is undefined. We therefore
   // need to filter out the undef cases from the check, otherwise we will
   // report miscompilation for
   //
