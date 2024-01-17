@@ -4455,6 +4455,60 @@ void Converter::process_gimple_return(gimple *stmt, Basic_block *bb)
   // miscompile otherwise...
 }
 
+Instruction *split_phi(Instruction *phi, uint64_t elem_bitsize, std::map<std::pair<Instruction *, uint64_t>, std::vector<Instruction *>>& cache)
+{
+  assert(phi->opcode == Op::PHI);
+  assert(phi->bitsize % elem_bitsize == 0);
+  if (phi->bitsize == elem_bitsize)
+    return phi;
+  Instruction *res = nullptr;
+  uint32_t nof_elem = phi->bitsize / elem_bitsize;
+  std::vector<Instruction *> phis;
+  phis.reserve(nof_elem);
+  for (uint64_t i = 0; i < nof_elem; i++)
+    {
+      Instruction *inst = phi->bb->build_phi_inst(elem_bitsize);
+      phis.push_back(inst);
+      if (res)
+	{
+	  Instruction *concat = create_inst(Op::CONCAT, inst, res);
+	  if (res->opcode == Op::PHI)
+	    {
+	      if (phi->bb->first_inst)
+		concat->insert_before(phi->bb->first_inst);
+	      else
+		phi->bb->insert_last(concat);
+	    }
+	  else
+	    concat->insert_after(res);
+	  res = concat;
+	}
+      else
+	res = inst;
+    }
+  phi->replace_all_uses_with(res);
+
+  for (auto [arg_inst, arg_bb] : phi->phi_args)
+    {
+      std::vector<Instruction *>& split = cache[{arg_inst, elem_bitsize}];
+      if (split.empty())
+	{
+	  for (uint64_t i = 0; i < nof_elem; i++)
+	    {
+	      Instruction *inst =
+		extract_vec_elem(arg_inst->bb, arg_inst, elem_bitsize, i);
+	      split.push_back(inst);
+	    }
+	}
+      for (uint64_t i = 0; i < nof_elem; i++)
+	{
+	  phis[i]->add_phi_arg(split[i], arg_bb);
+	}
+    }
+
+  return res;
+}
+
 void Converter::generate_return_inst(Basic_block *bb)
 {
   if (!retval_bitsize)
@@ -4515,6 +4569,15 @@ void Converter::generate_return_inst(Basic_block *bb)
 	}
       retval = phi;
       retval_undef = need_undef_phi ? phi_undef : nullptr;
+
+      std::map<std::pair<Instruction *, uint64_t>, std::vector<Instruction *>> cache;
+      if (VECTOR_TYPE_P(retval_type) || TREE_CODE(retval_type) == COMPLEX_TYPE)
+	{
+	  uint32_t elem_bitsize = bitsize_for_type(TREE_TYPE(retval_type));
+	  retval = split_phi(retval, elem_bitsize, cache);
+	  if (retval_undef)
+	    retval_undef = split_phi(retval_undef, elem_bitsize, cache);
+	}
     }
 
   // GCC treats it as UB to return the address of a local variable.
@@ -5115,6 +5178,7 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 
   // We have created all instructions, so it is now safe to add the phi
   // arguments (as they must have been created now).
+  std::map<std::pair<Instruction *, uint64_t>, std::vector<Instruction *>> cache;
   for (int i = 0; i < nof_blocks; i++)
     {
       basic_block gcc_bb =
@@ -5125,7 +5189,8 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	{
 	  gphi *phi = gsi.phi();
 	  tree phi_result = gimple_phi_result(phi);
-	  if (VOID_TYPE_P(TREE_TYPE(phi_result)))
+	  tree phi_type = TREE_TYPE(phi_result);
+	  if (VOID_TYPE_P(phi_type))
 	    {
 	      // Skip phi nodes for the memory SSA virtual SSA names.
 	      continue;
@@ -5150,6 +5215,13 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 		  assert(arg_prov);
 		  phi_prov->add_phi_arg(arg_prov, arg_bb);
 		}
+	    }
+
+	  if (VECTOR_TYPE_P(phi_type) || TREE_CODE(phi_type) == COMPLEX_TYPE)
+	    {
+	      uint32_t bs = bitsize_for_type(TREE_TYPE(phi_type));
+	      tree2instruction[phi_result] = split_phi(phi_inst, bs, cache);
+	      tree2undef[phi_result] = split_phi(phi_undef, bs, cache);
 	    }
 	}
     }
