@@ -4987,11 +4987,9 @@ void Converter::process_func_args()
 	      uint32_t ptr_id_bits = func->module->ptr_id_bits;
 	      Instruction *id = bb->build_extract_id(param_inst);
 	      Instruction *zero = bb->value_inst(0, ptr_id_bits);
-	      Instruction *cond0 = bb->build_inst(Op::SLT, id, zero);
 	      Instruction *one = bb->value_inst(1, ptr_id_bits);
-	      Instruction *cond1 = bb->build_inst(Op::EQ, id, one);
-	      Instruction *cond = bb->build_inst(Op::OR, cond0, cond1);
-	      bb->build_inst(Op::UB, cond);
+	      bb->build_inst(Op::UB, bb->build_inst(Op::SLT, id, zero));
+	      bb->build_inst(Op::UB, bb->build_inst(Op::EQ, id, one));
 	    }
 
 	  canonical_nan_check(bb, param_inst, TREE_TYPE(decl), nullptr);
