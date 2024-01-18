@@ -478,7 +478,22 @@ Instruction *Converter::bool_not(Instruction *a)
 
 void Converter::add_ub(Basic_block *bb, Instruction *cond)
 {
-  bb2ub[bb].push_back(cond);
+  // It is more effective to split Op::OR into two elements to better handle
+  // cases where, for example, one of the arguments is common to both src
+  // and tgt.
+  //
+  // Note: This split needs to be done here rather than in earlier passes
+  // such as simplify_inst, because it is common to encounter IR of the form
+  //   UB(!uninit & (cond1 | cond2))
+  // and the uninit check is not eliminated until the memory array
+  // optimizations are performed here in the Converter pass.
+  if (cond->opcode == Op::OR)
+    {
+      add_ub(bb, cond->arguments[0]);
+      add_ub(bb, cond->arguments[1]);
+    }
+  else
+    bb2ub[bb].push_back(cond);
 }
 
 void Converter::add_assert(Basic_block *bb, Instruction *cond)
