@@ -929,18 +929,68 @@ void Function::canonicalize()
 
   for (Basic_block *bb : bbs)
     {
-      // The code lowering the IR assumes the phi nodes and BB preds are
-      // sorted in reverse post order.
+      /*
+       * We need to sort the phi node arguments and BB predecessors in a
+       * consistent way to prevent random differences between src and tgt
+       * when we create ITEs for phi nodes. We basically sort them in
+       * reverse post order, but we treat basic blocks having exactly one
+       * predecessor and successor as having the same position as its
+       * successor.
+       *
+       * This approach generates the same ITEs for cases such as the GCC
+       * pre pass eliminating BB3 as shown below (where BB2 in the original
+       * came before BB3 in RPO)
+       *
+       *        BB1                          BB1
+       *        / \                           |\
+       *       /   \                          | \
+       *     BB3   BB2          ===>          | BB2
+       *       \   / \                        | / \
+       *        \ /   \                       |/   \
+       *        BB4   ...                    BB4   ...
+       *         |                            |
+       *        ...                          ...
+       *
+       * which would differ if we used the reverse post order directly.
+       */
       for (auto phi : bb->phis)
 	{
 	  std::sort(phi->phi_args.begin(), phi->phi_args.end(),
 		    [](const Phi_arg &a, const Phi_arg &b) {
-		      return a.bb->id < b.bb->id;
+		      Basic_block *a_bb = a.bb;
+		      while (a_bb->preds.size() == 1 &&
+			     a_bb->succs.size() == 1)
+			{
+			  a_bb = a_bb->preds[0];
+			}
+		      Basic_block *b_bb = b.bb;
+		      while (b_bb->preds.size() == 1 &&
+			     b_bb->succs.size() == 1)
+			{
+			  b_bb = b_bb->preds[0];
+			}
+		      if (a_bb == b_bb)
+			return a.bb->id < b.bb->id;
+		      return a_bb->id < b_bb->id;
 		    });
 	}
       std::sort(bb->preds.begin(), bb->preds.end(),
 		[](const Basic_block *a, const Basic_block *b) {
-		  return a->id < b->id;
+		  const Basic_block *a_bb = a;
+		  while (a_bb->preds.size() == 1 &&
+			 a_bb->succs.size() == 1)
+		    {
+		      a_bb = a_bb->preds[0];
+		    }
+		  const Basic_block *b_bb = b;
+		  while (b_bb->preds.size() == 1 &&
+			 b_bb->succs.size() == 1)
+		    {
+		      b_bb = b_bb->preds[0];
+		    }
+		  if (a_bb == b_bb)
+		    return a->id < b->id;
+		  return a_bb->id < b_bb->id;
 		});
     }
 }
