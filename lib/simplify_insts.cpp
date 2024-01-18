@@ -447,6 +447,43 @@ Instruction *simplify_concat(Instruction *inst)
       return new_inst;
     }
 
+  // concat (extract %x, %v1, %v2), (concat (extract %x, %v3, %v4), %y)
+  //   -> (concat (extract %x, %v1, %v4)), %y) if %v2 = %v3 + 1
+  if (arg1->opcode == Op::EXTRACT
+      && arg2->opcode == Op::CONCAT
+      && arg2->arguments[0]->opcode == Op::EXTRACT
+      && arg1->arguments[0] == arg2->arguments[0]->arguments[0]
+      && (arg1->arguments[2]->value()
+	  == arg2->arguments[0]->arguments[1]->value() + 1))
+    {
+      Instruction *extr = create_inst(Op::EXTRACT, arg1->arguments[0],
+				      arg1->arguments[1],
+				      arg2->arguments[0]->arguments[2]);
+      extr->insert_before(inst);
+      extr = simplify_inst(extr);
+
+      Instruction *new_inst = create_inst(Op::CONCAT, extr, arg2->arguments[1]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // concat %c1, (concat %c2, %x)) -> concat %c, %x
+  if (arg1->opcode == Op::VALUE
+      && arg2->opcode == Op::CONCAT
+      && arg2->arguments[0]->opcode == Op::VALUE
+      && arg1->bitsize + arg2->arguments[0]->bitsize <= 128)
+    {
+      Instruction *new_const =
+	create_inst(Op::CONCAT, arg1, arg2->arguments[0]);
+      new_const->insert_before(inst);
+      new_const = simplify_inst(new_const);
+
+      Instruction *new_inst =
+	create_inst(Op::CONCAT, new_const, arg2->arguments[1]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   return inst;
 }
 
