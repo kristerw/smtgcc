@@ -2449,11 +2449,6 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	arg2 = type_convert(arg2, arg2_type, arg1_type, bb);
 	Instruction *ptr = bb->build_inst(Op::ADD, arg1, arg2);
 
-	// The documentation is a bit unclear what "overflow" really mean.
-	// Pointers are unsigned, and POINTER_PLUS_EXPR is used for
-	// subtraction too, so "p - 1" will always overflow in some sense.
-	// So we interpret the addition as a subtraction if the second
-	// operand is interpreted as a negative number.
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	{
 	  Instruction *sub_overflow = bb->build_inst(Op::UGT, ptr, arg1);
@@ -2465,16 +2460,13 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	  bb->build_inst(Op::UB, is_ub);
 	}
 
-	// The resulting pointer cannot be NULL if arg1 or arg2 is
-	// non-zero, but GIMPLE allows NULL + 0.
+	// The resulting pointer cannot be NULL if arg1 is non-zero.
+	// (However, GIMPLE allows NULL + 0).
 	{
 	  Instruction *zero = bb->value_inst(0, ptr->bitsize);
 	  Instruction *cond1 = bb->build_inst(Op::EQ, ptr, zero);
 	  Instruction *cond2 = bb->build_inst(Op::NE, arg1, zero);
-	  Instruction *cond3 = bb->build_inst(Op::NE, arg2, zero);
-	  Instruction *args_nonzero = bb->build_inst(Op::OR, cond2, cond3);
-	  Instruction *cond = bb->build_inst(Op::AND, cond1, args_nonzero);
-	  bb->build_inst(Op::UB, cond);
+	  bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
 	}
 
 	return {ptr, nullptr, arg1_prov};
