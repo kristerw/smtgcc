@@ -1187,7 +1187,14 @@ void Converter::convert_function(Function *func, Function_role role)
 	{
 	  Instruction *phi_inst = translate.at(phi->phi_args[0].inst);
 	  assert(phi->phi_args.size() == bb->preds.size());
-	  for (unsigned i = 1; i < phi->phi_args.size(); i++)
+	  if (phi->phi_args.size() > 1)
+	    {
+	      Basic_block *pred_bb = phi->phi_args[0].bb;
+	      Instruction *cond = get_full_edge_cond(pred_bb, bb);
+	      Instruction *inst = translate.at(phi->phi_args[1].inst);
+	      phi_inst = ite(cond, phi_inst, inst);
+	    }
+	  for (unsigned i = 2; i < phi->phi_args.size(); i++)
 	    {
 	      Basic_block *pred_bb = phi->phi_args[i].bb;
 	      Instruction *cond = get_full_edge_cond(pred_bb, bb);
