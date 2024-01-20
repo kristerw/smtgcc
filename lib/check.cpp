@@ -143,6 +143,7 @@ class Converter {
   void generate_bb2cond(Basic_block *bb);
   std::pair<Instruction *, Instruction *> simplify_array_access(Instruction *array, Instruction *addr, std::map<Instruction *, std::pair<Instruction *, Instruction *>>& cache);
   Instruction *strip_local_mem(Instruction *array, std::map<Instruction *, Instruction *>& cache);
+  bool may_alias(Instruction *p1, Instruction *p2);
   void convert(Basic_block *bb, Instruction *inst, Function_role role);
 
   Instruction *get_inst(const Cse_key& key, bool may_add_insts = true);
@@ -745,8 +746,7 @@ std::pair<Instruction *, Instruction *> Converter::simplify_array_access(Instruc
 	      value = store_value;
 	      break;
 	    }
-	  else if (addr->opcode == Op::VALUE && store_addr->opcode == Op::VALUE
-		   && addr != store_addr)
+	  else if (!may_alias(addr, store_addr))
 	    array = store_array;
 	  else
 	    break;
@@ -834,6 +834,34 @@ Instruction *Converter::strip_local_mem(Instruction *array, std::map<Instruction
   return array;
 }
 
+bool Converter::may_alias(Instruction *p1, Instruction *p2)
+{
+  if (p1 != p2 && p1->opcode == Op::VALUE && p2->opcode == Op::VALUE)
+    return false;
+
+  // p + const1 cannot alias p + const2 if the constants differ.
+  if (p1->opcode == Op::ADD && p2->opcode == Op::ADD
+      && p1->arguments[0] == p2->arguments[0]
+      && p1->arguments[1]->opcode == Op::VALUE
+      && p2->arguments[1]->opcode == Op::VALUE
+      && p1->arguments[1] != p2->arguments[1])
+    return false;
+
+  // p cannot alias p + const if const != 0.
+  if (p1->opcode == Op::ADD
+      && p1->arguments[0] == p2
+      && p1->arguments[1]->opcode == Op::VALUE
+      && p1->arguments[1]->value() != 0)
+    return false;
+  if (p2->opcode == Op::ADD
+      && p2->arguments[0] == p1
+      && p2->arguments[1]->opcode == Op::VALUE
+      && p2->arguments[1]->value() != 0)
+    return false;
+
+  return true;
+}
+
 void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 {
   Instruction *new_inst = nullptr;
@@ -869,13 +897,8 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 		  // The array element has the correct value already.
 		  return;
 		}
-	      else if (addr != tmp_addr
-		       && addr->opcode == Op::VALUE
-		       && tmp_addr->opcode == Op::VALUE)
+	      else if (!may_alias(addr, tmp_addr))
 		{
-		  // If the addresses are distinct Op::VALUE, then we know
-		  // that they do not alias, so we continue traversing the
-		  // list.
 		  tmp_array = tmp_array->arguments[0];
 		  continue;
 		}
@@ -923,13 +946,8 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 		  // The array element has the correct value already.
 		  return;
 		}
-	      else if (addr != tmp_addr
-		       && addr->opcode == Op::VALUE
-		       && tmp_addr->opcode == Op::VALUE)
+	      else if (!may_alias(addr, tmp_addr))
 		{
-		  // If the addresses are distinct Op::VALUE, then we know
-		  // that they do not alias, so we continue traversing the
-		  // list.
 		  tmp_array = tmp_array->arguments[0];
 		  continue;
 		}
@@ -967,13 +985,8 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 		  // The array element has the correct value already.
 		  return;
 		}
-	      else if (addr != tmp_addr
-		       && addr->opcode == Op::VALUE
-		       && tmp_addr->opcode == Op::VALUE)
+	      else if (!may_alias(addr, tmp_addr))
 		{
-		  // If the addresses are distinct Op::VALUE, then we know
-		  // that they do not alias, so we continue traversing the
-		  // list.
 		  tmp_array = tmp_array->arguments[0];
 		  continue;
 		}
