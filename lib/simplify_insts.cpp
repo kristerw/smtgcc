@@ -507,6 +507,25 @@ Instruction *simplify_eq(Instruction *inst)
   if (arg1->bitsize == 1 && is_value_one(arg2))
     return arg1;
 
+  // Boolean x == 0 -> not x
+  if (arg1->bitsize == 1 && is_value_zero(arg2))
+    {
+      Instruction *new_inst = create_inst(Op::NOT, arg1);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // (sext x) == 0 -> x == 0
+  // (zext x) == 0 -> x == 0
+  if ((arg1->opcode == Op::SEXT || arg1->opcode == Op::ZEXT)
+      && is_value_zero(arg2))
+    {
+      Instruction *zero = inst->bb->value_inst(0, arg1->arguments[0]->bitsize);
+      Instruction *new_inst = create_inst(Op::EQ, arg1->arguments[0], zero);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   // x == x -> true
   if (arg1 == arg2)
     return inst->bb->value_inst(1, 1);
@@ -522,6 +541,25 @@ Instruction *simplify_ne(Instruction *inst)
   // Boolean x != 0 -> x
   if (arg1->bitsize == 1 && is_value_zero(arg2))
     return arg1;
+
+  // Boolean x != 1 -> not x
+  if (arg1->bitsize == 1 && is_value_one(arg2))
+    {
+      Instruction *new_inst = create_inst(Op::NOT, arg1);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // (sext x) != 0 -> x != 0
+  // (zext x) != 0 -> x != 0
+  if ((arg1->opcode == Op::SEXT || arg1->opcode == Op::ZEXT)
+      && is_value_zero(arg2))
+    {
+      Instruction *zero = inst->bb->value_inst(0, arg1->arguments[0]->bitsize);
+      Instruction *new_inst = create_inst(Op::NE, arg1->arguments[0], zero);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
 
   // x != x -> false
   if (arg1 == arg2)
