@@ -84,7 +84,7 @@ struct Converter {
   std::pair<Instruction *, Instruction *>tree2inst_undef(Basic_block *bb, tree expr);
   std::pair<Instruction *, Instruction *>tree2inst_prov(Basic_block *bb, tree expr);
   Instruction *tree2inst(Basic_block *bb, tree expr);
-  Instruction *tree2inst_constructor(Basic_block *bb, tree expr);
+  std::tuple<Instruction *, Instruction *, Instruction *> tree2inst_init_var(Basic_block *bb, tree expr);
   Addr process_array_ref(Basic_block *bb, tree expr);
   Addr process_component_ref(Basic_block *bb, tree expr);
   Addr process_bit_field_ref(Basic_block *bb, tree expr);
@@ -158,7 +158,7 @@ struct Converter {
   void process_gimple_switch(gimple *stmt, Basic_block *bb);
   Basic_block *get_phi_arg_bb(gphi *phi, int i);
   void generate_return_inst(Basic_block *bb);
-  void xxx_constructor(tree initial, Instruction *mem_inst);
+  void init_var_values(tree initial, Instruction *mem_inst);
   void init_var(tree decl, Instruction *mem_inst);
   void make_uninit(Basic_block *bb, Instruction *ptr, uint64_t size);
   void process_variables();
@@ -1122,13 +1122,9 @@ Instruction *Converter::tree2inst(Basic_block *bb, tree expr)
 // than what we get from normal operations. For example, initializing an array
 // of pointers may have an initializer &a-&b that in the function body would
 // be calculated by its own stmt.
-Instruction *Converter::tree2inst_constructor(Basic_block *bb, tree expr)
+std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_init_var(Basic_block *bb, tree expr)
 {
   check_type(TREE_TYPE(expr));
-
-  auto I = tree2instruction.find(expr);
-  if (I != tree2instruction.end())
-    return I->second;
 
   tree_code code = TREE_CODE(expr);
   if (TREE_OPERAND_LENGTH(expr) == 2)
@@ -1137,9 +1133,10 @@ Instruction *Converter::tree2inst_constructor(Basic_block *bb, tree expr)
       tree arg2_expr = TREE_OPERAND(expr, 1);
       tree arg1_type = TREE_TYPE(arg1_expr);
       tree arg2_type = TREE_TYPE(arg2_expr);
-      Instruction *arg1 = tree2inst_constructor(bb, arg1_expr);
-      Instruction *arg2 = tree2inst_constructor(bb, arg2_expr);
-      return process_binary_scalar(code, arg1, arg2, TREE_TYPE(expr),
+      auto [arg1, arg1_undef, arg1_prov] = tree2inst_init_var(bb, arg1_expr);
+      auto [arg2, arg2_undef, arg2_prov] = tree2inst_init_var(bb, arg2_expr);
+      return process_binary_scalar(code, arg1, arg1_undef, arg1_prov, arg2,
+				   arg2_undef, arg2_prov, TREE_TYPE(expr),
 				   arg1_type, arg2_type, bb);
     }
   switch (code)
@@ -1152,11 +1149,12 @@ Instruction *Converter::tree2inst_constructor(Basic_block *bb, tree expr)
     case CONVERT_EXPR:
       {
 	tree arg_expr = TREE_OPERAND(expr, 0);
-	Instruction *arg = tree2inst_constructor(bb, arg_expr);
-	return process_unary_scalar(code, arg, TREE_TYPE(expr), TREE_TYPE(arg_expr), bb);
+	auto [arg, arg_undef, arg_prov] = tree2inst_init_var(bb, arg_expr);
+	return process_unary_scalar(code, arg, arg_undef, arg_prov,
+				    TREE_TYPE(expr), TREE_TYPE(arg_expr), bb);
       }
     default:
-      return tree2inst(bb, expr);
+      return tree2inst_undef_prov(bb, expr);
     }
 }
 
@@ -4594,7 +4592,8 @@ void Converter::generate_return_inst(Basic_block *bb)
     bb->build_ret_inst(retval);
 }
 
-void Converter::xxx_constructor(tree initial, Instruction *mem_inst)
+// Write the values to initialized variables.
+void Converter::init_var_values(tree initial, Instruction *mem_inst)
 {
   Basic_block *bb = mem_inst->bb;
   Instruction *ptr = mem_inst;
@@ -4622,7 +4621,7 @@ void Converter::xxx_constructor(tree initial, Instruction *mem_inst)
       || POINTER_TYPE_P(type)
       || VECTOR_TYPE_P(type))
     {
-      Instruction *value = tree2inst_constructor(bb, initial);
+      auto [value, undef, prov] = tree2inst_init_var(bb, initial);
       value = to_mem_repr(bb, value, type);
       store_value(bb, mem_inst, value);
       return;
@@ -4642,7 +4641,7 @@ void Converter::xxx_constructor(tree initial, Instruction *mem_inst)
 	  uint64_t offset = idx * elem_size;
 	  Instruction *off = bb->value_inst(offset, ptr->bitsize);
 	  Instruction *ptr2 = bb->build_inst(Op::ADD, ptr, off);
-	  xxx_constructor(value, ptr2);
+	  init_var_values(value, ptr2);
 	}
       return;
     }
@@ -4664,11 +4663,11 @@ void Converter::xxx_constructor(tree initial, Instruction *mem_inst)
 	  if (TREE_CODE(elem_type) == ARRAY_TYPE
 	      || TREE_CODE(elem_type) == RECORD_TYPE
 	      || TREE_CODE(elem_type) == UNION_TYPE)
-	    xxx_constructor(value, ptr2);
+	    init_var_values(value, ptr2);
 	  else
 	    {
 	      uint64_t bitsize = bitsize_for_type(elem_type);
-	      Instruction *value_inst = tree2inst_constructor(bb, value);
+	      auto [value_inst, undef, prov] = tree2inst_init_var(bb, value);
 	      size = (bitsize + bit_offset + 7) / 8;
 	      if (DECL_BIT_FIELD_TYPE(index))
 		{
@@ -4762,7 +4761,7 @@ void Converter::init_var(tree decl, Instruction *mem_inst)
 	}
     }
 
-  xxx_constructor(initial, mem_inst);
+  init_var_values(initial, mem_inst);
 }
 
 void Converter::make_uninit(Basic_block *bb, Instruction *ptr, uint64_t size)
