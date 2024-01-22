@@ -58,7 +58,7 @@ void check(Module *orig_module, Module *module, const char *opt)
       Function *tgt_func = module->functions[i]->clone(m);
       tgt_func->rename("tgt");
 
-      Solver_result result = check_refine(m);
+      Solver_result result = check_refine(m, false);
       if (result.status != Result_status::correct)
 	{
 	  assert(result.message);

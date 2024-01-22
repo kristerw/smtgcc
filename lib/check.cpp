@@ -76,6 +76,8 @@ struct Inst_comp {
 // eliminate control flow, and change the memory operations to use
 // arrays.
 class Converter {
+  bool run_simplify_inst;
+
   // Maps basic blocks to an expression telling if it is executed.
   std::map<Basic_block *, Instruction *> bb2cond;
 
@@ -157,7 +159,7 @@ class Converter {
 			  Instruction *arg3);
 
 public:
-  Converter(Module *m);
+  Converter(Module *m, bool run_simplify_inst = true);
   ~Converter()
   {
     if (module)
@@ -338,6 +340,9 @@ Instruction *Converter::update_key2inst(Instruction *inst)
 
 Instruction *Converter::simplify(Instruction *inst)
 {
+  if (!run_simplify_inst)
+    return inst;
+
   // The canonical form for comparisons in the converter is using
   // Op::NOT for the negation of a comparison instead of changing the
   // opcode, so we do not want simplify_inst optimizing this to a plain
@@ -419,7 +424,8 @@ Instruction *Converter::build_inst(Op opcode, Instruction *arg1, Instruction *ar
   return inst;
 }
 
-Converter::Converter(Module *m)
+Converter::Converter(Module *m, bool run_simplify_inst)
+  : run_simplify_inst{run_simplify_inst}
 {
   module = create_module(m->ptr_bits, m->ptr_id_bits, m->ptr_offset_bits);
   dest_func = module->build_function("check");
@@ -1311,7 +1317,7 @@ bool Converter::need_checking()
 
 } // end anonymous namespace
 
-Solver_result check_refine(Module *module)
+Solver_result check_refine(Module *module, bool run_simplify_inst)
 {
   struct VStats {
     SStats cvc5;
@@ -1325,7 +1331,7 @@ Solver_result check_refine(Module *module)
     std::swap(src, tgt);
   assert(src->name == "src" && tgt->name == "tgt");
 
-  Converter converter(module);
+  Converter converter(module, run_simplify_inst);
   converter.convert_function(src, Function_role::src);
   converter.convert_function(tgt, Function_role::tgt);
   converter.finalize();
