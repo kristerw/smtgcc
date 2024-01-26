@@ -1,7 +1,11 @@
 # smtgcc
-This is an experimental implementation of translation validation for GCC (similar to the LLVM [Alive2](https://github.com/AliveToolkit/alive2)) and is a continuation of my previous experiment [`pysmtgcc`](https://github.com/kristerw/pysmtgcc). See [`pysmtgcc`](https://github.com/kristerw/pysmtgcc) for a list of blog posts describing how this works.
+This is an implementation of translation validation for GCC (similar to LLVM's [Alive2](https://github.com/AliveToolkit/alive2)), used to find bugs in the compiler.
 
-I am still figuring out how to implement correct memory semantics, so most of the code is placeholder code that lets me continue experimenting, so you should not trust the code too much... But it is useful enough to find bugs in GCC (a partial list of bugs found:
+The main functionality is in a plugin, which is passed to GCC when compiling:
+```
+gcc -O3 -fplugin=smtgcc-tv file.c
+```
+This plugin checks the IR (Intermediate Representation) before and after each optimization pass and reports an error if the IR after a pass is not a refinement of the input IR (which means the optimized code doesn't do the same thing as the input source code — that is, GCC has miscompiled the program). While the tool is somewhat limited, it has already found several bugs in GCC. A partial list of bugs found includes:
 [106513](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=106513),
 [106523](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=106523),
 [106744](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=106744),
@@ -18,9 +22,21 @@ I am still figuring out how to implement correct memory semantics, so most of th
 [111257](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111257),
 [111280](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111280),
 [111494](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111494),
-[112736](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=112736)).
+[112736](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=112736),
+[113588](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113588),
+[113590](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113590).
 
-# Compiling `smtgcc`
+The implementation is described in a series of blog posts. The first posts describe a previous version of this tool ([pysmtgcc](https://github.com/kristerw/pysmtgcc)), but the general ideas are the same for both tools:
+1. [Writing a GCC plugin in Python](https://kristerw.github.io/2022/10/20/gcc-python-plugin/)
+2. [Verifying GCC optimizations using an SMT solver](https://kristerw.github.io/2022/11/01/verifying-optimizations/)
+3. [Memory representation](https://kristerw.github.io/2023/07/17/memory-representation/)
+4. [Address calculations](https://kristerw.github.io/2023/07/18/address-calculations/)
+5. [Pointer alignment](https://kristerw.github.io/2023/07/20/pointer-alignment/)
+6. Problems with pointers
+7. Uninitialized memory
+8. Control flow
+
+# Compiling smtgcc
 You must have the Z3 SMT solver installed. For example, as
 ```
 sudo apt install libz3-dev
@@ -34,7 +50,7 @@ make
 # plugins
 
 ## smtgcc-tv
-`smtgcc-tv` compares the IR before/after each GIMPLE pass and complains if the resulting IR is not a refinement of the input (that is, if the GIMPLE pass miscompiled the program).
+smtgcc-tv compares the IR before/after each GIMPLE pass and complains if the resulting IR is not a refinement of the input (i.e. if the GIMPLE pass miscompiled the program).
 
 For example, compiling the function `foo` from [PR 111494](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111494)
 ```c
@@ -58,10 +74,10 @@ pr111494.c:2:5: note: ifcvt -> dce: Transformation is not correct (UB)
 .memory = (let ((a!1 (store (store (store ((as const (Array (_ BitVec 64) (_ BitVec 8)))
 [...]
 ```
-telling us that the output IR of the `dce` pass is not a refinement of the input that comes from `ifcvt` (in this case the error is in the vectorizer pass, but we are treating `vect` followed by `dce` as one pass because of [PR 111257](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111257)) because the result has more UB than the original, and the tool give us an example for `n = 5` where this happen.
+telling us that the output IR of the dce pass is not a refinement of the input that comes from ifcvt (in this case the error is in the vectorizer pass, but we are treating vect followed by dce as one pass because of [PR 111257](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111257)) because the result has more UB than the original, and the tool give us an example for `n = 5` where this happens.
 
 ## smtgcc-tv-backend
-`smtgcc-tv-backend` compares the GIMPLE IR from  the last GIMPLE pass with the generated assembly code, and complains if the resulting assembly code is not a refinement of the GIMPLE IR (that is, if the backend has miscompiled the program).
+smtgcc-tv-backend compares the GIMPLE IR from  the last GIMPLE pass with the generated assembly code, and complains if the resulting assembly code is not a refinement of the GIMPLE IR (that is, if the backend has miscompiled the program).
 
 This was just a quick experiment, so it has far too many limitations to be useful:
  * Only RISC-V
@@ -71,7 +87,7 @@ This was just a quick experiment, so it has far too many limitations to be usefu
  * The ABI is not correctly implemented, so the function must have a few parameters of an integral type.
 
 ## smtgcc-check-refine
-`smtgcc-check-refine` requires the translation unit to consist of two functions named `src` and `tgt`, and it verifies that `tgt` is a refinement of `src`.
+smtgcc-check-refine requires the translation unit to consist of two functions named `src` and `tgt`, and it verifies that `tgt` is a refinement of `src`.
 
 For example, testing changing the order of signed addition
 ```c
@@ -100,7 +116,7 @@ example.c:6:5: note: Transformation is not correct (UB)
 telling us that `tgt` invokes undefined behavior in cases where `src` does not,
 and gives us an example of input where this happens (the values are, unfortunately, written as unsigned values. In this case, it means `[c = -1776232725, a = 2128329002, b = 103540242]`).
 
-**Note**: `smtgcc-check-refine` works on the IR from the `ssa` pass, i.e., early enough that the compiler has not done many optimizations. But GCC does peephole optimizations earlier (even when compiling as `-O0`), so we need to prevent that from happening when testing such optimizations. The pre-GIMPLE optimizations are done one statement at a time, so we can disable the optimization by splitting the optimized pattern into two statements. For example, to check the following optimization
+**Note**: smtgcc-check-refine works on the IR from the ssa pass, i.e., early enough that the compiler has not done many optimizations. But GCC does peephole optimizations earlier (even when compiling as `-O0`), so we need to prevent that from happening when testing such optimizations. The pre-GIMPLE optimizations are done one statement at a time, so we can disable the optimization by splitting the optimized pattern into two statements. For example, to check the following optimization
 ```
 -(a - b)  ->  b - a
 ```
@@ -131,7 +147,7 @@ Some of the major limitations in the current version:
 * Function calls are not implemented.
 * Exceptions are not implemented.
 * Only tested on C and C++ source code.
-* Only simple loops are handled.
+* Nested loops are not handled.
 * Memory semantics is not correct
   - Strict aliasing does not work, so you must pass `-fno-strict-aliasing` to the compiler.
   - Handling of pointer provenance is too restrictive.
