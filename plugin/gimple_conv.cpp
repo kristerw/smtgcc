@@ -368,7 +368,6 @@ Instruction *extract_elem(Basic_block *bb, Instruction *vec, uint32_t elem_bitsi
 // Note: Floating point in unions cannot be fixed up here...
 void canonical_nan_check(Basic_block *bb, Instruction *inst, tree type, Instruction *undef)
 {
-  // TODO: arrays.
   if (SCALAR_FLOAT_TYPE_P(type))
     {
       Instruction *cond = bb->build_inst(Op::IS_NONCANONICAL_NAN, inst);
@@ -411,13 +410,17 @@ void canonical_nan_check(Basic_block *bb, Instruction *inst, tree type, Instruct
 	}
       return;
     }
-  if (VECTOR_TYPE_P(type) || TREE_CODE(type) == COMPLEX_TYPE)
+  if (VECTOR_TYPE_P(type)
+      || TREE_CODE(type) == COMPLEX_TYPE
+      || TREE_CODE(type) == ARRAY_TYPE)
     {
       tree elem_type = TREE_TYPE(type);
-      if (!FLOAT_TYPE_P(elem_type))
+      if (!FLOAT_TYPE_P(elem_type) && TREE_CODE(type) != ARRAY_TYPE)
 	return;
       uint32_t elem_bitsize = bitsize_for_type(elem_type);
-      uint32_t nof_elt = bitsize_for_type(type) / elem_bitsize;
+      assert(inst->bitsize % elem_bitsize == 0);
+      assert(inst->bitsize == bitsize_for_type(type));
+      uint32_t nof_elt = inst->bitsize / elem_bitsize;
       for (uint64_t i = 0; i < nof_elt; i++)
 	{
 	  Instruction *extract = extract_vec_elem(bb, inst, elem_bitsize, i);
@@ -446,7 +449,6 @@ void constrain_pointer(Basic_block *bb, Instruction *inst, tree type, Instructio
       bb->build_inst(Op::UB, cond);
     }
 
-  // TODO: arrays.
   if (TREE_CODE(type) == RECORD_TYPE)
     {
       for (tree fld = TYPE_FIELDS(type); fld; fld = DECL_CHAIN(fld))
@@ -467,6 +469,22 @@ void constrain_pointer(Basic_block *bb, Instruction *inst, tree type, Instructio
 	  Instruction *extract = bb->build_inst(Op::EXTRACT, inst, high, low);
 	  Instruction *extract2 =
 	    bb->build_inst(Op::EXTRACT, mem_flags, high, low);
+	  constrain_pointer(bb, extract, elem_type, extract2);
+	}
+      return;
+    }
+  if (TREE_CODE(type) == ARRAY_TYPE)
+    {
+      tree elem_type = TREE_TYPE(type);
+      uint32_t elem_bitsize = bitsize_for_type(elem_type);
+      assert(inst->bitsize % elem_bitsize == 0);
+      assert(inst->bitsize == bitsize_for_type(type));
+      uint32_t nof_elt = inst->bitsize / elem_bitsize;
+      for (uint64_t i = 0; i < nof_elt; i++)
+	{
+	  Instruction *extract = extract_vec_elem(bb, inst, elem_bitsize, i);
+	  Instruction *extract2 =
+	    extract_vec_elem(bb, mem_flags, elem_bitsize, i);
 	  constrain_pointer(bb, extract, elem_type, extract2);
 	}
       return;
@@ -4882,6 +4900,11 @@ void Converter::process_variables()
 	tree decl = var->decl;
 	if (TREE_READONLY(decl))
 	  init_var(decl, decl2instruction.at(decl));
+
+	// Constrain the global variables.
+	// We achieve this by loading the values, as process_load constrains
+	// the values as a side effect.
+	process_load(func->bbs[0], decl);
       }
   }
 
