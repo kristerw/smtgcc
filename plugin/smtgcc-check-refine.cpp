@@ -56,6 +56,7 @@ unsigned int tv_pass::execute(function *fun)
 	  simplify_mem(module);
 	  ls_elim(module);
 	  simplify_insts(module);
+	  simplify_cfg(module);
 	  dead_code_elimination(module);
 
 	  Solver_result result = check_refine(module);
