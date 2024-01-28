@@ -1297,6 +1297,10 @@ void Converter::finalize()
 
 bool Converter::need_checking()
 {
+  if ((src_common_ub->opcode == Op::VALUE && src_common_ub->value() != 0)
+      || (src_unique_ub->opcode == Op::VALUE && src_unique_ub->value() != 0))
+    return false;
+
   if (src_retval != tgt_retval
       || src_retval_undef != tgt_retval_undef)
     return true;
