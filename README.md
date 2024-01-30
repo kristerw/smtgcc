@@ -24,7 +24,8 @@ This plugin checks the IR (Intermediate Representation) before and after each op
 [111494](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111494),
 [112736](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=112736),
 [113588](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113588),
-[113590](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113590).
+[113590](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113590),
+[113630](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113630).
 
 The implementation is described in a series of blog posts. The first posts describe a previous version of this tool ([pysmtgcc](https://github.com/kristerw/pysmtgcc)), but the general ideas are the same for both tools:
 1. [Writing a GCC plugin in Python](https://kristerw.github.io/2022/10/20/gcc-python-plugin/)
