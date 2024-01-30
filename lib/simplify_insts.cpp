@@ -425,6 +425,21 @@ Instruction *simplify_and(Instruction *inst)
 	return inst->bb->value_inst(0, 1);
     }
 
+  // and (eq x, y), (ne x, y) -> 0
+  // and (ne x, y), (eq x, y) -> 0
+  if (((arg1->opcode == Op::EQ && arg2->opcode == Op::NE)
+       || (arg1->opcode == Op::NE && arg2->opcode == Op::EQ))
+      && arg1->arguments[0] == arg2->arguments[0]
+      && arg1->arguments[1] == arg2->arguments[1])
+    return inst->bb->value_inst(0, 1);
+
+  // and (not x), x -> 0
+  // and x, (not x) -> 0
+  if (arg1->opcode == Op::NOT && arg1->arguments[0] == arg2)
+    return inst->bb->value_inst(0, inst->bitsize);
+  if (arg2->opcode == Op::NOT && arg2->arguments[0] == arg1)
+    return inst->bb->value_inst(0, inst->bitsize);
+
   return inst;
 }
 
@@ -557,6 +572,15 @@ Instruction *simplify_ne(Instruction *inst)
     {
       Instruction *zero = inst->bb->value_inst(0, arg1->arguments[0]->bitsize);
       Instruction *new_inst = create_inst(Op::NE, arg1->arguments[0], zero);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // (sext x) != -1 -> x != -1
+  if (arg1->opcode == Op::SEXT && is_value_m1(arg2))
+    {
+      Instruction *m1 = inst->bb->value_inst(-1, arg1->arguments[0]->bitsize);
+      Instruction *new_inst = create_inst(Op::NE, arg1->arguments[0], m1);
       new_inst->insert_before(inst);
       return new_inst;
     }
