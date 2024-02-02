@@ -1619,6 +1619,37 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
   if (!undef)
     undef = bb->value_inst(0, value->bitsize);
 
+  // We are not tracking provenance through memory yet, which may lead to
+  // false positives. For example,
+  //
+  //     #include <stdint.h>
+  //     int a[10];
+  //     int b[10];
+  //     int *p;
+  //     int foo(uintptr_t i) {
+  //       int *q = a;
+  //       q = q + i;
+  //       p = q;
+  //       b[0] = 1;
+  //       *p = 0;
+  //       return b[0];
+  //     }
+  //
+  // SMTGCC reports a miscompilation when fre changes the return to "return 1;"
+  // because it believes *p may modify 'b'. We mitigate this issue by marking
+  // the store as UB if it stores a pointer with incorrect provenance.
+  // This workaround is not correct for GIMPLE, but it doesn't matter much
+  // as the original C or C++ program would be UB anyway if it stored a pointer
+  // having incorrect provenance.
+  // TODO: Implement provenance tracking through memory.
+  if (POINTER_TYPE_P(value_type))
+    {
+      assert(provenance);
+      Instruction *value_mem_id = bb->build_extract_id(value);
+      Instruction *is_ub = bb->build_inst(Op::NE, provenance, value_mem_id);
+      bb->build_inst(Op::UB, is_ub);
+    }
+
   uint64_t size;
   if (is_bitfield)
     {
