@@ -163,6 +163,7 @@ struct Converter {
   void make_uninit(Basic_block *bb, Instruction *ptr, uint64_t size);
   void process_variables();
   void process_func_args();
+  bool need_prov_phi(gimple *phi);
   void process_instructions(int nof_blocks, int *postorder);
   Function *process_function();
 };
@@ -2487,6 +2488,40 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 
 	return {ptr, nullptr, arg1_prov};
       }
+    case MINUS_EXPR:
+      {
+	Instruction *prov = nullptr;
+	if (arg1_prov && arg2_prov && arg1_prov != arg2_prov)
+	  throw Not_implemented("two different provenance in MINUS_EXPR");
+	if (arg1_prov)
+	  prov = arg1_prov;
+	if (arg2_prov)
+	  prov = arg2_prov;
+
+	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
+	  {
+	    Instruction *cond = bb->build_inst(Op::SSUB_WRAPS, arg1, arg2);
+	    bb->build_inst(Op::UB, cond);
+	  }
+	return {bb->build_inst(Op::SUB, arg1, arg2), nullptr, prov};
+      }
+    case PLUS_EXPR:
+      {
+	Instruction *prov = nullptr;
+	if (arg1_prov && arg2_prov && arg1_prov != arg2_prov)
+	  throw Not_implemented("two different provenance in PLUS_EXPR");
+	if (arg1_prov)
+	  prov = arg1_prov;
+	if (arg2_prov)
+	  prov = arg2_prov;
+
+	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
+	  {
+	    Instruction *cond = bb->build_inst(Op::SADD_WRAPS, arg1, arg2);
+	    bb->build_inst(Op::UB, cond);
+	  }
+	return {bb->build_inst(Op::ADD, arg1, arg2), nullptr, prov};
+      }
     default:
       break;
     }
@@ -2550,13 +2585,6 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
       }
       arg2 = type_convert(arg2, arg2_type, arg1_type, bb);
       return {bb->build_inst(Op::SHL, arg1, arg2), nullptr, nullptr};
-    case MINUS_EXPR:
-      if (!TYPE_OVERFLOW_WRAPS(lhs_type))
-	{
-	  Instruction *cond = bb->build_inst(Op::SSUB_WRAPS, arg1, arg2);
-	  bb->build_inst(Op::UB, cond);
-	}
-      return {bb->build_inst(Op::SUB, arg1, arg2), nullptr, nullptr};
     case MULT_EXPR:
       if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	{
@@ -2564,13 +2592,6 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	  bb->build_inst(Op::UB, cond);
 	}
       return {bb->build_inst(Op::MUL, arg1, arg2), nullptr, nullptr};
-    case PLUS_EXPR:
-      if (!TYPE_OVERFLOW_WRAPS(lhs_type))
-	{
-	  Instruction *cond = bb->build_inst(Op::SADD_WRAPS, arg1, arg2);
-	  bb->build_inst(Op::UB, cond);
-	}
-      return {bb->build_inst(Op::ADD, arg1, arg2), nullptr, nullptr};
     case POINTER_DIFF_EXPR:
       {
 	// Pointers are treated as unsigned, and the result must fit in
@@ -5057,6 +5078,22 @@ void Converter::process_func_args()
   BITMAP_FREE(nonnullargs);
 }
 
+bool Converter::need_prov_phi(gimple *phi)
+{
+  tree phi_result = gimple_phi_result(phi);
+  if (POINTER_TYPE_P(TREE_TYPE(phi_result)))
+    return true;
+
+  for (unsigned i = 0; i < gimple_phi_num_args(phi); i++)
+    {
+      tree arg = gimple_phi_arg_def(phi, i);
+      if (tree2provenance.contains(arg))
+	return true;
+    }
+
+  return false;
+}
+
 void Converter::process_instructions(int nof_blocks, int *postorder)
 {
   for (int i = 0; i < nof_blocks; i++)
@@ -5080,7 +5117,7 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	  Instruction *phi_inst = bb->build_phi_inst(bitwidth);
 	  Instruction *phi_undef = bb->build_phi_inst(bitwidth);
 	  constrain_range(bb, phi_result, phi_inst, phi_undef);
-	  if (POINTER_TYPE_P(TREE_TYPE(phi_result)))
+	  if (need_prov_phi(phi))
 	    {
 	      uint32_t ptr_id_bits = bb->func->module->ptr_id_bits;
 	      Instruction *phi_prov = bb->build_phi_inst(ptr_id_bits);
@@ -5224,7 +5261,9 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	      phi_undef->add_phi_arg(arg_undef, arg_bb);
 	      if (phi_prov)
 		{
-		  assert(arg_prov);
+		  assert(!POINTER_TYPE_P(phi_type) || arg_prov);
+		  if (!arg_prov)
+		    arg_prov = arg_bb->build_extract_id(arg_inst);
 		  phi_prov->add_phi_arg(arg_prov, arg_bb);
 		}
 	    }
