@@ -1734,7 +1734,7 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
 	  memory_flag = bb->build_inst(Op::NE, memory_flag, zero);
 	}
       else
-	memory_flag = bb->value_inst(provenance != nullptr, 1);
+	memory_flag = bb->value_inst(1, 1);
       bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
     }
 
