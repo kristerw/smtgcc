@@ -2352,10 +2352,15 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 			     mask);
 	  }
 
-	// TODO: We arbitrarily only propagate provenance from the first
-	// argument, which is not correct. We must add support for tracking
-	// more than one provenance for each pointer.
-	return {res, res_undef, arg1_prov};
+	Instruction *prov = nullptr;
+	if (arg1_prov && arg2_prov && arg1_prov != arg2_prov)
+	  throw Not_implemented("two different provenance in BIT_AND_EXPR");
+	if (arg1_prov)
+	  prov = arg1_prov;
+	if (arg2_prov)
+	  prov = arg2_prov;
+
+	return {res, res_undef, prov};
       }
     case BIT_IOR_EXPR:
       {
@@ -2385,10 +2390,15 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 			     mask);
 	  }
 
-	// TODO: We arbitrarily only propagate provenance from the first
-	// argument, which is not correct. We must add support for tracking
-	// more than one provenance for each pointer.
-	return {res, res_undef, arg1_prov};
+	Instruction *prov = nullptr;
+	if (arg1_prov && arg2_prov && arg1_prov != arg2_prov)
+	  throw Not_implemented("two different provenance in BIT_IOR_EXPR");
+	if (arg1_prov)
+	  prov = arg1_prov;
+	if (arg2_prov)
+	  prov = arg2_prov;
+
+	return {res, res_undef, prov};
       }
     case MULT_EXPR:
       {
