@@ -80,15 +80,16 @@ struct Converter {
 
   Instruction *build_memory_inst(uint64_t id, uint64_t size, uint32_t flags);
   void constrain_range(Basic_block *bb, tree expr, Instruction *inst, Instruction *undef=nullptr);
+  void mem_access_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size);
   std::tuple<Instruction *, Instruction *, Instruction *> tree2inst_undef_prov(Basic_block *bb, tree expr);
   std::pair<Instruction *, Instruction *>tree2inst_undef(Basic_block *bb, tree expr);
   std::pair<Instruction *, Instruction *>tree2inst_prov(Basic_block *bb, tree expr);
   Instruction *tree2inst(Basic_block *bb, tree expr);
   std::tuple<Instruction *, Instruction *, Instruction *> tree2inst_init_var(Basic_block *bb, tree expr);
-  Addr process_array_ref(Basic_block *bb, tree expr);
-  Addr process_component_ref(Basic_block *bb, tree expr);
-  Addr process_bit_field_ref(Basic_block *bb, tree expr);
-  Addr process_address(Basic_block *bb, tree expr);
+  Addr process_array_ref(Basic_block *bb, tree expr, bool is_mem_access);
+  Addr process_component_ref(Basic_block *bb, tree expr, bool is_mem_access);
+  Addr process_bit_field_ref(Basic_block *bb, tree expr, bool is_mem_access);
+  Addr process_address(Basic_block *bb, tree expr, bool is_mem_access);
   std::tuple<Instruction *, Instruction *, Instruction *> vector_as_array(Basic_block *bb, tree expr);
   std::tuple<Instruction *, Instruction *, Instruction *> process_load(Basic_block *bb, tree expr);
   void process_store(tree addr_expr, tree value_expr, Basic_block *bb);
@@ -287,6 +288,8 @@ uint64_t bitsize_for_type(tree type)
 uint64_t bytesize_for_type(tree type)
 {
   tree size_tree = TYPE_SIZE(type);
+  if (size_tree == NULL_TREE)
+    assert(0);
   if (size_tree == NULL_TREE)
     throw Not_implemented("incomplete parameter type");
   if (TREE_CODE(size_tree) != INTEGER_CST)
@@ -635,6 +638,32 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Instruction *inst, I
   if (is_ub1)
     bb->build_inst(Op::UB, is_ub1);
   bb->build_inst(Op::UB, is_ub2);
+}
+
+void Converter::mem_access_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size)
+{
+  assert(size != 0);
+  assert(size < (uint64_t(1) << func->module->ptr_offset_bits));
+
+  // It is UB if the pointer provenance does not correspond to the address.
+  Instruction *ptr_mem_id = bb->build_extract_id(ptr);
+  Instruction *is_ub = bb->build_inst(Op::NE, provenance, ptr_mem_id);
+  bb->build_inst(Op::UB, is_ub);
+
+  // It is UB if the size overflows the offset field.
+  Instruction *size_inst = bb->value_inst(size - 1, ptr->bitsize);
+  Instruction *end = bb->build_inst(Op::ADD, ptr, size_inst);
+  Instruction *end_mem_id = bb->build_extract_id(end);
+  Instruction *overflow = bb->build_inst(Op::NE, provenance, end_mem_id);
+  bb->build_inst(Op::UB, overflow);
+
+  // It is UB if the end is outside the memory object.
+  // Note: ptr is within the memory object; otherwise, the provenance check
+  // or the offset overflow check would have failed.
+  Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
+  Instruction *offset = bb->build_extract_offset(end);
+  Instruction *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
+  bb->build_inst(Op::UB, out_of_bound);
 }
 
 void store_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size)
@@ -1068,7 +1097,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_und
       }
     case ADDR_EXPR:
       {
-	Addr addr = process_address(bb, TREE_OPERAND(expr, 0));
+	Addr addr = process_address(bb, TREE_OPERAND(expr, 0), false);
 	assert(addr.bitoffset == 0);
 	return {addr.ptr, nullptr, addr.provenance};
       }
@@ -1177,7 +1206,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_ini
     }
 }
 
-Addr Converter::process_array_ref(Basic_block *bb, tree expr)
+Addr Converter::process_array_ref(Basic_block *bb, tree expr, bool is_mem_access)
 {
   tree array = TREE_OPERAND(expr, 0);
   tree index = TREE_OPERAND(expr, 1);
@@ -1185,7 +1214,7 @@ Addr Converter::process_array_ref(Basic_block *bb, tree expr)
   tree elem_type = TREE_TYPE(array_type);
   tree domain = TYPE_DOMAIN(array_type);
 
-  Addr addr = process_address(bb, array);
+  Addr addr = process_address(bb, array, is_mem_access);
   Instruction *idx = tree2inst(bb, index);
   if (idx->bitsize < addr.ptr->bitsize)
     {
@@ -1245,11 +1274,13 @@ Addr Converter::process_array_ref(Basic_block *bb, tree expr)
 	bb->value_inst((uint64_t)1 << ptr_offset_bits, ptr->bitsize * 2);
       Instruction *cond = bb->build_inst(Op::UGE, eoffset, emax_offset);
       bb->build_inst(Op::UB, cond);
+      if (is_mem_access)
+	mem_access_ub_check(bb, ptr, addr.provenance, elem_size);
     }
   return {ptr, 0, addr.provenance};
 }
 
-Addr Converter::process_component_ref(Basic_block *bb, tree expr)
+Addr Converter::process_component_ref(Basic_block *bb, tree expr, bool is_mem_access)
 {
   tree object = TREE_OPERAND(expr, 0);
   tree field = TREE_OPERAND(expr, 1);
@@ -1265,19 +1296,19 @@ Addr Converter::process_component_ref(Basic_block *bb, tree expr)
   offset += bit_offset / 8;
   bit_offset &= 7;
 
-  Addr addr = process_address(bb, object);
+  Addr addr = process_address(bb, object, is_mem_access);
   Instruction *off = bb->value_inst(offset, addr.ptr->bitsize);
   Instruction *ptr = bb->build_inst(Op::ADD, addr.ptr, off);
 
   return {ptr, bit_offset, addr.provenance};
 }
 
-Addr Converter::process_bit_field_ref(Basic_block *bb, tree expr)
+Addr Converter::process_bit_field_ref(Basic_block *bb, tree expr, bool is_mem_access)
 {
   tree object = TREE_OPERAND(expr, 0);
   tree position = TREE_OPERAND(expr, 2);
   uint64_t bit_offset = get_int_cst_val(position);
-  Addr addr = process_address(bb, object);
+  Addr addr = process_address(bb, object, is_mem_access);
   Instruction *ptr = addr.ptr;
   if (bit_offset > 7)
     {
@@ -1321,7 +1352,7 @@ void alignment_check(Basic_block *bb, tree expr, Instruction *ptr)
     }
 }
 
-Addr Converter::process_address(Basic_block *bb, tree expr)
+Addr Converter::process_address(Basic_block *bb, tree expr, bool is_mem_access)
 {
   tree_code code = TREE_CODE(expr);
   if (code == MEM_REF)
@@ -1330,7 +1361,12 @@ Addr Converter::process_address(Basic_block *bb, tree expr)
       assert(arg1_prov);
       Instruction *arg2 = tree2inst(bb, TREE_OPERAND(expr, 1));
       Instruction *ptr = bb->build_inst(Op::ADD, arg1, arg2);
-      alignment_check(bb, expr, ptr);
+      if (is_mem_access)
+	{
+	  uint64_t size = bytesize_for_type(TREE_TYPE(expr));
+	  mem_access_ub_check(bb, ptr, arg1_prov, size);
+	  alignment_check(bb, expr, ptr);
+	}
       return {ptr, 0, arg1_prov};
     }
   if (code == TARGET_MEM_REF)
@@ -1356,7 +1392,12 @@ Addr Converter::process_address(Basic_block *bb, tree expr)
 	  off = bb->build_inst(Op::ADD, off, index2);
 	}
       Instruction *ptr = bb->build_inst(Op::ADD, base, off);
-      alignment_check(bb, expr, ptr);
+      if (is_mem_access)
+	{
+	  uint64_t size = bytesize_for_type(TREE_TYPE(expr));
+	  mem_access_ub_check(bb, ptr, base_prov, size);
+	  alignment_check(bb, expr, ptr);
+	}
       return {ptr, 0, base_prov};
     }
   if (code == VAR_DECL)
@@ -1372,18 +1413,18 @@ Addr Converter::process_address(Basic_block *bb, tree expr)
 	}
     }
   if (code == ARRAY_REF)
-    return process_array_ref(bb, expr);
+    return process_array_ref(bb, expr, is_mem_access);
   if (code == COMPONENT_REF)
-    return process_component_ref(bb, expr);
+    return process_component_ref(bb, expr, is_mem_access);
   if (code == BIT_FIELD_REF)
-    return process_bit_field_ref(bb, expr);
+    return process_bit_field_ref(bb, expr, is_mem_access);
   if (code == VIEW_CONVERT_EXPR)
-    return process_address(bb, TREE_OPERAND(expr, 0));
+    return process_address(bb, TREE_OPERAND(expr, 0), is_mem_access);
   if (code == REALPART_EXPR)
-    return process_address(bb, TREE_OPERAND(expr, 0));
+    return process_address(bb, TREE_OPERAND(expr, 0), is_mem_access);
   if (code == IMAGPART_EXPR)
     {
-      Addr addr = process_address(bb, TREE_OPERAND(expr, 0));
+      Addr addr = process_address(bb, TREE_OPERAND(expr, 0), is_mem_access);
       uint64_t offset_val = bytesize_for_type(TREE_TYPE(expr));
       Instruction *offset = bb->value_inst(offset_val, addr.ptr->bitsize);
       Instruction *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
@@ -1478,12 +1519,11 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_load(
     throw Not_implemented("tree2inst: load unhandled size 0");
   if (size > MAX_MEMORY_UNROLL_LIMIT)
     throw Not_implemented("tree2inst: load size too big");
-  Addr addr = process_address(bb, expr);
+  Addr addr = process_address(bb, expr, true);
   bool is_bitfield = is_bit_field(expr);
   assert(is_bitfield || addr.bitoffset == 0);
   if (is_bitfield)
     size = (bitsize + addr.bitoffset + 7) / 8;
-  load_ub_check(bb, addr.ptr, addr.provenance, size);
   Instruction *value = nullptr;
   Instruction *undef = nullptr;
   Instruction *mem_flags2 = nullptr;
@@ -1588,7 +1628,7 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
       uint64_t size = bytesize_for_type(TREE_TYPE(addr_expr));
       assert(str_len <= size);
       const char *p = TREE_STRING_POINTER(value_expr);
-      Addr addr = process_address(bb, addr_expr);
+      Addr addr = process_address(bb, addr_expr, true);
       assert(!addr.bitoffset);
       Instruction *ptr = addr.ptr;
       Instruction *one = bb->value_inst(1, ptr->bitsize);
@@ -1612,7 +1652,7 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
 
   tree value_type = TREE_TYPE(value_expr);
   bool is_bitfield = is_bit_field(addr_expr);
-  Addr addr = process_address(bb, addr_expr);
+  Addr addr = process_address(bb, addr_expr, true);
   assert(is_bitfield || addr.bitoffset == 0);
   assert(addr.bitoffset < 8);
   auto [value, undef, provenance] = tree2inst_undef_prov(bb, value_expr);
@@ -3110,7 +3150,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::vector_constr
 
 void Converter::process_constructor(tree lhs, tree rhs, Basic_block *bb)
 {
-  Addr addr = process_address(bb, lhs);
+  Addr addr = process_address(bb, lhs, true);
   assert(!addr.bitoffset);
 
   if (TREE_CLOBBER_P(rhs) && CLOBBER_KIND(rhs) == CLOBBER_STORAGE_END)
