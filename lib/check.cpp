@@ -1181,7 +1181,6 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 
 void Converter::convert_function(Function *func, Function_role role)
 {
-  func->canonicalize();
   calculate_dominance(func);
 
   for (auto bb : func->bbs)
@@ -1324,6 +1323,115 @@ bool Converter::need_checking()
   return false;
 }
 
+bool identical(Instruction *inst1, Instruction *inst2)
+{
+  if (inst1->opcode != inst2->opcode)
+    return false;
+  if (inst1->bitsize != inst2->bitsize)
+    return false;
+  if (inst1->nof_args != inst2->nof_args)
+    return false;
+  if (inst1->is_commutative())
+    {
+      // Some passes, like ccp, may perform pointless argument swaps.
+      assert(inst1->nof_args == 2);
+      int nbr1_0 = inst1->arguments[0]->id;
+      int nbr1_1 = inst1->arguments[1]->id;
+      int nbr2_0 = inst2->arguments[0]->id;
+      int nbr2_1 = inst2->arguments[1]->id;
+      if (!((nbr1_0 == nbr2_0 && nbr1_1 == nbr2_1)
+	    || (nbr1_0 == nbr2_1 && nbr1_1 == nbr2_0)))
+	return false;
+    }
+  else
+    for (size_t i = 0; i < inst1->nof_args; i++)
+      {
+	if (inst1->arguments[i]->id != inst2->arguments[i]->id)
+	  return false;
+      }
+
+  // The normal instructions are fully checked by the preceding code,
+  // but instructions of class "special" require additional checks.
+  switch (inst1->opcode)
+    {
+    case Op::BR:
+      if (inst1->nof_args == 0)
+	{
+	  if (inst1->u.br1.dest_bb->id != inst2->u.br1.dest_bb->id)
+	    return false;
+	}
+      else
+	{
+	  if (inst1->u.br3.true_bb->id != inst2->u.br3.true_bb->id)
+	    return false;
+	  if (inst1->u.br3.false_bb->id != inst2->u.br3.false_bb->id)
+	    return false;
+	}
+      break;
+    case Op::PHI:
+      if (inst1->phi_args.size() != inst2->phi_args.size())
+	return false;
+      for (size_t i = 0; i < inst1->phi_args.size(); i++)
+	{
+	  Phi_arg arg1 = inst1->phi_args[i];
+	  Phi_arg arg2 = inst2->phi_args[i];
+	  if (arg1.inst->id != arg2.inst->id)
+	    return false;
+	  if (arg1.bb->id != arg2.bb->id)
+	    return false;
+	}
+      break;
+    case Op::RET:
+      // This is already checked by the argument check above.
+      break;
+    case Op::VALUE:
+      if (inst1->value() != inst2->value())
+	return false;
+      break;
+    default:
+      // If this is an instruction of class "special", then there is a missing
+      // case in this switch statement.
+      assert(inst1->iclass() != Inst_class::special);
+      break;
+    }
+
+  return true;
+}
+
+bool identical(Function *func1, Function *func2)
+{
+  if (func1->bbs.size() != func2->bbs.size())
+    return false;
+
+  for (size_t i = 0; i < func1->bbs.size(); i++)
+    {
+      Basic_block *bb1 = func1->bbs[i];
+      Basic_block *bb2 = func2->bbs[i];
+      if (bb1->phis.size() != bb2->phis.size())
+	return false;
+      for (size_t j = 0; j < bb1->phis.size(); j++)
+	{
+	  Instruction *phi1 = bb1->phis[j];
+	  Instruction *phi2 = bb2->phis[j];
+	  if (!identical(phi1, phi2))
+	    return false;
+	}
+      Instruction *inst1 = bb1->first_inst;
+      Instruction *inst2 = bb2->first_inst;
+      while (inst1 && inst2)
+	{
+	  if (!identical(inst1, inst2))
+	    return false;
+	  inst1 = inst1->next;
+	  inst2 = inst2->next;
+	}
+      if (inst1 || inst2)
+	return false;
+    }
+
+  return true;
+}
+
 } // end anonymous namespace
 
 Solver_result check_refine(Module *module, bool run_simplify_inst)
@@ -1339,6 +1447,11 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
   if (src->name != "src")
     std::swap(src, tgt);
   assert(src->name == "src" && tgt->name == "tgt");
+
+  src->canonicalize();
+  tgt->canonicalize();
+  if (identical(src, tgt))
+    return {};
 
   Converter converter(module, run_simplify_inst);
   converter.convert_function(src, Function_role::src);
@@ -1395,6 +1508,8 @@ Solver_result check_ub(Function *func)
     SStats z3;
   } stats;
 
+  func->canonicalize();
+
   Converter converter(func->module);
   converter.convert_function(func, Function_role::src);
   converter.finalize();
@@ -1445,6 +1560,8 @@ Solver_result check_assert(Function *func)
     SStats cvc5;
     SStats z3;
   } stats;
+
+  func->canonicalize();
 
   Converter converter(func->module);
   converter.convert_function(func, Function_role::src);
