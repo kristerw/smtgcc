@@ -289,8 +289,6 @@ uint64_t bytesize_for_type(tree type)
 {
   tree size_tree = TYPE_SIZE(type);
   if (size_tree == NULL_TREE)
-    assert(0);
-  if (size_tree == NULL_TREE)
     throw Not_implemented("incomplete parameter type");
   if (TREE_CODE(size_tree) != INTEGER_CST)
     {
