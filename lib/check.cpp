@@ -1182,6 +1182,7 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 void Converter::convert_function(Function *func, Function_role role)
 {
   func->canonicalize();
+  calculate_dominance(func);
 
   for (auto bb : func->bbs)
     {
@@ -1270,6 +1271,10 @@ void Converter::convert_function(Function *func, Function_role role)
       tgt_memory_size = memory_size;
       tgt_memory_undef = memory_undef;
     }
+
+  // Dominance information can be extensive for large functions, and it is
+  // no longer needed.
+  clear_dominance(func);
 
   // Clear the arrays. This is needed for check_refine to get a clean slate
   // when converting the second function. But it also reduces memory usage

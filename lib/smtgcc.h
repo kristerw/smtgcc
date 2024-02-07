@@ -301,6 +301,7 @@ public:
   Function *clone(Module *dest_module);
   void print(FILE *stream) const;
   Module *module;
+  bool has_dominance = false;
 private:
   int next_bb_id = 0;
 };
@@ -376,6 +377,8 @@ struct SStats {
 uint64_t get_time();
 
 // cfg.cpp
+void clear_dominance(Function *func);
+void calculate_dominance(Function *func);
 void reverse_post_order(Function *func);
 bool has_loops(Function *func);
 void simplify_cfg(Function *func);

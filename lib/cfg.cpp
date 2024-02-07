@@ -77,14 +77,31 @@ void remove_dead_bbs(std::vector<Basic_block *>& dead_bbs)
     }
 }
 
-// We assume the CFG is loop-free and no dead BBs.
-void calculate_dominance(Function *func)
+void update_phi(Basic_block *dest_bb, Basic_block *orig_src_bb, Basic_block *new_src_bb)
+{
+  for (auto phi : dest_bb->phis)
+    {
+      Instruction *inst = phi->get_phi_arg(orig_src_bb);
+      phi->add_phi_arg(inst, new_src_bb);
+    }
+}
+
+} // end anonymous namespace
+
+void clear_dominance(Function *func)
 {
   for (auto bb : func->bbs)
     {
       bb->dom.clear();
       bb->post_dom.clear();
     }
+  func->has_dominance = false;
+}
+
+// We assume the CFG is loop-free and no dead BBs.
+void calculate_dominance(Function *func)
+{
+  clear_dominance(func);
 
   int nof_bbs = func->bbs.size();
 
@@ -125,21 +142,13 @@ void calculate_dominance(Function *func)
       bb->post_dom = std::move(intersection);
       bb->post_dom.insert(bb);
     }
-}
 
-void update_phi(Basic_block *dest_bb, Basic_block *orig_src_bb, Basic_block *new_src_bb)
-{
-  for (auto phi : dest_bb->phis)
-    {
-      Instruction *inst = phi->get_phi_arg(orig_src_bb);
-      phi->add_phi_arg(inst, new_src_bb);
-    }
+  func->has_dominance = true;
 }
-
-} // end anonymous namespace
 
 Basic_block *nearest_dominator(const Basic_block *bb_in)
 {
+  assert(bb_in->func->has_dominance);
   if (bb_in->preds.size() == 0)
     return nullptr;
 
@@ -162,12 +171,14 @@ Basic_block *nearest_dominator(const Basic_block *bb_in)
 // Check if bb1 dominates bb2
 bool dominates(const Basic_block *bb1, const Basic_block *bb2)
 {
+  assert(bb1->func->has_dominance);
   return bb2->dom.contains(const_cast<Basic_block *>(bb1));
 }
 
 // Check if bb1 post dominates bb2
 bool post_dominates(const Basic_block *bb1, const Basic_block *bb2)
 {
+  assert(bb1->func->has_dominance);
   return bb2->post_dom.contains(const_cast<Basic_block *>(bb1));
 }
 
@@ -197,9 +208,6 @@ void reverse_post_order(Function *func)
       remove_dead_bbs(dead_bbs);
     }
   func->bbs = bbs;
-
-  if (!has_loops(func))
-    calculate_dominance(func);
 }
 
 bool has_loops(Function *func)
