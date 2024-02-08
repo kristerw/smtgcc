@@ -2500,51 +2500,17 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
     {
     case MAX_EXPR:
       {
-	if (arg1_prov || arg2_prov)
-	  {
-	    // We cannot use MIN/MAX when we have provenance, because
-	    // arg1 may be equal to arg2 without the provenance being
-	    // the same, and it is then "random" which is returned
-	    // (MIN/MAX are commutative, so GCC may change one to the other).
-	    // TODO: Must discuss the correct semantics on the mailing list.
-	    uint32_t ptr_id_bits = bb->func->module->ptr_id_bits;
-	    if (!arg1_prov)
-	      arg1_prov = bb->value_inst(0, ptr_id_bits);
-	    if (!arg2_prov)
-	      arg2_prov = bb->value_inst(0, ptr_id_bits);
-	    Op op = is_unsigned ? Op::UGE : Op::SGE;
-	    Instruction *cmp = bb->build_inst(op, arg1, arg2);
-	    Instruction *res = bb->build_inst(Op::ITE, cmp, arg1, arg2);
-	    Instruction *provenance =
-	      bb->build_inst(Op::ITE, cmp, arg1_prov, arg2_prov);
-	    return {res, nullptr, provenance};
-	  }
+	if ((arg1_prov || arg2_prov) && arg1_prov != arg2_prov)
+	  throw Not_implemented("two different provenance in MAX_EXPR");
 	Op op = is_unsigned ? Op::UMAX : Op::SMAX;
-	return {bb->build_inst(op, arg1, arg2), nullptr, nullptr};
+	return {bb->build_inst(op, arg1, arg2), nullptr, arg1_prov};
       }
     case MIN_EXPR:
       {
-	if (arg1_prov || arg2_prov)
-	  {
-	    // We cannot use MIN/MAX when we have provenance, because
-	    // arg1 may be equal to arg2 without the provenance being
-	    // the same, and it is then "random" which is returned
-	    // (MIN/MAX are commutative, so GCC may change one to the other).
-	    // TODO: Must discuss the correct semantics on the mailing list.
-	    uint32_t ptr_id_bits = bb->func->module->ptr_id_bits;
-	    if (!arg1_prov)
-	      arg1_prov = bb->value_inst(0, ptr_id_bits);
-	    if (!arg2_prov)
-	      arg2_prov = bb->value_inst(0, ptr_id_bits);
-	    Op op = is_unsigned ? Op::ULT : Op::SLT;
-	    Instruction *cmp = bb->build_inst(op, arg1, arg2);
-	    Instruction *res = bb->build_inst(Op::ITE, cmp, arg1, arg2);
-	    Instruction *provenance =
-	      bb->build_inst(Op::ITE, cmp, arg1_prov, arg2_prov);
-	    return {res, nullptr, provenance};
-	  }
+	if ((arg1_prov || arg2_prov) && arg1_prov != arg2_prov)
+	  throw Not_implemented("two different provenance in MIN_EXPR");
 	Op op = is_unsigned ? Op::UMIN : Op::SMIN;
-	return {bb->build_inst(op, arg1, arg2), nullptr, nullptr};
+	return {bb->build_inst(op, arg1, arg2), nullptr, arg1_prov};
       }
     case POINTER_PLUS_EXPR:
       {
