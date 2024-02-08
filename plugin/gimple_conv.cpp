@@ -1102,6 +1102,11 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_und
     case BIT_FIELD_REF:
       {
 	tree arg = TREE_OPERAND(expr, 0);
+	tree_code code = TREE_CODE(arg);
+	if (code == ARRAY_REF || code == MEM_REF || code == COMPONENT_REF
+	    || code == TARGET_MEM_REF || code == VAR_DECL)
+	  return process_load(bb, expr);
+
 	auto [value, undef] = tree2inst_undef(bb, arg);
 	uint64_t bitsize = get_int_cst_val(TREE_OPERAND(expr, 1));
 	uint64_t bit_offset = get_int_cst_val(TREE_OPERAND(expr, 2));
