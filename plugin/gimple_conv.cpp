@@ -1781,7 +1781,9 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
       bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
     }
 
-  store_ub_check(bb, addr.ptr, addr.provenance, size);
+  // It is UB to write to constant memory.
+  Instruction *is_const = bb->build_inst(Op::IS_CONST_MEM, addr.provenance);
+  bb->build_inst(Op::UB, is_const);
 }
 
 // Convert a scalar value of src_type to dest_type.
