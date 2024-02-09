@@ -1809,24 +1809,21 @@ std::pair<Instruction *, Instruction *> Converter::type_convert(Instruction *ins
 	  unsigned src_prec = inst->bitsize;
 	  unsigned dest_prec = bitsize_for_type(dest_type);
 	  if (src_prec > dest_prec)
-	    return {bb->build_trunc(inst, dest_prec), nullptr};
-	  if (src_prec == dest_prec)
+	    inst = bb->build_trunc(inst, dest_prec);
+	  else if (src_prec < dest_prec)
 	    {
-	      assert(!POINTER_TYPE_P(src_type) || provenance);
-	      if (POINTER_TYPE_P(dest_type) && !provenance)
-		provenance = bb->build_extract_id(inst);
-	      return {inst, provenance};
+	      Op op = TYPE_UNSIGNED(src_type) ? Op::ZEXT : Op::SEXT;
+	      Instruction *dest_prec_inst = bb->value_inst(dest_prec, 32);
+	      inst =  bb->build_inst(op, inst, dest_prec_inst);
+	      provenance = nullptr;
 	    }
-	  Op op = TYPE_UNSIGNED(src_type) ? Op::ZEXT : Op::SEXT;
-	  Instruction *dest_prec_inst = bb->value_inst(dest_prec, 32);
-	  Instruction *dest =  bb->build_inst(op, inst, dest_prec_inst);
 	  if (POINTER_TYPE_P(dest_type))
 	    {
 	      assert(!POINTER_TYPE_P(src_type) || provenance);
 	      if (!provenance)
-		provenance = bb->build_extract_id(dest);
+		provenance = bb->build_extract_id(inst);
 	    }
-	  return {dest, provenance};
+	  return {inst, provenance};
 	}
       if (FLOAT_TYPE_P(dest_type))
 	{
@@ -1935,7 +1932,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_unary
 	      arg1 = bb->build_trunc(arg1, dest_prec);
 	      if (arg1_undef)
 		arg1_undef = bb->build_trunc(arg1_undef, dest_prec);
-	      return {arg1, arg1_undef, arg1_prov};
+	      return {arg1, arg1_undef, nullptr};
 	    }
 	}
       break;
