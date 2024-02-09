@@ -640,7 +640,6 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Instruction *inst, I
 
 void Converter::mem_access_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size)
 {
-  assert(size != 0);
   assert(size < (uint64_t(1) << func->module->ptr_offset_bits));
 
   // It is UB if the pointer provenance does not correspond to the address.
@@ -1250,8 +1249,8 @@ Addr Converter::process_array_ref(Basic_block *bb, tree expr, bool is_mem_access
 	throw Not_implemented("process_array_ref: index TYPE_MIN_VALUE != 0");
       tree max = TYPE_MAX_VALUE(domain);
       // TODO: Handle variable size arrays. This is (currently) not needed
-      //       for correctness -- the array is its own obkect or last in a
-      //       strucure, so overflow is detected on the memory block level.
+      //       for correctness -- the array is its own object or last in a
+      //       structure, so overflow is detected on the memory block level.
       //       But it will start failing when we support non-constant
       //       field offsets in structures.
       if (TREE_CODE(max) == INTEGER_CST)
