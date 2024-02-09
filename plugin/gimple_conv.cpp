@@ -419,7 +419,7 @@ void canonical_nan_check(Basic_block *bb, Instruction *inst, tree type, Instruct
       tree elem_type = TREE_TYPE(type);
       if (!FLOAT_TYPE_P(elem_type) && TREE_CODE(type) != ARRAY_TYPE)
 	return;
-      uint32_t elem_bitsize = bitsize_for_type(elem_type);
+      uint32_t elem_bitsize = bytesize_for_type(elem_type) * 8;
       assert(inst->bitsize % elem_bitsize == 0);
       assert(inst->bitsize == bitsize_for_type(type));
       uint32_t nof_elt = inst->bitsize / elem_bitsize;
@@ -478,7 +478,7 @@ void constrain_pointer(Basic_block *bb, Instruction *inst, tree type, Instructio
   if (TREE_CODE(type) == ARRAY_TYPE)
     {
       tree elem_type = TREE_TYPE(type);
-      uint32_t elem_bitsize = bitsize_for_type(elem_type);
+      uint32_t elem_bitsize = bytesize_for_type(elem_type) * 8;
       assert(inst->bitsize % elem_bitsize == 0);
       assert(inst->bitsize == bitsize_for_type(type));
       uint32_t nof_elt = inst->bitsize / elem_bitsize;
