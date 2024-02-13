@@ -65,6 +65,7 @@ struct Converter {
   CommonState *state;
   function *fun;
   Function *func = nullptr;
+  Instruction *loop_vect_sym = nullptr;
   std::string pass_name;
   std::map<Basic_block *, std::set<Basic_block *>> switch_bbs;
   std::map<basic_block, Basic_block *> gccbb2bb;
@@ -133,7 +134,7 @@ struct Converter {
   void process_cfn_ffs(gimple *stmt, Basic_block *bb);
   void process_cfn_fmax(gimple *stmt, Basic_block *bb);
   void process_cfn_fmin(gimple *stmt, Basic_block *bb);
-  void process_cfn_loop_vectorized(gimple *stmt, Basic_block *bb);
+  void process_cfn_loop_vectorized(gimple *stmt);
   void process_cfn_memcpy(gimple *stmt, Basic_block *bb);
   void process_cfn_memset(gimple *stmt, Basic_block *bb);
   void process_cfn_mul_overflow(gimple *stmt, Basic_block *bb);
@@ -168,6 +169,17 @@ struct Converter {
   void process_instructions(int nof_blocks, int *postorder);
   Function *process_function();
 };
+
+Instruction *get_lv_inst(Function *func)
+{
+  for (Instruction *inst = func->bbs[0]->first_inst; inst; inst = inst->next)
+    {
+      if (inst->opcode == Op::SYMBOLIC
+	  && inst->arguments[0]->value() == LOOP_VECT_SYM_IDX)
+	return inst;
+    }
+  return nullptr;
+}
 
 // Build the minimal signed integer value for the bitsize.
 // The bitsize may be larger than 128.
@@ -3724,14 +3736,18 @@ void Converter::process_cfn_fmin(gimple *stmt, Basic_block *bb)
   tree2instruction.insert({lhs, bb->build_inst(Op::ITE, is_zero, min3, min2)});
 }
 
-void Converter::process_cfn_loop_vectorized(gimple *stmt, Basic_block *bb)
+void Converter::process_cfn_loop_vectorized(gimple *stmt)
 {
   tree lhs = gimple_call_lhs(stmt);
   assert(lhs);
-  Instruction *idx_inst = bb->value_inst(state->symbolic_idx++, 32);
-  Instruction *bitsize_inst = bb->value_inst(1, 32);
-  Instruction *inst = bb->build_inst(Op::SYMBOLIC, idx_inst, bitsize_inst);
-  tree2instruction.insert({lhs, inst});
+  if (!loop_vect_sym)
+    {
+      Basic_block *entry_bb = func->bbs[0];
+      Instruction *idx_inst = entry_bb->value_inst(LOOP_VECT_SYM_IDX, 32);
+      Instruction *bs_inst = entry_bb->value_inst(1, 32);
+      loop_vect_sym = entry_bb->build_inst(Op::SYMBOLIC, idx_inst, bs_inst);
+    }
+  tree2instruction.insert({lhs, loop_vect_sym});
 }
 
 void Converter::process_cfn_memcpy(gimple *stmt, Basic_block *bb)
@@ -4347,7 +4363,7 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
     case CFN_FALLTHROUGH:
       break;
     case CFN_LOOP_VECTORIZED:
-      process_cfn_loop_vectorized(stmt, bb);
+      process_cfn_loop_vectorized(stmt);
       break;
     case CFN_MUL_OVERFLOW:
       process_cfn_mul_overflow(stmt, bb);
@@ -5418,4 +5434,29 @@ Module *create_module()
       ptr_offset_bits = 48;
     }
   return create_module(ptr_bits, ptr_id_bits, ptr_offset_bits);
+}
+
+// We emit CFN_LOOP_VECTORIZED as a symbolic value, which ensures that we
+// verify tgt is a refinement of src regardless of its value. However, this
+// approach can lead to false positives in cases where gcc decides not to
+// vectorize the loop. The issue arises because the 'true' branch of
+// CFN_LOOP_VECTORIZED may have changed some integer variables to unsigned
+// to prevent overflow. When CFN_LOOP_VECTORIZED is eliminated, we then
+// detect a possible overflow when this is compared to tgt, which now only
+// contains the original, overflowing calculations.
+//
+// We address this by setting CFN_LOOP_VECTORIZED to `false` in src if tgt
+// does not include any CFN_LOOP_VECTORIZED.
+void adjust_loop_vectorized(smtgcc::Module *module)
+{
+  assert(module->functions.size() == 2);
+  Function *src = module->functions[0];
+  Function *tgt = module->functions[1];
+  if (src->name != "src")
+    std::swap(src, tgt);
+  assert(src->name == "src" && tgt->name == "tgt");
+  Instruction *src_lv_inst = get_lv_inst(src);
+  Instruction *tgt_lv_inst = get_lv_inst(tgt);
+  if (src_lv_inst && !tgt_lv_inst)
+    src_lv_inst->replace_all_uses_with(src_lv_inst->bb->value_inst(0, 1));
 }

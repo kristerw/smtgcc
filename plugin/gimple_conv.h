@@ -4,6 +4,9 @@
 #include <map>
 #include <vector>
 
+// The symbolic instruction index used for CFN_LOOP_VECTORIZED.
+#define LOOP_VECT_SYM_IDX  0
+
 struct CommonState {
   // ID 0 - reserved for NULL
   //    1 - reserved for anonymous memory
@@ -12,12 +15,10 @@ struct CommonState {
   std::map<tree, int64_t> decl2id;
 
   std::vector<smtgcc::Param_info> params;
-
-  // The next free index for a symbolic instruction.
-  uint32_t symbolic_idx = 0;
 };
 
 smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun);
 smtgcc::Module *create_module();
+void adjust_loop_vectorized(smtgcc::Module *module);
 
 #endif

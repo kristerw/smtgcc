@@ -82,6 +82,7 @@ void tv_function::check()
 		prev_pass_name.c_str(), pass_name.c_str(),
 		function_name(cfun));
 
+      adjust_loop_vectorized(module);
       canonicalize_memory(module);
       simplify_mem(module);
       ls_elim(module);
