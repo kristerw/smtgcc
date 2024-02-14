@@ -15,6 +15,8 @@
 
 namespace smtgcc {
 
+const int unroll_limit = 12;
+
 struct Not_implemented
 {
   Not_implemented(const std::string& msg) : msg{msg} {}

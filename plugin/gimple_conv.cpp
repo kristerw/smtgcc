@@ -276,6 +276,15 @@ void check_type(tree type)
 	  && precision != 128)
 	throw Not_implemented("check_type: fp" + std::to_string(precision));
     }
+  else if (TREE_CODE(type) == BITINT_TYPE)
+    {
+      // The bitintlower pass creates loops that iterate over 64-bit
+      // chunks of the integer, leading us to report miscompilations
+      // if the loop is not fully unrolled. Therefore, we limit the
+      // size of bitint integers to dimensions we can manage.
+      if (TYPE_PRECISION(type) > 64 * unroll_limit)
+	throw Not_implemented("check_type: too wide BITINT");
+    }
 }
 
 // The logical bitsize used in the IR for the GCC type/

@@ -14,8 +14,6 @@ using namespace std::string_literals;
 namespace smtgcc {
 namespace {
 
-const int unroll_limit = 12;
-
 struct Loop
 {
   // The basic blocks of the loop, in reverse post order.
