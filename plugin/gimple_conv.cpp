@@ -1975,6 +1975,15 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_unary
 		arg1_undef = bb->build_trunc(arg1_undef, dest_prec);
 	      return {arg1, arg1_undef, nullptr};
 	    }
+	  else
+	    {
+	      Op op = TYPE_UNSIGNED(arg1_type) ? Op::ZEXT : Op::SEXT;
+	      Instruction *dest_prec_inst = bb->value_inst(dest_prec, 32);
+	      arg1 =  bb->build_inst(op, arg1, dest_prec_inst);
+	      if (arg1_undef)
+		arg1_undef =  bb->build_inst(op, arg1_undef, dest_prec_inst);
+	      return {arg1, arg1_undef, nullptr};
+	    }
 	}
       break;
     default:
