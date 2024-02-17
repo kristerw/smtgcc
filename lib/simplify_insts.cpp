@@ -1239,6 +1239,11 @@ Instruction *simplify_extract(Instruction *inst)
 	}
     }
 
+  // "extract (zext x)" is changed to 0 if the range only access the
+  // extended bits.
+  if (arg->opcode == Op::ZEXT && low_val >= arg->arguments[0]->bitsize)
+    return inst->bb->value_inst(0, inst->bitsize);
+
   // "extract (sext x)" is changed to "sext x" with a smaller extension if
   // the extraction extract from the low part (and similarly for zext).
   if ((arg->opcode == Op::SEXT || arg->opcode == Op::ZEXT) && low_val == 0)
