@@ -165,6 +165,7 @@ struct Converter {
   void init_var_values(tree initial, Instruction *mem_inst);
   void init_var(tree decl, Instruction *mem_inst);
   void make_uninit(Basic_block *bb, Instruction *ptr, uint64_t size);
+  void constrain_variable(Basic_block *bb, tree decl);
   void process_variables();
   void process_func_args();
   bool need_prov_phi(gimple *phi);
@@ -5002,6 +5003,40 @@ void Converter::make_uninit(Basic_block *bb, Instruction *ptr, uint64_t size)
     }
 }
 
+bool may_need_constraining(tree type)
+{
+  tree_code code = TREE_CODE(type);
+  if (code == INTEGER_TYPE &&
+      bitsize_for_type(type) == bytesize_for_type(type) * 8)
+    return false;
+  if (VECTOR_TYPE_P(type)
+      || TREE_CODE(type) == COMPLEX_TYPE
+      || TREE_CODE(type) == ARRAY_TYPE)
+    {
+      tree elem_type = TREE_TYPE(type);
+      return may_need_constraining(elem_type);
+    }
+
+  return true;
+}
+
+void Converter::constrain_variable(Basic_block *bb, tree decl)
+{
+  if (!may_need_constraining(TREE_TYPE(decl)))
+    return;
+
+  // Constrain global variables by loading their values, since process_load
+  // constrains them as a side effect. However, this method is highly
+  // inefficient for large objects because it requires loading data that
+  // doesn't need to be constrained.
+  // TODO: Switch to a more efficient implementation.
+  // TODO: Additionally, mark padding as uninitialized.
+  uint64_t size = bytesize_for_type(TREE_TYPE(decl));
+  if (size > MAX_MEMORY_UNROLL_LIMIT)
+    throw Not_implemented("process_function: too large global variable");
+  process_load(bb, decl);
+}
+
 void Converter::process_variables()
 {
   tree retval_decl = DECL_RESULT(fun->decl);
@@ -5041,7 +5076,7 @@ void Converter::process_variables()
 	if (lookup_attribute("alias", DECL_ATTRIBUTES(decl)))
 	  continue;
 	uint64_t size = bytesize_for_type(TREE_TYPE(decl));
-	if (size > MAX_MEMORY_UNROLL_LIMIT)
+	if (size >= ((uint64_t)1 << module->ptr_offset_bits))
 	  throw Not_implemented("process_function: too large global variable");
 	// TODO: Implement.
 	if (size == 0)
@@ -5110,10 +5145,7 @@ void Converter::process_variables()
 	if (TREE_READONLY(decl))
 	  init_var(decl, decl2instruction.at(decl));
 
-	// Constrain the global variables.
-	// We achieve this by loading the values, as process_load constrains
-	// the values as a side effect.
-	process_load(func->bbs[0], decl);
+	constrain_variable(func->bbs[0], decl);
       }
   }
 
