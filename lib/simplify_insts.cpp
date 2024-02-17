@@ -746,6 +746,47 @@ Instruction *simplify_xor(Instruction *inst)
   return inst;
 }
 
+Instruction *simplify_sext(Instruction *inst)
+{
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+
+  // sext (sext x) -> sext x
+  if (arg1->opcode == Op::SEXT)
+    {
+      Instruction *new_inst = create_inst(Op::SEXT, arg1->arguments[0], arg2);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // sext (zext x) -> zext x
+  if (arg1->opcode == Op::ZEXT)
+    {
+      Instruction *new_inst = create_inst(Op::ZEXT, arg1->arguments[0], arg2);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  return inst;
+}
+
+Instruction *simplify_zext(Instruction *inst)
+{
+  Instruction *arg1 = inst->arguments[0];
+  Instruction *arg2 = inst->arguments[1];
+
+  // zext (zext x) -> zext x
+  if (arg1->opcode == Op::ZEXT)
+    {
+      Instruction *new_inst = create_inst(Op::ZEXT, arg1->arguments[0], arg2);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  return inst;
+}
+
+
 Instruction *simplify_mov(Instruction *inst)
 {
   return inst->arguments[0];
@@ -1420,6 +1461,9 @@ Instruction *simplify_inst(Instruction *inst)
     case Op::SADD_WRAPS:
       inst = simplify_sadd_wraps(inst);
       break;
+    case Op:: SEXT:
+      inst = simplify_sext(inst);
+      break;
     case Op::SGE:
       inst = simplify_sge(inst);
       break;
@@ -1458,6 +1502,9 @@ Instruction *simplify_inst(Instruction *inst)
       break;
     case Op::XOR:
       inst = simplify_xor(inst);
+      break;
+    case Op:: ZEXT:
+      inst = simplify_zext(inst);
       break;
     default:
       break;
