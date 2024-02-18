@@ -1077,12 +1077,9 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_und
 	Instruction *high = bb->value_inst(arg->bitsize - 1, 32);
 	Instruction *low = bb->value_inst(arg->bitsize / 2, 32);
 	Instruction *res = bb->build_inst(Op::EXTRACT, arg, high, low);
-	res = from_mem_repr(bb, res, elem_type);
 	if (undef)
-	  {
-	    undef = bb->build_inst(Op::EXTRACT, undef, high, low);
-	    undef = from_mem_repr(bb, undef, elem_type);
-	  }
+	  undef = bb->build_inst(Op::EXTRACT, undef, high, low);
+	std::tie(res, undef) = from_mem_repr(bb, res, undef, elem_type);
 	return {res, undef, nullptr};
       }
     case REALPART_EXPR:
@@ -1090,12 +1087,9 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_und
 	tree elem_type = TREE_TYPE(expr);
 	auto [arg, undef] = tree2inst_undef(bb, TREE_OPERAND(expr, 0));
 	Instruction *res = bb->build_trunc(arg, arg->bitsize / 2);
-	res = from_mem_repr(bb, res, elem_type);
 	if (undef)
-	  {
-	    undef = bb->build_trunc(undef, arg->bitsize / 2);
-	    undef = from_mem_repr(bb, undef, elem_type);
-	  }
+	  undef = bb->build_trunc(undef, arg->bitsize / 2);
+	std::tie(res, undef) = from_mem_repr(bb, res, undef, elem_type);
 	return {res, undef, nullptr};
       }
     case VIEW_CONVERT_EXPR:
@@ -1138,12 +1132,10 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_und
 	Instruction *low = bb->value_inst(bit_offset, 32);
 	value = to_mem_repr(bb, value, TREE_TYPE(arg));
 	value = bb->build_inst(Op::EXTRACT, value, high, low);
-	value = from_mem_repr(bb, value, TREE_TYPE(expr));
 	if (undef)
-	  {
-	    undef = bb->build_inst(Op::EXTRACT, undef, high, low);
-	    undef = from_mem_repr(bb, undef, TREE_TYPE(expr));
-	  }
+	  undef = bb->build_inst(Op::EXTRACT, undef, high, low);
+	std::tie(value, undef) =
+	  from_mem_repr(bb, value, undef, TREE_TYPE(expr));
 	return {value, undef, nullptr};
       }
     case ARRAY_REF:
@@ -1525,13 +1517,12 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::vector_as_arr
     shift = bb->build_trunc(shift, inst->bitsize);
   inst = bb->build_inst(Op::LSHR, inst, shift);
   inst = bb->build_trunc(inst, elem_size * 8);
-  inst = from_mem_repr(bb, inst, elem_type);
   if (undef)
     {
       undef = bb->build_inst(Op::LSHR, undef, shift);
       undef = bb->build_trunc(undef, elem_size * 8);
-      undef = from_mem_repr(bb, undef, elem_type);
     }
+  std::tie(inst, undef) = from_mem_repr(bb, inst, undef, elem_type);
 
   return {inst, undef, nullptr};
 }
@@ -1605,24 +1596,23 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_load(
     }
   else
     {
-      value = from_mem_repr(bb, value, TREE_TYPE(expr));
       // TODO: What if the extracted bits are defined, but the extra bits
       // undefined?
       // E.g. a bool where the least significant bit is defined, but the rest
       // undefined. I guess it should be undefined?
-      undef = from_mem_repr(bb, undef, TREE_TYPE(expr));
-      mem_flags2 = from_mem_repr(bb, mem_flags2, TREE_TYPE(expr));
+      std::tie(value, undef) = from_mem_repr(bb, value, undef, type);
+      std::tie(value, mem_flags2) = from_mem_repr(bb, value, mem_flags2, type);
       inst2memory_flagsx.insert({value, mem_flags2});
     }
 
   if (expr != DECL_RESULT(fun->decl))
     {
-      constrain_pointer(bb, value, TREE_TYPE(expr), mem_flags2);
-      canonical_nan_check(bb, value, TREE_TYPE(expr), undef);
+      constrain_pointer(bb, value, type, mem_flags2);
+      canonical_nan_check(bb, value, type, undef);
     }
 
   Instruction *provenance = nullptr;
-  if (POINTER_TYPE_P(TREE_TYPE(expr)))
+  if (POINTER_TYPE_P(type))
     provenance = bb->build_extract_id(value);
 
   return {value, undef, provenance};
