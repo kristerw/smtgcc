@@ -909,6 +909,16 @@ Instruction *simplify_sgt(Instruction *inst)
       arg2->opcode == Op::ZEXT && arg2->arguments[0]->bitsize == 1)
     return inst->bb->value_inst(0, 1);
 
+  // sgt 0, (zext x) -> false
+  if (is_value_zero(arg1) && arg2->opcode == Op::ZEXT)
+    return inst->bb->value_inst(0, 1);
+
+  // sgt (zext x), c -> false if c >= (zext -1)
+  if (arg1->bitsize <= 128 && arg1->opcode == Op::ZEXT
+      && arg2->opcode == Op::VALUE
+      && arg2->signed_value() >= (((__int128)1 << arg1->arguments[0]->bitsize) - 1))
+    return inst->bb->value_inst(0, 1);
+
   // sgt x, x -> false
   if (arg1 == arg2)
     return inst->bb->value_inst(0, 1);
