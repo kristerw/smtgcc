@@ -4995,16 +4995,26 @@ void Converter::make_uninit(Basic_block *bb, Instruction *ptr, uint64_t size)
 
 bool may_need_constraining(tree type)
 {
-  tree_code code = TREE_CODE(type);
-  if (code == INTEGER_TYPE &&
-      bitsize_for_type(type) == bytesize_for_type(type) * 8)
+  if (POINTER_TYPE_P(type) || SCALAR_FLOAT_TYPE_P(type))
+    return true;
+  if (INTEGRAL_TYPE_P(type))
     return false;
   if (VECTOR_TYPE_P(type)
       || TREE_CODE(type) == COMPLEX_TYPE
       || TREE_CODE(type) == ARRAY_TYPE)
+    return may_need_constraining(TREE_TYPE(type));
+  if (TREE_CODE(type) == RECORD_TYPE)
     {
-      tree elem_type = TREE_TYPE(type);
-      return may_need_constraining(elem_type);
+      for (tree fld = TYPE_FIELDS(type); fld; fld = DECL_CHAIN(fld))
+	{
+	  if (TREE_CODE(fld) != FIELD_DECL)
+	    continue;
+	  if (DECL_BIT_FIELD_TYPE(fld))
+	    continue;
+	  if (may_need_constraining(TREE_TYPE(fld)))
+	    return true;
+	}
+      return false;
     }
 
   return true;
