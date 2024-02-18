@@ -1097,6 +1097,12 @@ Instruction *simplify_ugt(Instruction *inst)
       arg2->opcode == Op::VALUE && arg2->value() > 0)
     return inst->bb->value_inst(0, 1);
 
+  // ugt (and x, y), x -> false
+  // ugt (and x, y), y -> false
+  if (arg1->opcode == Op::AND
+      && (arg1->arguments[0] == arg2 || arg1->arguments[1] == arg2))
+    return inst->bb->value_inst(0, 1);
+
   // ugt x, x -> false
   if (arg1 == arg2)
     return inst->bb->value_inst(0, 1);
