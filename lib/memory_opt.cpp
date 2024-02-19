@@ -124,8 +124,6 @@ void remove_unused_memory(Instruction *memory_inst)
   assert(memory_inst->bb == entry_bb);
 
   std::vector<Instruction *> worklist;
-  uint64_t memory_size = memory_inst->arguments[1]->value();
-  worklist.reserve(4 * memory_size);
   worklist.push_back(memory_inst);
   while (!worklist.empty())
     {
