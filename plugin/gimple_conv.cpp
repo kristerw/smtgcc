@@ -1619,13 +1619,14 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_load(
 }
 
 // Read value/undef from memory. No UB checks etc. are done.
-std::pair<Instruction *, Instruction *> Converter::load_value(Basic_block *bb, Instruction *ptr, uint64_t size)
+std::pair<Instruction *, Instruction *> Converter::load_value(Basic_block *bb, Instruction *orig_ptr, uint64_t size)
 {
-  Instruction *one = bb->value_inst(1, ptr->bitsize);
   Instruction *value = nullptr;
   Instruction *undef = nullptr;
   for (uint64_t i = 0; i < size; i++)
     {
+      Instruction *offset = bb->value_inst(i, orig_ptr->bitsize);
+      Instruction *ptr = bb->build_inst(Op::ADD, orig_ptr, offset);
       Instruction *data_byte = bb->build_inst(Op::LOAD, ptr);
       Instruction *undef_byte = bb->build_inst(Op::GET_MEM_UNDEF, ptr);
       if (value)
@@ -1636,21 +1637,21 @@ std::pair<Instruction *, Instruction *> Converter::load_value(Basic_block *bb, I
 	undef = bb->build_inst(Op::CONCAT, undef_byte, undef);
       else
 	undef = undef_byte;
-      ptr = bb->build_inst(Op::ADD, ptr, one);
     }
   return {value, undef};
 }
 
 // Write value to memory. No UB checks etc. are done, and memory flags
 // are not updated.
-void Converter::store_value(Basic_block *bb, Instruction *ptr, Instruction *value, Instruction *undef)
+void Converter::store_value(Basic_block *bb, Instruction *orig_ptr, Instruction *value, Instruction *undef)
 {
   if ((value->bitsize & 7) != 0)
     throw Not_implemented("store_value: not byte aligned");
   uint64_t size = value->bitsize / 8;
-  Instruction *one = bb->value_inst(1, ptr->bitsize);
   for (uint64_t i = 0; i < size; i++)
     {
+      Instruction *offset = bb->value_inst(i, orig_ptr->bitsize);
+      Instruction *ptr = bb->build_inst(Op::ADD, orig_ptr, offset);
       Instruction *high = bb->value_inst(i * 8 + 7, 32);
       Instruction *low = bb->value_inst(i * 8, 32);
       Instruction *byte = bb->build_inst(Op::EXTRACT, value, high, low);
@@ -1660,7 +1661,6 @@ void Converter::store_value(Basic_block *bb, Instruction *ptr, Instruction *valu
 	  byte = bb->build_inst(Op::EXTRACT, undef, high, low);
 	  bb->build_inst(Op::SET_MEM_UNDEF, ptr, byte);
 	}
-      ptr = bb->build_inst(Op::ADD, ptr, one);
     }
 }
 
@@ -1674,8 +1674,6 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
       const char *p = TREE_STRING_POINTER(value_expr);
       Addr addr = process_address(bb, addr_expr, true);
       assert(!addr.bitoffset);
-      Instruction *ptr = addr.ptr;
-      Instruction *one = bb->value_inst(1, ptr->bitsize);
       Instruction *memory_flag = bb->value_inst(0, 1);
       Instruction *undef = bb->value_inst(0, 8);
       if (size > MAX_MEMORY_UNROLL_LIMIT)
@@ -1684,12 +1682,13 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
       store_ub_check(bb, addr.ptr, addr.provenance, size);
       for (uint64_t i = 0; i < size; i++)
 	{
+	  Instruction *offset = bb->value_inst(i, addr.ptr->bitsize);
+	  Instruction *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
 	  uint8_t byte = (i < str_len) ? p[i] : 0;
 	  Instruction *value = bb->value_inst(byte, 8);
 	  bb->build_inst(Op::STORE, ptr, value);
 	  bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
 	  bb->build_inst(Op::SET_MEM_UNDEF, ptr, undef);
-	  ptr = bb->build_inst(Op::ADD, ptr, one);
 	}
       return;
     }
@@ -3178,7 +3177,6 @@ void Converter::process_constructor(tree lhs, tree rhs, Basic_block *bb)
     }
 
   assert(!CONSTRUCTOR_NO_CLEARING(rhs));
-  Instruction *one = bb->value_inst(1, addr.ptr->bitsize);
   uint64_t size = bytesize_for_type(TREE_TYPE(rhs));
   if (size > MAX_MEMORY_UNROLL_LIMIT)
     throw Not_implemented("process_constructor: too large constructor");
@@ -3188,17 +3186,17 @@ void Converter::process_constructor(tree lhs, tree rhs, Basic_block *bb)
     make_uninit(bb, addr.ptr, size);
   else
     {
-      Instruction *ptr = addr.ptr;
       Instruction *zero = bb->value_inst(0, 8);
       Instruction *memory_flag = bb->value_inst(0, 1);
       for (uint64_t i = 0; i < size; i++)
 	{
+	  Instruction *offset = bb->value_inst(i, addr.ptr->bitsize);
+	  Instruction *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
 	  uint8_t padding = padding_at_offset(TREE_TYPE(rhs), i);
 	  Instruction *undef = bb->value_inst(padding, 8);
 	  bb->build_inst(Op::STORE, ptr, zero);
 	  bb->build_inst(Op::SET_MEM_UNDEF, ptr, undef);
 	  bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
-	  ptr = bb->build_inst(Op::ADD, ptr, one);
 	}
     }
 
@@ -3866,26 +3864,30 @@ void Converter::process_cfn_memcpy(gimple *stmt, Basic_block *bb)
 {
   if (TREE_CODE(gimple_call_arg(stmt, 2)) != INTEGER_CST)
     throw Not_implemented("non-constant memcpy size");
-  auto [dest_ptr, dest_prov] = tree2inst_prov(bb, gimple_call_arg(stmt, 0));
-  auto [src_ptr, src_prov] = tree2inst_prov(bb, gimple_call_arg(stmt, 1));
+  auto [orig_dest_ptr, dest_prov] =
+    tree2inst_prov(bb, gimple_call_arg(stmt, 0));
+  auto [orig_src_ptr, src_prov] = tree2inst_prov(bb, gimple_call_arg(stmt, 1));
   unsigned __int128 size = get_int_cst_val(gimple_call_arg(stmt, 2));
   if (size > MAX_MEMORY_UNROLL_LIMIT)
     throw Not_implemented("too large memcpy");
 
-  store_ub_check(bb, dest_ptr, dest_prov, size);
-  load_ub_check(bb, src_ptr, src_prov, size);
+  store_ub_check(bb, orig_dest_ptr, dest_prov, size);
+  load_ub_check(bb, orig_src_ptr, src_prov, size);
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
     {
-      constrain_range(bb, lhs, dest_ptr);
-      tree2instruction.insert({lhs, dest_ptr});
+      constrain_range(bb, lhs, orig_dest_ptr);
+      tree2instruction.insert({lhs, orig_dest_ptr});
       tree2provenance.insert({lhs, dest_prov});
     }
 
-  Instruction *one = bb->value_inst(1, src_ptr->bitsize);
   for (size_t i = 0; i < size; i++)
     {
+      Instruction *offset = bb->value_inst(i, orig_src_ptr->bitsize);
+      Instruction *src_ptr = bb->build_inst(Op::ADD, orig_src_ptr, offset);
+      Instruction *dest_ptr = bb->build_inst(Op::ADD, orig_dest_ptr, offset);
+
       Instruction *byte = bb->build_inst(Op::LOAD, src_ptr);
       bb->build_inst(Op::STORE, dest_ptr, byte);
 
@@ -3894,9 +3896,6 @@ void Converter::process_cfn_memcpy(gimple *stmt, Basic_block *bb)
 
       Instruction *undef = bb->build_inst(Op::GET_MEM_UNDEF, src_ptr);
       bb->build_inst(Op::SET_MEM_UNDEF, dest_ptr, undef);
-
-      src_ptr = bb->build_inst(Op::ADD, src_ptr, one);
-      dest_ptr = bb->build_inst(Op::ADD, dest_ptr, one);
     }
 }
 
@@ -3904,34 +3903,34 @@ void Converter::process_cfn_memset(gimple *stmt, Basic_block *bb)
 {
   if (TREE_CODE(gimple_call_arg(stmt, 2)) != INTEGER_CST)
     throw Not_implemented("non-constant memset size");
-  auto [ptr, ptr_prov] = tree2inst_prov(bb, gimple_call_arg(stmt, 0));
+  auto [orig_ptr, ptr_prov] = tree2inst_prov(bb, gimple_call_arg(stmt, 0));
   Instruction *value = tree2inst(bb, gimple_call_arg(stmt, 1));
   unsigned __int128 size = get_int_cst_val(gimple_call_arg(stmt, 2));
   if (size > MAX_MEMORY_UNROLL_LIMIT)
     throw Not_implemented("too large memset");
 
-  store_ub_check(bb, ptr, ptr_prov, size);
+  store_ub_check(bb, orig_ptr, ptr_prov, size);
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
     {
-      constrain_range(bb, lhs, ptr);
-      tree2instruction.insert({lhs, ptr});
+      constrain_range(bb, lhs, orig_ptr);
+      tree2instruction.insert({lhs, orig_ptr});
       tree2provenance.insert({lhs, ptr_prov});
     }
 
   assert(value->bitsize >= 8);
   if (value->bitsize > 8)
     value = bb->build_trunc(value, 8);
-  Instruction *one = bb->value_inst(1, ptr->bitsize);
   Instruction *mem_flag = bb->value_inst(0, 1);
   Instruction *undef = bb->value_inst(0, 8);
   for (size_t i = 0; i < size; i++)
     {
+      Instruction *offset = bb->value_inst(i, orig_ptr->bitsize);
+      Instruction *ptr = bb->build_inst(Op::ADD, orig_ptr, offset);
       bb->build_inst(Op::STORE, ptr, value);
       bb->build_inst(Op::SET_MEM_FLAG, ptr, mem_flag);
       bb->build_inst(Op::SET_MEM_UNDEF, ptr, undef);
-      ptr = bb->build_inst(Op::ADD, ptr, one);
     }
 }
 
@@ -4814,7 +4813,6 @@ void Converter::generate_return_inst(Basic_block *bb)
 void Converter::init_var_values(tree initial, Instruction *mem_inst)
 {
   Basic_block *bb = mem_inst->bb;
-  Instruction *ptr = mem_inst;
   tree type = TREE_TYPE(initial);
   uint64_t size = bytesize_for_type(TREE_TYPE(initial));
 
@@ -4822,13 +4820,12 @@ void Converter::init_var_values(tree initial, Instruction *mem_inst)
     {
       uint64_t len = TREE_STRING_LENGTH(initial);
       const char *p = TREE_STRING_POINTER(initial);
-      ptr = mem_inst;
-      Instruction *one = bb->value_inst(1, ptr->bitsize);
       for (uint64_t i = 0; i < len; i++)
 	{
+	  Instruction *offset = bb->value_inst(i, mem_inst->bitsize);
+	  Instruction *ptr = bb->build_inst(Op::ADD, mem_inst, offset);
 	  Instruction *byte = bb->value_inst(p[i], 8);
 	  bb->build_inst(Op::STORE, ptr, byte);
-	  ptr = bb->build_inst(Op::ADD, ptr, one);
 	}
       return;
     }
@@ -4857,9 +4854,9 @@ void Converter::init_var_values(tree initial, Instruction *mem_inst)
 	  if (index && TREE_CODE(index) == RANGE_EXPR)
 	    throw Not_implemented("init_var: RANGE_EXPR");
 	  uint64_t offset = idx * elem_size;
-	  Instruction *off = bb->value_inst(offset, ptr->bitsize);
-	  Instruction *ptr2 = bb->build_inst(Op::ADD, ptr, off);
-	  init_var_values(value, ptr2);
+	  Instruction *off = bb->value_inst(offset, mem_inst->bitsize);
+	  Instruction *ptr = bb->build_inst(Op::ADD, mem_inst, off);
+	  init_var_values(value, ptr);
 	}
       return;
     }
@@ -4875,13 +4872,13 @@ void Converter::init_var_values(tree initial, Instruction *mem_inst)
 	  uint64_t bit_offset = get_int_cst_val(DECL_FIELD_BIT_OFFSET(index));
 	  offset += bit_offset / 8;
 	  bit_offset &= 7;
-	  Instruction *off = bb->value_inst(offset, ptr->bitsize);
-	  Instruction *ptr2 = bb->build_inst(Op::ADD, ptr, off);
+	  Instruction *off = bb->value_inst(offset, mem_inst->bitsize);
+	  Instruction *ptr = bb->build_inst(Op::ADD, mem_inst, off);
 	  tree elem_type = TREE_TYPE(value);
 	  if (TREE_CODE(elem_type) == ARRAY_TYPE
 	      || TREE_CODE(elem_type) == RECORD_TYPE
 	      || TREE_CODE(elem_type) == UNION_TYPE)
-	    init_var_values(value, ptr2);
+	    init_var_values(value, ptr);
 	  else
 	    {
 	      uint64_t bitsize = bitsize_for_type(elem_type);
@@ -4891,15 +4888,15 @@ void Converter::init_var_values(tree initial, Instruction *mem_inst)
 		{
 		  if (bit_offset)
 		    {
-		      Instruction *first_byte = bb->build_inst(Op::LOAD, ptr2);
+		      Instruction *first_byte = bb->build_inst(Op::LOAD, ptr);
 		      Instruction *bits = bb->build_trunc(first_byte, bit_offset);
 		      value_inst = bb->build_inst(Op::CONCAT, value_inst, bits);
 		    }
 		  if (bitsize + bit_offset != size * 8)
 		    {
 		      Instruction *offset =
-			bb->value_inst(size - 1, ptr2->bitsize);
-		      Instruction *ptr3 = bb->build_inst(Op::ADD, ptr2, offset);
+			bb->value_inst(size - 1, ptr->bitsize);
+		      Instruction *ptr3 = bb->build_inst(Op::ADD, ptr, offset);
 
 		      uint64_t remaining = size * 8 - (bitsize + bit_offset);
 		      assert(remaining < 8);
@@ -4917,7 +4914,7 @@ void Converter::init_var_values(tree initial, Instruction *mem_inst)
 		{
 		  value_inst = to_mem_repr(bb, value_inst, elem_type);
 		}
-	      store_value(bb, ptr2, value_inst);
+	      store_value(bb, ptr, value_inst);
 	    }
 	}
       return;
@@ -4942,14 +4939,13 @@ void Converter::init_var(tree decl, Instruction *mem_inst)
 	return;
 
       // Uninitializied static variables are guaranted to be initialized to 0.
-      Instruction *ptr = mem_inst;
       Instruction *zero = bb->value_inst(0, 8);
-      Instruction *one = bb->value_inst(1, ptr->bitsize);
       uint64_t size = bytesize_for_type(TREE_TYPE(decl));
       for (uint64_t i = 0; i < size; i++)
 	{
+	  Instruction *offset = bb->value_inst(i, mem_inst->bitsize);
+	  Instruction *ptr = bb->build_inst(Op::ADD, mem_inst, offset);
 	  bb->build_inst(Op::STORE, ptr, zero);
-	  ptr = bb->build_inst(Op::ADD, ptr, one);
 	}
       return;
     }
@@ -4963,33 +4959,32 @@ void Converter::init_var(tree decl, Instruction *mem_inst)
       if (CONSTRUCTOR_NO_CLEARING(initial))
 	throw Not_implemented("init_var: CONSTRUCTOR_NO_CLEARING");
 
-      Instruction *ptr = mem_inst;
       Instruction *zero = bb->value_inst(0, 8);
-      Instruction *one = bb->value_inst(1, ptr->bitsize);
       if (size > MAX_MEMORY_UNROLL_LIMIT)
 	throw Not_implemented("init_var: too large constructor");
       for (uint64_t i = 0; i < size; i++)
 	{
+	  Instruction *offset = bb->value_inst(i, mem_inst->bitsize);
+	  Instruction *ptr = bb->build_inst(Op::ADD, mem_inst, offset);
 	  uint8_t padding = padding_at_offset(type, i);
 	  if (padding)
 	    bb->build_inst(Op::SET_MEM_UNDEF, ptr, bb->value_inst(padding, 8));
 	  if (padding != 255)
 	    bb->build_inst(Op::STORE, ptr, zero);
-	  ptr = bb->build_inst(Op::ADD, ptr, one);
 	}
     }
 
   init_var_values(initial, mem_inst);
 }
 
-void Converter::make_uninit(Basic_block *bb, Instruction *ptr, uint64_t size)
+void Converter::make_uninit(Basic_block *bb, Instruction *orig_ptr, uint64_t size)
 {
-  Instruction *one = bb->value_inst(1, ptr->bitsize);
   Instruction *byte_m1 = bb->value_inst(255, 8);
   for (uint64_t i = 0; i < size; i++)
     {
+      Instruction *offset = bb->value_inst(i, orig_ptr->bitsize);
+      Instruction *ptr = bb->build_inst(Op::ADD, orig_ptr, offset);
       bb->build_inst(Op::SET_MEM_UNDEF, ptr, byte_m1);
-      ptr = bb->build_inst(Op::ADD, ptr, one);
     }
 }
 
