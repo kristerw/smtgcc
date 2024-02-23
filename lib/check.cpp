@@ -716,6 +716,22 @@ void Converter::generate_bb2cond(Basic_block *bb)
     }
 }
 
+// Simplify instructions that take a memory array as the first parameter by:
+//  * Implementing store-to-load forwarding (and set-to-get forwarding).
+//  * For load/get instructions, attempt to use an "earlier" array when
+//    possible (by bypassing non-aliasing store/set in the instruction
+//    sequence that generates the array). This helps in several cases:
+//     - Load/get instructions become more likely to be CSE'd, especially
+//       when vectorizing instructions like:
+//         a[0] = a[0] + 1;
+//         a[1] = a[1] + 1;
+//       In these cases, all loads now reference the same array, so the load
+//       instructions in src and vectorized loads in tgt will be CSE:ed.
+//     - Load/get instructions are more likely to use the same array,
+//       improving the effectiveness of CSE for the generated ITEs for
+//       phi nodes of memory arrays.
+//     - Using fewer arrays for load/get operations appears to benefit
+//       the SMT solver's performance.
 std::pair<Instruction *, Instruction *> Converter::simplify_array_access(Instruction *array, Instruction *addr, std::map<Instruction *, std::pair<Instruction *, Instruction *>>& cache)
 {
   auto I = cache.find(array);
@@ -750,6 +766,12 @@ std::pair<Instruction *, Instruction *> Converter::simplify_array_access(Instruc
 	  if (addr == store_addr)
 	    {
 	      value = store_value;
+	      // Use the original array when a value is found.
+	      // This helps loads after loops for types wider than a byte,
+	      // preventing the generation of a distinct chain of ITE
+	      // instructions for each byte loaded in situations where
+	      // store-to-load forwarding of all values is not possible.
+	      array = orig_array;
 	      break;
 	    }
 	  else if (!may_alias(addr, store_addr))
