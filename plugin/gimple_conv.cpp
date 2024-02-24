@@ -915,7 +915,16 @@ uint8_t padding_at_offset(tree type, uint64_t offset)
 		return bitfield_padding_at_offset(fld, offset);
 	    }
 	  else if (elem_offset <= offset && offset < (elem_offset + elem_size))
-	    return padding_at_offset(elem_type, offset - elem_offset);
+	    {
+	      uint8_t padding =
+		padding_at_offset(elem_type, offset - elem_offset);
+	      // Record types in IR generated from C++ may have overlapping
+	      // fields where one field is an empty record. We therefore
+	      // continue iterating if we got a padding 0xff to try to find
+	      // a following "real" field.
+	      if (padding != 0xff)
+		return padding;
+	    }
 	}
       return 0xff;
     }
