@@ -165,7 +165,8 @@ struct Converter {
   void init_var_values(tree initial, Instruction *mem_inst);
   void init_var(tree decl, Instruction *mem_inst);
   void make_uninit(Basic_block *bb, Instruction *ptr, uint64_t size);
-  void constrain_variable(Basic_block *bb, tree decl);
+  uint64_t constrain_variable(Basic_block *bb, Instruction *ptr,
+			      uint64_t offset, tree type);
   void process_variables();
   void process_func_args();
   bool need_prov_phi(gimple *phi);
@@ -465,9 +466,8 @@ void constrain_pointer(Basic_block *bb, Instruction *inst, tree type, Instructio
   // TODO: mem_flags is not correct name -- it is only one flag.
   if (POINTER_TYPE_P(type))
     {
-      uint32_t ptr_id_bits = bb->func->module->ptr_id_bits;
       Instruction *id = bb->build_extract_id(inst);
-      Instruction *zero = bb->value_inst(0, ptr_id_bits);
+      Instruction *zero = bb->value_inst(0, id->bitsize);
       Instruction *cond = bb->build_inst(Op::SLT, id, zero);
       Instruction *not_written = bb->build_extract_id(mem_flags);
       not_written = bb->build_inst(Op::EQ, not_written, zero);
@@ -4997,48 +4997,89 @@ void Converter::make_uninit(Basic_block *bb, Instruction *orig_ptr, uint64_t siz
     }
 }
 
-bool may_need_constraining(tree type)
+uint64_t Converter::constrain_variable(Basic_block *bb, Instruction *ptr, uint64_t offset, tree type)
 {
-  if (POINTER_TYPE_P(type) || SCALAR_FLOAT_TYPE_P(type))
-    return true;
-  if (INTEGRAL_TYPE_P(type))
-    return false;
-  if (VECTOR_TYPE_P(type)
-      || TREE_CODE(type) == COMPLEX_TYPE
-      || TREE_CODE(type) == ARRAY_TYPE)
-    return may_need_constraining(TREE_TYPE(type));
+  if (SCALAR_FLOAT_TYPE_P(type))
+    {
+      uint64_t size = bytesize_for_type(type);
+      ptr = bb->build_inst(Op::ADD, ptr, bb->value_inst(offset, ptr->bitsize));
+      auto [inst, _] = load_value(bb, ptr, size);
+      Instruction *cond = bb->build_inst(Op::IS_NONCANONICAL_NAN, inst);
+      bb->build_inst(Op::UB, cond);
+      return size;
+    }
+  if (POINTER_TYPE_P(type))
+    {
+      uint64_t size = bytesize_for_type(type);
+      ptr = bb->build_inst(Op::ADD, ptr, bb->value_inst(offset, ptr->bitsize));
+      auto [inst, _] = load_value(bb, ptr, size);
+      Instruction *id = bb->build_extract_id(inst);
+      Instruction *zero = bb->value_inst(0, id->bitsize);
+      Instruction *cond = bb->build_inst(Op::SLT, id, zero);
+      bb->build_inst(Op::UB, cond);
+      return (id->bitsize + 7) / 8;
+    }
+  if (TREE_CODE(type) == BOOLEAN_TYPE && bitsize_for_type(type) == 1)
+    {
+      uint64_t size = bytesize_for_type(type);
+      ptr = bb->build_inst(Op::ADD, ptr, bb->value_inst(offset, ptr->bitsize));
+      auto [inst, _] = load_value(bb, ptr, size);
+      Instruction *bit_inst = bb->build_trunc(inst, 1);
+      Instruction *bitsize_inst = bb->value_inst(inst->bitsize, 32);
+      Instruction *ext = bb->build_inst(Op::ZEXT, bit_inst, bitsize_inst);
+      bb->build_inst(Op::UB, bb->build_inst(Op::NE, inst, ext));
+      return size;
+    }
+
   if (TREE_CODE(type) == RECORD_TYPE)
     {
+      uint64_t nof_bytes = 0;
       for (tree fld = TYPE_FIELDS(type); fld; fld = DECL_CHAIN(fld))
 	{
 	  if (TREE_CODE(fld) != FIELD_DECL)
 	    continue;
 	  if (DECL_BIT_FIELD_TYPE(fld))
 	    continue;
-	  if (may_need_constraining(TREE_TYPE(fld)))
-	    return true;
+	  tree elem_type = TREE_TYPE(fld);
+	  uint64_t elem_size = bytesize_for_type(elem_type);
+	  if (elem_size == 0)
+	    continue;
+	  uint64_t elem_offset = get_int_cst_val(DECL_FIELD_OFFSET(fld));
+	  elem_offset += get_int_cst_val(DECL_FIELD_BIT_OFFSET(fld)) / 8;
+	  uint64_t nof =
+	    constrain_variable(bb, ptr, offset + elem_offset, elem_type);
+	  nof_bytes += nof;
+	  if (nof_bytes > MAX_MEMORY_UNROLL_LIMIT)
+	    throw Not_implemented("too large global variable");
 	}
-      return false;
+      return nof_bytes;
+    }
+  if (VECTOR_TYPE_P(type)
+      || TREE_CODE(type) == COMPLEX_TYPE
+      || TREE_CODE(type) == ARRAY_TYPE)
+    {
+      uint64_t nof_bytes = 0;
+      tree elem_type = TREE_TYPE(type);
+      if (!FLOAT_TYPE_P(elem_type) && TREE_CODE(type) != ARRAY_TYPE)
+	return 0;
+      uint64_t size = bytesize_for_type(type);
+      uint64_t elem_size = bytesize_for_type(elem_type);
+      assert(size % elem_size == 0);
+      uint32_t nof_elt = size / elem_size;
+      for (uint64_t i = 0; i < nof_elt; i++)
+	{
+	  uint64_t nof =
+	    constrain_variable(bb, ptr, offset + i * elem_size, elem_type);
+	  if (nof == 0)
+	    return 0;
+	  nof_bytes += nof;
+	  if (nof_bytes > MAX_MEMORY_UNROLL_LIMIT)
+	    throw Not_implemented("too large global variable");
+	}
+      return nof_bytes;
     }
 
-  return true;
-}
-
-void Converter::constrain_variable(Basic_block *bb, tree decl)
-{
-  if (!may_need_constraining(TREE_TYPE(decl)))
-    return;
-
-  // Constrain global variables by loading their values, since process_load
-  // constrains them as a side effect. However, this method is highly
-  // inefficient for large objects because it requires loading data that
-  // doesn't need to be constrained.
-  // TODO: Switch to a more efficient implementation.
-  // TODO: Additionally, mark padding as uninitialized.
-  uint64_t size = bytesize_for_type(TREE_TYPE(decl));
-  if (size > MAX_MEMORY_UNROLL_LIMIT)
-    throw Not_implemented("process_function: too large global variable");
-  process_load(bb, decl);
+  return 0;
 }
 
 void Converter::process_variables()
@@ -5149,7 +5190,8 @@ void Converter::process_variables()
 	if (TREE_READONLY(decl))
 	  init_var(decl, decl2instruction.at(decl));
 
-	constrain_variable(func->bbs[0], decl);
+	Instruction *ptr = decl2instruction.at(decl);
+	constrain_variable(func->bbs[0], ptr, 0, TREE_TYPE(decl));
       }
   }
 
