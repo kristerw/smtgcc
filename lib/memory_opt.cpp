@@ -44,10 +44,7 @@ bool is_unused_memory(Instruction *memory_inst)
   // If not, then the memory_inst is not unused.
   std::set<Instruction *> visited;
   std::vector<Instruction *> sinks;
-  uint64_t memory_size = memory_inst->arguments[1]->value();
-  sinks.reserve(4 * memory_size);
   std::vector<Instruction *> worklist;
-  worklist.reserve(4 * memory_size);
   worklist.insert(std::end(worklist), std::begin(memory_inst->used_by),
 		  std::end(memory_inst->used_by));
   while (!worklist.empty())
