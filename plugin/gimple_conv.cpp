@@ -19,6 +19,8 @@
 #include "cgraph.h"
 #include "alloc-pool.h"
 #include "symbol-summary.h"
+#include "sreal.h"
+#include "ipa-cp.h"
 #include "ipa-prop.h"
 #include "value-query.h"
 #include "attribs.h"
