@@ -54,11 +54,13 @@ void tv_function::delete_ir()
   prev_pass_name = "";
 }
 
-static Function *convert_function(tv_function *tv_fun, const char *name)
+static Function *convert_function(tv_function *tv_fun, bool is_tgt_func = false)
 {
+  const char *name = is_tgt_func ? "tgt" : "src";
   try
     {
-      Function *func = process_function(tv_fun->module, tv_fun->state, cfun);
+      Function *func =
+	process_function(tv_fun->module, tv_fun->state, cfun, is_tgt_func);
       func->rename(name);
       return func;
     }
@@ -130,7 +132,7 @@ static void ipa_pass(opt_pass *pass, my_plugin *plugin_data)
 	continue;
 
       push_cfun(fun);
-      Function *func = convert_function(tv_fun, "tgt");
+      Function *func = convert_function(tv_fun, true);
       if (func)
 	tv_fun->check();
       pop_cfun();
@@ -170,7 +172,7 @@ static void gimple_pass(opt_pass *pass, my_plugin *plugin_data)
     {
       // The vectorizer modifies a copy of the scalar loop in-place
       // and relies on dce to remove unused calculations. Some of the
-      // unised instruction may start to overflow from the vectorization
+      // unused instruction may start to overflow from the vectorization
       // (see PR 111257), so we must wait for the following dce pass
       // before checking the IR.
       if (tv_fun->pass_name == "vect")
@@ -179,7 +181,7 @@ static void gimple_pass(opt_pass *pass, my_plugin *plugin_data)
 	  return;
 	}
 
-      Function *func = convert_function(tv_fun, "tgt");
+      Function *func = convert_function(tv_fun, true);
       if (!func)
 	{
 	  tv_fun->delete_ir();
@@ -193,7 +195,7 @@ static void gimple_pass(opt_pass *pass, my_plugin *plugin_data)
   assert(!tv_fun->module);
   tv_fun->module = create_module();
   tv_fun->state = new CommonState();
-  Function *func = convert_function(tv_fun, "src");
+  Function *func = convert_function(tv_fun);
   if (!func)
     {
       tv_fun->delete_ir();

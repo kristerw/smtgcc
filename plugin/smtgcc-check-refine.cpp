@@ -47,7 +47,16 @@ unsigned int tv_pass::execute(function *fun)
   try
     {
       CommonState state;
-      process_function(module, &state, fun);
+      const char *name = function_name(fun);
+      if (strcmp(name, "src") && strcmp(name, "tgt"))
+	{
+	  fprintf(stderr, "Error: function name must be \"src\" or \"tgt\"\n");
+	  error_has_been_reported = true;
+	  return 0;
+	}
+      bool is_tgt_func = !strcmp(name, "tgt");
+
+      process_function(module, &state, fun, is_tgt_func);
       if (module->functions.size() == 2)
 	{
 	  // TODO: Is canonicalize memory needed? It should obviously be

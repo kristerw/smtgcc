@@ -53,10 +53,12 @@ struct Addr {
 };
 
 struct Converter {
-  Converter(Module *module, CommonState *state, function *fun)
+  Converter(Module *module, CommonState *state, function *fun, bool is_tgt_func = false, bool add_abi_checks = false)
     : module{module}
     , state{state}
     , fun{fun}
+    , is_tgt_func{is_tgt_func}
+    , add_abi_checks{add_abi_checks}
   {}
   ~Converter()
   {
@@ -80,6 +82,9 @@ struct Converter {
   Instruction *retval = nullptr;
   int retval_bitsize;
   tree retval_type;
+
+  bool is_tgt_func;
+  bool add_abi_checks;
 
   Instruction *build_memory_inst(uint64_t id, uint64_t size, uint32_t flags);
   void constrain_range(Basic_block *bb, tree expr, Instruction *inst, Instruction *undef=nullptr);
@@ -167,6 +172,7 @@ struct Converter {
   void init_var_values(tree initial, Instruction *mem_inst);
   void init_var(tree decl, Instruction *mem_inst);
   void make_uninit(Basic_block *bb, Instruction *ptr, uint64_t size);
+  void constrain_src_value(Basic_block *bb, Instruction *inst, tree type, Instruction *undef = nullptr, Instruction *mem_flags = nullptr);
   uint64_t constrain_variable(Basic_block *bb, Instruction *ptr,
 			      uint64_t offset, tree type);
   void process_variables();
@@ -375,37 +381,47 @@ Instruction *extract_elem(Basic_block *bb, Instruction *vec, uint32_t elem_bitsi
   return bb->build_inst(Op::EXTRACT, inst, high, low);
 }
 
-// Add a check that floating point bitvectors use the correct NaN value.
+// Add checks in the src function to ensure that the value is a valid value
+// for the type. The main use is to make sure the initial state is valid
+// (for example, global pointers can't point to local memory).
 //
-// This is needed because SMT solvers canonicalizes NaN values. So if we get
-// a non-canonical value, then the SMT solver will change the result. This
-// does not matter in most cases (as it will change it consistently for
-// the source and target) but it fails in e.g., gcc.dg/tree-ssa/mult-abs-2.c
-// where we optimize
-//   return x * (x > 0.f ? -1.f : 1.f);
-// to
-//   if (x > 0.f)
-//     return -x;
-//   else
-//     return x;
-// so that we do only do the NaN canonicalization in one path.
-//
-// We therefore add this check each time we may get an non-canonical NaN
-// from the outside, and only do the translation validation using NaN
-// values that will work.
-//
-// Note: Floating point in unions cannot be fixed up here...
-void canonical_nan_check(Basic_block *bb, Instruction *inst, tree type, Instruction *undef)
+// * FLOAT_TYPE - make sure the value isn't a "non-canonical" NaN.
+//   SMT solvers canonicalize NaN values, so if we get a non-canonical value,
+//   then the SMT solver will change the result. This doesn't matter in most
+//   cases (as it will change it consistently for the source and target) but
+//   it fails in e.g., gcc.dg/tree-ssa/mult-abs-2.c where GCC optimizes
+//     return x * (x > 0.f ? -1.f : 1.f);
+//   to
+//     if (x > 0.f)
+//       return -x;
+//     else
+//       return x;
+//   which only do the NaN canonicalization in one path.
+// * POINTER_TYPE - ensures the pointer doesn't point to local memory
+//   unless it has a memory_flag value that isn't 0.
+// * BOOLEAN_TYPE - ensure the value is 0 or 1. This isn't needed for
+//   most use cases as GIMPLE only looks at the least significant bit,
+//   so we only do this if the add_abi_checks is set to true.
+void Converter::constrain_src_value(Basic_block *bb, Instruction *inst, tree type, Instruction *undef, Instruction *mem_flags)
 {
-  if (SCALAR_FLOAT_TYPE_P(type))
+  if (is_tgt_func)
+    return;
+
+  // TODO: We should invert the meaning of mem_flags.
+  // TODO: mem_flags is not correct name -- it is only one flag.
+  if (POINTER_TYPE_P(type))
     {
-      Instruction *cond = bb->build_inst(Op::IS_NONCANONICAL_NAN, inst);
+      Instruction *id = bb->build_extract_id(inst);
+      Instruction *zero = bb->value_inst(0, id->bitsize);
+      Instruction *cond = bb->build_inst(Op::SLT, id, zero);
+      if (mem_flags)
+	{
+	  Instruction *not_written = bb->build_extract_id(mem_flags);
+	  not_written = bb->build_inst(Op::EQ, not_written, zero);
+	  cond = bb->build_inst(Op::AND, cond, not_written);
+	}
       if (undef)
 	{
-	  // We do not check that NaN are canonical if there are undefined
-	  // bits, as that often gives us spurious failures for e.g. partially
-	  // created complex numbers. All use of the undef element will be
-	  // be flagged as UB when used, so we are not hiding any real issues.
 	  Instruction *zero = bb->value_inst(0, undef->bitsize);
 	  Instruction *cond2 = bb->build_inst(Op::EQ, undef, zero);
 	  cond = bb->build_inst(Op::AND, cond, cond2);
@@ -413,6 +429,43 @@ void canonical_nan_check(Basic_block *bb, Instruction *inst, tree type, Instruct
       bb->build_inst(Op::UB, cond);
       return;
     }
+  if (SCALAR_FLOAT_TYPE_P(type))
+    {
+      Instruction *cond = bb->build_inst(Op::IS_NONCANONICAL_NAN, inst);
+      if (undef)
+	{
+	  Instruction *zero = bb->value_inst(0, undef->bitsize);
+	  Instruction *cond2 = bb->build_inst(Op::EQ, undef, zero);
+	  cond = bb->build_inst(Op::AND, cond, cond2);
+	}
+      bb->build_inst(Op::UB, cond);
+      return;
+    }
+  if (add_abi_checks
+      && TREE_CODE(type) == BOOLEAN_TYPE
+      && bitsize_for_type(type) == 1
+      && inst->bitsize > 1)
+    {
+      // GIMPLE does not care about the extra bits, but the ABI requires that
+      // the unused bits of _Bool be 0. Therefore, smtgcc-tv-backend.so
+      // may report errors when the symbolic values in memory violate the
+      // constraints if the assembly code takes advantage of this.
+      // We therefore mark it as UB here if the padding is incorrect,
+      // which will force the initial symbolic memory state to be correct.
+      // TODO: Should that be done for BITINT_TYPE too?
+      // TODO: The requirement may be different for other architectures?
+      Instruction *one = bb->value_inst(1, inst->bitsize);
+      Instruction *cond = bb->build_inst(Op::UGT, inst, one);
+      if (undef)
+	{
+	  Instruction *zero = bb->value_inst(0, undef->bitsize);
+	  Instruction *cond2 = bb->build_inst(Op::EQ, undef, zero);
+	  cond = bb->build_inst(Op::AND, cond, cond2);
+	}
+      bb->build_inst(Op::UB, cond);
+      return;
+    }
+
   if (TREE_CODE(type) == RECORD_TYPE)
     {
       for (tree fld = TYPE_FIELDS(type); fld; fld = DECL_CHAIN(fld))
@@ -427,15 +480,17 @@ void canonical_nan_check(Basic_block *bb, Instruction *inst, tree type, Instruct
 	    continue;
 	  uint64_t elem_offset = get_int_cst_val(DECL_FIELD_OFFSET(fld));
 	  elem_offset += get_int_cst_val(DECL_FIELD_BIT_OFFSET(fld)) / 8;
-
 	  Instruction *high =
 	    bb->value_inst((elem_offset + elem_size) * 8 - 1, 32);
 	  Instruction *low = bb->value_inst(elem_offset * 8, 32);
-	  Instruction *extract = bb->build_inst(Op::EXTRACT, inst, high, low);
+	  Instruction *extract1 = bb->build_inst(Op::EXTRACT, inst, high, low);
 	  Instruction *extract2 = nullptr;
 	  if (undef)
 	    extract2 = bb->build_inst(Op::EXTRACT, undef, high, low);
-	  canonical_nan_check(bb, extract, elem_type, extract2);
+	  Instruction *extract3 = nullptr;
+	  if (mem_flags)
+	    extract3 = bb->build_inst(Op::EXTRACT, mem_flags, high, low);
+	  constrain_src_value(bb, extract1, elem_type, extract2, extract3);
 	}
       return;
     }
@@ -444,8 +499,6 @@ void canonical_nan_check(Basic_block *bb, Instruction *inst, tree type, Instruct
       || TREE_CODE(type) == ARRAY_TYPE)
     {
       tree elem_type = TREE_TYPE(type);
-      if (!FLOAT_TYPE_P(elem_type) && TREE_CODE(type) != ARRAY_TYPE)
-	return;
       uint32_t elem_bitsize = bytesize_for_type(elem_type) * 8;
       assert(inst->bitsize % elem_bitsize == 0);
       assert(inst->bitsize == bitsize_for_type(type));
@@ -454,66 +507,12 @@ void canonical_nan_check(Basic_block *bb, Instruction *inst, tree type, Instruct
 	{
 	  Instruction *extract = extract_vec_elem(bb, inst, elem_bitsize, i);
 	  Instruction *extract2 = nullptr;
+	  if (mem_flags)
+	    extract2 = extract_vec_elem(bb, mem_flags, elem_bitsize, i);
+	  Instruction *extract3 = nullptr;
 	  if (undef)
-	    extract2 = extract_vec_elem(bb, undef, elem_bitsize, i);
-	  canonical_nan_check(bb, extract, elem_type, extract2);
-	}
-      return;
-    }
-}
-
-void constrain_pointer(Basic_block *bb, Instruction *inst, tree type, Instruction *mem_flags)
-{
-  // TODO: We should invert the meaning of mem_flags.
-  // TODO: mem_flags is not correct name -- it is only one flag.
-  if (POINTER_TYPE_P(type))
-    {
-      Instruction *id = bb->build_extract_id(inst);
-      Instruction *zero = bb->value_inst(0, id->bitsize);
-      Instruction *cond = bb->build_inst(Op::SLT, id, zero);
-      Instruction *not_written = bb->build_extract_id(mem_flags);
-      not_written = bb->build_inst(Op::EQ, not_written, zero);
-      cond = bb->build_inst(Op::AND, cond, not_written);
-      bb->build_inst(Op::UB, cond);
-    }
-
-  if (TREE_CODE(type) == RECORD_TYPE)
-    {
-      for (tree fld = TYPE_FIELDS(type); fld; fld = DECL_CHAIN(fld))
-	{
-	  if (TREE_CODE(fld) != FIELD_DECL)
-	    continue;
-	  if (DECL_BIT_FIELD_TYPE(fld))
-	    continue;
-	  tree elem_type = TREE_TYPE(fld);
-	  uint64_t elem_size = bytesize_for_type(elem_type);
-	  if (elem_size == 0)
-	    continue;
-	  uint64_t elem_offset = get_int_cst_val(DECL_FIELD_OFFSET(fld));
-	  elem_offset += get_int_cst_val(DECL_FIELD_BIT_OFFSET(fld)) / 8;
-	  Instruction *high =
-	    bb->value_inst((elem_offset + elem_size) * 8 - 1, 32);
-	  Instruction *low = bb->value_inst(elem_offset * 8, 32);
-	  Instruction *extract = bb->build_inst(Op::EXTRACT, inst, high, low);
-	  Instruction *extract2 =
-	    bb->build_inst(Op::EXTRACT, mem_flags, high, low);
-	  constrain_pointer(bb, extract, elem_type, extract2);
-	}
-      return;
-    }
-  if (TREE_CODE(type) == ARRAY_TYPE)
-    {
-      tree elem_type = TREE_TYPE(type);
-      uint32_t elem_bitsize = bytesize_for_type(elem_type) * 8;
-      assert(inst->bitsize % elem_bitsize == 0);
-      assert(inst->bitsize == bitsize_for_type(type));
-      uint32_t nof_elt = inst->bitsize / elem_bitsize;
-      for (uint64_t i = 0; i < nof_elt; i++)
-	{
-	  Instruction *extract = extract_vec_elem(bb, inst, elem_bitsize, i);
-	  Instruction *extract2 =
-	    extract_vec_elem(bb, mem_flags, elem_bitsize, i);
-	  constrain_pointer(bb, extract, elem_type, extract2);
+	    extract3 = extract_vec_elem(bb, undef, elem_bitsize, i);
+	  constrain_src_value(bb, extract, elem_type, extract3, extract2);
 	}
       return;
     }
@@ -804,26 +803,9 @@ std::pair<Instruction *, Instruction *> from_mem_repr(Basic_block *bb, Instructi
   if (inst->bitsize == bitsize)
     return {inst, undef};
 
-  Instruction *orig_inst = inst;
   inst = bb->build_trunc(inst, bitsize);
   if (undef)
     undef = bb->build_trunc(undef, bitsize);
-
-  // GIMPLE does not care about the extra bits, but the ABI requires that
-  // the unused bits of _Bool be 0. Therefore, smtgcc-tv-backend.so
-  // may report errors when the symbolic values in memory violate the
-  // constraints if the assembly code takes advantage of this.
-  // We therefore mark it as UB here if the padding is incorrect,
-  // which will force the initial symbolic memory state to be correct.
-  // TODO: Should that be done for BITINT_TYPE too?
-  // TODO: The requirement may be different for other architectures?
-  if (TREE_CODE(type) == BOOLEAN_TYPE && bitsize == 1)
-    {
-      Instruction *bitsize_inst = bb->value_inst(orig_inst->bitsize, 32);
-      Op op = TYPE_UNSIGNED(type) ? Op::ZEXT : Op::SEXT;
-      Instruction *ext = bb->build_inst(op, inst, bitsize_inst);
-      bb->build_inst(Op::UB, bb->build_inst(Op::NE, orig_inst, ext));
-    }
 
   return {inst, undef};
 }
@@ -1111,8 +1093,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_und
 	tree dest_type = TREE_TYPE(expr);
 	std::tie(arg, undef) = to_mem_repr(bb, arg, undef, src_type);
 	std::tie(arg, undef) = from_mem_repr(bb, arg, undef, dest_type);
-	// TODO: Do we need a local pointer check too?
-	canonical_nan_check(bb, arg, dest_type, undef);
+	constrain_src_value(bb, arg, dest_type, undef);
 	if (POINTER_TYPE_P(dest_type))
 	  {
 	    assert(!POINTER_TYPE_P(src_type) || provenance);
@@ -1607,6 +1588,9 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_load(
     }
   else
     {
+      if (expr != DECL_RESULT(fun->decl))
+	constrain_src_value(bb, value, type, undef, mem_flags2);
+
       // TODO: What if the extracted bits are defined, but the extra bits
       // undefined?
       // E.g. a bool where the least significant bit is defined, but the rest
@@ -1614,12 +1598,6 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_load(
       std::tie(value, undef) = from_mem_repr(bb, value, undef, type);
       std::tie(value, mem_flags2) = from_mem_repr(bb, value, mem_flags2, type);
       inst2memory_flagsx.insert({value, mem_flags2});
-    }
-
-  if (expr != DECL_RESULT(fun->decl))
-    {
-      constrain_pointer(bb, value, type, mem_flags2);
-      canonical_nan_check(bb, value, type, undef);
     }
 
   Instruction *provenance = nullptr;
@@ -4044,8 +4022,6 @@ void Converter::process_cfn_popcount(gimple *stmt, Basic_block *bb)
 void Converter::process_cfn_signbit(gimple *stmt, Basic_block *bb)
 {
   Instruction *arg1 = tree2inst(bb, gimple_call_arg(stmt, 0));
-  Instruction *cond = bb->build_inst(Op::IS_NONCANONICAL_NAN, arg1);
-  bb->build_inst(Op::UB, cond);
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
@@ -5001,35 +4977,16 @@ void Converter::make_uninit(Basic_block *bb, Instruction *orig_ptr, uint64_t siz
 
 uint64_t Converter::constrain_variable(Basic_block *bb, Instruction *ptr, uint64_t offset, tree type)
 {
-  if (SCALAR_FLOAT_TYPE_P(type))
+  if (SCALAR_FLOAT_TYPE_P(type)
+      || POINTER_TYPE_P(type)
+      || (add_abi_checks
+	  && TREE_CODE(type) == BOOLEAN_TYPE
+	  && bitsize_for_type(type) == 1))
     {
       uint64_t size = bytesize_for_type(type);
       ptr = bb->build_inst(Op::ADD, ptr, bb->value_inst(offset, ptr->bitsize));
       auto [inst, _] = load_value(bb, ptr, size);
-      Instruction *cond = bb->build_inst(Op::IS_NONCANONICAL_NAN, inst);
-      bb->build_inst(Op::UB, cond);
-      return size;
-    }
-  if (POINTER_TYPE_P(type))
-    {
-      uint64_t size = bytesize_for_type(type);
-      ptr = bb->build_inst(Op::ADD, ptr, bb->value_inst(offset, ptr->bitsize));
-      auto [inst, _] = load_value(bb, ptr, size);
-      Instruction *id = bb->build_extract_id(inst);
-      Instruction *zero = bb->value_inst(0, id->bitsize);
-      Instruction *cond = bb->build_inst(Op::SLT, id, zero);
-      bb->build_inst(Op::UB, cond);
-      return (id->bitsize + 7) / 8;
-    }
-  if (TREE_CODE(type) == BOOLEAN_TYPE && bitsize_for_type(type) == 1)
-    {
-      uint64_t size = bytesize_for_type(type);
-      ptr = bb->build_inst(Op::ADD, ptr, bb->value_inst(offset, ptr->bitsize));
-      auto [inst, _] = load_value(bb, ptr, size);
-      Instruction *bit_inst = bb->build_trunc(inst, 1);
-      Instruction *bitsize_inst = bb->value_inst(inst->bitsize, 32);
-      Instruction *ext = bb->build_inst(Op::ZEXT, bit_inst, bitsize_inst);
-      bb->build_inst(Op::UB, bb->build_inst(Op::NE, inst, ext));
+      constrain_src_value(bb, inst, type);
       return size;
     }
 
@@ -5295,7 +5252,7 @@ void Converter::process_func_args()
 	      bb->build_inst(Op::UB, bb->build_inst(Op::EQ, id, one));
 	    }
 
-	  canonical_nan_check(bb, param_inst, TREE_TYPE(decl), nullptr);
+	  constrain_src_value(bb, param_inst, TREE_TYPE(decl));
 
 	  // Params marked "nonnull" is UB if NULL.
 	  if (POINTER_TYPE_P(TREE_TYPE(decl))
@@ -5613,9 +5570,9 @@ Function *Converter::process_function()
 
 }  // ennd empty namespace
 
-Function *process_function(Module *module, CommonState *state, function *fun)
+Function *process_function(Module *module, CommonState *state, function *fun, bool is_tgt_func, bool add_abi_checks)
 {
-  Converter func(module, state, fun);
+  Converter func(module, state, fun, is_tgt_func, add_abi_checks);
   return func.process_function();
 }
 

@@ -17,7 +17,7 @@ struct CommonState {
   std::vector<smtgcc::Param_info> params;
 };
 
-smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun);
+smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun, bool is_tgt_func = false, bool add_abi_checks = false);
 smtgcc::Module *create_module();
 void adjust_loop_vectorized(smtgcc::Module *module);
 
