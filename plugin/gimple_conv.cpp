@@ -304,6 +304,8 @@ uint64_t bitsize_for_type(tree type)
 
   if (INTEGRAL_TYPE_P(type))
     return TYPE_PRECISION(type);
+  if (VECTOR_TYPE_P(type) && bitsize_for_type(TREE_TYPE(type)) == 1)
+    return 1 << VECTOR_TYPE_CHECK(type)->type_common.precision;
 
   tree size_tree = TYPE_SIZE(type);
   if (size_tree == NULL_TREE)
