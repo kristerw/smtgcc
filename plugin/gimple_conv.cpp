@@ -688,15 +688,19 @@ void Converter::mem_access_ub_check(Basic_block *bb, Instruction *ptr, Instructi
   bb->build_inst(Op::UB, out_of_bound);
 }
 
-void store_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size)
+void store_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size, Instruction *cond = nullptr)
 {
   // It is UB to write to constant memory.
   Instruction *is_const = bb->build_inst(Op::IS_CONST_MEM, provenance);
+  if (cond)
+    is_const = bb->build_inst(Op::AND, is_const, cond);
   bb->build_inst(Op::UB, is_const);
 
   // It is UB if the pointer provenance does not correspond to the address.
   Instruction *ptr_mem_id = bb->build_extract_id(ptr);
   Instruction *is_ub = bb->build_inst(Op::NE, provenance, ptr_mem_id);
+  if (cond)
+    is_ub = bb->build_inst(Op::AND, is_ub, cond);
   bb->build_inst(Op::UB, is_ub);
 
   if (size != 0)
@@ -707,6 +711,8 @@ void store_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, 
       Instruction *end = bb->build_inst(Op::ADD, ptr, size_inst);
       Instruction *end_mem_id = bb->build_extract_id(end);
       Instruction *overflow = bb->build_inst(Op::NE, provenance, end_mem_id);
+      if (cond)
+	overflow = bb->build_inst(Op::AND, overflow, cond);
       bb->build_inst(Op::UB, overflow);
 
       // It is UB if the end is outside the memory object.
@@ -715,6 +721,8 @@ void store_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, 
       Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
       Instruction *offset = bb->build_extract_offset(end);
       Instruction *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
+      if (cond)
+	out_of_bound = bb->build_inst(Op::AND, out_of_bound, cond);
       bb->build_inst(Op::UB, out_of_bound);
     }
   else
@@ -725,6 +733,8 @@ void store_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, 
       Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
       Instruction *offset = bb->build_extract_offset(ptr);
       Instruction *out_of_bound = bb->build_inst(Op::UGT, offset, mem_size);
+      if (cond)
+	out_of_bound = bb->build_inst(Op::AND, out_of_bound, cond);
       bb->build_inst(Op::UB, out_of_bound);
     }
 }
@@ -3791,10 +3801,6 @@ void Converter::process_cfn_mask_store(gimple *stmt, Basic_block *bb)
   assert((value->bitsize & 7) == 0);
   uint64_t size = value->bitsize / 8;
 
-  // We perform the UB check as with store, even if the mask is 0.
-  // TODO: Verify if this is the correct semantics.
-  store_ub_check(bb, ptr, ptr_prov, size);
-
   uint64_t alignment = get_int_cst_val(alignment_expr) / 8;
   if (alignment > 1)
     {
@@ -3812,19 +3818,14 @@ void Converter::process_cfn_mask_store(gimple *stmt, Basic_block *bb)
       bb->build_inst(Op::UB, cond);
     }
 
-  uint64_t elem_size;
-  uint64_t mask_elem_bitsize;
   assert(VECTOR_TYPE_P(value_type) == VECTOR_TYPE_P(mask_type));
-  if (VECTOR_TYPE_P(value_type))
-    {
-      mask_elem_bitsize = bitsize_for_type(TREE_TYPE(mask_type));
-      elem_size = bytesize_for_type(TREE_TYPE(value_type));
-    }
-  else
-    {
-      elem_size = bytesize_for_type(value_type);
-      mask_elem_bitsize = bitsize_for_type(mask_type);
-    }
+  tree value_elem_type =
+    VECTOR_TYPE_P(value_type) ? TREE_TYPE(value_type) : value_type;
+  tree mask_elem_type =
+    VECTOR_TYPE_P(mask_type) ? TREE_TYPE(mask_type) : mask_type;
+  uint64_t elem_size = bytesize_for_type(value_elem_type);
+  assert(TREE_CODE(mask_elem_type) == BOOLEAN_TYPE);
+  uint64_t mask_elem_bitsize = bitsize_for_type(mask_elem_type);
 
   if (!undef)
     undef = bb->value_inst(0, value->bitsize);
@@ -3836,7 +3837,7 @@ void Converter::process_cfn_mask_store(gimple *stmt, Basic_block *bb)
     {
       Instruction *cond = extract_vec_elem(bb, mask, mask_elem_bitsize, i);
       if (cond->bitsize != 1)
-	cond = bb->build_inst(Op::NE, cond, bb->value_inst(0, cond->bitsize));
+	cond = bb->build_trunc(cond, 1);
       Instruction *orig_elem = extract_vec_elem(bb, orig, elem_size * 8, i);
       Instruction *elem = extract_vec_elem(bb, value, elem_size * 8, i);
       Instruction *new_value = bb->build_inst(Op::ITE, cond, elem, orig_elem);
@@ -3845,6 +3846,7 @@ void Converter::process_cfn_mask_store(gimple *stmt, Basic_block *bb)
       Instruction *new_undef = bb->build_inst(Op::ITE, cond, elem, orig_elem);
       Instruction *offset = bb->value_inst(i * elem_size, ptr->bitsize);
       Instruction *dst_ptr = bb->build_inst(Op::ADD, ptr, offset);
+      store_ub_check(bb, dst_ptr, ptr_prov, elem_size, cond);
       store_value(bb, dst_ptr, new_value, new_undef);
     }
 }
