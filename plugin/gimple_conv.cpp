@@ -3480,6 +3480,8 @@ void Converter::process_cfn_add_overflow(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_add_overflow: vector type");
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   Instruction *arg1 = tree2inst(bb, arg1_expr);
   Instruction *arg2 = tree2inst(bb, arg2_expr);
@@ -3571,6 +3573,8 @@ void Converter::process_cfn_clrsb(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_clrsb: vector type");
   Instruction *arg = tree2inst(bb, gimple_call_arg(stmt, 0));
   assert(arg->bitsize > 1);
   int bitsize = bitsize_for_type(TREE_TYPE(lhs));
@@ -3600,6 +3604,8 @@ void Converter::process_cfn_clz(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_clz: vector type");
   int bitsize = bitsize_for_type(TREE_TYPE(lhs));
   Instruction *inst;
   if (nargs == 1)
@@ -3624,6 +3630,10 @@ void Converter::process_cfn_copysign(gimple *stmt, Basic_block *bb)
   Instruction *res = bb->build_trunc(arg1, arg1->bitsize - 1);
   res = bb->build_inst(Op::CONCAT, signbit, res);
 
+  tree lhs = gimple_call_lhs(stmt);
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_copysign: vector type");
+
   // SMT solvers has only one NaN value, so NEGATE_EXPR of NaN does not
   // change the value. This leads to incorrect reports of miscompilations
   // for transformations like -ABS_EXPR(x) -> .COPYSIGN(x, -1.0) because
@@ -3633,7 +3643,6 @@ void Converter::process_cfn_copysign(gimple *stmt, Basic_block *bb)
   // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
   Instruction *is_nan = bb->build_inst(Op::IS_NAN, arg1);
   res = bb->build_inst(Op::ITE, is_nan, arg1, res);
-  tree lhs = gimple_call_lhs(stmt);
   if (lhs)
     {
       constrain_range(bb, lhs, res);
@@ -3654,6 +3663,8 @@ void Converter::process_cfn_ctz(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_ctz: vector type");
   int bitsize = bitsize_for_type(TREE_TYPE(lhs));
   Instruction *inst;
   if (nargs == 1)
@@ -3679,6 +3690,8 @@ void Converter::process_cfn_divmod(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_divmod_: vector type");
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   Instruction *arg1 = tree2inst(bb, arg1_expr);
   Instruction *arg2 = tree2inst(bb, arg2_expr);
@@ -3711,6 +3724,8 @@ void Converter::process_cfn_ffs(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_ffs: vector type");
   int bitsize = bitsize_for_type(TREE_TYPE(lhs));
   Instruction *inst;
   inst = bb->value_inst(0, bitsize);
@@ -3729,6 +3744,8 @@ void Converter::process_cfn_fmax(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_fmax: vector type");
   Instruction *arg1 = tree2inst(bb, gimple_call_arg(stmt, 0));
   Instruction *arg2 = tree2inst(bb, gimple_call_arg(stmt, 1));
   Instruction *is_nan = bb->build_inst(Op::IS_NAN, arg2);
@@ -3754,6 +3771,8 @@ void Converter::process_cfn_fmin(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_fmin: vector type");
   Instruction *arg1 = tree2inst(bb, gimple_call_arg(stmt, 0));
   Instruction *arg2 = tree2inst(bb, gimple_call_arg(stmt, 1));
   Instruction *is_nan = bb->build_inst(Op::IS_NAN, arg2);
@@ -3936,6 +3955,8 @@ void Converter::process_cfn_mul_overflow(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_mul_overflow: vector type");
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   Instruction *arg1 = tree2inst(bb, arg1_expr);
   Instruction *arg2 = tree2inst(bb, arg2_expr);
@@ -3975,6 +3996,8 @@ void Converter::process_cfn_nan(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_nan: vector type");
 
   Instruction *bs = bb->value_inst(bitsize_for_type(TREE_TYPE(lhs)), 32);
   tree2instruction.insert({lhs, bb->build_inst(Op::NAN, bs)});
@@ -3985,6 +4008,8 @@ void Converter::process_cfn_parity(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_parity: vector type");
   Instruction *arg = tree2inst(bb, gimple_call_arg(stmt, 0));
   int bitwidth = arg->bitsize;
   Instruction *inst = bb->build_extract_bit(arg, 0);
@@ -4005,6 +4030,8 @@ void Converter::process_cfn_popcount(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_popcount: vector type");
   Instruction *arg = tree2inst(bb, gimple_call_arg(stmt, 0));
   int bitwidth = arg->bitsize;
   Instruction *eight = bb->value_inst(8, 32);
@@ -4029,6 +4056,8 @@ void Converter::process_cfn_signbit(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_signbit: vector type");
   Instruction *signbit = bb->build_extract_bit(arg1, arg1->bitsize - 1);
   uint32_t bitsize = bitsize_for_type(TREE_TYPE(lhs));
   Instruction *lhs_bitsize_inst = bb->value_inst(bitsize, 32);
@@ -4046,6 +4075,8 @@ void Converter::process_cfn_sub_overflow(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_sub_overflow: vector type");
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   Instruction *arg1 = tree2inst(bb, arg1_expr);
   Instruction *arg2 = tree2inst(bb, arg2_expr);
@@ -4269,6 +4300,8 @@ void Converter::process_cfn_uaddc(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_uaddc: vector type");
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   Instruction *arg1 = tree2inst(bb, gimple_call_arg(stmt, 0));
@@ -4308,6 +4341,8 @@ void Converter::process_cfn_usubc(gimple *stmt, Basic_block *bb)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_usubc: vector type");
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   Instruction *arg1 = tree2inst(bb, gimple_call_arg(stmt, 0));
@@ -4347,12 +4382,15 @@ void Converter::process_cfn_xorsign(gimple *stmt, Basic_block *bb)
   Instruction *res = bb->build_trunc(arg1, arg1->bitsize - 1);
   res = bb->build_inst(Op::CONCAT, signbit, res);
 
+  tree lhs = gimple_call_lhs(stmt);
+  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+    throw Not_implemented("process_cfn_: vector type");
+
   // For now, treat copying the sign to NaN as always produce the original
   // canonical NaN.
   // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
   Instruction *is_nan = bb->build_inst(Op::IS_NAN, arg1);
   res = bb->build_inst(Op::ITE, is_nan, arg1, res);
-  tree lhs = gimple_call_lhs(stmt);
   if (lhs)
     {
       constrain_range(bb, lhs, res);
