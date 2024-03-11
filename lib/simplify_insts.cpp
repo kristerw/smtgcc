@@ -1247,8 +1247,8 @@ Instruction *simplify_extract(Instruction *inst)
 	return ext_arg;
       if (high_val < ext_arg->bitsize)
 	{
-	  Instruction *high = inst->bb->value_inst(high_val, 32);
-	  Instruction *low = inst->bb->value_inst(low_val, 32);
+	  Instruction *high = inst->arguments[1];
+	  Instruction *low = inst->arguments[2];
 	  Instruction *new_inst = create_inst(Op::EXTRACT, ext_arg, high, low);
 	  new_inst->insert_before(inst);
 	  return new_inst;
@@ -1351,6 +1351,20 @@ Instruction *simplify_extract(Instruction *inst)
 	  new_inst->insert_before(inst);
 	  return new_inst;
 	}
+    }
+
+  // extract (add x, c) -> extract x if the high_val least significant bits
+  // of c are 0.
+  if (arg->opcode == Op::ADD
+      && arg->arguments[1]->opcode == Op::VALUE
+      && (arg->arguments[1]->value() << (127 - high_val)) == 0)
+    {
+      Instruction *high = inst->arguments[1];
+      Instruction *low = inst->arguments[2];
+      Instruction *new_inst =
+	create_inst(Op::EXTRACT, arg->arguments[0], high, low);
+      new_inst->insert_before(inst);
+      return new_inst;
     }
 
   // extract (lshr x, c) -> extract if the shift is constant.
