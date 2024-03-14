@@ -53,12 +53,11 @@ struct Addr {
 };
 
 struct Converter {
-  Converter(Module *module, CommonState *state, function *fun, bool is_tgt_func = false, bool add_abi_checks = false)
+  Converter(Module *module, CommonState *state, function *fun, bool is_tgt_func = false)
     : module{module}
     , state{state}
     , fun{fun}
     , is_tgt_func{is_tgt_func}
-    , add_abi_checks{add_abi_checks}
   {}
   ~Converter()
   {
@@ -84,7 +83,6 @@ struct Converter {
   tree retval_type;
 
   bool is_tgt_func;
-  bool add_abi_checks;
 
   Instruction *build_memory_inst(uint64_t id, uint64_t size, uint32_t flags);
   void constrain_range(Basic_block *bb, tree expr, Instruction *inst, Instruction *undef=nullptr);
@@ -401,9 +399,7 @@ Instruction *extract_elem(Basic_block *bb, Instruction *vec, uint32_t elem_bitsi
 //   which only do the NaN canonicalization in one path.
 // * POINTER_TYPE - ensures the pointer doesn't point to local memory
 //   unless it has a memory_flag value that isn't 0.
-// * BOOLEAN_TYPE - ensure the value is 0 or 1. This isn't needed for
-//   most use cases as GIMPLE only looks at the least significant bit,
-//   so we only do this if the add_abi_checks is set to true.
+// * BOOLEAN_TYPE - ensure the value is 0 or 1.
 void Converter::constrain_src_value(Basic_block *bb, Instruction *inst, tree type, Instruction *undef, Instruction *mem_flags)
 {
   if (is_tgt_func)
@@ -443,8 +439,7 @@ void Converter::constrain_src_value(Basic_block *bb, Instruction *inst, tree typ
       bb->build_inst(Op::UB, cond);
       return;
     }
-  if (add_abi_checks
-      && TREE_CODE(type) == BOOLEAN_TYPE
+  if (TREE_CODE(type) == BOOLEAN_TYPE
       && bitsize_for_type(type) == 1
       && inst->bitsize > 1)
     {
@@ -5021,9 +5016,7 @@ uint64_t Converter::constrain_variable(Basic_block *bb, Instruction *ptr, uint64
 {
   if (SCALAR_FLOAT_TYPE_P(type)
       || POINTER_TYPE_P(type)
-      || (add_abi_checks
-	  && TREE_CODE(type) == BOOLEAN_TYPE
-	  && bitsize_for_type(type) == 1))
+      || (TREE_CODE(type) == BOOLEAN_TYPE && bitsize_for_type(type) == 1))
     {
       uint64_t size = bytesize_for_type(type);
       ptr = bb->build_inst(Op::ADD, ptr, bb->value_inst(offset, ptr->bitsize));
@@ -5612,9 +5605,9 @@ Function *Converter::process_function()
 
 }  // ennd empty namespace
 
-Function *process_function(Module *module, CommonState *state, function *fun, bool is_tgt_func, bool add_abi_checks)
+Function *process_function(Module *module, CommonState *state, function *fun, bool is_tgt_func)
 {
-  Converter func(module, state, fun, is_tgt_func, add_abi_checks);
+  Converter func(module, state, fun, is_tgt_func);
   return func.process_function();
 }
 

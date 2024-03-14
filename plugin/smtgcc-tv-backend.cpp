@@ -48,7 +48,7 @@ unsigned int tv_pass::execute(function *fun)
   try
     {
       CommonState state;
-      process_function(module, &state, fun, false, true);
+      process_function(module, &state, fun, false);
       rstate->module = module;
       rstate->params = state.params;
     }
