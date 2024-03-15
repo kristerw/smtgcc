@@ -1419,15 +1419,23 @@ Addr Converter::process_address(Basic_block *bb, tree expr, bool is_mem_access)
     }
   if (code == VAR_DECL)
     {
-      // This check is not needed. But we are currently not adding RTTI
-      // structures, which makes the decl2instruction.at(expr) crash for
-      // e.g.,  g++.dg/analyzer/pr108003.C
-      if (decl2instruction.contains(expr))
+      // We are currently not adding RTTI structures, which makes
+      // decl2instruction.at(expr) crash for e.g., g++.dg/analyzer/pr108003.C
+      if (!decl2instruction.contains(expr))
+	throw Not_implemented("process_address: unknown VAR_DECL");
+
+      Instruction *ptr = decl2instruction.at(expr);
+      assert(ptr->opcode == Op::MEMORY);
+      Instruction *id = bb->build_extract_id(ptr);
+      if (is_mem_access)
 	{
-	  Instruction *ptr = decl2instruction.at(expr);
-	  assert(ptr->opcode == Op::MEMORY);
-	  return {ptr, 0, ptr->arguments[0]};
+	  // This reads/writes a variable, so we know the access is in range.
+	  // However, we must verify the variable hasn't gone out of scope.
+	  Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, id);
+	  Instruction *zero = bb->value_inst(0, mem_size->bitsize);
+	  bb->build_inst(Op::UB, bb->build_inst(Op::EQ, mem_size, zero));
 	}
+      return {ptr, 0, id};
     }
   if (code == ARRAY_REF)
     return process_array_ref(bb, expr, is_mem_access);
