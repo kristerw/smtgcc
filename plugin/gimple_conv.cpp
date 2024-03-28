@@ -170,7 +170,7 @@ struct Converter {
   void init_var_values(tree initial, Instruction *mem_inst);
   void init_var(tree decl, Instruction *mem_inst);
   void make_uninit(Basic_block *bb, Instruction *ptr, uint64_t size);
-  void constrain_src_value(Basic_block *bb, Instruction *inst, tree type, Instruction *undef = nullptr, Instruction *mem_flags = nullptr);
+  void constrain_src_value(Basic_block *bb, Instruction *inst, tree type, Instruction *mem_flags = nullptr);
   uint64_t constrain_variable(Basic_block *bb, Instruction *ptr,
 			      uint64_t offset, tree type);
   void process_variables();
@@ -400,7 +400,7 @@ Instruction *extract_elem(Basic_block *bb, Instruction *vec, uint32_t elem_bitsi
 // * POINTER_TYPE - ensures the pointer doesn't point to local memory
 //   unless it has a memory_flag value that isn't 0.
 // * BOOLEAN_TYPE - ensure the value is 0 or 1.
-void Converter::constrain_src_value(Basic_block *bb, Instruction *inst, tree type, Instruction *undef, Instruction *mem_flags)
+void Converter::constrain_src_value(Basic_block *bb, Instruction *inst, tree type, Instruction *mem_flags)
 {
   if (is_tgt_func)
     return;
@@ -418,25 +418,12 @@ void Converter::constrain_src_value(Basic_block *bb, Instruction *inst, tree typ
 	  not_written = bb->build_inst(Op::EQ, not_written, zero);
 	  cond = bb->build_inst(Op::AND, cond, not_written);
 	}
-      if (undef)
-	{
-	  Instruction *zero = bb->value_inst(0, undef->bitsize);
-	  Instruction *cond2 = bb->build_inst(Op::EQ, undef, zero);
-	  cond = bb->build_inst(Op::AND, cond, cond2);
-	}
       bb->build_inst(Op::UB, cond);
       return;
     }
   if (SCALAR_FLOAT_TYPE_P(type))
     {
-      Instruction *cond = bb->build_inst(Op::IS_NONCANONICAL_NAN, inst);
-      if (undef)
-	{
-	  Instruction *zero = bb->value_inst(0, undef->bitsize);
-	  Instruction *cond2 = bb->build_inst(Op::EQ, undef, zero);
-	  cond = bb->build_inst(Op::AND, cond, cond2);
-	}
-      bb->build_inst(Op::UB, cond);
+      bb->build_inst(Op::UB, bb->build_inst(Op::IS_NONCANONICAL_NAN, inst));
       return;
     }
   if (TREE_CODE(type) == BOOLEAN_TYPE
@@ -452,14 +439,7 @@ void Converter::constrain_src_value(Basic_block *bb, Instruction *inst, tree typ
       // TODO: Should that be done for BITINT_TYPE too?
       // TODO: The requirement may be different for other architectures?
       Instruction *one = bb->value_inst(1, inst->bitsize);
-      Instruction *cond = bb->build_inst(Op::UGT, inst, one);
-      if (undef)
-	{
-	  Instruction *zero = bb->value_inst(0, undef->bitsize);
-	  Instruction *cond2 = bb->build_inst(Op::EQ, undef, zero);
-	  cond = bb->build_inst(Op::AND, cond, cond2);
-	}
-      bb->build_inst(Op::UB, cond);
+      bb->build_inst(Op::UB, bb->build_inst(Op::UGT, inst, one));
       return;
     }
 
@@ -482,12 +462,9 @@ void Converter::constrain_src_value(Basic_block *bb, Instruction *inst, tree typ
 	  Instruction *low = bb->value_inst(elem_offset * 8, 32);
 	  Instruction *extract1 = bb->build_inst(Op::EXTRACT, inst, high, low);
 	  Instruction *extract2 = nullptr;
-	  if (undef)
-	    extract2 = bb->build_inst(Op::EXTRACT, undef, high, low);
-	  Instruction *extract3 = nullptr;
 	  if (mem_flags)
-	    extract3 = bb->build_inst(Op::EXTRACT, mem_flags, high, low);
-	  constrain_src_value(bb, extract1, elem_type, extract2, extract3);
+	    extract2 = bb->build_inst(Op::EXTRACT, mem_flags, high, low);
+	  constrain_src_value(bb, extract1, elem_type, extract2);
 	}
       return;
     }
@@ -506,10 +483,7 @@ void Converter::constrain_src_value(Basic_block *bb, Instruction *inst, tree typ
 	  Instruction *extract2 = nullptr;
 	  if (mem_flags)
 	    extract2 = extract_vec_elem(bb, mem_flags, elem_bitsize, i);
-	  Instruction *extract3 = nullptr;
-	  if (undef)
-	    extract3 = extract_vec_elem(bb, undef, elem_bitsize, i);
-	  constrain_src_value(bb, extract, elem_type, extract3, extract2);
+	  constrain_src_value(bb, extract, elem_type, extract2);
 	}
       return;
     }
@@ -1100,7 +1074,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_und
 	tree dest_type = TREE_TYPE(expr);
 	std::tie(arg, undef) = to_mem_repr(bb, arg, undef, src_type);
 	std::tie(arg, undef) = from_mem_repr(bb, arg, undef, dest_type);
-	constrain_src_value(bb, arg, dest_type, undef);
+	constrain_src_value(bb, arg, dest_type);
 	if (POINTER_TYPE_P(dest_type))
 	  {
 	    assert(!POINTER_TYPE_P(src_type) || provenance);
@@ -1606,7 +1580,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_load(
   else
     {
       if (expr != DECL_RESULT(fun->decl))
-	constrain_src_value(bb, value, type, undef, mem_flags2);
+	constrain_src_value(bb, value, type, mem_flags2);
 
       // TODO: What if the extracted bits are defined, but the extra bits
       // undefined?
