@@ -1483,7 +1483,9 @@ bool is_bit_field(tree expr)
     }
   else if (code == BIT_FIELD_REF)
     {
-      return true;
+      uint64_t bitsize = get_int_cst_val(TREE_OPERAND(expr, 1));
+      uint64_t bit_offset = get_int_cst_val(TREE_OPERAND(expr, 2));
+      return (bitsize % 8) != 0 || (bit_offset % 8) != 0;
     }
 
   return false;
