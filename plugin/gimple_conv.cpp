@@ -115,11 +115,11 @@ struct Converter {
   Instruction *process_binary_complex(enum tree_code code, Instruction *arg1, Instruction *arg2, tree lhs_type, Basic_block *bb);
   Instruction *process_binary_complex_cmp(enum tree_code code, Instruction *arg1, Instruction *arg2, tree lhs_type, tree arg1_type, Basic_block *bb);
   std::pair<Instruction *, Instruction *> process_binary_bool(enum tree_code code, Instruction *arg1, Instruction *arg1_undef, Instruction *arg2, Instruction *arg2_undef, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb);
-  Instruction *process_binary_int(enum tree_code code, bool is_unsigned, Instruction *arg1, Instruction *arg2, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb);
-  std::tuple<Instruction *, Instruction *, Instruction *> process_binary_int(enum tree_code code, bool is_unsigned, Instruction *arg1, Instruction *arg1_undef, Instruction *arg1_prov, Instruction *arg2, Instruction *arg2_undef, Instruction *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb);
-  Instruction *process_binary_scalar(enum tree_code code, Instruction *arg1, Instruction *arg2, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb);
-  std::tuple<Instruction *, Instruction *, Instruction *> process_binary_scalar(enum tree_code code, Instruction *arg1, Instruction *arg1_undef, Instruction *arg1_prov, Instruction *arg2, Instruction *arg2_undef, Instruction *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb);
-  std::pair<Instruction *, Instruction *> process_binary_vec(enum tree_code code, Instruction *arg1, Instruction *arg1_undef, Instruction *arg2, Instruction *arg2_undef, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb);
+  Instruction *process_binary_int(enum tree_code code, bool is_unsigned, Instruction *arg1, Instruction *arg2, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb, bool ignore_overflow = false);
+  std::tuple<Instruction *, Instruction *, Instruction *> process_binary_int(enum tree_code code, bool is_unsigned, Instruction *arg1, Instruction *arg1_undef, Instruction *arg1_prov, Instruction *arg2, Instruction *arg2_undef, Instruction *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb, bool ignore_overflow = false);
+  Instruction *process_binary_scalar(enum tree_code code, Instruction *arg1, Instruction *arg2, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb, bool ignore_overflow = false);
+  std::tuple<Instruction *, Instruction *, Instruction *> process_binary_scalar(enum tree_code code, Instruction *arg1, Instruction *arg1_undef, Instruction *arg1_prov, Instruction *arg2, Instruction *arg2_undef, Instruction *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb, bool ignore_overflow = false);
+  std::pair<Instruction *, Instruction *> process_binary_vec(enum tree_code code, Instruction *arg1, Instruction *arg1_undef, Instruction *arg2, Instruction *arg2_undef, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb, bool ignore_overflow = false);
   Instruction *process_ternary(enum tree_code code, Instruction *arg1, Instruction *arg2, Instruction *arg3, tree arg1_type, tree arg2_type, tree arg3_type, Basic_block *bb);
   Instruction *process_ternary_vec(enum tree_code code, Instruction *arg1, Instruction *arg2, Instruction *arg3, tree lhs_type, tree arg1_type, tree arg2_type, tree arg3_type, Basic_block *bb);
   std::pair<Instruction *, Instruction *> process_vec_cond(Instruction *arg1, Instruction *arg2, Instruction *arg2_undef, Instruction *arg3, Instruction *arg3_undef, tree arg1_type, tree arg2_type, Basic_block *bb);
@@ -133,6 +133,7 @@ struct Converter {
   void process_cfn_bswap(gimple *stmt, Basic_block *bb);
   void process_cfn_clrsb(gimple *stmt, Basic_block *bb);
   void process_cfn_clz(gimple *stmt, Basic_block *bb);
+  void process_cfn_cond(gimple *stmt, Basic_block *bb);
   void process_cfn_copysign(gimple *stmt, Basic_block *bb);
   void process_cfn_ctz(gimple *stmt, Basic_block *bb);
   void process_cfn_divmod(gimple *stmt, Basic_block *bb);
@@ -2389,12 +2390,12 @@ std::pair<Instruction *, Instruction *> Converter::process_binary_bool(enum tree
   return {lhs, lhs_undef};
 }
 
-Instruction *Converter::process_binary_int(enum tree_code code, bool is_unsigned, Instruction *arg1, Instruction *arg2, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb)
+Instruction *Converter::process_binary_int(enum tree_code code, bool is_unsigned, Instruction *arg1, Instruction *arg2, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb, bool ignore_overflow)
 {
-  return std::get<0>(process_binary_int(code, is_unsigned, arg1, nullptr, nullptr, arg2, nullptr, nullptr, lhs_type, arg1_type, arg2_type, bb));
+  return std::get<0>(process_binary_int(code, is_unsigned, arg1, nullptr, nullptr, arg2, nullptr, nullptr, lhs_type, arg1_type, arg2_type, bb, ignore_overflow));
 }
 
-std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binary_int(enum tree_code code, bool is_unsigned, Instruction *arg1, Instruction *arg1_undef, Instruction *arg1_prov, Instruction *arg2, Instruction *arg2_undef, Instruction *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb)
+std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binary_int(enum tree_code code, bool is_unsigned, Instruction *arg1, Instruction *arg1_undef, Instruction *arg1_prov, Instruction *arg2, Instruction *arg2_undef, Instruction *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb, bool ignore_overflow)
 {
   // Handle instructions that accept uninitialized arguments.
   switch (code)
@@ -2502,7 +2503,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	      bb->build_inst(Op::SEXT, ub, bb->value_inst(arg1->bitsize, 32));
 	  }
 
-	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
+	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
 	    Instruction *cond = bb->build_inst(Op::SMUL_WRAPS, arg1, arg2);
 	    bb->build_inst(Op::UB, cond);
@@ -2544,7 +2545,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	arg2 = type_convert(arg2, arg2_type, arg1_type, bb);
 	Instruction *ptr = bb->build_inst(Op::ADD, arg1, arg2);
 
-	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
+	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	{
 	  Instruction *sub_overflow = bb->build_inst(Op::UGT, ptr, arg1);
 	  Instruction *add_overflow = bb->build_inst(Op::ULT, ptr, arg1);
@@ -2576,7 +2577,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	if (arg2_prov)
 	  prov = arg2_prov;
 
-	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
+	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
 	    Instruction *cond = bb->build_inst(Op::SSUB_WRAPS, arg1, arg2);
 	    bb->build_inst(Op::UB, cond);
@@ -2593,7 +2594,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	if (arg2_prov)
 	  prov = arg2_prov;
 
-	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
+	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
 	    Instruction *cond = bb->build_inst(Op::SADD_WRAPS, arg1, arg2);
 	    bb->build_inst(Op::UB, cond);
@@ -2636,7 +2637,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
       return {bb->build_inst(Op::XOR, arg1, arg2), nullptr, nullptr};
     case EXACT_DIV_EXPR:
       {
-	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
+	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
 	    Instruction *min_int_inst = build_min_int(bb, arg1->bitsize);
 	    Instruction *minus1_inst = bb->value_inst(-1, arg1->bitsize);
@@ -2664,7 +2665,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
       arg2 = type_convert(arg2, arg2_type, arg1_type, bb);
       return {bb->build_inst(Op::SHL, arg1, arg2), nullptr, nullptr};
     case MULT_EXPR:
-      if (!TYPE_OVERFLOW_WRAPS(lhs_type))
+      if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	{
 	  Instruction *cond = bb->build_inst(Op::SMUL_WRAPS, arg1, arg2);
 	  bb->build_inst(Op::UB, cond);
@@ -2728,7 +2729,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
       }
     case TRUNC_DIV_EXPR:
       {
-	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
+	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
 	    Instruction *min_int_inst = build_min_int(bb, arg1->bitsize);
 	    Instruction *minus1_inst = bb->value_inst(-1, arg1->bitsize);
@@ -2789,7 +2790,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
     }
 }
 
-Instruction *Converter::process_binary_scalar(enum tree_code code, Instruction *arg1, Instruction *arg2, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb)
+Instruction *Converter::process_binary_scalar(enum tree_code code, Instruction *arg1, Instruction *arg2, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb, bool ignore_overflow)
 {
   if (TREE_CODE(lhs_type) == BOOLEAN_TYPE)
     {
@@ -2803,10 +2804,11 @@ Instruction *Converter::process_binary_scalar(enum tree_code code, Instruction *
     return process_binary_float(code, arg1, arg2, bb);
   else
     return process_binary_int(code, TYPE_UNSIGNED(arg1_type), arg1, arg2,
-			      lhs_type, arg1_type, arg2_type, bb);
+			      lhs_type, arg1_type, arg2_type, bb,
+			      ignore_overflow);
 }
 
-std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binary_scalar(enum tree_code code, Instruction *arg1, Instruction *arg1_undef, Instruction *arg1_prov, Instruction *arg2, Instruction *arg2_undef, Instruction *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb)
+std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binary_scalar(enum tree_code code, Instruction *arg1, Instruction *arg1_undef, Instruction *arg1_prov, Instruction *arg2, Instruction *arg2_undef, Instruction *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb, bool ignore_overflow)
 {
   if (TREE_CODE(lhs_type) == BOOLEAN_TYPE)
     {
@@ -2827,10 +2829,11 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
   else
     return process_binary_int(code, TYPE_UNSIGNED(arg1_type),
 			      arg1, arg1_undef, arg1_prov, arg2, arg2_undef,
-			      arg2_prov, lhs_type, arg1_type, arg2_type, bb);
+			      arg2_prov, lhs_type, arg1_type, arg2_type, bb,
+			      ignore_overflow);
 }
 
-std::pair<Instruction *, Instruction *> Converter::process_binary_vec(enum tree_code code, Instruction *arg1, Instruction *arg1_undef, Instruction *arg2, Instruction *arg2_undef, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb)
+std::pair<Instruction *, Instruction *> Converter::process_binary_vec(enum tree_code code, Instruction *arg1, Instruction *arg1_undef, Instruction *arg2, Instruction *arg2_undef, tree lhs_type, tree arg1_type, tree arg2_type, Basic_block *bb, bool ignore_overflow)
 {
   assert(VECTOR_TYPE_P(lhs_type));
   assert(VECTOR_TYPE_P(arg1_type));
@@ -2892,7 +2895,7 @@ std::pair<Instruction *, Instruction *> Converter::process_binary_vec(enum tree_
       auto [inst, inst_undef, _] =
 	process_binary_scalar(code, a1, a1_undef, nullptr, a2, a2_undef,
 			      nullptr, lhs_elem_type, arg1_elem_type,
-			      arg2_elem_type, bb);
+			      arg2_elem_type, bb, ignore_overflow);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
@@ -3599,6 +3602,107 @@ void Converter::process_cfn_clz(gimple *stmt, Basic_block *bb)
     }
   constrain_range(bb, lhs, inst);
   tree2instruction.insert({lhs, inst});
+}
+
+void Converter::process_cfn_cond(gimple *stmt, Basic_block *bb)
+{
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  Instruction *arg1 = tree2inst(bb, arg1_expr);
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  tree arg2_type = TREE_TYPE(arg2_expr);
+  auto[arg2, arg2_undef] = tree2inst_undef(bb, arg2_expr);
+  tree arg3_expr = gimple_call_arg(stmt, 2);
+  tree arg3_type = TREE_TYPE(arg3_expr);
+  auto[arg3, arg3_undef] = tree2inst_undef(bb, arg3_expr);
+  tree arg4_expr = gimple_call_arg(stmt, 3);
+  tree arg4_type = TREE_TYPE(arg4_expr);
+  auto[arg4, arg4_undef] = tree2inst_undef(bb, arg4_expr);
+  tree lhs = gimple_call_lhs(stmt);
+
+  tree_code code;
+  switch (gimple_call_combined_fn(stmt))
+    {
+    case CFN_COND_ADD:
+      code = PLUS_EXPR;
+      break;
+    case CFN_COND_AND:
+      code = BIT_AND_EXPR;
+      break;
+    case CFN_COND_IOR:
+      code = BIT_IOR_EXPR;
+      break;
+    case CFN_COND_MUL:
+      code = MULT_EXPR;
+      break;
+    case CFN_COND_RDIV:
+      code = RDIV_EXPR;
+      break;
+    case CFN_COND_SHL:
+      code = LSHIFT_EXPR;
+      break;
+    case CFN_COND_SHR:
+      code = RSHIFT_EXPR;
+      break;
+    case CFN_COND_SUB:
+      code = MINUS_EXPR;
+      break;
+    default:
+      {
+	const char *name = internal_fn_name(gimple_call_internal_fn(stmt));
+	throw Not_implemented("process_cfn_cond: "s + name);
+      }
+    }
+
+  Instruction *op_inst;
+  Instruction *op_undef = nullptr;
+  // TODO: We ignore overflow for now, but we may need to modify this to
+  // check for oveflow when the condition is true.
+  if (VECTOR_TYPE_P(arg2_type))
+    {
+      std::tie(op_inst, op_undef) =
+	process_binary_vec(code, arg2, arg2_undef, arg3, arg3_undef,
+			   arg2_type, arg2_type, arg3_type, bb, true);
+    }
+  else
+    {
+      Instruction *op_prov;
+      std::tie(op_inst, op_undef, op_prov) =
+	process_binary_scalar(code, arg2, arg2_undef, nullptr,
+			      arg3, arg3_undef, nullptr,
+			      arg2_type, arg2_type, arg3_type, bb, true);
+    }
+
+  Instruction *ret_inst;
+  Instruction *ret_undef = nullptr;
+  if (VECTOR_TYPE_P(arg1_type))
+    {
+      std::tie(ret_inst, ret_undef) =
+	process_vec_cond(arg1, op_inst, op_undef, arg4, arg4_undef,
+			 arg1_type, arg4_type, bb);
+    }
+  else
+    {
+      assert(TREE_CODE(arg1_type) == BOOLEAN_TYPE);
+      if (TYPE_PRECISION(arg1_type) != 1)
+	arg1 = bb->build_extract_bit(arg1, 0);
+      ret_inst = bb->build_inst(Op::ITE, arg1, op_inst, arg4);
+      if (op_undef || arg4_undef)
+	{
+	  if (!op_undef)
+	    op_undef = bb->value_inst(0, op_inst->bitsize);
+	  if (!arg4_undef)
+	    arg4_undef = bb->value_inst(0, arg4->bitsize);
+	  ret_undef = bb->build_inst(Op::ITE, arg1, op_undef, arg4_undef);
+	}
+    }
+
+  if (lhs)
+    {
+      tree2instruction.insert({lhs, ret_inst});
+      if (ret_undef)
+	tree2undef.insert({lhs, ret_undef});
+    }
 }
 
 void Converter::process_cfn_copysign(gimple *stmt, Basic_block *bb)
@@ -4475,6 +4579,16 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
     case CFN_BUILT_IN_UNREACHABLE:
     case CFN_BUILT_IN_UNREACHABLE_TRAP:
       process_cfn_unreachable(stmt, bb);
+      break;
+    case CFN_COND_ADD:
+    case CFN_COND_AND:
+    case CFN_COND_IOR:
+    case CFN_COND_MUL:
+    case CFN_COND_RDIV:
+    case CFN_COND_SHL:
+    case CFN_COND_SHR:
+    case CFN_COND_SUB:
+      process_cfn_cond(stmt, bb);
       break;
     case CFN_DIVMOD:
       process_cfn_divmod(stmt, bb);
