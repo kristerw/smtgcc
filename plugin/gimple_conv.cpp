@@ -142,6 +142,7 @@ struct Converter {
   void process_cfn_fmax(gimple *stmt, Basic_block *bb);
   void process_cfn_fmin(gimple *stmt, Basic_block *bb);
   void process_cfn_loop_vectorized(gimple *stmt);
+  void process_cfn_mask_load(gimple *stmt, Basic_block *bb);
   void process_cfn_mask_store(gimple *stmt, Basic_block *bb);
   void process_cfn_memcpy(gimple *stmt, Basic_block *bb);
   void process_cfn_memset(gimple *stmt, Basic_block *bb);
@@ -711,11 +712,13 @@ void store_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, 
     }
 }
 
-void load_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size)
+void load_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size, Instruction *cond = nullptr)
 {
   // It is UB if the pointer provenance does not correspond to the address.
   Instruction *ptr_mem_id = bb->build_extract_id(ptr);
   Instruction *is_ub = bb->build_inst(Op::NE, provenance, ptr_mem_id);
+  if (cond)
+    is_ub = bb->build_inst(Op::AND, is_ub, cond);
   bb->build_inst(Op::UB, is_ub);
 
   if (size != 0)
@@ -725,6 +728,8 @@ void load_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, u
       Instruction *end = bb->build_inst(Op::ADD, ptr, size_inst);
       Instruction *end_mem_id = bb->build_extract_id(end);
       Instruction *overflow = bb->build_inst(Op::NE, provenance, end_mem_id);
+      if (cond)
+	overflow = bb->build_inst(Op::AND, overflow, cond);
       bb->build_inst(Op::UB, overflow);
 
       // It is UB if the end is outside the memory object.
@@ -733,6 +738,8 @@ void load_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, u
       Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
       Instruction *offset = bb->build_extract_offset(end);
       Instruction *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
+      if (cond)
+	out_of_bound = bb->build_inst(Op::AND, out_of_bound, cond);
       bb->build_inst(Op::UB, out_of_bound);
     }
   else
@@ -743,6 +750,8 @@ void load_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, u
       Instruction *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
       Instruction *offset = bb->build_extract_offset(ptr);
       Instruction *out_of_bound = bb->build_inst(Op::UGT, offset, mem_size);
+      if (cond)
+	out_of_bound = bb->build_inst(Op::AND, out_of_bound, cond);
       bb->build_inst(Op::UB, out_of_bound);
     }
 }
@@ -3890,6 +3899,80 @@ void Converter::process_cfn_loop_vectorized(gimple *stmt)
   tree2instruction.insert({lhs, loop_vect_sym});
 }
 
+void Converter::process_cfn_mask_load(gimple *stmt, Basic_block *bb)
+{
+  tree ptr_expr = gimple_call_arg(stmt, 0);
+  tree alignment_expr = gimple_call_arg(stmt, 1);
+  tree mask_expr = gimple_call_arg(stmt, 2);
+  tree mask_type = TREE_TYPE(mask_expr);
+  tree lhs = gimple_call_lhs(stmt);
+  assert(lhs);
+  tree lhs_type = TREE_TYPE(lhs);
+
+  auto [ptr, ptr_prov] = tree2inst_prov(bb, ptr_expr);
+  Instruction *mask = tree2inst(bb, mask_expr);
+  uint64_t size = bytesize_for_type(lhs_type);
+
+  uint64_t alignment = get_int_cst_val(alignment_expr) / 8;
+  if (alignment > 1)
+    {
+      uint32_t high_val = 0;
+      for (;;)
+	{
+	  high_val++;
+	  if (alignment == (1u << high_val))
+	    break;
+	}
+
+      Instruction *extract = bb->build_trunc(ptr, high_val);
+      Instruction *zero = bb->value_inst(0, high_val);
+      Instruction *cond = bb->build_inst(Op::NE, extract, zero);
+      bb->build_inst(Op::UB, cond);
+    }
+
+  assert(VECTOR_TYPE_P(lhs_type) == VECTOR_TYPE_P(mask_type));
+  tree elem_type = VECTOR_TYPE_P(lhs_type) ? TREE_TYPE(lhs_type) : lhs_type;
+  tree mask_elem_type =
+    VECTOR_TYPE_P(mask_type) ? TREE_TYPE(mask_type) : mask_type;
+  uint64_t elem_size = bytesize_for_type(elem_type);
+  assert(TREE_CODE(mask_elem_type) == BOOLEAN_TYPE);
+  uint64_t mask_elem_bitsize = bitsize_for_type(mask_elem_type);
+
+  uint64_t nof_elem = size / elem_size;
+  assert((size % elem_size) == 0);
+  Instruction *inst = nullptr;
+  Instruction *undef = nullptr;
+  for (uint64_t i = 0; i < nof_elem; i++)
+    {
+      Instruction *cond = extract_vec_elem(bb, mask, mask_elem_bitsize, i);
+      if (cond->bitsize != 1)
+	cond = bb->build_trunc(cond, 1);
+
+      Instruction *offset = bb->value_inst(i * elem_size, ptr->bitsize);
+      Instruction *src_ptr = bb->build_inst(Op::ADD, ptr, offset);
+      load_ub_check(bb, src_ptr, ptr_prov, elem_size, cond);
+      auto [elem, elem_undef] = load_value(bb, src_ptr, elem_size);
+      constrain_src_value(bb, elem, elem_type);
+      Instruction *zero = bb->value_inst(0, elem->bitsize);
+      Instruction *m1 = bb->value_inst(-1, elem->bitsize);
+      elem = bb->build_inst(Op::ITE, cond, elem, zero);
+      elem_undef = bb->build_inst(Op::ITE, cond, elem_undef, m1);
+
+      if (inst)
+	inst = bb->build_inst(Op::CONCAT, elem, inst);
+      else
+	inst = elem;
+      if (undef)
+	undef = bb->build_inst(Op::CONCAT, elem_undef, undef);
+      else
+	undef = elem_undef;
+    }
+
+  constrain_range(bb, lhs, inst);
+  tree2instruction.insert({lhs, inst});
+  tree2undef.insert({lhs, undef});
+}
+
 void Converter::process_cfn_mask_store(gimple *stmt, Basic_block *bb)
 {
   tree ptr_expr = gimple_call_arg(stmt, 0);
@@ -4597,6 +4680,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt, Basic_block *bb)
       break;
     case CFN_LOOP_VECTORIZED:
       process_cfn_loop_vectorized(stmt);
+      break;
+    case CFN_MASK_LOAD:
+      process_cfn_mask_load(stmt, bb);
       break;
     case CFN_MASK_STORE:
       process_cfn_mask_store(stmt, bb);
