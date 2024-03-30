@@ -2673,13 +2673,6 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
       }
       arg2 = type_convert(arg2, arg2_type, arg1_type, bb);
       return {bb->build_inst(Op::SHL, arg1, arg2), nullptr, nullptr};
-    case MULT_EXPR:
-      if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
-	{
-	  Instruction *cond = bb->build_inst(Op::SMUL_WRAPS, arg1, arg2);
-	  bb->build_inst(Op::UB, cond);
-	}
-      return {bb->build_inst(Op::MUL, arg1, arg2), nullptr, nullptr};
     case POINTER_DIFF_EXPR:
       {
 	// Pointers are treated as unsigned, and the result must fit in
