@@ -46,6 +46,20 @@ using namespace smtgcc;
 
 namespace {
 
+// Setting this to true makes us check that tgt is a refinement of src
+// for both possible values of CFN_LOOP_VECTORIZED. This slows down the
+// checking and reports issues for cases that are arguably correct (such as
+// in gcc.c-torture/execute/pr94734.c where the true case has been changed
+// from
+//   if (x == (i & 0x25))
+//     arr[y] = i;
+// to
+//   _25 = &arr[y_12(D)];
+//   .MASK_STORE (_25, 32B, _2, i_17);
+// which may result in invalid indexing for cases where `x == (i & 0x25)` is
+// false, but would not be a problem after vectorization.
+bool check_loop_vectorized = false;
+
 struct Addr {
   Instruction *ptr;
   uint64_t bitoffset;
@@ -3882,14 +3896,21 @@ void Converter::process_cfn_loop_vectorized(gimple *stmt)
 {
   tree lhs = gimple_call_lhs(stmt);
   assert(lhs);
-  if (!loop_vect_sym)
+  Basic_block *entry_bb = func->bbs[0];
+  Instruction *cond;
+  if (check_loop_vectorized)
     {
-      Basic_block *entry_bb = func->bbs[0];
-      Instruction *idx_inst = entry_bb->value_inst(LOOP_VECT_SYM_IDX, 32);
-      Instruction *bs_inst = entry_bb->value_inst(1, 32);
-      loop_vect_sym = entry_bb->build_inst(Op::SYMBOLIC, idx_inst, bs_inst);
+      if (!loop_vect_sym)
+	{
+	  Instruction *idx_inst = entry_bb->value_inst(LOOP_VECT_SYM_IDX, 32);
+	  Instruction *bs_inst = entry_bb->value_inst(1, 32);
+	  loop_vect_sym = entry_bb->build_inst(Op::SYMBOLIC, idx_inst, bs_inst);
+	}
+      cond = loop_vect_sym;
     }
-  tree2instruction.insert({lhs, loop_vect_sym});
+  else
+    cond = entry_bb->value_inst(0, 1);
+  tree2instruction.insert({lhs, cond});
 }
 
 void Converter::process_cfn_mask_load(gimple *stmt, Basic_block *bb)
