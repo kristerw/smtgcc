@@ -5035,6 +5035,9 @@ void Converter::generate_return_inst(Basic_block *bb)
 // Write the values to initialized variables.
 void Converter::init_var_values(tree initial, Instruction *mem_inst)
 {
+  if (TREE_CODE(initial) == ERROR_MARK)
+    throw Not_implemented("init_var_values: ERROR_MARK");
+
   Basic_block *bb = mem_inst->bb;
   tree type = TREE_TYPE(initial);
   uint64_t size = bytesize_for_type(TREE_TYPE(initial));
