@@ -3983,6 +3983,8 @@ void Converter::process_cfn_mask_load(gimple *stmt, Basic_block *bb)
   constrain_range(bb, lhs, inst);
   tree2instruction.insert({lhs, inst});
   tree2undef.insert({lhs, undef});
+  if (POINTER_TYPE_P(lhs_type))
+    tree2provenance.insert({lhs, bb->build_extract_id(inst)});
 }
 
 void Converter::process_cfn_mask_store(gimple *stmt, Basic_block *bb)
