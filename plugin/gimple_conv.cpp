@@ -113,7 +113,7 @@ struct Converter {
   std::tuple<Instruction *, Instruction *, Instruction *> vector_as_array(Basic_block *bb, tree expr);
   std::tuple<Instruction *, Instruction *, Instruction *> process_load(Basic_block *bb, tree expr);
   void process_store(tree addr_expr, tree value_expr, Basic_block *bb);
-  std::pair<Instruction *, Instruction *> load_value(Basic_block *bb, Instruction *ptr, uint64_t size);
+  std::tuple<Instruction *, Instruction *, Instruction *> load_value(Basic_block *bb, Instruction *ptr, uint64_t size);
   void store_value(Basic_block *bb, Instruction *ptr, Instruction *value, Instruction *undef = nullptr);
   std::pair<Instruction *, Instruction *> type_convert(Instruction *inst, Instruction *provenance, tree src_type, tree dest_type, Basic_block *bb);
   Instruction *type_convert(Instruction *inst, tree src_type, tree dest_type, Basic_block *bb);
@@ -1621,26 +1621,33 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_load(
 }
 
 // Read value/undef from memory. No UB checks etc. are done.
-std::pair<Instruction *, Instruction *> Converter::load_value(Basic_block *bb, Instruction *orig_ptr, uint64_t size)
+std::tuple<Instruction *, Instruction *, Instruction *> Converter::load_value(Basic_block *bb, Instruction *orig_ptr, uint64_t size)
 {
   Instruction *value = nullptr;
   Instruction *undef = nullptr;
+  Instruction *mem_flags = nullptr;
   for (uint64_t i = 0; i < size; i++)
     {
       Instruction *offset = bb->value_inst(i, orig_ptr->bitsize);
       Instruction *ptr = bb->build_inst(Op::ADD, orig_ptr, offset);
       Instruction *data_byte = bb->build_inst(Op::LOAD, ptr);
-      Instruction *undef_byte = bb->build_inst(Op::GET_MEM_UNDEF, ptr);
       if (value)
 	value = bb->build_inst(Op::CONCAT, data_byte, value);
       else
 	value = data_byte;
+      Instruction *undef_byte = bb->build_inst(Op::GET_MEM_UNDEF, ptr);
       if (undef)
 	undef = bb->build_inst(Op::CONCAT, undef_byte, undef);
       else
 	undef = undef_byte;
+      Instruction *flag = bb->build_inst(Op::GET_MEM_FLAG, ptr);
+      flag = bb->build_inst(Op::SEXT, flag, bb->value_inst(8, 32));
+      if (mem_flags)
+	mem_flags = bb->build_inst(Op::CONCAT, flag, mem_flags);
+      else
+	mem_flags = flag;
     }
-  return {value, undef};
+  return {value, undef, mem_flags};
 }
 
 // Write value to memory. No UB checks etc. are done, and memory flags
@@ -3955,6 +3962,7 @@ void Converter::process_cfn_mask_load(gimple *stmt, Basic_block *bb)
   assert((size % elem_size) == 0);
   Instruction *inst = nullptr;
   Instruction *undef = nullptr;
+  Instruction *mem_flags = nullptr;
   for (uint64_t i = 0; i < nof_elem; i++)
     {
       Instruction *cond = extract_vec_elem(bb, mask, mask_elem_bitsize, i);
@@ -3964,7 +3972,7 @@ void Converter::process_cfn_mask_load(gimple *stmt, Basic_block *bb)
       Instruction *offset = bb->value_inst(i * elem_size, ptr->bitsize);
       Instruction *src_ptr = bb->build_inst(Op::ADD, ptr, offset);
       load_ub_check(bb, src_ptr, ptr_prov, elem_size, cond);
-      auto [elem, elem_undef] = load_value(bb, src_ptr, elem_size);
+      auto [elem, elem_undef, elem_flags] = load_value(bb, src_ptr, elem_size);
       constrain_src_value(bb, elem, elem_type);
       Instruction *zero = bb->value_inst(0, elem->bitsize);
       Instruction *m1 = bb->value_inst(-1, elem->bitsize);
@@ -3979,8 +3987,14 @@ void Converter::process_cfn_mask_load(gimple *stmt, Basic_block *bb)
 	undef = bb->build_inst(Op::CONCAT, elem_undef, undef);
       else
 	undef = elem_undef;
+      if (mem_flags)
+	mem_flags = bb->build_inst(Op::CONCAT, elem_flags, mem_flags);
+      else
+	mem_flags = elem_flags;
     }
 
+  constrain_src_value(bb, inst, lhs_type, mem_flags);
+  std::tie(inst, undef) = from_mem_repr(bb, inst, undef, lhs_type);
   constrain_range(bb, lhs, inst);
   tree2instruction.insert({lhs, inst});
   tree2undef.insert({lhs, undef});
@@ -4032,7 +4046,7 @@ void Converter::process_cfn_mask_store(gimple *stmt, Basic_block *bb)
   if (!undef)
     undef = bb->value_inst(0, value->bitsize);
 
-  auto [orig, orig_undef] = load_value(bb, ptr, size);
+  auto [orig, orig_undef, _] = load_value(bb, ptr, size);
   uint64_t nof_elem = size / elem_size;
   assert((size % elem_size) == 0);
   for (uint64_t i = 0; i < nof_elem; i++)
