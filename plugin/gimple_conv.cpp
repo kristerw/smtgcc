@@ -3141,12 +3141,13 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::vector_constr
 	  undef = elem_undef;
 	}
     }
-  assert(res);
-  assert(res->bitsize <= vector_size);
   if (CONSTRUCTOR_NO_CLEARING(expr))
     throw Not_implemented("vector_constructor: CONSTRUCTOR_NO_CLEARING");
-  if (res->bitsize != vector_size)
+  if (!res)
+    res = bb->value_inst(0, vector_size);
+  else if (res->bitsize != vector_size)
     {
+      assert(res->bitsize < vector_size);
       Instruction *zero = bb->value_inst(0, vector_size - res->bitsize);
       res = bb->build_inst(Op::CONCAT, zero, res);
       undef = bb->build_inst(Op::CONCAT, zero, undef);
