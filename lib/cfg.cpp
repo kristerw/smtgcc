@@ -255,7 +255,8 @@ void simplify_cfg(Function *func)
       // predecessors call the successor.
       if (bb->first_inst->opcode == Op::BR
 	  && bb->first_inst->nof_args == 0
-	  && bb->phis.size() == 0)
+	  && bb->phis.size() == 0
+	  && bb->succs[0]->phis.size() == 0)
 	{
 	  Basic_block *dest_bb = bb->first_inst->u.br1.dest_bb;
 	  std::vector<Basic_block *> preds = bb->preds;
