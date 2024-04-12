@@ -251,6 +251,22 @@ void simplify_cfg(Function *func)
 	    }
 	}
 
+      // If a BB with exactly one predecessor and successor follows a BB
+      // with exactly one successor, then we may move all its instructions
+      // to the predecessor BB (and the now empty BB will be removed later).
+      if (bb->preds.size() == 1
+	  && bb->preds[0] != func->bbs[0]
+	  && bb->preds[0]->succs.size() == 1
+	  && bb->succs.size() == 1
+	  && bb->phis.size() == 0)
+	{
+	  Instruction *last_inst = bb->preds[0]->last_inst;
+	  while (bb->first_inst->opcode != Op::BR)
+	    {
+	      bb->first_inst->move_before(last_inst);
+	    }
+	}
+
       // Remove empty BBs ending in unconditional branch by letting the
       // predecessors call the successor.
       if (bb->first_inst->opcode == Op::BR
