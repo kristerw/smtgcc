@@ -576,7 +576,7 @@ void Instruction::move_before(Instruction *inst)
   if (this->prev)
     this->prev->next = this->next;
   if (this->next)
-    inst->next->prev = this->prev;
+    this->next->prev = this->prev;
   next = nullptr;
   prev = nullptr;
   bb = nullptr;
