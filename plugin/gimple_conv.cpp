@@ -5745,6 +5745,7 @@ Function *Converter::process_function()
       dead_code_elimination(func);
       simplify_cfg(func);
     }
+  dead_code_elimination(func);
   validate(func);
 
   Function *f = func;
