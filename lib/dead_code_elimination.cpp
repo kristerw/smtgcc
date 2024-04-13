@@ -135,6 +135,30 @@ void dead_code_elimination(Function *func)
 	  destroy(phi);
 	}
     }
+
+  for (auto bb : func->bbs)
+    {
+      // Propagate "always UB" from predecessors (this BB is always UB if
+      // all its predecessors are always UB).
+      if (bb != func->bbs.back()
+	  && !bb->preds.empty()
+	  && (bb->first_inst->opcode != Op::UB
+	      || !is_true(bb->first_inst->arguments[0])))
+	{
+	  bool preds_are_ub = true;
+	  for (auto pred : bb->preds)
+	    {
+	      preds_are_ub =
+		preds_are_ub && pred->first_inst->opcode == Op::UB
+		&& is_true(pred->first_inst->arguments[0]);
+	    }
+	  if (preds_are_ub)
+	    {
+	      bb->build_inst(Op::UB, bb->value_inst(1, 1));
+	      clear_ub_bb(bb, is_loopfree);
+	    }
+	}
+    }
 }
 
 void dead_code_elimination(Module *module)
