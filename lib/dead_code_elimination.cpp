@@ -29,13 +29,10 @@ void destroy(Instruction *inst)
 
 // Remove all instructions (except the "ub 1") for a basic block that
 // is always UB.
-//
-// Note: This should only be called for loop-free functions because
-// we may otherwise create infinite loops where there is no path to the
-// exit block if a removed instruction was used in a branch condition.
-void clear_ub_bb(Basic_block *bb)
+void clear_ub_bb(Basic_block *bb, bool is_loopfree)
 {
-  if (bb->last_inst->opcode == Op::BR && bb->last_inst->nof_args == 1)
+  if (is_loopfree
+      && bb->last_inst->opcode == Op::BR && bb->last_inst->nof_args == 1)
     {
       // Change the conditional branch to an unconditional branch. It does
       // not matter which branch we take since the execution is UB anyway.
@@ -43,7 +40,7 @@ void clear_ub_bb(Basic_block *bb)
       cond->replace_use_with(bb->last_inst, bb->value_inst(1, 1));
     }
 
-  bool found_ub = false;
+  Instruction *found_ub = nullptr;
   for (Instruction *inst = bb->last_inst->prev; inst;)
     {
       Instruction *next_inst = inst->prev;
@@ -51,13 +48,16 @@ void clear_ub_bb(Basic_block *bb)
 	{
 	  if (found_ub)
 	    destroy(inst);
-	  found_ub = true;
+	  else
+	    found_ub = inst;
 	}
-      else if(inst->has_lhs())
+      else if(inst->has_lhs() && !inst->used_by.empty())
 	{
-	  if (!inst->used_by.empty())
-	    inst->replace_all_uses_with(bb->value_inst(0, inst->bitsize));
-	  destroy(inst);
+	  if (is_loopfree)
+	    {
+	      inst->replace_all_uses_with(bb->value_inst(0, inst->bitsize));
+	      destroy(inst);
+	    }
 	}
       else
 	destroy(inst);
@@ -72,6 +72,9 @@ void clear_ub_bb(Basic_block *bb)
 	inst->replace_all_uses_with(bb->value_inst(0, inst->bitsize));
       destroy(inst);
     }
+
+  if (bb->first_inst != found_ub)
+    found_ub->move_before(bb->first_inst);
 }
 
 } // end anonymous namespace
@@ -85,8 +88,7 @@ void dead_code_elimination(Function *func)
 
       // Propagate "always UB" from successors (this BB is always UB if
       // all its successors are always UB).
-      if (is_loopfree
-	  && bb != func->bbs[0]
+      if (bb != func->bbs[0]
 	  && !bb->succs.empty()
 	  && (bb->first_inst->opcode != Op::UB
 	      || !is_true(bb->first_inst->arguments[0])))
@@ -108,11 +110,10 @@ void dead_code_elimination(Function *func)
 	  Instruction *next_inst = inst->prev;
 	  if (inst->has_lhs() && inst->used_by.empty())
 	    destroy(inst);
-	  else if (is_loopfree &&
-		   bb != func->bbs[0]
+	  else if (bb != func->bbs[0]
 		   && inst->opcode == Op::UB && is_true(inst->arguments[0]))
 	    {
-	      clear_ub_bb(bb);
+	      clear_ub_bb(bb, is_loopfree);
 	      break;
 	    }
 	  else if (inst->opcode == Op::UB && is_false(inst->arguments[0]))
