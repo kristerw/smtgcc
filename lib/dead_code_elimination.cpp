@@ -83,6 +83,25 @@ void dead_code_elimination(Function *func)
     {
       Basic_block *bb = func->bbs[i];
 
+      // Propagate "always UB" from successors (this BB is always UB if
+      // all its successors are always UB).
+      if (is_loopfree
+	  && bb != func->bbs[0]
+	  && !bb->succs.empty()
+	  && (bb->first_inst->opcode != Op::UB
+	      || !is_true(bb->first_inst->arguments[0])))
+	{
+	  bool succs_are_ub = true;
+	  for (auto succ : bb->succs)
+	    {
+	      succs_are_ub =
+		succs_are_ub && succ->first_inst->opcode == Op::UB
+		&& is_true(succ->first_inst->arguments[0]);
+	    }
+	  if (succs_are_ub)
+	    bb->build_inst(Op::UB, bb->value_inst(1, 1));
+	}
+
       // Remove dead instructions.
       for (Instruction *inst = bb->last_inst; inst;)
 	{
@@ -111,7 +130,9 @@ void dead_code_elimination(Function *func)
 	    dead_phis.push_back(phi);
 	}
       for (auto phi : dead_phis)
-	destroy(phi);
+	{
+	  destroy(phi);
+	}
     }
 }
 
