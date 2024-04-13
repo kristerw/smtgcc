@@ -255,6 +255,7 @@ void simplify_cfg(Function *func)
       // with exactly one successor, then we may move all its instructions
       // to the predecessor BB (and the now empty BB will be removed later).
       if (bb->preds.size() == 1
+	  && bb->preds[0] != bb
 	  && bb->preds[0] != func->bbs[0]
 	  && bb->preds[0]->succs.size() == 1
 	  && bb->succs.size() == 1
