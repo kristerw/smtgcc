@@ -311,6 +311,9 @@ void simplify_cfg(Function *func)
 		    }
 		}
 	    }
+
+	  destroy_instruction(bb->first_inst);
+	  bb->build_br_inst(bb);
 	}
     }
 
