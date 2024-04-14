@@ -19,7 +19,7 @@ struct Loop
   // The basic blocks of the loop, in reverse post order.
   std::vector<Basic_block *> bbs;
 
-  // The exit blocks for the original loop.
+  // The exit blocks for the original loop, in reverse post order.
   std::vector<Basic_block *> exit_blocks;
 };
 
@@ -27,19 +27,12 @@ class Loop_finder
 {
   Function *func;
 
+  std::map<size_t, size_t> nbr2last;
+
   // Map between BB and its index in the function.
   std::map<Basic_block *, size_t> idx;
 
-  // State for Tarjan's algorithm for calculating strongly connected
-  // components.
-  std::map<Basic_block *, int> dfn;
-  std::map<Basic_block *, int> lowlink;
-  std::vector<Basic_block *> stack;
-  std::vector<std::vector<Basic_block *>> sccs;
-  int dfnum = 0;
-
-  std::optional<Loop> get_loop(std::vector<Basic_block *>& scc);
-  void strong_connect(Basic_block *bb);
+  bool is_ancestor(size_t, size_t);
 
 public:
   Loop_finder(Function *func);
@@ -174,115 +167,147 @@ Loop_finder::Loop_finder(Function *func) : func{func}
     {
       idx.insert({func->bbs[i], i});
     }
-  for (auto bb : func->bbs)
-    {
-      if (!dfn.contains(bb))
-	strong_connect(bb);
-    }
 }
 
+bool Loop_finder::is_ancestor(size_t w, size_t v)
+{
+  return w <= v && v <= nbr2last.at(w);
+}
+
+// Find a loop to unroll.
+//
+// This is an implementation of the algorithm described in the paper
+// "Nesting of Reducible and Irreducible Loops" by Paul Havlak, but
+// simplified to only return one loop (the innermost loop in case of
+// nested loops).
 std::optional<Loop> Loop_finder::find_loop()
 {
-  for (auto& ssc : sccs)
-    {
-      std::optional<Loop> loop = get_loop(ssc);
-      if (loop)
-	return loop;
-    }
-  return {};
-}
+  std::map<size_t, Basic_block *> nbr2bb;
+  std::map<Basic_block *, size_t> bb2nbr;
 
-void Loop_finder::strong_connect(Basic_block *bb)
-{
-  dfn.insert({bb, dfnum});
-  lowlink.insert({bb, dfnum});
-  stack.push_back(bb);
-  dfnum++;
+  // Calculate preorder numbers.
+  size_t nbr = 0;
+  {
+    std::set<Basic_block *> visited;
+    std::vector<Basic_block *> worklist;
+    worklist.push_back(func->bbs.front());
+    while (!worklist.empty())
+      {
+	Basic_block *bb = worklist.back();
+	if (visited.contains(bb))
+	  {
+	    worklist.pop_back();
+	    nbr2last.insert({bb2nbr.at(bb), nbr - 1});
+	  }
+	else
+	  {
+	    visited.insert(bb);
+	    nbr2bb.insert({nbr, bb});
+	    bb2nbr.insert({bb, nbr});
+	    nbr++;
+	    for (auto succ : bb->succs)
+	      {
+		if (!visited.contains(succ))
+		  worklist.push_back(succ);
+	      }
+	  }
+      }
+    assert(nbr == func->bbs.size());
+  }
 
-  for (auto succ : bb->succs)
+  // Make lists of predecessors (backedge and other).
+  std::map<size_t, std::set<ssize_t>> back_preds;
+  std::map<size_t, std::set<ssize_t>> nonback_preds;
+  for (size_t w = 0; w < nbr; w++)
     {
-      if (!dfn.contains(succ))
+      for (auto pred : nbr2bb.at(w)->preds)
 	{
-	  strong_connect(succ);
-	  lowlink[bb] = std::min(lowlink.at(bb), lowlink.at(succ));
+	  size_t v = bb2nbr.at(pred);
+	  if (is_ancestor(w, v))
+	    back_preds[w].insert(v);
+	  else
+	    nonback_preds[w].insert(v);
 	}
-      else if (dfn.at(succ) < dfn.at(bb) && contains(stack, succ))
-	lowlink[bb] = std::min(lowlink.at(bb), dfn.at(succ));
     }
 
-  if (lowlink.at(bb) == dfn.at(bb))
+  for (ssize_t w = nbr - 1; w >= 0; w--)
     {
-      auto it = std::find(stack.begin(), stack.end(), bb);
-      sccs.emplace_back(it, stack.end());
-      stack.erase(it, stack.end());
+      std::set<size_t> P;
 
-      // Sort the blocks in reverse post order.
-      std::vector<Basic_block*>& scc = sccs.back();
-      std::sort(scc.begin(), scc.end(),
-		[this](Basic_block *a, Basic_block *b) {
-		  return idx.at(a) < idx.at(b);
-		});
-    }
-}
-
-std::optional<Loop> Loop_finder::get_loop(std::vector<Basic_block *>& scc)
-{
-  // The loop must have at least one back edge, and all back edges must
-  // be to the loop header.
-  Basic_block *loop_header = scc.front();
-  bool found_back_edge = false;
-  for (auto bb : scc)
-    {
-      for (auto succ : bb->succs)
+      for (auto v : back_preds[w])
 	{
-	  if (idx.at(succ) <= idx.at(bb))
+	  if (v != w)
+	    P.insert(v);
+	  else
 	    {
-	      found_back_edge = true;
-	      if (succ != loop_header)
-		return {};
+	      Loop loop;
+	      Basic_block *bb = nbr2bb.at(w);
+	      loop.bbs.push_back(bb);
+	      for (auto succ : bb->succs)
+		{
+		  if (succ != bb)
+		    push_unique(loop.exit_blocks, succ);
+		}
+	      assert(loop.exit_blocks.size() < 2);
+	      return loop;
 	    }
 	}
-    }
-  if (!found_back_edge)
-    return {};
 
-  // Only the loop header may have predecessors outside the loop.
-  for (size_t i = 1; i < scc.size(); i++)
-    {
-      for (auto pred : scc[i]->preds)
+      std::vector<size_t> worklist(P.begin(), P.end());
+      while (!worklist.empty())
 	{
-	  if (!contains(scc, pred))
-	    return {};
+	  size_t x = worklist.back();
+	  worklist.pop_back();
+	  for (auto y : nonback_preds[x])
+	    {
+	      if (!is_ancestor(w, y))
+		throw Not_implemented("irreducible loop");
+	      if (y != w && !P.contains(y))
+		{
+		  P.insert(y);
+		  worklist.push_back(y);
+		}
+	    }
+	}
+
+      if (!P.empty())
+	{
+	  Loop loop;
+	  P.insert(w);
+	  for (auto p : P)
+	    {
+	      Basic_block *bb = nbr2bb.at(p);
+	      loop.bbs.push_back(bb);
+	      for (auto succ : bb->succs)
+		{
+		  if (!P.contains(bb2nbr.at(succ)))
+		    push_unique(loop.exit_blocks, succ);
+		}
+	    }
+
+	  std::sort(loop.bbs.begin(), loop.bbs.end(),
+		    [this](Basic_block *a, Basic_block *b) {
+		      return idx.at(a) < idx.at(b);
+		    });
+	  std::sort(loop.exit_blocks.begin(), loop.exit_blocks.end(),
+		    [this](Basic_block *a, Basic_block *b) {
+		      return idx.at(a) < idx.at(b);
+		    });
+
+	  return loop;
 	}
     }
 
-  // Find the exit_blocks.
-  std::vector<Basic_block *> exit_blocks;
-  for (auto bb : scc)
-    {
-      for (auto succ : bb->succs)
-	{
-	  if (!contains(scc, succ))
-	    push_unique(exit_blocks, succ);
-	}
-    }
-  if (exit_blocks.size() == 0)
-    throw Not_implemented("infinite loop");
-  std::sort(exit_blocks.begin(), exit_blocks.end(),
-	    [this](Basic_block *a, Basic_block *b) {
-	      return idx.at(a) < idx.at(b);
-	    });
-
-  Loop loop;
-  loop.bbs = scc;
-  loop.exit_blocks = exit_blocks;
-  return loop;
+  return {};
 }
 
 std::optional<Loop> find_loop(Function *func)
 {
   Loop_finder loop_finder(func);
-  return loop_finder.find_loop();
+  std::optional<Loop> loop = loop_finder.find_loop();
+  if (loop && loop->exit_blocks.empty())
+    throw Not_implemented("infinite loop");
+  return loop;
 }
 
 // Get the SSA variable (i.e., instruction) corresponding to the input SSA

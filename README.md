@@ -152,7 +152,7 @@ Some of the major limitations in the current version:
 * Function calls are not implemented.
 * Exceptions are not implemented.
 * Only tested on C and C++ source code.
-* Nested loops are not handled.
+* Irreducible loops are not handled.
 * Memory semantics is not correct
   - Strict aliasing does not work, so you must pass `-fno-strict-aliasing` to the compiler.
   - Handling of pointer provenance is too restrictive.
