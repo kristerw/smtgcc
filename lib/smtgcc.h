@@ -390,6 +390,7 @@ bool dominates(const Basic_block *bb1, const Basic_block *bb2);
 bool post_dominates(const Basic_block *bb1, const Basic_block *bb2);
 
 // check.cpp
+bool identical(Function *func1, Function *func2);
 Solver_result check_refine(Module *module, bool run_simplify_inst = true);
 Solver_result check_assert(Function *func);
 Solver_result check_ub(Function *func);

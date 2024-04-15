@@ -54,22 +54,20 @@ void tv_function::delete_ir()
   prev_pass_name = "";
 }
 
-static Function *convert_function(tv_function *tv_fun, bool is_tgt_func = false)
+static Function *convert_function(Module *module, CommonState *state, std::set<std::string>& errors, bool is_tgt_func = false)
 {
-  const char *name = is_tgt_func ? "tgt" : "src";
   try
     {
-      Function *func =
-	process_function(tv_fun->module, tv_fun->state, cfun, is_tgt_func);
-      func->rename(name);
+      Function *func = process_function(module, state, cfun, is_tgt_func);
+      func->rename(is_tgt_func ? "tgt" : "src");
       return func;
     }
   catch (Not_implemented& error)
     {
-      if (!tv_fun->errors.contains(error.msg))
+      if (!errors.contains(error.msg))
 	{
 	  fprintf(stderr, "Not implemented: %s\n", error.msg.c_str());
-	  tv_fun->errors.insert(error.msg);
+	  errors.insert(error.msg);
 	}
     }
   return nullptr;
@@ -79,11 +77,6 @@ void tv_function::check()
 {
   try
     {
-      if (config.verbose > 0)
-	fprintf(stderr, "SMTGCC: Checking %s -> %s : %s\n",
-		prev_pass_name.c_str(), pass_name.c_str(),
-		function_name(cfun));
-
       adjust_loop_vectorized(module);
       canonicalize_memory(module);
       simplify_mem(module);
@@ -114,6 +107,53 @@ void tv_function::check()
     }
 }
 
+static void check(opt_pass *pass, tv_function *tv_fun)
+{
+  Module *next_module = create_module();
+  CommonState *next_state = new CommonState();
+  Function *next_func =
+    convert_function(next_module, next_state, tv_fun->errors);
+  if (!next_func)
+    {
+      destroy_module(next_module);
+      delete next_state;
+      tv_fun->delete_ir();
+      tv_fun->pass_name = pass->name;
+      return;
+    }
+
+  if (tv_fun->module)
+    {
+      if (config.verbose > 0)
+	fprintf(stderr, "SMTGCC: Checking %s -> %s : %s\n",
+		tv_fun->prev_pass_name.c_str(), tv_fun->pass_name.c_str(),
+		function_name(cfun));
+
+      tv_fun->module->canonicalize();
+      next_module->canonicalize();
+      if (!identical(tv_fun->module->functions[0], next_module->functions[0]))
+	{
+	  Function *func = convert_function(tv_fun->module, tv_fun->state,
+					    tv_fun->errors, true);
+	  if (!func)
+	    {
+	      destroy_module(next_module);
+	      delete next_state;
+	      tv_fun->delete_ir();
+	      tv_fun->pass_name = pass->name;
+	      return;
+	    }
+	  tv_fun->check();
+	}
+      tv_fun->delete_ir();
+    }
+
+  tv_fun->module = next_module;
+  tv_fun->state = next_state;
+  tv_fun->prev_pass_name = tv_fun->pass_name;
+  tv_fun->pass_name = pass->name;
+}
+
 static void ipa_pass(opt_pass *pass, my_plugin *plugin_data)
 {
   if (plugin_data->has_run_ssa_pass)
@@ -132,13 +172,9 @@ static void ipa_pass(opt_pass *pass, my_plugin *plugin_data)
 	continue;
 
       push_cfun(fun);
-      Function *func = convert_function(tv_fun, true);
-      if (func)
-	tv_fun->check();
-      pop_cfun();
-
+      check(pass, tv_fun);
       tv_fun->delete_ir();
-      tv_fun->pass_name = pass->name;
+      pop_cfun();
     }
 }
 
@@ -168,42 +204,18 @@ static void gimple_pass(opt_pass *pass, my_plugin *plugin_data)
       return;
     }
 
-  if (tv_fun->module)
+  if (tv_fun->module && tv_fun->pass_name == "vect")
     {
       // The vectorizer modifies a copy of the scalar loop in-place
       // and relies on dce to remove unused calculations. Some of the
       // unused instruction may start to overflow from the vectorization
       // (see PR 111257), so we must wait for the following dce pass
       // before checking the IR.
-      if (tv_fun->pass_name == "vect")
-	{
-	  tv_fun->pass_name = pass->name;
-	  return;
-	}
-
-      Function *func = convert_function(tv_fun, true);
-      if (!func)
-	{
-	  tv_fun->delete_ir();
-	  tv_fun->pass_name = pass->name;
-	  return;
-	}
-      tv_fun->check();
-      tv_fun->delete_ir();
-    }
-
-  assert(!tv_fun->module);
-  tv_fun->module = create_module();
-  tv_fun->state = new CommonState();
-  Function *func = convert_function(tv_fun);
-  if (!func)
-    {
-      tv_fun->delete_ir();
       tv_fun->pass_name = pass->name;
       return;
     }
-  tv_fun->prev_pass_name = tv_fun->pass_name;
-  tv_fun->pass_name = pass->name;
+
+  check(pass, tv_fun);
 }
 
 static void pass_execution(void *event_data, void *data)

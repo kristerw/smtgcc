@@ -1420,6 +1420,8 @@ bool identical(Instruction *inst1, Instruction *inst2)
   return true;
 }
 
+} // end anonymous namespace
+
 bool identical(Function *func1, Function *func2)
 {
   if (func1->bbs.size() != func2->bbs.size())
@@ -1453,8 +1455,6 @@ bool identical(Function *func1, Function *func2)
 
   return true;
 }
-
-} // end anonymous namespace
 
 Solver_result check_refine(Module *module, bool run_simplify_inst)
 {
