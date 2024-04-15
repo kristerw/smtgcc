@@ -18,6 +18,8 @@ struct CommonState {
 };
 
 smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun, bool is_tgt_func = false);
+void unroll_and_optimize(smtgcc::Function *func);
+void unroll_and_optimize(smtgcc::Module *module);
 smtgcc::Module *create_module();
 void adjust_loop_vectorized(smtgcc::Module *module);
 

@@ -5736,17 +5736,6 @@ Function *Converter::process_function()
   validate(func);
 
   reverse_post_order(func);
-  simplify_insts(func);
-  dead_code_elimination(func);
-  simplify_cfg(func);
-  if (loop_unroll(func))
-    {
-      simplify_insts(func);
-      dead_code_elimination(func);
-      simplify_cfg(func);
-    }
-  dead_code_elimination(func);
-  validate(func);
 
   Function *f = func;
   func = nullptr;
@@ -5759,6 +5748,27 @@ Function *process_function(Module *module, CommonState *state, function *fun, bo
 {
   Converter func(module, state, fun, is_tgt_func);
   return func.process_function();
+}
+
+void unroll_and_optimize(Function *func)
+{
+  simplify_insts(func);
+  dead_code_elimination(func);
+  simplify_cfg(func);
+  if (loop_unroll(func))
+    {
+      simplify_insts(func);
+      dead_code_elimination(func);
+      simplify_cfg(func);
+    }
+  dead_code_elimination(func);
+  validate(func);
+}
+
+void unroll_and_optimize(Module *module)
+{
+  for (auto func : module->functions)
+    unroll_and_optimize(func);
 }
 
 Module *create_module()

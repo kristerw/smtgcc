@@ -77,6 +77,7 @@ void tv_function::check()
 {
   try
     {
+      unroll_and_optimize(module);
       adjust_loop_vectorized(module);
       canonicalize_memory(module);
       simplify_mem(module);
