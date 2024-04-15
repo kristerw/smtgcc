@@ -824,6 +824,31 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
   cvc5::Term tgt_unique_ub_term = conv.inst_as_bool(conv.tgt_unique_ub);
 
   std::string warning;
+
+  // Check that tgt does not have UB that is not in src.
+  assert(conv.src_common_ub == conv.tgt_common_ub);
+  if (conv.src_unique_ub != conv.tgt_unique_ub
+      && !(conv.tgt_unique_ub->opcode == Op::VALUE
+	   && conv.tgt_unique_ub->value() == 0))
+  {
+    solver.push();
+    solver.assertFormula(not_src_common_ub_term);
+    solver.assertFormula(not_src_unique_ub_term);
+    solver.assertFormula(tgt_unique_ub_term);
+    uint64_t start_time = get_time();
+    Solver_result solver_result = run_solver(solver, "UB");
+    stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
+    if (solver_result.status == Result_status::incorrect)
+      return std::pair<SStats, Solver_result>(stats, solver_result);
+    if (solver_result.status == Result_status::unknown)
+      {
+	assert(solver_result.message);
+	warning = warning + *solver_result.message;
+      }
+    solver.pop();
+  }
+
+  // Check that the returned value (if any) is the same for src and tgt.
   if (conv.src_retval != conv.tgt_retval
       || conv.src_retval_undef != conv.tgt_retval_undef)
     {
@@ -964,32 +989,6 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	Solver_result result = {Result_status::incorrect, msg};
 	return std::pair<SStats, Solver_result>(stats, result);
       }
-    if (solver_result.status == Result_status::unknown)
-      {
-	assert(solver_result.message);
-	warning = warning + *solver_result.message;
-      }
-    solver.pop();
-  }
-
-  // Check that tgt does not have UB that is not in src.
-  //
-  // This should be the last check as UB that does not change the result
-  // has low priority.
-  assert(conv.src_common_ub == conv.tgt_common_ub);
-  if (conv.src_unique_ub != conv.tgt_unique_ub
-      && !(conv.tgt_unique_ub->opcode == Op::VALUE
-	   && conv.tgt_unique_ub->value() == 0))
-  {
-    solver.push();
-    solver.assertFormula(not_src_common_ub_term);
-    solver.assertFormula(not_src_unique_ub_term);
-    solver.assertFormula(tgt_unique_ub_term);
-    uint64_t start_time = get_time();
-    Solver_result solver_result = run_solver(solver, "UB");
-    stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-    if (solver_result.status == Result_status::incorrect)
-      return std::pair<SStats, Solver_result>(stats, solver_result);
     if (solver_result.status == Result_status::unknown)
       {
 	assert(solver_result.message);
