@@ -20,6 +20,8 @@ using namespace std::string_literals;
 namespace smtgcc {
 namespace {
 
+const int max_store_traversal = 100;
+
 struct Cse_key
 {
   Op opcode;
@@ -914,7 +916,8 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 
       // Traverse the list of previous updates to the array to determine
       // whether the current value is already the same as 'value'.
-      for (Instruction *tmp_array = array;;)
+      Instruction *tmp_array = array;
+      for (int i = 0; i < max_store_traversal; i++)
 	{
 	  if (tmp_array->opcode == Op::ARRAY_STORE)
 	    {
@@ -956,7 +959,8 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 
       // Traverse the list of previous updates to the array to determine
       // whether the current value is already the same as 'value'.
-      for (Instruction *tmp_array = array;;)
+      Instruction *tmp_array = array;
+      for (int i = 0; i < max_store_traversal; i++)
 	{
 	  if (tmp_array->opcode == Op::MEM_FLAG_ARRAY
 	      && value->opcode == Op::VALUE
@@ -995,7 +999,8 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 
       // Traverse the list of previous updates to the array to determine
       // whether the current value is already the same as 'value'.
-      for (Instruction *tmp_array = array;;)
+      Instruction *tmp_array = array;
+      for (int i = 0; i < max_store_traversal; i++)
 	{
 	  if (tmp_array->opcode == Op::MEM_UNDEF_ARRAY
 	      && value->opcode == Op::VALUE
