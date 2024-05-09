@@ -884,9 +884,7 @@ void add_print(std::string& msg, Converter& conv, z3::solver& solver)
     }
 }
 
-} // end anonymous namespace
-
-std::pair<SStats, Solver_result> check_refine_z3(Function *func)
+std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 {
   assert(func->bbs.size() == 1);
 
@@ -1064,6 +1062,19 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *func)
       return std::pair<SStats, Solver_result>(stats, result);
     }
   return std::pair<SStats, Solver_result>(stats, {Result_status::correct, {}});
+}
+
+} // end anonymous namespace
+
+std::pair<SStats, Solver_result> check_refine_z3(Function *func)
+{
+  try {
+    return check_refine_z3_helper(func);
+  } catch (const z3::exception& e) {
+    SStats stats;
+    std::string msg = "Analysis was interrupted: "s + e.msg() + "\n";
+    return {stats, {Result_status::unknown, msg}};
+  }
 }
 
 std::pair<SStats, Solver_result> check_ub_z3(Function *func)
