@@ -499,10 +499,8 @@ void Converter::constrain_src_value(Basic_block *bb, Instruction *inst, tree typ
 Instruction *Converter::build_memory_inst(uint64_t id, uint64_t size, uint32_t flags)
 {
   Basic_block *bb = func->bbs[0];
-  uint32_t ptr_id_bits = func->module->ptr_id_bits;
-  uint32_t ptr_offset_bits = func->module->ptr_offset_bits;
-  Instruction *arg1 = bb->value_inst(id, ptr_id_bits);
-  Instruction *arg2 = bb->value_inst(size, ptr_offset_bits);
+  Instruction *arg1 = bb->value_inst(id, module->ptr_id_bits);
+  Instruction *arg2 = bb->value_inst(size, module->ptr_offset_bits);
   Instruction *arg3 = bb->value_inst(flags, 32);
   return bb->build_inst(Op::MEMORY, arg1, arg2, arg3);
 }
@@ -643,7 +641,7 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Instruction *inst, I
 
 void Converter::mem_access_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size)
 {
-  assert(size < (uint64_t(1) << func->module->ptr_offset_bits));
+  assert(size < (uint64_t(1) << module->ptr_offset_bits));
 
   // It is UB if the pointer provenance does not correspond to the address.
   Instruction *ptr_mem_id = bb->build_extract_id(ptr);
@@ -1005,8 +1003,8 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_und
 	Instruction *provenance = nullptr;
 	if (POINTER_TYPE_P(TREE_TYPE(expr)))
 	  {
-	    uint32_t ptr_id_bits = bb->func->module->ptr_id_bits;
-	    uint32_t ptr_id_low = bb->func->module->ptr_id_low;
+	    uint32_t ptr_id_bits = module->ptr_id_bits;
+	    uint32_t ptr_id_low = module->ptr_id_low;
 	    uint64_t id = (value >> ptr_id_low) & ((1 << ptr_id_bits) - 1);
 	    provenance = bb->value_inst(id, ptr_id_bits);
 	  }
@@ -1355,7 +1353,7 @@ Addr Converter::process_array_ref(Basic_block *bb, tree expr, bool is_mem_access
       Instruction *eidx = bb->build_inst(op, idx, ext_bitsize_inst);
       Instruction *eelm_size = bb->value_inst(elem_size, ptr->bitsize * 2);
       Instruction *eoffset = bb->build_inst(Op::MUL, eidx, eelm_size);
-      uint32_t ptr_offset_bits = func->module->ptr_offset_bits;
+      uint32_t ptr_offset_bits = module->ptr_offset_bits;
       Instruction *emax_offset =
 	bb->value_inst((uint64_t)1 << ptr_offset_bits, ptr->bitsize * 2);
       Instruction *cond = bb->build_inst(Op::UGE, eoffset, emax_offset);
@@ -5238,9 +5236,8 @@ void Converter::generate_return_inst(Basic_block *bb)
   // GCC treats it as UB to return the address of a local variable.
   if (POINTER_TYPE_P(retval_type))
     {
-      uint32_t ptr_id_bits = func->module->ptr_id_bits;
       Instruction *mem_id = bb->build_extract_id(retval);
-      Instruction *zero = bb->value_inst(0, ptr_id_bits);
+      Instruction *zero = bb->value_inst(0, module->ptr_id_bits);
       Instruction *cond = bb->build_inst(Op::SLT, mem_id, zero);
       if (retval_undef)
 	{
@@ -5491,20 +5488,18 @@ void Converter::process_variables()
 	  }
 	else
 	  {
-	    uint32_t ptr_id_bits = func->module->ptr_id_bits;
-
 	    // Artificial decls are used for data introduced by the compiler
 	    // (such as switch tables), so normal, unconstrained, pointers
 	    // cannot point to them. Give these a local ID.
 	    if (DECL_ARTIFICIAL(decl))
 	      {
-		if (state->id_local <= -(1 << ((ptr_id_bits - 1))))
+		if (state->id_local <= -(1 << ((module->ptr_id_bits - 1))))
 		  throw Not_implemented("too many local variables");
 		id = --state->id_local;
 	      }
 	    else
 	      {
-		if (state->id_global >= (1 << ((ptr_id_bits - 1) - 1)))
+		if (state->id_global >= (1 << ((module->ptr_id_bits - 1) - 1)))
 		  throw Not_implemented("too many global variables");
 		id = ++state->id_global;
 	      }
@@ -5576,8 +5571,7 @@ void Converter::process_variables()
 	  }
 	else
 	  {
-	    uint32_t ptr_id_bits = func->module->ptr_id_bits;
-	    if (state->id_local <= -(1 << ((ptr_id_bits - 1))))
+	    if (state->id_local <= -(1 << ((module->ptr_id_bits - 1))))
 	      throw Not_implemented("too many local variables");
 	    id = --state->id_local;
 	    state->decl2id.insert({decl, id});
@@ -5639,10 +5633,9 @@ void Converter::process_func_args()
 	  // TODO: Update all pointer UB checks for this.
 	  if (POINTER_TYPE_P(TREE_TYPE(decl)))
 	    {
-	      uint32_t ptr_id_bits = func->module->ptr_id_bits;
 	      Instruction *id = bb->build_extract_id(param_inst);
-	      Instruction *zero = bb->value_inst(0, ptr_id_bits);
-	      Instruction *one = bb->value_inst(1, ptr_id_bits);
+	      Instruction *zero = bb->value_inst(0, module->ptr_id_bits);
+	      Instruction *one = bb->value_inst(1, module->ptr_id_bits);
 	      bb->build_inst(Op::UB, bb->build_inst(Op::SLT, id, zero));
 	      bb->build_inst(Op::UB, bb->build_inst(Op::EQ, id, one));
 	    }
@@ -5739,8 +5732,7 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	  constrain_range(bb, phi_result, phi_inst, phi_undef);
 	  if (need_prov_phi(phi))
 	    {
-	      uint32_t ptr_id_bits = bb->func->module->ptr_id_bits;
-	      Instruction *phi_prov = bb->build_phi_inst(ptr_id_bits);
+	      Instruction *phi_prov = bb->build_phi_inst(module->ptr_id_bits);
 	      tree2provenance.insert({phi_result, phi_prov});
 	    }
 	  tree2instruction.insert({phi_result, phi_inst});
