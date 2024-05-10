@@ -5,6 +5,7 @@
 // lots of extra instructions. For example, the UB checks for constant
 // shift amount, or constant pointer arithmetic.
 
+#include <algorithm>
 #include <cassert>
 
 #include "smtgcc.h"
@@ -50,6 +51,19 @@ bool is_value_m1(Instruction *inst)
   unsigned __int128 m1 = ~((unsigned __int128)0);
   m1 = (m1 << (128 - inst->bitsize)) >> (128 - inst->bitsize);
   return inst->opcode == Op::VALUE && inst->value() == m1;
+}
+
+void flatten(Instruction *inst, std::vector<Instruction *>& elems)
+{
+  Op op = inst->opcode;
+  if (inst->arguments[1]->opcode == op)
+    flatten(inst->arguments[1], elems);
+  else
+    elems.push_back(inst->arguments[1]);
+  if (inst->arguments[0]->opcode == op)
+    flatten(inst->arguments[0], elems);
+  else
+    elems.push_back(inst->arguments[0]);
 }
 
 Instruction *cfold_add(Instruction *inst)
@@ -440,6 +454,18 @@ Instruction *simplify_and(Instruction *inst)
   if (arg2->opcode == Op::NOT && arg2->arguments[0] == arg1)
     return inst->bb->value_inst(0, inst->bitsize);
 
+  // and x, (and y, (and x, z)) -> (and y, (and x, z))
+  if ((arg1->opcode == Op::AND && arg2->opcode != Op::AND)
+      || (arg1->opcode != Op::AND && arg2->opcode == Op::AND))
+    {
+      if (arg1->opcode == Op::AND)
+	std::swap(arg1, arg2);
+      std::vector<Instruction *> elems;
+      flatten(arg2, elems);
+      if (std::find(elems.begin(), elems.end(), arg1) != elems.end())
+	return arg2;
+    }
+
   return inst;
 }
 
@@ -589,6 +615,24 @@ Instruction *simplify_ne(Instruction *inst)
   if (arg1 == arg2)
     return inst->bb->value_inst(0, 1);
 
+  // (concat (concat x, x), x) != 0 -> x != 0
+  if (arg1->opcode == Op::CONCAT && is_value_zero(arg2))
+    {
+      std::vector<Instruction *> elems;
+      flatten(arg1, elems);
+      bool are_identical =
+	std::all_of(elems.begin(), elems.end(),
+		    [&](auto elem) { return elem == elems.front(); });
+      if (are_identical)
+	{
+	  Instruction *elem = elems.front();
+	  Instruction *zero = inst->bb->value_inst(0, elem->bitsize);
+	  Instruction *new_inst = create_inst(Op::NE, elem, zero);
+	  new_inst->insert_before(inst);
+	  return new_inst;
+	}
+    }
+
   return inst;
 }
 
@@ -703,6 +747,18 @@ Instruction *simplify_or(Instruction *inst)
 	create_inst(Op::ZEXT, new_inst1, arg1->arguments[1]);
       new_inst2->insert_before(inst);
       return new_inst2;
+    }
+
+  // or x, (or y, (or x, z)) -> (or y, (or x, z))
+  if ((arg1->opcode == Op::OR && arg2->opcode != Op::OR)
+      || (arg1->opcode != Op::OR && arg2->opcode == Op::OR))
+    {
+      if (arg1->opcode == Op::OR)
+	std::swap(arg1, arg2);
+      std::vector<Instruction *> elems;
+      flatten(arg2, elems);
+      if (std::find(elems.begin(), elems.end(), arg1) != elems.end())
+	return arg2;
     }
 
   return inst;
@@ -1215,19 +1271,6 @@ Instruction *simplify_phi(Instruction *phi)
   return inst;
 }
 
-void flatten_concat(Instruction *inst, std::vector<Instruction *>& elems)
-{
-  assert(inst->opcode == Op::CONCAT);
-  if (inst->arguments[1]->opcode == Op::CONCAT)
-    flatten_concat(inst->arguments[1], elems);
-  else
-    elems.push_back(inst->arguments[1]);
-  if (inst->arguments[0]->opcode == Op::CONCAT)
-    flatten_concat(inst->arguments[0], elems);
-  else
-    elems.push_back(inst->arguments[0]);
-}
-
 Instruction *simplify_extract(Instruction *inst)
 {
   Instruction *arg = inst->arguments[0];
@@ -1237,6 +1280,18 @@ Instruction *simplify_extract(Instruction *inst)
   // extract x -> x if the range completely cover x.
   if (low_val == 0 && high_val == arg->bitsize - 1)
     return arg;
+
+  // "extract (sext x)" -> sext x if is boolean.
+  if (arg->opcode == Op::SEXT && arg->arguments[0]->bitsize == 1)
+    {
+      Instruction *ext_arg = arg->arguments[0];
+      if (inst->bitsize == 1)
+	return ext_arg;
+      Instruction *new_inst =
+	create_inst(Op::SEXT, ext_arg, inst->bb->value_inst(inst->bitsize, 32));
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
 
   // "extract (sext x)" and "extract (zext x)" is changed to "extract x" if
   // the range only access bits from x.
@@ -1324,7 +1379,7 @@ Instruction *simplify_extract(Instruction *inst)
   if (arg->opcode == Op::CONCAT)
     {
       std::vector<Instruction *> elems;
-      flatten_concat(arg, elems);
+      flatten(arg, elems);
 
       if (low_val >= elems[0]->bitsize
 	  || high_val < (arg->bitsize - elems.back()->bitsize))
