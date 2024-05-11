@@ -2749,7 +2749,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	    Instruction *arg1_mask = bb->build_inst(Op::NOT, arg1_undef);
 	    Instruction *arg2_mask = bb->build_inst(Op::NOT, arg2_undef);
 	    Instruction *mask = bb->build_inst(Op::AND, arg1_mask, arg2_mask);
-	    Instruction *zero = bb->value_m1_inst(arg1->bitsize);
+	    Instruction *zero = bb->value_inst(0, arg1->bitsize);
 	    Instruction *c1 = bb->build_inst(Op::EQ, mask, zero);
 	    Instruction *a1 = bb->build_inst(Op::AND, arg1, arg1_mask);
 	    Instruction *a2 = bb->build_inst(Op::AND, arg2, arg2_mask);
