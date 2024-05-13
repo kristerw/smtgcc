@@ -106,9 +106,9 @@ struct Converter {
   std::pair<Instruction *, Instruction *>tree2inst_prov(Basic_block *bb, tree expr);
   Instruction *tree2inst(Basic_block *bb, tree expr);
   std::tuple<Instruction *, Instruction *, Instruction *> tree2inst_init_var(Basic_block *bb, tree expr);
-  std::pair<Instruction *, Instruction *> get_res_undef(Instruction *arg1_undef, tree lhs_type, Basic_block *bb);
-  std::pair<Instruction *, Instruction *> get_res_undef(Instruction *arg1_undef, Instruction *arg2_undef, tree lhs_type, Basic_block *bb);
-  std::pair<Instruction *, Instruction *> get_res_undef(Instruction *arg1_undef, Instruction *arg2_undef, Instruction *arg3_undef, tree lhs_type, Basic_block *bb);
+  Instruction *get_res_undef(Instruction *arg1_undef, tree lhs_type, Basic_block *bb);
+  Instruction *get_res_undef(Instruction *arg1_undef, Instruction *arg2_undef, tree lhs_type, Basic_block *bb);
+  Instruction *get_res_undef(Instruction *arg1_undef, Instruction *arg2_undef, Instruction *arg3_undef, tree lhs_type, Basic_block *bb);
   Addr process_array_ref(Basic_block *bb, tree expr, bool is_mem_access);
   Addr process_component_ref(Basic_block *bb, tree expr, bool is_mem_access);
   Addr process_bit_field_ref(Basic_block *bb, tree expr, bool is_mem_access);
@@ -1200,15 +1200,13 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_ini
     }
 }
 
-std::pair<Instruction *, Instruction *> Converter::get_res_undef(Instruction *arg1_undef, tree lhs_type, Basic_block *bb)
+Instruction *Converter::get_res_undef(Instruction *arg1_undef, tree lhs_type, Basic_block *bb)
 {
   Instruction *res_undef = nullptr;
-  Instruction *res_def = nullptr;
   if (arg1_undef)
     {
       Instruction *zero = bb->value_inst(0, arg1_undef->bitsize);
       res_undef = bb->build_inst(Op::NE, arg1_undef, zero);
-      res_def = bb->build_inst(Op::NOT, res_undef);
       uint64_t bitsize = bitsize_for_type(lhs_type);
       if (TREE_CODE(lhs_type) != BOOLEAN_TYPE && bitsize > res_undef->bitsize)
 	{
@@ -1216,13 +1214,12 @@ std::pair<Instruction *, Instruction *> Converter::get_res_undef(Instruction *ar
 	  res_undef = bb->build_inst(Op::SEXT, res_undef, bs_inst);
 	}
     }
-  return {res_undef, res_def};
+  return res_undef;
 }
 
-std::pair<Instruction *, Instruction *> Converter::get_res_undef(Instruction *arg1_undef, Instruction *arg2_undef, tree lhs_type, Basic_block *bb)
+Instruction *Converter::get_res_undef(Instruction *arg1_undef, Instruction *arg2_undef, tree lhs_type, Basic_block *bb)
 {
   Instruction *res_undef = nullptr;
-  Instruction *res_def = nullptr;
   if (arg1_undef)
     {
       Instruction *zero = bb->value_inst(0, arg1_undef->bitsize);
@@ -1239,7 +1236,6 @@ std::pair<Instruction *, Instruction *> Converter::get_res_undef(Instruction *ar
     }
   if (res_undef)
     {
-      res_def = bb->build_inst(Op::NOT, res_undef);
       uint64_t bitsize = bitsize_for_type(lhs_type);
       if (TREE_CODE(lhs_type) != BOOLEAN_TYPE && bitsize > res_undef->bitsize)
 	{
@@ -1247,13 +1243,12 @@ std::pair<Instruction *, Instruction *> Converter::get_res_undef(Instruction *ar
 	  res_undef = bb->build_inst(Op::SEXT, res_undef, bs_inst);
 	}
     }
-  return {res_undef, res_def};
+  return res_undef;
 }
 
-std::pair<Instruction *, Instruction *> Converter::get_res_undef(Instruction *arg1_undef, Instruction *arg2_undef, Instruction *arg3_undef, tree lhs_type, Basic_block *bb)
+Instruction *Converter::get_res_undef(Instruction *arg1_undef, Instruction *arg2_undef, Instruction *arg3_undef, tree lhs_type, Basic_block *bb)
 {
   Instruction *res_undef = nullptr;
-  Instruction *res_def = nullptr;
   if (arg1_undef)
     {
       Instruction *zero = bb->value_inst(0, arg1_undef->bitsize);
@@ -1279,7 +1274,6 @@ std::pair<Instruction *, Instruction *> Converter::get_res_undef(Instruction *ar
     }
   if (res_undef)
     {
-      res_def = bb->build_inst(Op::NOT, res_undef);
       uint64_t bitsize = bitsize_for_type(lhs_type);
       if (TREE_CODE(lhs_type) != BOOLEAN_TYPE && bitsize > res_undef->bitsize)
 	{
@@ -1287,7 +1281,7 @@ std::pair<Instruction *, Instruction *> Converter::get_res_undef(Instruction *ar
 	  res_undef = bb->build_inst(Op::SEXT, res_undef, bs_inst);
 	}
     }
-  return {res_undef, res_def};
+  return res_undef;
 }
 
 Addr Converter::process_array_ref(Basic_block *bb, tree expr, bool is_mem_access)
@@ -1909,7 +1903,7 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
 // Convert a scalar value of src_type to dest_type.
 std::tuple<Instruction *, Instruction *, Instruction *> Converter::type_convert(Instruction *inst, Instruction *undef, Instruction *provenance, tree src_type, tree dest_type, Basic_block *bb)
 {
-  auto [res_undef, res_def] = get_res_undef(undef, dest_type, bb);
+  Instruction *res_undef = get_res_undef(undef, dest_type, bb);
 
   if (INTEGRAL_TYPE_P(src_type) || POINTER_TYPE_P(src_type) || TREE_CODE(src_type) == OFFSET_TYPE)
     {
@@ -1974,15 +1968,15 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::type_convert(
 	  Instruction *chigh = bb->build_inst(Op::FLE, inst, fmax);
 	  Instruction *is_in_range = bb->build_inst(Op::AND, clow, chigh);
 	  Instruction *is_ub = bb->build_inst(Op::NOT, is_in_range);
-	  if (res_def)
-	    is_ub = bb->build_inst(Op::AND, is_ub, res_def);
 	  bb->build_inst(Op::UB, is_ub);
+	  if (undef)
+	    build_ub_if_not_zero(bb, undef);
 
 	  int dest_bitsize = bitsize_for_type(dest_type);
 	  op = TYPE_UNSIGNED(dest_type) ? Op::F2U : Op::F2S;
 	  Instruction *dest_bitsize_inst = bb->value_inst(dest_bitsize, 32);
 	  Instruction *res = bb->build_inst(op, inst, dest_bitsize_inst);
-	  return {res, res_undef, nullptr};
+	  return {res, nullptr, nullptr};
 	}
       if (FLOAT_TYPE_P(dest_type))
 	{
@@ -2069,7 +2063,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_unary
     }
 
   // Handle instructions where the result is undef if any input bit is undef.
-  auto [res_undef, res_def] = get_res_undef(arg1_undef, lhs_type, bb);
+  Instruction *res_undef = get_res_undef(arg1_undef, lhs_type, bb);
   switch (code)
     {
     case ABS_EXPR:
@@ -2077,10 +2071,10 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_unary
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
 	    Instruction *min_int_inst = build_min_int(bb, arg1->bitsize);
-	    Instruction *cond = bb->build_inst(Op::EQ, arg1, min_int_inst);
-	    if (res_def)
-	      cond = bb->build_inst(Op::AND, cond, res_def);
-	    bb->build_inst(Op::UB, cond);
+	    bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg1, min_int_inst));
+	    if (arg1_undef)
+	      build_ub_if_not_zero(bb, arg1_undef);
+	    res_undef = nullptr;
 	  }
 	assert(!TYPE_UNSIGNED(arg1_type));
 	Instruction *neg = bb->build_inst(Op::NEG, arg1);
@@ -2102,10 +2096,10 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_unary
       if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	{
 	  Instruction *min_int_inst = build_min_int(bb, arg1->bitsize);
-	  Instruction *cond = bb->build_inst(Op::EQ, arg1, min_int_inst);
-	  if (res_def)
-	    cond = bb->build_inst(Op::AND, cond, res_def);
-	  bb->build_inst(Op::UB, cond);
+	  bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg1, min_int_inst));
+	  if (arg1_undef)
+	    build_ub_if_not_zero(bb, arg1_undef);
+	  res_undef = nullptr;
 	}
       return {bb->build_inst(Op::NEG, arg1), res_undef, nullptr};
     default:
@@ -2134,7 +2128,7 @@ std::pair<Instruction *, Instruction *> Converter::process_unary_float(enum tree
     }
 
   // Handle instructions where the result is undef if any input bit is undef.
-  auto [res_undef, res_def] = get_res_undef(arg1_undef, lhs_type, bb);
+  Instruction *res_undef = get_res_undef(arg1_undef, lhs_type, bb);
   switch (code)
     {
     case ABS_EXPR:
@@ -2275,8 +2269,7 @@ std::pair<Instruction *, Instruction *> Converter::process_unary_vec(enum tree_c
 
 std::pair<Instruction *, Instruction *> Converter::process_binary_float(enum tree_code code, Instruction *arg1, Instruction *arg1_undef, Instruction *arg2, Instruction *arg2_undef, tree lhs_type, Basic_block *bb)
 {
-  auto [res_undef, res_def] = get_res_undef(arg1_undef, arg2_undef, lhs_type,
-					    bb);
+  Instruction *res_undef = get_res_undef(arg1_undef, arg2_undef, lhs_type, bb);
   switch (code)
     {
     case EQ_EXPR:
@@ -2610,24 +2603,21 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
       }
     case MULT_EXPR:
       {
-	auto [res_undef, res_def] =
-	  get_res_undef(arg1_undef, arg2_undef, lhs_type, bb);
-	res_undef = nullptr;
+	Instruction *res_undef = nullptr;
 	if (arg1_undef || arg2_undef)
 	  {
+	    // The result is defined if no input is uninitialized, or if one of
+	    // the arguments is an initialized zero.
 	    Instruction *zero = bb->value_inst(0, arg1->bitsize);
 	    if (!arg1_undef)
 	      arg1_undef = zero;
 	    if (!arg2_undef)
 	      arg2_undef = zero;
-
-	    // The result is defined if no input is uninitizled, or if one of
-	    // that arguments is a initialized zero.
 	    Instruction *arg1_unini = bb->build_inst(Op::NE, arg1_undef, zero);
 	    Instruction *arg1_nonzero = bb->build_inst(Op::NE, arg1, zero);
 	    Instruction *arg2_unini = bb->build_inst(Op::NE, arg2_undef, zero);
 	    Instruction *arg2_nonzero = bb->build_inst(Op::NE, arg2, zero);
-	    Instruction *ub =
+	    Instruction *is_undef =
 	      bb->build_inst(Op::OR,
 			     bb->build_inst(Op::AND,
 					    arg1_unini,
@@ -2637,25 +2627,29 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 					    arg2_unini,
 					    bb->build_inst(Op::OR, arg1_unini,
 							   arg1_nonzero)));
-	    res_undef =
-	      bb->build_inst(Op::SEXT, ub, bb->value_inst(arg1->bitsize, 32));
+
+	    if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
+	      {
+		bb->build_inst(Op::UB, is_undef);
+		res_undef = nullptr;
+	      }
+	    else
+	      {
+		Instruction *bs_inst = bb->value_inst(arg1->bitsize, 32);
+		res_undef = bb->build_inst(Op::SEXT, is_undef, bs_inst);
+	      }
 	  }
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
-	  {
-	    Instruction *cond = bb->build_inst(Op::SMUL_WRAPS, arg1, arg2);
-	    if (res_def)
-	      cond = bb->build_inst(Op::AND, cond, res_def);
-	    bb->build_inst(Op::UB, cond);
-	  }
-	Instruction *res = bb->build_inst(Op::MUL, arg1, arg2);
-	return {res, res_undef, nullptr};
+	  bb->build_inst(Op::UB, bb->build_inst(Op::SMUL_WRAPS, arg1, arg2));
+
+	return {bb->build_inst(Op::MUL, arg1, arg2), res_undef, nullptr};
       }
     case EXACT_DIV_EXPR:
       {
 	if (arg2_undef)
 	  build_ub_if_not_zero(bb, arg2_undef);
-	auto [res_undef, res_def] = get_res_undef(arg1_undef, lhs_type, bb);
+	Instruction *res_undef = get_res_undef(arg1_undef, lhs_type, bb);
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
@@ -2663,21 +2657,20 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	    Instruction *minus1_inst = bb->value_inst(-1, arg1->bitsize);
 	    Instruction *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
 	    Instruction *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
-	    Instruction *ub_cond = bb->build_inst(Op::AND, cond1, cond2);
-	    if (res_def)
-	      ub_cond = bb->build_inst(Op::AND, ub_cond, res_def);
-	    bb->build_inst(Op::UB, ub_cond);
+	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
+	    if (arg1_undef)
+	      {
+		Instruction *zero = bb->value_inst(0, arg1_undef->bitsize);
+		Instruction *cond3 = bb->build_inst(Op::NE, arg1_undef, zero);
+		bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond2, cond3));
+	      }
 	  }
 	Instruction *zero = bb->value_inst(0, arg1->bitsize);
 	Op rem_op = is_unsigned ? Op::UREM : Op::SREM;
 	Instruction *rem = bb->build_inst(rem_op, arg1, arg2);
 	Instruction *ub_cond = bb->build_inst(Op::NE, rem, zero);
-	if (res_def)
-	  ub_cond = bb->build_inst(Op::AND, ub_cond, res_def);
 	bb->build_inst(Op::UB, ub_cond);
 	Instruction *ub_cond2 = bb->build_inst(Op::EQ, arg2, zero);
-	if (res_def)
-	  ub_cond2 = bb->build_inst(Op::AND, ub_cond2, res_def);
 	bb->build_inst(Op::UB, ub_cond2);
 	Op div_op = is_unsigned ? Op::UDIV : Op::SDIV;
 	return {bb->build_inst(div_op, arg1, arg2), res_undef, nullptr};
@@ -2686,7 +2679,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
       {
 	if (arg2_undef)
 	  build_ub_if_not_zero(bb, arg2_undef);
-	auto [res_undef, res_def] = get_res_undef(arg1_undef, lhs_type, bb);
+	Instruction *res_undef = get_res_undef(arg1_undef, lhs_type, bb);
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
@@ -2694,15 +2687,16 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	    Instruction *minus1_inst = bb->value_inst(-1, arg1->bitsize);
 	    Instruction *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
 	    Instruction *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
-	    Instruction *cond = bb->build_inst(Op::AND, cond1, cond2);
-	    if (res_def)
-	      cond = bb->build_inst(Op::AND, cond, res_def);
-	    bb->build_inst(Op::UB, cond);
+	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
+	    if (arg1_undef)
+	      {
+		Instruction *zero = bb->value_inst(0, arg1_undef->bitsize);
+		Instruction *cond3 = bb->build_inst(Op::NE, arg1_undef, zero);
+		bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond2, cond3));
+	      }
 	  }
 	Instruction *zero_inst = bb->value_inst(0, arg1->bitsize);
 	Instruction *cond = bb->build_inst(Op::EQ, arg2, zero_inst);
-	if (res_def)
-	  cond = bb->build_inst(Op::AND, cond, res_def);
 	bb->build_inst(Op::UB, cond);
 	Op op = is_unsigned ? Op::UDIV : Op::SDIV;
 	return {bb->build_inst(op, arg1, arg2), res_undef, nullptr};
@@ -2711,7 +2705,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
       {
 	if (arg2_undef)
 	  build_ub_if_not_zero(bb, arg2_undef);
-	auto [res_undef, res_def] = get_res_undef(arg1_undef, lhs_type, bb);
+	Instruction *res_undef = get_res_undef(arg1_undef, lhs_type, bb);
 
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
@@ -2719,24 +2713,24 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	    Instruction *minus1_inst = bb->value_inst(-1, arg1->bitsize);
 	    Instruction *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
 	    Instruction *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
-	    Instruction *cond = bb->build_inst(Op::AND, cond1, cond2);
-	    if (res_def)
-	      cond = bb->build_inst(Op::AND, cond, res_def);
-	    bb->build_inst(Op::UB, cond);
+	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
+	    if (arg1_undef)
+	      {
+		Instruction *zero = bb->value_inst(0, arg1_undef->bitsize);
+		Instruction *cond3 = bb->build_inst(Op::NE, arg1_undef, zero);
+		bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond2, cond3));
+	      }
 	  }
 	Instruction *zero_inst = bb->value_inst(0, arg1->bitsize);
 	Instruction *cond = bb->build_inst(Op::EQ, arg2, zero_inst);
-	if (res_def)
-	  cond = bb->build_inst(Op::AND, cond, res_def);
 	bb->build_inst(Op::UB, cond);
 	Op op = is_unsigned ? Op::UREM : Op::SREM;
 	return {bb->build_inst(op, arg1, arg2), res_undef, nullptr};
       }
     case NE_EXPR:
       {
-	auto [res_undef, res_def] =
-	  get_res_undef(arg1_undef, arg2_undef, lhs_type, bb);
-	if (res_undef)
+	Instruction *res_undef = nullptr;
+	if (arg1_undef || arg2_undef)
 	  {
 	    // The result is defined if the value of the undefined bits
 	    // does not matter. That is, if there are bits that are defined
@@ -2749,13 +2743,13 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	    Instruction *arg1_mask = bb->build_inst(Op::NOT, arg1_undef);
 	    Instruction *arg2_mask = bb->build_inst(Op::NOT, arg2_undef);
 	    Instruction *mask = bb->build_inst(Op::AND, arg1_mask, arg2_mask);
-	    Instruction *zero = bb->value_inst(0, arg1->bitsize);
-	    Instruction *c1 = bb->build_inst(Op::EQ, mask, zero);
-	    Instruction *a1 = bb->build_inst(Op::AND, arg1, arg1_mask);
-	    Instruction *a2 = bb->build_inst(Op::AND, arg2, arg2_mask);
-	    Instruction *c2 = bb->build_inst(Op::EQ, a1, a2);
-	    Instruction *o = bb->build_inst(Op::OR, c1, c2);
-	    res_undef = bb->build_inst(Op::AND, o, res_undef);
+
+	    Instruction *a1 = bb->build_inst(Op::AND, arg1, mask);
+	    Instruction *a2 = bb->build_inst(Op::AND, arg2, mask);
+	    Instruction *c1 = bb->build_inst(Op::EQ, a1, a2);
+	    Instruction *m1 = bb->value_m1_inst(arg1->bitsize);
+	    Instruction *c2 = bb->build_inst(Op::NE, mask, m1);
+	    res_undef = bb->build_inst(Op::AND, c1, c2);
 	  }
 	return {bb->build_inst(Op::NE, arg1, arg2), res_undef, nullptr};
       }
@@ -2764,8 +2758,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
     }
 
   // Handle instructions where the result is undef if any input bit is undef.
-  auto [res_undef, res_def] = get_res_undef(arg1_undef, arg2_undef, lhs_type,
-					    bb);
+  Instruction *res_undef = get_res_undef(arg1_undef, arg2_undef, lhs_type, bb);
   switch (code)
     {
     case MAX_EXPR:
@@ -2796,8 +2789,6 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	    Instruction *is_sub = bb->build_inst(Op::SLT, arg2, zero);
 	    Instruction *is_ub =
 	      bb->build_inst(Op::ITE, is_sub, sub_overflow, add_overflow);
-	    if (res_def)
-	      is_ub = bb->build_inst(Op::AND, is_ub, res_def);
 	    bb->build_inst(Op::UB, is_ub);
 	  }
 
@@ -2808,10 +2799,15 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	  Instruction *cond1 = bb->build_inst(Op::EQ, ptr, zero);
 	  Instruction *cond2 = bb->build_inst(Op::NE, arg1, zero);
 	  Instruction *is_ub = bb->build_inst(Op::AND, cond1, cond2);
-	  if (res_def)
-	    is_ub = bb->build_inst(Op::AND, is_ub, res_def);
 	  bb->build_inst(Op::UB, is_ub);
 	}
+
+	// TODO: Implement correct undef handling.
+	if (arg1_undef)
+	  build_ub_if_not_zero(bb, arg1_undef);
+	if (arg2_undef)
+	  build_ub_if_not_zero(bb, arg2_undef);
+	res_undef = nullptr;
 
 	return {ptr, res_undef, arg1_prov};
       }
@@ -2827,10 +2823,12 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
-	    Instruction *cond = bb->build_inst(Op::SSUB_WRAPS, arg1, arg2);
-	    if (res_def)
-	      cond = bb->build_inst(Op::AND, cond, res_def);
-	    bb->build_inst(Op::UB, cond);
+	    bb->build_inst(Op::UB, bb->build_inst(Op::SSUB_WRAPS, arg1, arg2));
+	    if (arg1_undef)
+	      build_ub_if_not_zero(bb, arg1_undef);
+	    if (arg2_undef)
+	      build_ub_if_not_zero(bb, arg2_undef);
+	    res_undef = nullptr;
 	  }
 	return {bb->build_inst(Op::SUB, arg1, arg2), res_undef, prov};
       }
@@ -2846,10 +2844,12 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
-	    Instruction *cond = bb->build_inst(Op::SADD_WRAPS, arg1, arg2);
-	    if (res_def)
-	      cond = bb->build_inst(Op::AND, cond, res_def);
-	    bb->build_inst(Op::UB, cond);
+	    bb->build_inst(Op::UB, bb->build_inst(Op::SADD_WRAPS, arg1, arg2));
+	    if (arg1_undef)
+	      build_ub_if_not_zero(bb, arg1_undef);
+	    if (arg2_undef)
+	      build_ub_if_not_zero(bb, arg2_undef);
+	    res_undef = nullptr;
 	  }
 	return {bb->build_inst(Op::ADD, arg1, arg2), res_undef, prov};
       }
@@ -2878,13 +2878,13 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
     case LSHIFT_EXPR:
       {
 	Instruction *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
-	Instruction *cond = bb->build_inst(Op::UGE, arg2, bitsize);
-	if (res_def)
-	  cond = bb->build_inst(Op::AND, cond, res_def);
-	bb->build_inst(Op::UB, cond);
+	bb->build_inst(Op::UB, bb->build_inst(Op::UGE, arg2, bitsize));
+	if (arg2_undef)
+	  build_ub_if_not_zero(bb, arg2_undef);
+	res_undef = get_res_undef(arg1_undef, lhs_type, bb);
+	arg2 = type_convert(arg2, arg2_type, arg1_type, bb);
+	return {bb->build_inst(Op::SHL, arg1, arg2), res_undef, nullptr};
       }
-      arg2 = type_convert(arg2, arg2_type, arg1_type, bb);
-      return {bb->build_inst(Op::SHL, arg1, arg2), res_undef, nullptr};
     case POINTER_DIFF_EXPR:
       {
 	// Pointers are treated as unsigned, and the result must fit in
@@ -2902,18 +2902,24 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	Instruction *top_bit =
 	  bb->build_inst(Op::EXTRACT, eres, top_bit_idx, top_bit_idx);
 	Instruction *cmp = bb->build_inst(Op::NE, top_bit, etop_bit);
-	if (res_def)
-	  cmp = bb->build_inst(Op::AND, cmp, res_def);
 	bb->build_inst(Op::UB, cmp);
+
+	// TODO: Implement correct undef handling.
+	if (arg1_undef)
+	  build_ub_if_not_zero(bb, arg1_undef);
+	if (arg2_undef)
+	  build_ub_if_not_zero(bb, arg2_undef);
+	res_undef = nullptr;
+
 	return {bb->build_trunc(eres, bitsize), res_undef, nullptr};
       }
     case RROTATE_EXPR:
       {
 	Instruction *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
-	Instruction *cond = bb->build_inst(Op::UGE, arg2, bitsize);
-	if (res_def)
-	  cond = bb->build_inst(Op::AND, cond, res_def);
-	bb->build_inst(Op::UB, cond);
+	bb->build_inst(Op::UB, bb->build_inst(Op::UGE, arg2, bitsize));
+	if (arg2_undef)
+	  build_ub_if_not_zero(bb, arg2_undef);
+	res_undef = get_res_undef(arg1_undef, lhs_type, bb);
 	arg2 = type_convert(arg2, arg2_type, arg1_type, bb);
 	Instruction *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
 	Instruction *bitsize_inst = bb->value_inst(concat->bitsize, 32);
@@ -2924,10 +2930,10 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
     case LROTATE_EXPR:
       {
 	Instruction *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
-	Instruction *cond = bb->build_inst(Op::UGE, arg2, bitsize);
-	if (res_def)
-	  cond = bb->build_inst(Op::AND, cond, res_def);
-	bb->build_inst(Op::UB, cond);
+	bb->build_inst(Op::UB, bb->build_inst(Op::UGE, arg2, bitsize));
+	if (arg2_undef)
+	  build_ub_if_not_zero(bb, arg2_undef);
+	res_undef = get_res_undef(arg1_undef, lhs_type, bb);
 	arg2 = type_convert(arg2, arg2_type, arg1_type, bb);
 	Instruction *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
 	Instruction *bitsize_inst = bb->value_inst(concat->bitsize, 32);
@@ -2941,10 +2947,10 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
     case RSHIFT_EXPR:
       {
 	Instruction *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
-	Instruction *cond = bb->build_inst(Op::UGE, arg2, bitsize);
-	if (res_def)
-	  cond = bb->build_inst(Op::AND, cond, res_def);
-	bb->build_inst(Op::UB, cond);
+	bb->build_inst(Op::UB, bb->build_inst(Op::UGE, arg2, bitsize));
+	if (arg2_undef)
+	  build_ub_if_not_zero(bb, arg2_undef);
+	res_undef = get_res_undef(arg1_undef, lhs_type, bb);
 	Op op = is_unsigned ? Op::LSHR : Op::ASHR;
 	arg2 = type_convert(arg2, arg2_type, arg1_type, bb);
 	return {bb->build_inst(op, arg1, arg2), res_undef, nullptr};
@@ -3652,7 +3658,7 @@ void Converter::process_cfn_add_overflow(gimple *stmt, Basic_block *bb)
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   auto [arg1, arg1_undef] = tree2inst_undef(bb, arg1_expr);
   auto [arg2, arg2_undef] = tree2inst_undef(bb, arg2_expr);
-  auto [res_undef, res_def] =
+  Instruction *res_undef =
     get_res_undef(arg1_undef, arg2_undef, TREE_TYPE(lhs), bb);
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   unsigned bitsize = 1 + std::max(arg1->bitsize, arg2->bitsize);
@@ -3747,7 +3753,7 @@ void Converter::process_cfn_clrsb(gimple *stmt, Basic_block *bb)
   if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
     throw Not_implemented("process_cfn_clrsb: vector type");
   auto [arg, arg_undef] = tree2inst_undef(bb, gimple_call_arg(stmt, 0));
-  auto [res_undef, res_def] = get_res_undef(arg_undef, TREE_TYPE(lhs), bb);
+  Instruction *res_undef = get_res_undef(arg_undef, TREE_TYPE(lhs), bb);
   assert(arg->bitsize > 1);
   int bitsize = bitsize_for_type(TREE_TYPE(lhs));
   Instruction *signbit = bb->build_extract_bit(arg, arg->bitsize - 1);
@@ -4025,7 +4031,7 @@ void Converter::process_cfn_fmax(gimple *stmt, Basic_block *bb)
   tree arg2_expr = gimple_call_arg(stmt, 1);
   auto [arg1, arg1_undef] = tree2inst_undef(bb, arg1_expr);
   auto [arg2, arg2_undef] = tree2inst_undef(bb, arg2_expr);
-  auto [res_undef, res_def] =
+  Instruction *res_undef =
     get_res_undef(arg1_undef, arg2_undef, TREE_TYPE(lhs), bb);
   Instruction *is_nan = bb->build_inst(Op::IS_NAN, arg2);
   Instruction *cmp = bb->build_inst(Op::FGT, arg1, arg2);
@@ -4058,7 +4064,7 @@ void Converter::process_cfn_fmin(gimple *stmt, Basic_block *bb)
   tree arg2_expr = gimple_call_arg(stmt, 1);
   auto [arg1, arg1_undef] = tree2inst_undef(bb, arg1_expr);
   auto [arg2, arg2_undef] = tree2inst_undef(bb, arg2_expr);
-  auto [res_undef, res_def] =
+  Instruction *res_undef =
     get_res_undef(arg1_undef, arg2_undef, TREE_TYPE(lhs), bb);
   Instruction *is_nan = bb->build_inst(Op::IS_NAN, arg2);
   Instruction *cmp = bb->build_inst(Op::FLT, arg1, arg2);
@@ -4337,7 +4343,7 @@ void Converter::process_cfn_mul_overflow(gimple *stmt, Basic_block *bb)
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   auto [arg1, arg1_undef] = tree2inst_undef(bb, arg1_expr);
   auto [arg2, arg2_undef] = tree2inst_undef(bb, arg2_expr);
-  auto [res_undef, res_def] =
+  Instruction *res_undef =
     get_res_undef(arg1_undef, arg2_undef, TREE_TYPE(lhs), bb);
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   unsigned bitsize =
@@ -4461,7 +4467,7 @@ void Converter::process_cfn_sub_overflow(gimple *stmt, Basic_block *bb)
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   auto [arg1, arg1_undef] = tree2inst_undef(bb, arg1_expr);
   auto [arg2, arg2_undef] = tree2inst_undef(bb, arg2_expr);
-  auto [res_undef, res_def] =
+  Instruction *res_undef =
     get_res_undef(arg1_undef, arg2_undef, TREE_TYPE(lhs), bb);
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   unsigned bitsize = 1 + std::max(arg1->bitsize, arg2->bitsize);
@@ -4700,7 +4706,7 @@ void Converter::process_cfn_uaddc(gimple *stmt, Basic_block *bb)
   auto [arg1, arg1_undef] = tree2inst_undef(bb, arg1_expr);
   auto [arg2, arg2_undef] = tree2inst_undef(bb, arg2_expr);
   auto [arg3, arg3_undef] = tree2inst_undef(bb, arg3_expr);
-  auto [res_undef, res_def] =
+  Instruction *res_undef =
     get_res_undef(arg1_undef, arg2_undef, arg3_undef, TREE_TYPE(lhs), bb);
   assert(arg1->bitsize == arg2->bitsize);
   assert(arg1->bitsize == arg3->bitsize);
@@ -4751,7 +4757,7 @@ void Converter::process_cfn_usubc(gimple *stmt, Basic_block *bb)
   assert(arg1->bitsize == arg2->bitsize);
   assert(arg1->bitsize == arg3->bitsize);
   assert(lhs_elem_bitsize == arg1->bitsize);
-  auto [res_undef, res_def] =
+  Instruction *res_undef =
     get_res_undef(arg1_undef, arg2_undef, arg3_undef, TREE_TYPE(lhs), bb);
 
   Instruction *bitsize_inst = bb->value_inst(arg1->bitsize + 2, 32);
