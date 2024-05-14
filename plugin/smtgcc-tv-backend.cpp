@@ -224,10 +224,6 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
 
 static void finish(void *, void *data)
 {
-  // TODO: Check that we are generating a .s file, and use the name of the
-  // newly generated .s file.
-  const char *file_name = "k.s";
-
   struct tv_pass *my_pass = (struct tv_pass *)data;
   if (my_pass->error_has_been_reported)
     return;
@@ -238,7 +234,7 @@ static void finish(void *, void *data)
       Module *module = state->module;
       module->functions[0]->name = "src";
       state->reg_bitsize = TARGET_64BIT ? 64 : 32;
-      Function *func = parse_riscv("k.s", state);
+      Function *func = parse_riscv(asm_file_name, state);
       reverse_post_order(func);
       adjust_abi(func, module->functions[0], state);
       eliminate_registers(func);
@@ -263,7 +259,7 @@ static void finish(void *, void *data)
     }
  catch (Parse_error error)
     {
-      fprintf(stderr, "%s:%d: Parse error: %s\n", file_name, error.line,
+      fprintf(stderr, "%s:%d: Parse error: %s\n", asm_file_name, error.line,
 	      error.msg.c_str());
     }
   catch (Not_implemented& error)
