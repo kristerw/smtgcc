@@ -52,6 +52,7 @@ unsigned int tv_pass::execute(function *fun)
       unroll_and_optimize(func);
       rstate->module = module;
       rstate->params = state.params;
+      rstate->func_name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl));
     }
   catch (Not_implemented& error)
     {

@@ -1,5 +1,6 @@
 #include <fstream>
 #include <cassert>
+#include <cstring>
 #include <limits>
 #include <string>
 
@@ -1242,7 +1243,11 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
       {
 	// TODO: Implement real parsing.
 	// Just eat lines until we find "foo:" for now.
-	if (buf[0] == 'f' && buf[1] == 'o' && buf[2] == 'o' && buf[3] == ':')
+	size_t len = strlen(buf);
+	if (len < 2 || buf[len - 1] != ':')
+	  continue;
+	buf[len - 1] = 0;
+	if (buf == rstate->func_name)
 	  {
 	    current_func = module->build_function("tgt");
 	    Basic_block *entry_bb = current_func->build_bb();

@@ -424,6 +424,7 @@ struct Param_info
 // read_riscv.cpp
 struct riscv_state {
   std::vector<Instruction *> registers;
+  std::string func_name;
   Module *module;
   uint32_t reg_bitsize;
   std::vector<Param_info> params;
