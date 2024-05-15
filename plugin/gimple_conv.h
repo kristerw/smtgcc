@@ -15,6 +15,7 @@ struct CommonState {
   std::map<tree, int64_t> decl2id;
 
   std::vector<smtgcc::Param_info> params;
+  std::vector<smtgcc::MemoryObject> memory_objects;
 };
 
 smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun, bool is_tgt_func = false);

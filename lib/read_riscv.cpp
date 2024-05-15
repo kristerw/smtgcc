@@ -28,6 +28,8 @@ struct parser {
     hex,
     comma,
     assign,
+    lo,
+    hi,
     left_bracket,
     right_bracket,
     left_paren,
@@ -42,6 +44,7 @@ struct parser {
   std::vector<token> tokens;
   std::vector<Instruction *> registers;
   std::vector<Basic_block *> ret_bbs;
+  std::map<std::string, Instruction *> sym_name2mem;
 
   int line_number = 0;
   int pos;
@@ -79,10 +82,13 @@ private:
   Instruction *get_reg(unsigned idx);
   Instruction *get_imm(unsigned idx);
   Instruction *get_reg_value(unsigned idx);
+  Instruction *get_sym_addr(unsigned idx);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
   std::string get_name(unsigned idx);
   void get_comma(unsigned idx);
+  void get_hi(unsigned idx);
+  void get_lo(unsigned idx);
   void get_left_paren(unsigned idx);
   void get_right_paren(unsigned idx);
   void get_end_of_line(unsigned idx);
@@ -197,7 +203,7 @@ std::string parser::get_name(unsigned idx)
 {
   assert(idx > 0);
   if (tokens.size() <= idx || tokens[idx].kind != lexeme::name)
-    throw Parse_error("expected a ',' after " + token_string(tokens[idx - 1]),
+    throw Parse_error("expected a name after " + token_string(tokens[idx - 1]),
 		      line_number);
   return get_name(&buf[tokens[idx].pos]);
 }
@@ -358,6 +364,16 @@ Instruction *parser::get_reg_value(unsigned idx)
 		      + token_string(tokens[idx]), line_number);
 }
 
+Instruction *parser::get_sym_addr(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  std::string sym_name = get_name(idx);
+  if (!sym_name2mem.contains(sym_name))
+    throw Parse_error("unknown symbol " + sym_name, line_number);
+  return sym_name2mem.at(sym_name);
+}
+
 Basic_block *parser::get_bb(unsigned idx)
 {
   if (tokens.size() <= idx)
@@ -397,6 +413,22 @@ void parser::get_comma(unsigned idx)
   assert(idx > 0);
   if (tokens.size() <= idx || tokens[idx].kind != lexeme::comma)
     throw Parse_error("expected a ',' after " + token_string(tokens[idx - 1]),
+		      line_number);
+}
+
+void parser::get_hi(unsigned idx)
+{
+  assert(idx > 0);
+  if (tokens.size() <= idx || tokens[idx].kind != lexeme::hi)
+    throw Parse_error("expected %hi after " + token_string(tokens[idx - 1]),
+		      line_number);
+}
+
+void parser::get_lo(unsigned idx)
+{
+  assert(idx > 0);
+  if (tokens.size() <= idx || tokens[idx].kind != lexeme::lo)
+    throw Parse_error("expected %lo after " + token_string(tokens[idx - 1]),
 		      line_number);
 }
 
@@ -489,20 +521,41 @@ void parser::load_ub_check(Instruction *ptr, uint64_t size)
 
 void parser::gen_load(int size)
 {
+  Instruction *ptr;
   Instruction *dest = get_reg(1);
   get_comma(2);
-  Instruction *offset = get_imm(3);
-  get_left_paren(4);
-  Instruction *base = get_reg_value(5);
-  get_right_paren(6);
-  get_end_of_line(7);
+  if (tokens[3].kind == lexeme::lo)
+    {
+      get_lo(3);
+      get_left_paren(4);
+      Instruction *addr = get_sym_addr(5);
+      get_right_paren(6);
+      get_left_paren(7);
+      Instruction *base = get_reg_value(8);
+      get_right_paren(9);
+      get_end_of_line(10);
 
-  Instruction *ptr = current_bb->build_inst(Op::ADD, base, offset);
+      Instruction *offset = current_bb->build_trunc(addr, 12);
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
+      offset = current_bb->build_inst(Op::SEXT, offset, bitsize);
+      ptr = current_bb->build_inst(Op::ADD, base, offset);
+    }
+  else
+    {
+      Instruction *offset = get_imm(3);
+      get_left_paren(4);
+      Instruction *base = get_reg_value(5);
+      get_right_paren(6);
+      get_end_of_line(7);
+
+      ptr = current_bb->build_inst(Op::ADD, base, offset);
+    }
   load_ub_check(ptr, size);
   Instruction *value = nullptr;
   for (int i = 0; i < size; i++)
     {
-      Instruction *addr = current_bb->build_inst(Op::ADD, ptr, offset);
+      Instruction *size_inst = current_bb->value_inst(i, ptr->bitsize);
+      Instruction *addr = current_bb->build_inst(Op::ADD, ptr, size_inst);
       Instruction *byte = current_bb->build_inst(Op::LOAD, addr);
       if (value)
 	value = current_bb->build_inst(Op::CONCAT, byte, value);
@@ -519,19 +572,41 @@ void parser::gen_load(int size)
 
 void parser::gen_store(int size)
 {
-  Instruction *value = get_reg_value(1);
+  Instruction *ptr;
+    Instruction *value = get_reg_value(1);
   get_comma(2);
-  Instruction *offset = get_imm(3);
-  get_left_paren(4);
-  Instruction *base = get_reg_value(5);
-  get_right_paren(6);
-  get_end_of_line(7);
+  if (tokens[3].kind == lexeme::lo)
+    {
+      get_lo(3);
+      get_left_paren(4);
+      Instruction *addr = get_sym_addr(5);
+      get_right_paren(6);
+      get_left_paren(7);
+      Instruction *base = get_reg_value(8);
+      get_right_paren(9);
+      get_end_of_line(10);
 
-  Instruction *ptr = current_bb->build_inst(Op::ADD, base, offset);
+      Instruction *offset = current_bb->build_trunc(addr, 12);
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
+      offset = current_bb->build_inst(Op::SEXT, offset, bitsize);
+      ptr = current_bb->build_inst(Op::ADD, base, offset);
+    }
+  else
+    {
+      Instruction *offset = get_imm(3);
+      get_left_paren(4);
+      Instruction *base = get_reg_value(5);
+      get_right_paren(6);
+      get_end_of_line(7);
+
+      ptr = current_bb->build_inst(Op::ADD, base, offset);
+    }
+
   store_ub_check(ptr, size);
   for (int i = 0; i < size; i++)
     {
-      Instruction *addr = current_bb->build_inst(Op::ADD, ptr, offset);
+      Instruction *size_inst = current_bb->value_inst(i, ptr->bitsize);
+      Instruction *addr = current_bb->build_inst(Op::ADD, ptr, size_inst);
       Instruction *high = current_bb->value_inst(i * 8 + 7, 32);
       Instruction *low = current_bb->value_inst(i * 8, 32);
       Instruction *byte = current_bb->build_inst(Op::EXTRACT, value, high, low);
@@ -1103,6 +1178,28 @@ void parser::parse_function()
 
       current_bb->build_inst(Op::WRITE, dest, arg1);
     }
+  else if (name == "lui")
+    {
+      Instruction *dest = get_reg(1);
+      get_comma(2);
+      get_hi(3);
+      get_left_paren(4);
+      Instruction *addr = get_sym_addr(5);
+      get_right_paren(6);
+      get_end_of_line(7);
+
+      Instruction *high = current_bb->value_inst(31, 32);
+      Instruction *low = current_bb->value_inst(12, 32);
+      Instruction *res = current_bb->build_inst(Op::EXTRACT, addr, high, low);
+      Instruction *zero = current_bb->value_inst(0, 12);
+      res = current_bb->build_inst(Op::CONCAT, res, zero);
+      if (reg_bitsize > 32)
+	{
+	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
+	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
+	}
+      current_bb->build_inst(Op::WRITE, dest, res);
+    }
   else if (name == "call")
     gen_call();
   else if (name == "ld" && reg_bitsize == 64)
@@ -1181,6 +1278,16 @@ void parser::lex_line(void)
 	lex_label_or_label_def();
       else if (isalpha(buf[pos]) || buf[pos] == '_' || buf[pos] == '.')
 	lex_name();
+      else if (buf[pos] == '%' && buf[pos + 1] == 'l' && buf[pos + 2] == 'o')  // TODO: pos+2 check.
+	{
+	  tokens.emplace_back(lexeme::lo, pos, 1);
+	  pos += 3;
+	}
+      else if (buf[pos] == '%' && buf[pos + 1] == 'h' && buf[pos + 2] == 'i')  // TODO: pos+2 check.
+	{
+	  tokens.emplace_back(lexeme::hi, pos, 1);
+	  pos += 3;
+	}
       else if (buf[pos] == ',')
 	{
 	  tokens.emplace_back(lexeme::comma, pos, 1);
@@ -1263,15 +1370,26 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
 
 	    current_bb = bb;
 
+	    for (const auto& mem_obj : rstate->memory_objects)
+	      {
+		Instruction *id =
+		  current_bb->value_inst(mem_obj.id, module->ptr_id_bits);
+		Instruction *size =
+		  current_bb->value_inst(mem_obj.size, module->ptr_offset_bits);
+		Instruction *flags = current_bb->value_inst(mem_obj.flags, 32);
+		Instruction *inst =
+		  entry_bb->build_inst(Op::MEMORY, id, size, flags);
+		sym_name2mem.insert({mem_obj.sym_name, inst});
+	      }
+
 	    // Set up the stack.
-	    uint32_t ptr_id_bits = module->ptr_id_bits;
-	    uint32_t ptr_offset_bits = module->ptr_offset_bits;
 	    // TODO: Set up memory consistent with the src function.
-	    Instruction *id = bb->value_inst(-128, ptr_id_bits);
-	    Instruction *mem_size = bb->value_inst(stack_size, ptr_offset_bits);
+	    Instruction *id = bb->value_inst(-128, module->ptr_id_bits);
+	    Instruction *mem_size =
+	      bb->value_inst(stack_size, module->ptr_offset_bits);
 	    Instruction *flags = bb->value_inst(0, 32);
 	    Instruction *stack =
-	      bb->build_inst(Op::MEMORY, id, mem_size, flags);
+	      entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
 	    Instruction *size = bb->value_inst(stack_size, stack->bitsize);
 	    stack = bb->build_inst(Op::ADD, stack, size);
 	    current_bb->build_inst(Op::WRITE, registers[2], stack);

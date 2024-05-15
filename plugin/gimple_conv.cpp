@@ -5516,10 +5516,11 @@ void Converter::process_variables()
 	  flags |= MEM_CONST;
 	Instruction *memory_inst = build_memory_inst(id, size, flags);
 	decl2instruction.insert({decl, memory_inst});
-	if (DECL_NAME(decl))
+	if (DECL_ASSEMBLER_NAME(decl))
 	  {
-	    const char *name = IDENTIFIER_POINTER(DECL_NAME(decl));
+	    const char *name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(decl));
 	    name2decl.insert({name, decl});
+	    state->memory_objects.push_back({name, id, size, flags});
 	  }
       }
 
@@ -5529,7 +5530,7 @@ void Converter::process_variables()
 	tree alias = lookup_attribute("alias", DECL_ATTRIBUTES(decl));
 	if (alias)
 	  {
-	    const char *name = IDENTIFIER_POINTER(DECL_NAME(decl));
+	    const char *name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(decl));
 	    const char *alias_name =
 	      TREE_STRING_POINTER(TREE_VALUE(TREE_VALUE(alias)));
 	    if (!name2decl.contains(alias_name))
@@ -5607,8 +5608,7 @@ void Converter::process_func_args()
 	throw Not_implemented("Parameter size == 0");
 
       bool type_is_unsigned =
-	TREE_CODE(TREE_TYPE(decl)) == INTEGER_TYPE
-	&& TYPE_UNSIGNED(TREE_TYPE(decl));
+	INTEGRAL_TYPE_P(TREE_TYPE(decl)) && TYPE_UNSIGNED(TREE_TYPE(decl));
       state->params.push_back({bitsize, type_is_unsigned, 0, 0});
 
       // TODO: There must be better ways to determine if this is the "this"

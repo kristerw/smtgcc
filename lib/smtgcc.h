@@ -421,6 +421,13 @@ struct Param_info
   uint32_t num_regs;
 };
 
+struct MemoryObject {
+  std::string sym_name;
+  uint64_t id;
+  uint64_t size;
+  uint64_t flags;
+};
+
 // read_riscv.cpp
 struct riscv_state {
   std::vector<Instruction *> registers;
@@ -428,6 +435,7 @@ struct riscv_state {
   Module *module;
   uint32_t reg_bitsize;
   std::vector<Param_info> params;
+  std::vector<MemoryObject> memory_objects;
 };
 Function *parse_riscv(std::string const& file_name, riscv_state *state);
 
