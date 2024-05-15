@@ -86,7 +86,6 @@ smtgcc-tv-backend compares the GIMPLE IR from  the last GIMPLE pass with the gen
 
 This was just a quick experiment, so it has far too many limitations to be useful:
  * Only RISC-V
- * The source code must have exactly one function
  * The function must not access global memory
  * The ABI is not correctly implemented, so the function must have a few parameters of an integral type.
 

@@ -32,12 +32,10 @@ struct tv_pass : gimple_opt_pass
   tv_pass(gcc::context *ctx)
     : gimple_opt_pass(tv_pass_data, ctx)
   {
-    module = create_module();
   }
   unsigned int execute(function *fun) final override;
-  Module *module;
-  riscv_state *rstate = new riscv_state;
   bool error_has_been_reported = false;
+  std::vector<riscv_state> functions;
 };
 
 unsigned int tv_pass::execute(function *fun)
@@ -48,12 +46,15 @@ unsigned int tv_pass::execute(function *fun)
   try
     {
       CommonState state;
+      Module *module = create_module();
       Function *func = process_function(module, &state, fun, false);
       unroll_and_optimize(func);
-      rstate->module = module;
-      rstate->params = state.params;
-      rstate->memory_objects = state.memory_objects;
-      rstate->func_name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl));
+      riscv_state rstate;
+      rstate.module = module;
+      rstate.params = state.params;
+      rstate.memory_objects = state.memory_objects;
+      rstate.func_name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl));
+      functions.push_back(rstate);
     }
   catch (Not_implemented& error)
     {
@@ -229,43 +230,45 @@ static void finish(void *, void *data)
   if (my_pass->error_has_been_reported)
     return;
 
-  try
+  for (auto& state : my_pass->functions)
     {
-      riscv_state *state = my_pass->rstate;
-      Module *module = state->module;
-      module->functions[0]->name = "src";
-      state->reg_bitsize = TARGET_64BIT ? 64 : 32;
-      Function *func = parse_riscv(asm_file_name, state);
-      reverse_post_order(func);
-      adjust_abi(func, module->functions[0], state);
-      eliminate_registers(func);
-      simplify_insts(func);
-      dead_code_elimination(func);
-
-      canonicalize_memory(module);
-      simplify_mem(module);
-      ls_elim(module);
-      simplify_insts(module);
-      simplify_cfg(module);
-      dead_code_elimination(module);
-
-      Solver_result result = check_refine(module);
-      if (result.status != Result_status::correct)
+      try
 	{
-	  assert(result.message);
-	  std::string msg = *result.message;
-	  msg.pop_back();
-	  inform(UNKNOWN_LOCATION, "%s", msg.c_str());
+	  Module *module = state.module;
+	  module->functions[0]->name = "src";
+	  state.reg_bitsize = TARGET_64BIT ? 64 : 32;
+	  Function *func = parse_riscv(asm_file_name, &state);
+	  reverse_post_order(func);
+	  adjust_abi(func, module->functions[0], &state);
+	  eliminate_registers(func);
+	  simplify_insts(func);
+	  dead_code_elimination(func);
+
+	  canonicalize_memory(module);
+	  simplify_mem(module);
+	  ls_elim(module);
+	  simplify_insts(module);
+	  simplify_cfg(module);
+	  dead_code_elimination(module);
+
+	  Solver_result result = check_refine(module);
+	  if (result.status != Result_status::correct)
+	    {
+	      assert(result.message);
+	      std::string msg = *result.message;
+	      msg.pop_back();
+	      inform(UNKNOWN_LOCATION, "%s", msg.c_str());
+	    }
 	}
-    }
- catch (Parse_error error)
-    {
-      fprintf(stderr, "%s:%d: Parse error: %s\n", asm_file_name, error.line,
-	      error.msg.c_str());
-    }
-  catch (Not_implemented& error)
-    {
-      fprintf(stderr, "Not implemented: %s\n", error.msg.c_str());
+      catch (Parse_error error)
+	{
+	  fprintf(stderr, "%s:%d: Parse error: %s\n", asm_file_name, error.line,
+		  error.msg.c_str());
+	}
+      catch (Not_implemented& error)
+	{
+	  fprintf(stderr, "Not implemented: %s\n", error.msg.c_str());
+	}
     }
 }
 
