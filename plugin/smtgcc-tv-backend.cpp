@@ -238,11 +238,31 @@ static void finish(void *, void *data)
 	  module->functions[0]->name = "src";
 	  state.reg_bitsize = TARGET_64BIT ? 64 : 32;
 	  Function *func = parse_riscv(asm_file_name, &state);
-	  reverse_post_order(func);
 	  adjust_abi(func, module->functions[0], &state);
+
+	  simplify_cfg(func);
+	  if (loop_unroll(func))
+	    {
+	      simplify_insts(func);
+	      dead_code_elimination(func);
+	      simplify_cfg(func);
+	    }
+
 	  eliminate_registers(func);
-	  simplify_insts(func);
-	  dead_code_elimination(func);
+	  validate(func);
+
+	  // Simplify the code several times -- this is often necessary
+	  // as instruction simplification enables new CFG simplifications
+	  // that then enable new instruction simplifications.
+	  // This is handled during unrolling for the GIMPLE passes, but
+	  // it does not work here because we must do unrolling before
+	  // eliminating the register instructions.
+	  for (int i = 0; i < 3; i++)
+	    {
+	      simplify_insts(func);
+	      dead_code_elimination(func);
+	      simplify_cfg(func);
+	    }
 
 	  canonicalize_memory(module);
 	  simplify_mem(module);
