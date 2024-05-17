@@ -636,10 +636,26 @@ void parser::parse_function()
       get_comma(4);
       Instruction *arg2;
       if (name == "addi" || name == "addiw")
-	arg2 = get_imm(5);
+	{
+	  if (tokens[5].kind == lexeme::lo)
+	    {
+	      get_lo(5);
+	      get_left_paren(6);
+	      arg2 = get_sym_addr(7);
+	      get_right_paren(8);
+	      get_end_of_line(9);
+	    }
+	  else
+	    {
+	      arg2 = get_imm(5);
+	      get_end_of_line(6);
+	    }
+	}
       else
-	arg2 = get_reg_value(5);
-      get_end_of_line(6);
+	{
+	  arg2 = get_reg_value(5);
+	  get_end_of_line(6);
+	}
 
       if (name == "addw" || name == "addiw")
 	{
