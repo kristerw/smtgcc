@@ -2728,6 +2728,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	return {bb->build_inst(op, arg1, arg2), res_undef, nullptr};
       }
     case NE_EXPR:
+    case EQ_EXPR:
       {
 	Instruction *res_undef = nullptr;
 	if (arg1_undef || arg2_undef)
@@ -2743,7 +2744,6 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	    Instruction *arg1_mask = bb->build_inst(Op::NOT, arg1_undef);
 	    Instruction *arg2_mask = bb->build_inst(Op::NOT, arg2_undef);
 	    Instruction *mask = bb->build_inst(Op::AND, arg1_mask, arg2_mask);
-
 	    Instruction *a1 = bb->build_inst(Op::AND, arg1, mask);
 	    Instruction *a2 = bb->build_inst(Op::AND, arg2, mask);
 	    Instruction *c1 = bb->build_inst(Op::EQ, a1, a2);
@@ -2751,7 +2751,8 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	    Instruction *c2 = bb->build_inst(Op::NE, mask, m1);
 	    res_undef = bb->build_inst(Op::AND, c1, c2);
 	  }
-	return {bb->build_inst(Op::NE, arg1, arg2), res_undef, nullptr};
+	Op op = code == NE_EXPR ? Op::NE : Op::EQ;
+	return {bb->build_inst(op, arg1, arg2), res_undef, nullptr};
       }
     default:
       break;
@@ -2853,8 +2854,6 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_binar
 	  }
 	return {bb->build_inst(Op::ADD, arg1, arg2), res_undef, prov};
       }
-    case EQ_EXPR:
-      return {bb->build_inst(Op::EQ, arg1, arg2), res_undef, nullptr};
     case GE_EXPR:
       {
 	Op op = is_unsigned ? Op::UGE : Op::SGE;
