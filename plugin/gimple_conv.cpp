@@ -546,11 +546,11 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Instruction *inst, I
     return;
 
   tree type = TREE_TYPE(expr);
-  if (!INTEGRAL_TYPE_P(type) && !POINTER_TYPE_P(type))
-    return;
-
   int_range_max r;
-  get_range_query(cfun)->range_of_expr(r, expr);
+  if (!r.supports_type_p(type))
+    return;
+  if (!get_range_query(cfun)->range_of_expr(r, expr))
+    return;
   if (r.undefined_p() || r.varying_p())
     return;
 
