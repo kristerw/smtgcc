@@ -91,7 +91,10 @@ int main(int argc, char **argv)
 	  file_name = arg;
 	}
       else if (!strcmp(arg, "-h") || !strcmp(arg, "--help"))
-	print_help(stdout);
+	{
+	  print_help(stdout);
+	  exit(0);
+	}
       else if (!strcmp(arg, "-c"))
 	flag_c = true;
       else if (!strcmp(arg, "-simplify_inst")
