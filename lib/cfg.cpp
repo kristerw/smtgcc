@@ -8,24 +8,13 @@ namespace {
 
 void rpo_walk(Basic_block *bb, std::vector<Basic_block *>& bbs, std::set<Basic_block *>& visited)
 {
-  assert(bb->last_inst->opcode == Op::BR || bb->last_inst->opcode == Op::RET);
   visited.insert(bb);
-  if (bb->last_inst->opcode == Op::BR)
+  for (auto succ : bb->succs)
     {
-      if (bb->last_inst->nof_args == 0)
-	{
-	  if (!visited.contains(bb->last_inst->u.br1.dest_bb))
-	    rpo_walk(bb->last_inst->u.br1.dest_bb, bbs, visited);
-	}
-      else
-	{
-	  if (!visited.contains(bb->last_inst->u.br3.true_bb))
-	    rpo_walk(bb->last_inst->u.br3.true_bb, bbs, visited);
-	  if (!visited.contains(bb->last_inst->u.br3.false_bb))
-	    rpo_walk(bb->last_inst->u.br3.false_bb, bbs, visited);
-	}
-      bbs.insert(bbs.begin(), bb);
+      if (!visited.contains(succ))
+	rpo_walk(succ, bbs, visited);
     }
+  bbs.insert(bbs.begin(), bb);
 }
 
 void remove_dead_bbs(std::vector<Basic_block *>& dead_bbs)
@@ -194,7 +183,13 @@ void reverse_post_order(Function *func)
   std::vector<Basic_block *> bbs;
   std::set<Basic_block *> visited;
   rpo_walk(func->bbs[0], bbs, visited);
-  bbs.push_back(exit_bb);
+  if (bbs.back() != exit_bb)
+    {
+      auto it2 = std::find(bbs.begin(), bbs.end(), exit_bb);
+      if (it2 != bbs.end())
+	bbs.erase(it2);
+      bbs.push_back(exit_bb);
+    }
   if (!visited.contains(exit_bb))
     throw Not_implemented("unreachable exit BB (infinite loop)");
   if (bbs.size() != func->bbs.size())

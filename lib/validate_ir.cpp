@@ -56,8 +56,7 @@ void validate(Basic_block *bb)
       assert(bb->last_inst->opcode == Op::BR);
       Basic_block *true_bb = bb->last_inst->u.br3.true_bb;
       Basic_block *false_bb = bb->last_inst->u.br3.false_bb;
-      assert((bb->succs[0] == true_bb && bb->succs[1] == false_bb)
-	     || (bb->succs[0] == false_bb && bb->succs[1] == true_bb));
+      assert(bb->succs[0] == true_bb && bb->succs[1] == false_bb);
     }
 
   // Phi nodes must have one argument for each predecessor.
