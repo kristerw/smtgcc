@@ -257,8 +257,6 @@ struct Basic_block {
   std::vector<Instruction *> phis;
   std::vector<Basic_block *> preds;
   std::vector<Basic_block *> succs;
-  std::set<Basic_block *> dom;
-  std::set<Basic_block *> post_dom;
 
   Instruction *first_inst = nullptr;
   Instruction *last_inst = nullptr;
@@ -295,6 +293,11 @@ public:
   std::map<std::pair<uint32_t, unsigned __int128>, Instruction *> values;
   Instruction *last_value_inst = nullptr;
 
+  // Data for dominance calculations.
+  bool has_dominance = false;
+  std::map<const Basic_block *, Basic_block *> nearest_dom;
+  std::map<const Basic_block *, Basic_block *> nearest_postdom;
+
   Basic_block *build_bb();
   Instruction *value_inst(unsigned __int128 value, uint32_t bitsize);
   void rename(const std::string& str);
@@ -303,7 +306,6 @@ public:
   Function *clone(Module *dest_module);
   void print(FILE *stream) const;
   Module *module;
-  bool has_dominance = false;
 private:
   int next_bb_id = 0;
 };
@@ -387,7 +389,7 @@ void simplify_cfg(Function *func);
 void simplify_cfg(Module *module);
 Basic_block *nearest_dominator(const Basic_block *bb);
 bool dominates(const Basic_block *bb1, const Basic_block *bb2);
-bool post_dominates(const Basic_block *bb1, const Basic_block *bb2);
+bool postdominates(const Basic_block *bb1, const Basic_block *bb2);
 
 // check.cpp
 bool identical(Function *func1, Function *func2);

@@ -6,15 +6,26 @@
 namespace smtgcc {
 namespace {
 
-void rpo_walk(Basic_block *bb, std::vector<Basic_block *>& bbs, std::set<Basic_block *>& visited)
+void dfs_walk(Basic_block *bb, std::vector<Basic_block *>& bbs, std::set<Basic_block *>& visited)
 {
   visited.insert(bb);
   for (auto succ : bb->succs)
     {
       if (!visited.contains(succ))
-	rpo_walk(succ, bbs, visited);
+	dfs_walk(succ, bbs, visited);
     }
-  bbs.insert(bbs.begin(), bb);
+  bbs.push_back(bb);
+}
+
+void inverse_dfs_walk(Basic_block *bb, std::vector<Basic_block *>& bbs, std::set<Basic_block *>& visited)
+{
+  visited.insert(bb);
+  for (auto pred : bb->preds)
+    {
+      if (!visited.contains(pred))
+	inverse_dfs_walk(pred, bbs, visited);
+    }
+  bbs.push_back(bb);
 }
 
 void remove_dead_bbs(std::vector<Basic_block *>& dead_bbs)
@@ -79,12 +90,9 @@ void update_phi(Basic_block *dest_bb, Basic_block *orig_src_bb, Basic_block *new
 
 void clear_dominance(Function *func)
 {
-  for (auto bb : func->bbs)
-    {
-      bb->dom.clear();
-      bb->post_dom.clear();
-    }
   func->has_dominance = false;
+  func->nearest_dom.clear();
+  func->nearest_postdom.clear();
 }
 
 // We assume the CFG is loop-free and no dead BBs.
@@ -92,83 +100,97 @@ void calculate_dominance(Function *func)
 {
   clear_dominance(func);
 
-  int nof_bbs = func->bbs.size();
-
-  // Dominators
-  func->bbs[0]->dom.insert(func->bbs[0]);
-  for (int i = 1; i < nof_bbs; i++)
-    {
-      Basic_block *bb = func->bbs[i];
-
-      std::set<Basic_block*> intersection = bb->preds.at(0)->dom;
-      for(size_t j = 1; j < bb->preds.size(); j++) {
-        std::set<Basic_block*> temp;
-	std::set<Basic_block*>& pred_dom = bb->preds.at(j)->dom;
-        std::set_intersection(intersection.begin(), intersection.end(),
-                              pred_dom.begin(), pred_dom.end(),
-                              std::inserter(temp, temp.begin()));
-        intersection = std::move(temp);
-      }
-      bb->dom = std::move(intersection);
-      bb->dom.insert(bb);
-    }
-
-  // Post dominators
-  func->bbs[nof_bbs - 1]->post_dom.insert(func->bbs[nof_bbs - 1]);
-  for (int i = nof_bbs - 2; i >= 0; i--)
-    {
-      Basic_block *bb = func->bbs[i];
-
-      std::set<Basic_block*> intersection = bb->succs.at(0)->post_dom;
-      for(size_t j = 1; j < bb->succs.size(); j++) {
-        std::set<Basic_block*> temp;
-	std::set<Basic_block*>& succ_post_dom = bb->succs.at(j)->post_dom;
-        std::set_intersection(intersection.begin(), intersection.end(),
-                              succ_post_dom.begin(), succ_post_dom.end(),
-                              std::inserter(temp, temp.begin()));
-        intersection = std::move(temp);
-      }
-      bb->post_dom = std::move(intersection);
-      bb->post_dom.insert(bb);
-    }
-
+  // We must set has_dominance early as we call the dominance functions (for
+  // cases we know it is safe) while we create the dominance information.
   func->has_dominance = true;
+
+  // Calculate func->nearest_dom
+  {
+    std::vector<Basic_block *> post;
+    post.reserve(func->bbs.size());
+    std::set<Basic_block *> visited;
+    dfs_walk(func->bbs.front(), post, visited);
+    func->nearest_dom.insert({post.back(), post.back()});
+    for (size_t i = 1; i < post.size(); i++)
+      {
+	Basic_block *bb = post[post.size() - i - 1];
+	assert(!bb->preds.empty());
+	Basic_block *dom = bb->preds[0];
+	for (;;)
+	  {
+	    bool found_dom = true;
+	    for (auto pred : bb->preds)
+	      {
+		found_dom = found_dom && dominates(dom, pred);
+	      }
+	    if (found_dom)
+	      break;
+	    dom = func->nearest_dom.at(dom);
+	  }
+	func->nearest_dom.insert({bb, dom});
+      }
+  }
+
+  // Calculate func->nearest_postdom
+  {
+    std::vector<Basic_block *> post;
+    post.reserve(func->bbs.size());
+    std::set<Basic_block *> visited;
+    inverse_dfs_walk(func->bbs.back(), post, visited);
+    func->nearest_postdom.insert({post.back(), post.back()});
+    for (size_t i = 1; i < post.size(); i++)
+      {
+	Basic_block *bb = post[post.size() - i - 1];
+	assert(!bb->succs.empty());
+	Basic_block *dom = bb->succs[0];
+	for (;;)
+	  {
+	    bool found_dom = true;
+	    for (auto succ : bb->succs)
+	      {
+		found_dom = found_dom && postdominates(dom, succ);
+	      }
+	    if (found_dom)
+	      break;
+	    dom = func->nearest_postdom.at(dom);
+	  }
+	func->nearest_postdom.insert({bb, dom});
+      }
+  }
 }
 
-Basic_block *nearest_dominator(const Basic_block *bb_in)
+Basic_block *nearest_dominator(const Basic_block *bb)
 {
-  assert(bb_in->func->has_dominance);
-  if (bb_in->preds.size() == 0)
-    return nullptr;
-
-  Basic_block *bb = bb_in->preds.at(0);
-  for (;;)
-    {
-      unsigned count = 0;
-      for (auto pred : bb_in->preds)
-	{
-	  count += dominates(bb, pred);
-	}
-      if (count == bb_in->preds.size())
-	return bb;
-      if (!(bb->preds.size() > 0))
-	abort();
-      bb = bb->preds.at(0);
-    }
+  assert(bb->func->has_dominance);
+  return bb->func->nearest_dom.at(bb);
 }
 
 // Check if bb1 dominates bb2
 bool dominates(const Basic_block *bb1, const Basic_block *bb2)
 {
   assert(bb1->func->has_dominance);
-  return bb2->dom.contains(const_cast<Basic_block *>(bb1));
+  for (;;)
+    {
+      if (bb1 == bb2)
+        return true;
+      if (bb2 == bb2->func->bbs.front())
+        return false;
+      bb2 = bb2->func->nearest_dom.at(bb2);
+    }
 }
 
-// Check if bb1 post dominates bb2
-bool post_dominates(const Basic_block *bb1, const Basic_block *bb2)
+// Check if bb1 postdominates bb2
+bool postdominates(const Basic_block *bb1, const Basic_block *bb2)
 {
   assert(bb1->func->has_dominance);
-  return bb2->post_dom.contains(const_cast<Basic_block *>(bb1));
+  for (;;)
+    {
+      if (bb1 == bb2)
+        return true;
+      if (bb2 == bb2->func->bbs.back())
+        return false;
+      bb2 = bb2->func->nearest_postdom.at(bb2);
+    }
 }
 
 void reverse_post_order(Function *func)
@@ -180,19 +202,13 @@ void reverse_post_order(Function *func)
   assert(it != func->bbs.end());
   Basic_block *exit_bb = *it;
 
-  std::vector<Basic_block *> bbs;
+  std::vector<Basic_block *> post;
+  post.reserve(func->bbs.size());
   std::set<Basic_block *> visited;
-  rpo_walk(func->bbs[0], bbs, visited);
-  if (bbs.back() != exit_bb)
-    {
-      auto it2 = std::find(bbs.begin(), bbs.end(), exit_bb);
-      if (it2 != bbs.end())
-	bbs.erase(it2);
-      bbs.push_back(exit_bb);
-    }
+  dfs_walk(func->bbs[0], post, visited);
   if (!visited.contains(exit_bb))
     throw Not_implemented("unreachable exit BB (infinite loop)");
-  if (bbs.size() != func->bbs.size())
+  if (post.size() != func->bbs.size())
     {
       std::vector<Basic_block *> dead_bbs;
       for (auto bb : func->bbs)
@@ -202,7 +218,15 @@ void reverse_post_order(Function *func)
 	}
       remove_dead_bbs(dead_bbs);
     }
-  func->bbs = bbs;
+  func->bbs.clear();
+  std::reverse_copy(post.begin(), post.end(), std::back_inserter(func->bbs));
+  if (func->bbs.back() != exit_bb)
+    {
+      auto it2 = std::find(func->bbs.begin(), func->bbs.end(), exit_bb);
+      if (it2 != func->bbs.end())
+	func->bbs.erase(it2);
+      func->bbs.push_back(exit_bb);
+    }
 }
 
 bool has_loops(Function *func)

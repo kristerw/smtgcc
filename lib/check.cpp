@@ -700,7 +700,7 @@ void Converter::build_mem_state(Basic_block *bb, std::map<Basic_block*, Instruct
 void Converter::generate_bb2cond(Basic_block *bb)
 {
   Basic_block *dominator = nearest_dominator(bb);
-  if (dominator && post_dominates(bb, dominator))
+  if (dominator && postdominates(bb, dominator))
     {
       // If the dominator is post dominated by bb, then they have identical
       // conditions.
