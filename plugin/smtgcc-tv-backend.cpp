@@ -157,12 +157,42 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
 
   // Determine the register to use for each function parameter.
   int reg_nbr = 10;
+
+  // Return of values wider than 2*reg_bitsize are passed in memory,
+  // where the address is specified by an implicit first parameter.
+  assert(src_last_bb->last_inst->opcode == Op::RET);
+  uint64_t ret_size = 0;
+  if (src_last_bb->last_inst->nof_args > 0)
+    ret_size = src_last_bb->last_inst->arguments[0]->bitsize;
+  Instruction *ret_mem = nullptr;
+  if (ret_size > 2 * state->reg_bitsize)
+    {
+      assert((ret_size & 7) == 0);
+      // TODO: Set up memory consistent with the src function.
+      Instruction *id = func->value_inst(-127, func->module->ptr_id_bits);
+      Instruction *mem_size =
+	func->value_inst(ret_size / 8, func->module->ptr_offset_bits);
+      Instruction *flags = func->value_inst(0, 32);
+      ret_mem = entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
+      Instruction *reg = state->registers[reg_nbr++];
+      Instruction *write = create_inst(Op::WRITE, reg, ret_mem);
+      write->insert_before(first_inst);
+    }
+
   for (auto& param_info : state->params)
     {
+      // Parameters wider than 2*reg_bitsize are passed in memory.
+      if (param_info.bitsize > 2 * state->reg_bitsize)
+	throw Not_implemented("adjust_abi: too wide param type");
+
       param_info.reg_nbr = reg_nbr;
       param_info.num_regs =
 	(param_info.bitsize + state->reg_bitsize - 1) / state->reg_bitsize;
       reg_nbr += param_info.num_regs;
+
+      // Values are passed on the stack when all registers are used.
+      if (reg_nbr > 18)
+	throw Not_implemented("adjust_abi: too many arguments");
     }
 
   // Create an Op::PARAM instruction for each function parameter and store
@@ -204,11 +234,9 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
     }
 
   // Generate the return value from the registers.
-  assert(src_last_bb->last_inst->opcode == Op::RET);
-  if (src_last_bb->last_inst->nof_args > 0)
+  if (ret_size > 0 && ret_size <= 2 * state->reg_bitsize)
     {
       Basic_block *exit_bb = func->bbs.back();
-      uint32_t ret_size = src_last_bb->last_inst->arguments[0]->bitsize;
       Instruction *retval =
 	exit_bb->build_inst(Op::READ, state->registers[10]);
       for (int reg_nbr = 11; retval->bitsize < ret_size; reg_nbr++)
@@ -219,6 +247,27 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
 	}
       if (ret_size < retval->bitsize)
 	retval = exit_bb->build_trunc(retval, ret_size);
+      destroy_instruction(exit_bb->last_inst);
+      exit_bb->build_ret_inst(retval);
+    }
+
+  // Generate the return value from the value returned in memory.
+  if (ret_size > 0 && ret_size > 2 * state->reg_bitsize)
+    {
+      assert(ret_mem);
+      Basic_block *exit_bb = func->bbs.back();
+      Instruction *retval = nullptr;
+      uint64_t size = ret_size / 8;
+      for (uint64_t i = 0; i < size; i++)
+	{
+	  Instruction *offset = exit_bb->value_inst(i, ret_mem->bitsize);
+	  Instruction *ptr = exit_bb->build_inst(Op::ADD, ret_mem, offset);
+	  Instruction *data_byte = exit_bb->build_inst(Op::LOAD, ptr);
+	  if (retval)
+	    retval = exit_bb->build_inst(Op::CONCAT, data_byte, retval);
+	  else
+	    retval = data_byte;
+	}
       destroy_instruction(exit_bb->last_inst);
       exit_bb->build_ret_inst(retval);
     }
