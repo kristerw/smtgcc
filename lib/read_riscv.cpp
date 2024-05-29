@@ -71,6 +71,7 @@ private:
   void lex_integer(void);
   void lex_hex_or_integer(void);
   void lex_name(void);
+  void lex_hilo(void);
 
   std::string token_string(const token& tok);
 
@@ -80,15 +81,14 @@ private:
 
   unsigned __int128 get_hex_or_integer(unsigned idx);
   Instruction *get_reg(unsigned idx);
+  Instruction *get_hi(unsigned idx);
+  Instruction *get_lo(unsigned idx);
   Instruction *get_imm(unsigned idx);
   Instruction *get_reg_value(unsigned idx);
-  Instruction *get_sym_addr(unsigned idx);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
   std::string get_name(unsigned idx);
   void get_comma(unsigned idx);
-  void get_hi(unsigned idx);
-  void get_lo(unsigned idx);
   void get_left_paren(unsigned idx);
   void get_right_paren(unsigned idx);
   void get_end_of_line(unsigned idx);
@@ -184,6 +184,27 @@ void parser::lex_name(void)
   while (isalnum(buf[pos]) || buf[pos] == '_' || buf[pos] == '-' || buf[pos] == '.')
     pos++;
   tokens.emplace_back(lexeme::name, start_pos, pos - start_pos);
+}
+
+void parser::lex_hilo(void)
+{
+  int start_pos = pos;
+  bool is_lo = (buf[pos] == '%' && buf[pos + 1] == 'l' && buf[pos + 2] == 'o');
+  lexeme op = is_lo ? lexeme::lo : lexeme::hi;
+  if (buf[pos + 3] != '(')
+    throw Parse_error("expected '('", line_number);
+  pos += 4;
+  if (buf[pos] == ')')
+    throw Parse_error("expected a name after '('", line_number);
+  while (isalnum(buf[pos])
+	 || buf[pos] == '_'
+	 || buf[pos] == '-'
+	 || buf[pos] == '.')
+    pos++;
+  if (buf[pos] != ')')
+    throw Parse_error("expected ')'", line_number);
+  pos++;
+  tokens.emplace_back(op, start_pos, pos - start_pos);
 }
 
 std::string parser::token_string(const token& tok)
@@ -307,10 +328,54 @@ Instruction *parser::get_reg(unsigned idx)
 		      + token_string(tokens[idx]), line_number);
 }
 
+Instruction *parser::get_hi(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  if (tokens[idx].kind != lexeme::hi)
+    throw Parse_error("expected %lo instead of "
+		      + token_string(tokens[idx]), line_number);
+  const token& tok = tokens[idx];
+  assert(tok.size > 5);
+  assert(buf[tok.pos + 3] == '(');
+  assert(buf[tok.pos + tok.size - 1] == ')');
+  std::string sym_name(&buf[tok.pos + 4], tok.size - 5);
+  if (!sym_name2mem.contains(sym_name))
+    throw Parse_error("unknown symbol " + sym_name, line_number);
+  Instruction *high = current_bb->value_inst(31, 32);
+  Instruction *low = current_bb->value_inst(12, 32);
+  Instruction *addr = sym_name2mem.at(sym_name);
+  Instruction *res = current_bb->build_inst(Op::EXTRACT, addr, high, low);
+  Instruction *zero = current_bb->value_inst(0, 12);
+  return current_bb->build_inst(Op::CONCAT, res, zero);
+}
+
+Instruction *parser::get_lo(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  if (tokens[idx].kind != lexeme::lo)
+    throw Parse_error("expected %lo instead of "
+		      + token_string(tokens[idx]), line_number);
+  const token& tok = tokens[idx];
+  assert(tok.size > 5);
+  assert(buf[tok.pos + 3] == '(');
+  assert(buf[tok.pos + tok.size - 1] == ')');
+  std::string sym_name(&buf[tok.pos + 4], tok.size - 5);
+  if (!sym_name2mem.contains(sym_name))
+    throw Parse_error("unknown symbol " + sym_name, line_number);
+  return current_bb->build_trunc(sym_name2mem.at(sym_name), 12);
+}
+
 Instruction *parser::get_imm(unsigned idx)
 {
-  uint32_t value = get_hex_or_integer(idx);
-  Instruction *inst =  current_bb->value_inst(value, 12);
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  Instruction *inst;
+  if (tokens[idx].kind == lexeme::lo)
+    inst = get_lo(idx);
+  else
+    inst = current_bb->value_inst(get_hex_or_integer(idx), 12);
   Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
   return current_bb->build_inst(Op::SEXT, inst, bitsize);
 }
@@ -364,16 +429,6 @@ Instruction *parser::get_reg_value(unsigned idx)
 		      + token_string(tokens[idx]), line_number);
 }
 
-Instruction *parser::get_sym_addr(unsigned idx)
-{
-  if (tokens.size() <= idx)
-    throw Parse_error("expected more arguments", line_number);
-  std::string sym_name = get_name(idx);
-  if (!sym_name2mem.contains(sym_name))
-    throw Parse_error("unknown symbol " + sym_name, line_number);
-  return sym_name2mem.at(sym_name);
-}
-
 Basic_block *parser::get_bb(unsigned idx)
 {
   if (tokens.size() <= idx)
@@ -413,22 +468,6 @@ void parser::get_comma(unsigned idx)
   assert(idx > 0);
   if (tokens.size() <= idx || tokens[idx].kind != lexeme::comma)
     throw Parse_error("expected a ',' after " + token_string(tokens[idx - 1]),
-		      line_number);
-}
-
-void parser::get_hi(unsigned idx)
-{
-  assert(idx > 0);
-  if (tokens.size() <= idx || tokens[idx].kind != lexeme::hi)
-    throw Parse_error("expected %hi after " + token_string(tokens[idx - 1]),
-		      line_number);
-}
-
-void parser::get_lo(unsigned idx)
-{
-  assert(idx > 0);
-  if (tokens.size() <= idx || tokens[idx].kind != lexeme::lo)
-    throw Parse_error("expected %lo after " + token_string(tokens[idx - 1]),
 		      line_number);
 }
 
@@ -524,32 +563,13 @@ void parser::gen_load(int size)
   Instruction *ptr;
   Instruction *dest = get_reg(1);
   get_comma(2);
-  if (tokens[3].kind == lexeme::lo)
-    {
-      get_lo(3);
-      get_left_paren(4);
-      Instruction *addr = get_sym_addr(5);
-      get_right_paren(6);
-      get_left_paren(7);
-      Instruction *base = get_reg_value(8);
-      get_right_paren(9);
-      get_end_of_line(10);
+  Instruction *offset = get_imm(3);
+  get_left_paren(4);
+  Instruction *base = get_reg_value(5);
+  get_right_paren(6);
+  get_end_of_line(7);
 
-      Instruction *offset = current_bb->build_trunc(addr, 12);
-      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      offset = current_bb->build_inst(Op::SEXT, offset, bitsize);
-      ptr = current_bb->build_inst(Op::ADD, base, offset);
-    }
-  else
-    {
-      Instruction *offset = get_imm(3);
-      get_left_paren(4);
-      Instruction *base = get_reg_value(5);
-      get_right_paren(6);
-      get_end_of_line(7);
-
-      ptr = current_bb->build_inst(Op::ADD, base, offset);
-    }
+  ptr = current_bb->build_inst(Op::ADD, base, offset);
   load_ub_check(ptr, size);
   Instruction *value = nullptr;
   for (int i = 0; i < size; i++)
@@ -575,33 +595,13 @@ void parser::gen_store(int size)
   Instruction *ptr;
     Instruction *value = get_reg_value(1);
   get_comma(2);
-  if (tokens[3].kind == lexeme::lo)
-    {
-      get_lo(3);
-      get_left_paren(4);
-      Instruction *addr = get_sym_addr(5);
-      get_right_paren(6);
-      get_left_paren(7);
-      Instruction *base = get_reg_value(8);
-      get_right_paren(9);
-      get_end_of_line(10);
+  Instruction *offset = get_imm(3);
+  get_left_paren(4);
+  Instruction *base = get_reg_value(5);
+  get_right_paren(6);
+  get_end_of_line(7);
 
-      Instruction *offset = current_bb->build_trunc(addr, 12);
-      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      offset = current_bb->build_inst(Op::SEXT, offset, bitsize);
-      ptr = current_bb->build_inst(Op::ADD, base, offset);
-    }
-  else
-    {
-      Instruction *offset = get_imm(3);
-      get_left_paren(4);
-      Instruction *base = get_reg_value(5);
-      get_right_paren(6);
-      get_end_of_line(7);
-
-      ptr = current_bb->build_inst(Op::ADD, base, offset);
-    }
-
+  ptr = current_bb->build_inst(Op::ADD, base, offset);
   store_ub_check(ptr, size);
   for (int i = 0; i < size; i++)
     {
@@ -636,26 +636,10 @@ void parser::parse_function()
       get_comma(4);
       Instruction *arg2;
       if (name == "addi" || name == "addiw")
-	{
-	  if (tokens[5].kind == lexeme::lo)
-	    {
-	      get_lo(5);
-	      get_left_paren(6);
-	      arg2 = get_sym_addr(7);
-	      get_right_paren(8);
-	      get_end_of_line(9);
-	    }
-	  else
-	    {
-	      arg2 = get_imm(5);
-	      get_end_of_line(6);
-	    }
-	}
+	arg2 = get_imm(5);
       else
-	{
-	  arg2 = get_reg_value(5);
-	  get_end_of_line(6);
-	}
+	arg2 = get_reg_value(5);
+      get_end_of_line(6);
 
       if (name == "addw" || name == "addiw")
 	{
@@ -1198,17 +1182,9 @@ void parser::parse_function()
     {
       Instruction *dest = get_reg(1);
       get_comma(2);
-      get_hi(3);
-      get_left_paren(4);
-      Instruction *addr = get_sym_addr(5);
-      get_right_paren(6);
-      get_end_of_line(7);
+      Instruction *res = get_hi(3);
+      get_end_of_line(4);
 
-      Instruction *high = current_bb->value_inst(31, 32);
-      Instruction *low = current_bb->value_inst(12, 32);
-      Instruction *res = current_bb->build_inst(Op::EXTRACT, addr, high, low);
-      Instruction *zero = current_bb->value_inst(0, 12);
-      res = current_bb->build_inst(Op::CONCAT, res, zero);
       if (reg_bitsize > 32)
 	{
 	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
@@ -1294,16 +1270,10 @@ void parser::lex_line(void)
 	lex_label_or_label_def();
       else if (isalpha(buf[pos]) || buf[pos] == '_' || buf[pos] == '.')
 	lex_name();
-      else if (buf[pos] == '%' && buf[pos + 1] == 'l' && buf[pos + 2] == 'o')  // TODO: pos+2 check.
-	{
-	  tokens.emplace_back(lexeme::lo, pos, 1);
-	  pos += 3;
-	}
-      else if (buf[pos] == '%' && buf[pos + 1] == 'h' && buf[pos + 2] == 'i')  // TODO: pos+2 check.
-	{
-	  tokens.emplace_back(lexeme::hi, pos, 1);
-	  pos += 3;
-	}
+      else if (buf[pos] == '%' && buf[pos + 1] == 'l' && buf[pos + 2] == 'o')
+	lex_hilo();
+      else if (buf[pos] == '%' && buf[pos + 1] == 'h' && buf[pos + 2] == 'i')
+	lex_hilo();
       else if (buf[pos] == ',')
 	{
 	  tokens.emplace_back(lexeme::comma, pos, 1);
