@@ -1394,6 +1394,21 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
 	std::string name = get_name(&buf[tokens[0].pos]);
 	if (name == ".size")
 	  {
+	    // We may have extra labels after the function, such as:
+	    //
+	    //   foo:
+	    //        ret
+	    //   .L4:
+	    //        .size   foo, .-foo
+	    //
+	    // Make this valid by branching back to current_bb (this is then
+	    // removed when building RPO as the BB is unreachable).
+	    if (current_bb)
+	      {
+		current_bb->build_br_inst(current_bb);
+		current_bb = nullptr;
+	      }
+
 	    parser_state = state::done;
 	    continue;
 	  }
