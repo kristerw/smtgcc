@@ -562,6 +562,28 @@ void Instruction::insert_before(Instruction *inst)
     bb->first_inst = this;
 }
 
+void Instruction::move_after(Instruction *inst)
+{
+  assert(bb);
+  assert(opcode != Op::PHI);
+  assert(inst->opcode != Op::PHI);
+
+  // Unlink the instruction from the BB.
+  if (this == bb->first_inst)
+    bb->first_inst = this->next;
+  if (this == bb->last_inst)
+    bb->last_inst = this->prev;
+  if (this->prev)
+    this->prev->next = this->next;
+  if (this->next)
+    this->next->prev = this->prev;
+  next = nullptr;
+  prev = nullptr;
+  bb = nullptr;
+
+  insert_after(inst);
+}
+
 void Instruction::move_before(Instruction *inst)
 {
   assert(bb);

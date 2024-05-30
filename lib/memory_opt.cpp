@@ -7,30 +7,66 @@ namespace smtgcc {
 
 namespace {
 
-bool is_global_memory(Instruction *inst)
+// Return a vector containing all the function's memory instructions.
+std::vector<Instruction *> collect_mem(Function *func)
 {
-  if (inst->opcode != Op::MEMORY)
-    return false;
-  uint64_t id = inst->arguments[0]->value();
-  return (id >> (inst->bb->func->module->ptr_id_bits - 1)) == 0;
+  std::vector<Instruction *> mem;
+  for (Instruction *inst = func->bbs[0]->first_inst; inst; inst = inst->next)
+    {
+      if (inst->opcode == Op::MEMORY)
+	mem.push_back(inst);
+    }
+  return mem;
 }
 
-Instruction *find_mem(const std::vector<Instruction *>& mem, Instruction *id)
+// Ensure the memory instructions in the IR come in the same order as in the
+// mem vector.
+void reorder_mem(std::vector<Instruction *>& mem)
 {
-  for (Instruction *inst : mem)
+  if (mem.empty())
+    return;
+
+  Basic_block *bb = mem[0]->bb;
+  Instruction *curr_inst = bb->first_inst;
+  while (curr_inst->opcode == Op::VALUE)
+    curr_inst = curr_inst->next;
+  if (curr_inst != mem[0])
     {
-      // Must compare the values as the instructions are from different
-      // functions.
-      if (inst->arguments[0]->value() == id->value())
-	return inst;
+      mem[0]->move_before(curr_inst);
+      curr_inst = mem[0];
     }
-  return nullptr;
+  for (auto inst : mem)
+    {
+      if (inst != curr_inst)
+	inst->move_after(curr_inst);
+      curr_inst = inst;
+    }
+}
+
+// Make a copy of inst in the first BB of the function func.
+Instruction *clone_inst(Instruction *inst, Function *func)
+{
+  Basic_block *bb = func->bbs[0];
+  if (inst->opcode == Op::VALUE)
+    {
+      return bb->value_inst(inst->value(), inst->bitsize);
+    }
+
+  if (inst->opcode == Op::MEMORY)
+    {
+      Instruction *arg1 = clone_inst(inst->arguments[0], func);
+      Instruction *arg2 = clone_inst(inst->arguments[1], func);
+      Instruction *arg3 = clone_inst(inst->arguments[2], func);
+      return bb->build_inst(Op::MEMORY, arg1, arg2, arg3);
+    }
+
+  throw smtgcc::Not_implemented("clone_inst: unhandled instruction");
 }
 
 // Return true if the instruction is an unused memory instruction.
-// Use in the entry BB is not counted -- those are only used for initialization
-// and are therefore not relevant for the function if the memory does not
-// have any other use.
+// Usage in the entry BB is not counted -- those are only used for
+// initialization and are therefore not relevant for the function if
+// the memory does not have any other use.
 bool is_unused_memory(Instruction *memory_inst)
 {
   if (memory_inst->opcode != Op::MEMORY)
@@ -67,15 +103,15 @@ bool is_unused_memory(Instruction *memory_inst)
 	}
     }
 
-  // We have now verified that all use of memory_inst is in the entry block.
-  // But this does not guarantee that the memory block is unused! We could
-  // for example have code of the form
+  // We have now verified that all uses of memory_inst are in the entry block.
+  // However, this does not guarantee that the memory block is unused! For
+  // example, consider code of the form
   //   int a;
   //   int *p = &a;
-  // where the use of `a` in the entry block is used to initialize `p`
-  // which may be used in the real function. We therefore must check that
-  // all the store instructions (and other "sink" instructions) identified
-  // above work on the memory_inst memory block.
+  // where the use of `a` in the entry block is used to initialize `p`,
+  // which may be used in the body of the function. We must therefore check
+  // that all the store instructions (and other "sink" instructions) identified
+  // above operate on the memory_inst memory block.
   visited.clear();
   for (auto sink_inst : sinks)
     {
@@ -239,7 +275,11 @@ void dead_store_elim(Function *func)
 
 } // end anonymous namespace
 
-// TODO: This pass is gimple_conv-specific. Move to gimple_conv.cpp?
+// This function makes the memory instructions consistent between src and tgt:
+//  * src and tgt have the same memory instructions
+//  * memory that is unused in both src and tgt is removed
+//  * The memory instructions are emitted in the same order
+// This makes checking faster as more can be CSEd between src and tgt.
 void canonicalize_memory(Module *module)
 {
   Function *src = module->functions[0];
@@ -247,109 +287,70 @@ void canonicalize_memory(Module *module)
   if (src->name != "src")
     std::swap(src, tgt);
 
+  struct {
+    bool operator()(const Instruction *a, const Instruction *b) const {
+      return a->arguments[0]->value() < b->arguments[0]->value();
+    }
+  } comp;
+
+  std::vector<Instruction *> src_mem = collect_mem(src);
+  std::vector<Instruction *> tgt_mem = collect_mem(tgt);
+  std::sort(src_mem.begin(), src_mem.end(), comp);
+  std::sort(tgt_mem.begin(), tgt_mem.end(), comp);
+
+  // Add missing memory instructions.
+  std::vector<Instruction *> missing_src;
+  std::vector<Instruction *> missing_tgt;
+  std::set_difference(tgt_mem.begin(), tgt_mem.end(),
+		      src_mem.begin(), src_mem.end(),
+		      std::back_inserter(missing_src), comp);
+  std::set_difference(src_mem.begin(), src_mem.end(),
+		      tgt_mem.begin(), tgt_mem.end(),
+		      std::back_inserter(missing_tgt), comp);
+  for (auto inst : missing_src)
+    {
+      src_mem.push_back(clone_inst(inst, src));
+    }
+  for (auto inst : missing_tgt)
+    {
+      tgt_mem.push_back(clone_inst(inst, tgt));
+    }
+
+  // Ensure that both src and tgt use the same instruction order.
+  std::sort(src_mem.begin(), src_mem.end(), comp);
+  std::sort(tgt_mem.begin(), tgt_mem.end(), comp);
+  reorder_mem(src_mem);
+  reorder_mem(tgt_mem);
+
+  // Remove memory that is unused in both src and tgt.
+  assert(src_mem.size() == tgt_mem.size());
   bool removed_mem = false;
-  std::vector<Instruction *> src_mem;
-  std::vector<Instruction *> tgt_mem;
-  std::vector<Instruction *> remove_mem;
-  for (Instruction *inst = src->bbs[0]->first_inst; inst; inst = inst->next)
+  for (size_t i = 0; i < src_mem.size(); i++)
     {
-      if (inst->opcode != Op::MEMORY)
-	continue;
-
-      uint32_t flags = inst->arguments[2]->value();
-      if (is_global_memory(inst))
-	src_mem.push_back(inst);
-      else if (!(flags & MEM_KEEP) && is_unused_memory(inst))
-	remove_mem.push_back(inst);
-    }
-  for (Instruction *inst = tgt->bbs[0]->first_inst; inst; inst = inst->next)
-    {
-      if (inst->opcode != Op::MEMORY)
-	continue;
-
-      uint32_t flags = inst->arguments[2]->value();
-      if (is_global_memory(inst))
-	tgt_mem.push_back(inst);
-      else if (!(flags & MEM_KEEP) && is_unused_memory(inst))
-	remove_mem.push_back(inst);
-    }
-  for (Instruction *inst : remove_mem)
-    {
-      removed_mem = true;
-      remove_unused_memory(inst);
-    }
-
-  for (Instruction *src_inst : src_mem)
-    {
-      Instruction *tgt_inst = find_mem(tgt_mem, src_inst->arguments[0]);
-      if (tgt_inst)
+      __int128 src_arg1 = src_mem[i]->arguments[0]->value();
+      __int128 src_arg2 = src_mem[i]->arguments[1]->value();
+      __int128 src_arg3 = src_mem[i]->arguments[2]->value();
+      __int128 tgt_arg1 = tgt_mem[i]->arguments[0]->value();
+      __int128 tgt_arg2 = tgt_mem[i]->arguments[1]->value();
+      __int128 tgt_arg3 = tgt_mem[i]->arguments[2]->value();
+      if (!(src_arg3 & MEM_KEEP)
+	  && src_arg1 == tgt_arg1
+	  && src_arg2 == tgt_arg2
+	  && src_arg3 == tgt_arg3
+	  && is_unused_memory(src_mem[i])
+	  && is_unused_memory(tgt_mem[i]))
 	{
-	  auto it = std::find(tgt_mem.begin(), tgt_mem.end(), tgt_inst);
-	  tgt_mem.erase(it);
-
-	  uint32_t src_flags = src_inst->arguments[2]->value();
-	  uint32_t tgt_flags = tgt_inst->arguments[2]->value();
-	  if (is_unused_memory(src_inst)
-	      && !(src_flags & MEM_KEEP)
-	      && is_unused_memory(tgt_inst)
-	      && !(tgt_flags & MEM_KEEP))
-	    {
-	      remove_unused_memory(src_inst);
-	      remove_unused_memory(tgt_inst);
-	      removed_mem = true;
-	    }
-	}
-      else
-	{
-	  uint32_t src_flags = src_inst->arguments[2]->value();
-	  if (is_unused_memory(src_inst)
-	      && !(src_flags & MEM_KEEP))
-	    {
-	      remove_unused_memory(src_inst);
-	      removed_mem = true;
-	    }
-	  else
-	    {
-	      uint64_t id = src_inst->arguments[0]->value();
-	      uint64_t size = src_inst->arguments[1]->value();
-	      uint32_t flags = src_inst->arguments[2]->value();
-
-	      Basic_block *bb = tgt->bbs[0];
-	      uint32_t ptr_id_bits = bb->func->module->ptr_id_bits;
-	      uint32_t ptr_offset_bits = bb->func->module->ptr_offset_bits;
-	      Instruction *arg1 = bb->value_inst(id, ptr_id_bits);
-	      Instruction *arg2 = bb->value_inst(size, ptr_offset_bits);
-	      Instruction *arg3 = bb->value_inst(flags, 32);
-	      bb->build_inst(Op::MEMORY, arg1, arg2, arg3);
-	    }
-	}
-    }
-  if (!tgt_mem.empty())
-    {
-      for (Instruction *tgt_inst : tgt_mem)
-	{
-	  uint32_t tgt_flags = tgt_inst->arguments[2]->value();
-	  if (is_unused_memory(tgt_inst)
-	      && !(tgt_flags & MEM_KEEP))
-	    {
-	      remove_unused_memory(tgt_inst);
-	      removed_mem = true;
-	    }
-	  else
-	    {
-	      // TODO: Add missing src memory.
-	      //       But this should not really happen as the memory added
-	      //       by the compiler should be marked artificial, and
-	      //       therefore not being treated as global mem by smtgcc.
-	      throw smtgcc::Not_implemented("canonicalize_memory: missing src memory");
-	    }
+	  removed_mem = true;
+	  remove_unused_memory(src_mem[i]);
+	  remove_unused_memory(tgt_mem[i]);
 	}
     }
 
-  // Removing memory may give us new opportunities. For example, for
+  // Removing memory may open up new opportunities. For example, consider:
   //   int b;
   //   int *p = &b;
-  // b may be dead when we remove p. So we need to rerun the pass.
+  // b may become dead after we remove p. Therefore, we need to rerun the
+  // pass.
   if (removed_mem)
     canonicalize_memory(module);
 }

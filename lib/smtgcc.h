@@ -239,6 +239,7 @@ struct Instruction {
   __int128 signed_value() const;
   void insert_after(Instruction *inst);
   void insert_before(Instruction *inst);
+  void move_after(Instruction *inst);
   void move_before(Instruction *inst);
   void replace_use_with(Instruction *use, Instruction *new_inst);
   void replace_all_uses_with(Instruction *inst);
