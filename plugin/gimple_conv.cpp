@@ -1622,21 +1622,12 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::process_load(
       Instruction *data_byte;
       Instruction *undef_byte;
       uint8_t padding = padding_at_offset(type, i);
-      if (padding == 255)
+      data_byte = bb->build_inst(Op::LOAD, ptr);
+      undef_byte = bb->build_inst(Op::GET_MEM_UNDEF, ptr);
+      if (padding != 0)
 	{
-	  // No need to load a value as its value is indeterminate.
-	  data_byte = bb->value_inst(0, 8);
-	  undef_byte = bb->value_inst(255, 8);
-	}
-      else
-	{
-	  data_byte = bb->build_inst(Op::LOAD, ptr);
-	  undef_byte = bb->build_inst(Op::GET_MEM_UNDEF, ptr);
-	  if (padding != 0)
-	    {
-	      Instruction *padding_inst = bb->value_inst(padding, 8);
-	      undef_byte = bb->build_inst(Op::OR, undef_byte, padding_inst);
-	    }
+	  Instruction *padding_inst = bb->value_inst(padding, 8);
+	  undef_byte = bb->build_inst(Op::OR, undef_byte, padding_inst);
 	}
 
       if (value)
@@ -1863,25 +1854,16 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
       Instruction *low = bb->value_inst(i * 8, 32);
 
       uint8_t padding = padding_at_offset(value_type, i);
-      if (padding == 255)
-	{
-	  // No need to store if this is padding as it will be marked as
-	  // undefined anyway.
-	  bb->build_inst(Op::SET_MEM_UNDEF, ptr, bb->value_inst(255, 8));
-	}
-      else
-	{
-	  Instruction *byte = bb->build_inst(Op::EXTRACT, value, high, low);
-	  bb->build_inst(Op::STORE, ptr, byte);
+      Instruction *byte = bb->build_inst(Op::EXTRACT, value, high, low);
+      bb->build_inst(Op::STORE, ptr, byte);
 
-	  byte = bb->build_inst(Op::EXTRACT, undef, high, low);
-	  if (padding != 0)
-	    {
-	      Instruction *padding_inst = bb->value_inst(padding, 8);
-	      byte = bb->build_inst(Op::OR, byte, padding_inst);
-	    }
-	  bb->build_inst(Op::SET_MEM_UNDEF, ptr, byte);
+      byte = bb->build_inst(Op::EXTRACT, undef, high, low);
+      if (padding != 0)
+	{
+	  Instruction *padding_inst = bb->value_inst(padding, 8);
+	  byte = bb->build_inst(Op::OR, byte, padding_inst);
 	}
+      bb->build_inst(Op::SET_MEM_UNDEF, ptr, byte);
 
       Instruction *memory_flag;
       if (memory_flagsx)
