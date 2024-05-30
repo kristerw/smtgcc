@@ -1128,6 +1128,16 @@ Instruction *simplify_ite(Instruction *inst)
       return new_inst;
     }
 
+  // ite (not c), a, b -> ite c, b, a
+  if (inst->arguments[0]->opcode == Op::NOT)
+    {
+      Instruction *new_cond = inst->arguments[0]->arguments[0];
+      Instruction *new_inst =
+	create_inst(Op::ITE, new_cond, inst->arguments[2], inst->arguments[1]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   return inst;
 }
 
