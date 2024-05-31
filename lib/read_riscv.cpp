@@ -81,6 +81,7 @@ private:
 
   unsigned __int128 get_hex_or_integer(unsigned idx);
   Instruction *get_reg(unsigned idx);
+  Instruction *get_hilo_addr(const token& tok);
   Instruction *get_hi(unsigned idx);
   Instruction *get_lo(unsigned idx);
   Instruction *get_imm(unsigned idx);
@@ -201,6 +202,12 @@ void parser::lex_hilo(void)
 	 || buf[pos] == '-'
 	 || buf[pos] == '.')
     pos++;
+  if (buf[pos] == '+')
+    {
+      pos++;
+      while (isdigit(buf[pos]))
+	pos++;
+    }
   if (buf[pos] != ')')
     throw Parse_error("expected ')'", line_number);
   pos++;
@@ -328,6 +335,40 @@ Instruction *parser::get_reg(unsigned idx)
 		      + token_string(tokens[idx]), line_number);
 }
 
+Instruction *parser::get_hilo_addr(const token& tok)
+{
+  assert(tok.size > 5);
+  assert(buf[tok.pos + 3] == '(');
+  assert(buf[tok.pos + tok.size - 1] == ')');
+  int pos = tok.pos + 4;
+  while (isalnum(buf[pos])
+	 || buf[pos] == '_'
+	 || buf[pos] == '-'
+	 || buf[pos] == '.')
+    pos++;
+  std::string sym_name(&buf[tok.pos + 4], pos - (tok.pos + 4));
+  if (!sym_name2mem.contains(sym_name))
+    throw Parse_error("unknown symbol " + sym_name, line_number);
+  Instruction *addr = sym_name2mem.at(sym_name);
+  if (buf[pos] == '+')
+    {
+      pos++;
+      assert(isdigit(buf[pos]));
+      uint64_t value = 0;
+      while (isdigit(buf[pos]))
+	{
+	  value = value * 10 + (buf[pos] - '0');
+	  if (value > std::numeric_limits<uint64_t>::max())
+	    throw Parse_error("too large decimal integer value", line_number);
+	  pos++;
+	}
+      Instruction *value_inst = current_bb->value_inst(value, addr->bitsize);
+      addr = current_bb->build_inst(Op::ADD, addr, value_inst);
+    }
+  assert(buf[pos] == ')');
+  return addr;
+}
+
 Instruction *parser::get_hi(unsigned idx)
 {
   if (tokens.size() <= idx)
@@ -335,16 +376,9 @@ Instruction *parser::get_hi(unsigned idx)
   if (tokens[idx].kind != lexeme::hi)
     throw Parse_error("expected %lo instead of "
 		      + token_string(tokens[idx]), line_number);
-  const token& tok = tokens[idx];
-  assert(tok.size > 5);
-  assert(buf[tok.pos + 3] == '(');
-  assert(buf[tok.pos + tok.size - 1] == ')');
-  std::string sym_name(&buf[tok.pos + 4], tok.size - 5);
-  if (!sym_name2mem.contains(sym_name))
-    throw Parse_error("unknown symbol " + sym_name, line_number);
   Instruction *high = current_bb->value_inst(31, 32);
   Instruction *low = current_bb->value_inst(12, 32);
-  Instruction *addr = sym_name2mem.at(sym_name);
+  Instruction *addr = get_hilo_addr(tokens[idx]);
   Instruction *res = current_bb->build_inst(Op::EXTRACT, addr, high, low);
   Instruction *zero = current_bb->value_inst(0, 12);
   return current_bb->build_inst(Op::CONCAT, res, zero);
@@ -357,14 +391,7 @@ Instruction *parser::get_lo(unsigned idx)
   if (tokens[idx].kind != lexeme::lo)
     throw Parse_error("expected %lo instead of "
 		      + token_string(tokens[idx]), line_number);
-  const token& tok = tokens[idx];
-  assert(tok.size > 5);
-  assert(buf[tok.pos + 3] == '(');
-  assert(buf[tok.pos + tok.size - 1] == ')');
-  std::string sym_name(&buf[tok.pos + 4], tok.size - 5);
-  if (!sym_name2mem.contains(sym_name))
-    throw Parse_error("unknown symbol " + sym_name, line_number);
-  return current_bb->build_trunc(sym_name2mem.at(sym_name), 12);
+  return current_bb->build_trunc(get_hilo_addr(tokens[idx]), 12);
 }
 
 Instruction *parser::get_imm(unsigned idx)
