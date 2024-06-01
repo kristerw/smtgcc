@@ -97,7 +97,7 @@ private:
   void gen_call();
   void store_ub_check(Instruction *ptr, uint64_t size);
   void load_ub_check(Instruction *ptr, uint64_t size);
-  void gen_load(int size);
+  void gen_load(int size, bool is_unsigned=false);
   void gen_store(int size);
 
   void parse_function();
@@ -585,7 +585,7 @@ void parser::load_ub_check(Instruction *ptr, uint64_t size)
   current_bb->build_inst(Op::UB, out_of_bound);
 }
 
-void parser::gen_load(int size)
+void parser::gen_load(int size, bool is_unsigned)
 {
   Instruction *ptr;
   Instruction *dest = get_reg(1);
@@ -612,7 +612,8 @@ void parser::gen_load(int size)
   if (value->bitsize < reg_bitsize)
     {
       Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      value = current_bb->build_inst(Op::SEXT, value, bitsize);
+      Op op = is_unsigned ? Op::ZEXT : Op::SEXT;
+      value = current_bb->build_inst(op, value, bitsize);
     }
   current_bb->build_inst(Op::WRITE, dest, value);
 }
@@ -1227,8 +1228,12 @@ void parser::parse_function()
     gen_load(4);
   else if (name == "lh")
     gen_load(2);
+  else if (name == "lhu")
+    gen_load(2, true);
   else if (name == "lb")
     gen_load(1);
+  else if (name == "lbu")
+    gen_load(1, true);
   else if (name == "sd" && reg_bitsize == 64)
     gen_store(8);
   else if (name == "sw")
