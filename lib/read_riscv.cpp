@@ -1364,6 +1364,15 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
   while (parser_state != state::done && in.getline(buf, max_line_len)) {
     line_number++;
 
+    // The parsing code has problems with Unicode characters in labels.
+    // Report "not implemented" for all uses of non-ASCII characters for
+    // now.
+    for (std::streamsize i = 0; i < in.gcount(); i++)
+      {
+	if ((unsigned char)buf[i] > 127)
+	  throw Not_implemented("non-ASCII character in assembly file");
+      }
+
     if (parser_state == state::global)
       {
 	// TODO: Implement real parsing.
