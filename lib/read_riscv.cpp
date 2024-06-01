@@ -95,6 +95,7 @@ private:
   void get_end_of_line(unsigned idx);
   void gen_cond_branch(Op opcode);
   void gen_call();
+  void gen_tail();
   void store_ub_check(Instruction *ptr, uint64_t size);
   void load_ub_check(Instruction *ptr, uint64_t size);
   void gen_load(int size, bool is_unsigned=false);
@@ -543,6 +544,14 @@ void parser::gen_call()
   get_end_of_line(2);
 
   throw Not_implemented("call " + name);
+}
+
+void parser::gen_tail()
+{
+  std::string name = get_name(1);
+  get_end_of_line(2);
+
+  throw Not_implemented("tail " + name);
 }
 
 void parser::store_ub_check(Instruction *ptr, uint64_t size)
@@ -1222,6 +1231,8 @@ void parser::parse_function()
     }
   else if (name == "call")
     gen_call();
+  else if (name == "tail")
+    gen_tail();
   else if (name == "ld" && reg_bitsize == 64)
     gen_load(8);
   else if (name == "lw")
@@ -1337,7 +1348,7 @@ void parser::lex_line(void)
 	  pos++;
 	}
       else
-	throw Parse_error("Syntax error.", line_number);
+	throw Parse_error("syntax error", line_number);
     }
 }
 
