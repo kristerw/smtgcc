@@ -275,6 +275,9 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
 
 static void finish(void *, void *data)
 {
+  if (seen_error())
+    return;
+
   struct tv_pass *my_pass = (struct tv_pass *)data;
   if (my_pass->error_has_been_reported)
     return;
