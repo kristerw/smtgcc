@@ -98,6 +98,14 @@ struct Converter {
 
   bool is_tgt_func;
 
+  uint64_t bytesize_for_type(tree type);
+  uint64_t bitsize_for_type(tree type);
+  std::pair<Instruction *, Instruction *> to_mem_repr(Basic_block *bb, Instruction *inst, Instruction *undef, tree type);
+  Instruction *to_mem_repr(Basic_block *bb, Instruction *inst, tree type);
+  std::pair<Instruction *, Instruction *> from_mem_repr(Basic_block *bb, Instruction *inst, Instruction *undef, tree type);
+  Instruction *from_mem_repr(Basic_block *bb, Instruction *inst, tree type);
+  uint8_t bitfield_padding_at_offset(tree fld, int64_t offset);
+  uint8_t padding_at_offset(tree type, uint64_t offset);
   Instruction *build_memory_inst(uint64_t id, uint64_t size, uint32_t flags);
   void constrain_range(Basic_block *bb, tree expr, Instruction *inst, Instruction *undef=nullptr);
   void mem_access_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size);
@@ -312,7 +320,7 @@ void check_type(tree type)
 }
 
 // The logical bitsize used in the IR for the GCC type/
-uint64_t bitsize_for_type(tree type)
+uint64_t Converter::bitsize_for_type(tree type)
 {
   check_type(type);
 
@@ -334,7 +342,7 @@ uint64_t bitsize_for_type(tree type)
 }
 
 // The size of the GCC type when stored in memory etc.
-uint64_t bytesize_for_type(tree type)
+uint64_t Converter::bytesize_for_type(tree type)
 {
   tree size_tree = TYPE_SIZE(type);
   if (size_tree == NULL_TREE)
@@ -347,7 +355,10 @@ uint64_t bytesize_for_type(tree type)
     }
   uint64_t bitsize = TREE_INT_CST_LOW(size_tree);
   assert((bitsize & 7) == 0);
-  return bitsize / 8;
+  uint64_t size = bitsize / 8;
+  if (size >= (uint64_t(1) << module->ptr_offset_bits))
+    throw Not_implemented("bytesize_for_type: too large type");
+  return size;
 }
 
 Instruction *extract_vec_elem(Basic_block *bb, Instruction *inst, uint32_t elem_bitsize, uint32_t idx)
@@ -759,7 +770,7 @@ void load_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, u
     }
 }
 
-std::pair<Instruction *, Instruction *> to_mem_repr(Basic_block *bb, Instruction *inst, Instruction *undef, tree type)
+std::pair<Instruction *, Instruction *> Converter::to_mem_repr(Basic_block *bb, Instruction *inst, Instruction *undef, tree type)
 {
   uint64_t bitsize = bytesize_for_type(type) * 8;
   if (inst->bitsize == bitsize)
@@ -777,7 +788,7 @@ std::pair<Instruction *, Instruction *> to_mem_repr(Basic_block *bb, Instruction
   return {inst, undef};
 }
 
-Instruction *to_mem_repr(Basic_block *bb, Instruction *inst, tree type)
+Instruction *Converter::to_mem_repr(Basic_block *bb, Instruction *inst, tree type)
 {
   auto [new_inst, undef] = to_mem_repr(bb, inst, nullptr, type);
   return new_inst;
@@ -785,7 +796,7 @@ Instruction *to_mem_repr(Basic_block *bb, Instruction *inst, tree type)
 
 // TODO: Imput does not necessaily be mem_repr -- it can be BITFIELD_REF reads
 // from vector elements. So should probably be "to_ir_repr" or similar.
-std::pair<Instruction *, Instruction *> from_mem_repr(Basic_block *bb, Instruction *inst, Instruction *undef, tree type)
+std::pair<Instruction *, Instruction *> Converter::from_mem_repr(Basic_block *bb, Instruction *inst, Instruction *undef, tree type)
 {
   uint64_t bitsize = bitsize_for_type(type);
   assert(bitsize <= inst->bitsize);
@@ -799,7 +810,7 @@ std::pair<Instruction *, Instruction *> from_mem_repr(Basic_block *bb, Instructi
   return {inst, undef};
 }
 
-Instruction *from_mem_repr(Basic_block *bb, Instruction *inst, tree type)
+Instruction *Converter::from_mem_repr(Basic_block *bb, Instruction *inst, tree type)
 {
   auto [new_inst, undef] = from_mem_repr(bb, inst, nullptr, type);
   return new_inst;
@@ -807,7 +818,7 @@ Instruction *from_mem_repr(Basic_block *bb, Instruction *inst, tree type)
 
 // Helper function to padding_at_offset.
 // TODO: Implement a sane version. And test.
-uint8_t bitfield_padding_at_offset(tree fld, int64_t offset)
+uint8_t Converter::bitfield_padding_at_offset(tree fld, int64_t offset)
 {
   uint8_t used_bits = 0;
   for (; fld; fld = DECL_CHAIN(fld))
@@ -859,7 +870,7 @@ uint8_t bitfield_padding_at_offset(tree fld, int64_t offset)
 
 // Return a bitmask telling which bits are padding (i.e., where the value is
 // undefined) for an offset into the type.
-uint8_t padding_at_offset(tree type, uint64_t offset)
+uint8_t Converter::padding_at_offset(tree type, uint64_t offset)
 {
   if (TREE_CODE(type) == ARRAY_TYPE)
     {
