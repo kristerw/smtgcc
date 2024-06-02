@@ -419,6 +419,7 @@ struct Param_info
 {
   uint32_t bitsize;
   bool is_unsigned;
+  bool is_float;
 
   uint32_t reg_nbr;
   uint32_t num_regs;

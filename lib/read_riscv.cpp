@@ -36,6 +36,12 @@ struct parser {
     right_paren
   };
 
+  enum class LStype {
+    signed_ls,
+    unsigned_ls,
+    float_ls
+  };
+
   struct token {
     lexeme kind;
     int pos;
@@ -43,6 +49,7 @@ struct parser {
   };
   std::vector<token> tokens;
   std::vector<Instruction *> registers;
+  std::vector<Instruction *> fregisters;
   std::vector<Basic_block *> ret_bbs;
   std::map<std::string, Instruction *> sym_name2mem;
 
@@ -81,11 +88,13 @@ private:
 
   unsigned __int128 get_hex_or_integer(unsigned idx);
   Instruction *get_reg(unsigned idx);
+  Instruction *get_freg(unsigned idx);
   Instruction *get_hilo_addr(const token& tok);
   Instruction *get_hi(unsigned idx);
   Instruction *get_lo(unsigned idx);
   Instruction *get_imm(unsigned idx);
   Instruction *get_reg_value(unsigned idx);
+  Instruction *get_freg_value(unsigned idx);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
   std::string get_name(unsigned idx);
@@ -98,8 +107,11 @@ private:
   void gen_tail();
   void store_ub_check(Instruction *ptr, uint64_t size);
   void load_ub_check(Instruction *ptr, uint64_t size);
-  void gen_load(int size, bool is_unsigned=false);
-  void gen_store(int size);
+  void gen_load(int size, LStype lstype = LStype::signed_ls);
+  void gen_store(int size, LStype lstype = LStype::signed_ls);
+  void gen_funary(std::string name, Op op);
+  void gen_fbinary(std::string name, Op op);
+  void gen_fcmp(std::string name, Op op);
 
   void parse_function();
 
@@ -336,6 +348,53 @@ Instruction *parser::get_reg(unsigned idx)
 		      + token_string(tokens[idx]), line_number);
 }
 
+Instruction *parser::get_freg(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  int pos = tokens[idx].pos;
+  if (buf[pos] != 'f')
+    throw Parse_error("expected a floating point register", line_number);
+  pos++;
+  bool is_pseudo_reg = false;
+  if (!isdigit(buf[pos]))
+    {
+      if (buf[pos] != 'a' && buf[pos] != 's' && buf[pos] != 't')
+	throw Parse_error("invalid floating point register "
+			  + token_string(tokens[idx]), line_number);
+      is_pseudo_reg = true;
+      pos++;
+    }
+  uint32_t value = buf[pos] - '0';
+  if (tokens[idx].size == pos)
+    value = value * 10 + (buf[pos + 1] - '0');
+  if (is_pseudo_reg)
+    {
+      char c = buf[tokens[idx].pos + 1];
+      assert(c == 'a' || c =='s' || c =='t');
+      if (c == 's')
+	{
+	  if (value == 0)
+	    return fregisters[8];
+	  else if (value == 1)
+	    return fregisters[9];
+	  else
+	    return fregisters[16 + value];
+	}
+      else if (c == 't')
+	{
+	  if (value <= 7)
+	    return fregisters[value];
+	  else
+	    return fregisters[value + 21];
+	}
+      else
+	return fregisters[10 + value];
+    }
+  else
+    return fregisters[value];
+}
+
 Instruction *parser::get_hilo_addr(const token& tok)
 {
   assert(tok.size > 5);
@@ -455,6 +514,11 @@ Instruction *parser::get_reg_value(unsigned idx)
   else
     throw Parse_error("expected a register instead of "
 		      + token_string(tokens[idx]), line_number);
+}
+
+Instruction *parser::get_freg_value(unsigned idx)
+{
+  return current_bb->build_inst(Op::READ, get_freg(idx));
 }
 
 Basic_block *parser::get_bb(unsigned idx)
@@ -594,10 +658,14 @@ void parser::load_ub_check(Instruction *ptr, uint64_t size)
   current_bb->build_inst(Op::UB, out_of_bound);
 }
 
-void parser::gen_load(int size, bool is_unsigned)
+void parser::gen_load(int size, LStype lstype)
 {
   Instruction *ptr;
-  Instruction *dest = get_reg(1);
+  Instruction *dest;
+  if (lstype == LStype::float_ls)
+    dest = get_freg(1);
+  else
+    dest = get_reg(1);
   get_comma(2);
   Instruction *offset = get_imm(3);
   get_left_paren(4);
@@ -618,19 +686,28 @@ void parser::gen_load(int size, bool is_unsigned)
       else
 	value = byte;
     }
-  if (value->bitsize < reg_bitsize)
+  if (lstype == LStype::float_ls && size == 4)
+    {
+      Instruction *m1 = current_bb->value_m1_inst(32);
+      value = current_bb->build_inst(Op::CONCAT, m1, value);
+    }
+  else if (value->bitsize < reg_bitsize)
     {
       Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      Op op = is_unsigned ? Op::ZEXT : Op::SEXT;
+      Op op = lstype == LStype::unsigned_ls ? Op::ZEXT : Op::SEXT;
       value = current_bb->build_inst(op, value, bitsize);
     }
   current_bb->build_inst(Op::WRITE, dest, value);
 }
 
-void parser::gen_store(int size)
+void parser::gen_store(int size, LStype lstype)
 {
   Instruction *ptr;
-    Instruction *value = get_reg_value(1);
+  Instruction *value;
+  if (lstype == LStype::float_ls)
+    value = get_freg_value(1);
+  else
+    value = get_reg_value(1);
   get_comma(2);
   Instruction *offset = get_imm(3);
   get_left_paren(4);
@@ -649,6 +726,75 @@ void parser::gen_store(int size)
       Instruction *byte = current_bb->build_inst(Op::EXTRACT, value, high, low);
       current_bb->build_inst(Op::STORE, addr, byte);
     }
+}
+
+void parser::gen_funary(std::string name, Op op)
+{
+  Instruction *dest = get_freg(1);
+  get_comma(2);
+  Instruction *arg1 = get_freg_value(3);
+  get_end_of_line(4);
+
+  bool is_single_prec =
+    name[name.length() - 2] == '.' && name[name.length() - 1] == 's';
+  if (is_single_prec)
+    {
+      arg1 = current_bb->build_trunc(arg1, 32);
+    }
+  Instruction *res = current_bb->build_inst(op, arg1);
+  if (is_single_prec)
+    {
+      Instruction *m1 = current_bb->value_m1_inst(32);
+      res = current_bb->build_inst(Op::CONCAT, m1, res);
+    }
+  current_bb->build_inst(Op::WRITE, dest, res);
+}
+
+void parser::gen_fbinary(std::string name, Op op)
+{
+  Instruction *dest = get_freg(1);
+  get_comma(2);
+  Instruction *arg1 = get_freg_value(3);
+  get_comma(4);
+  Instruction *arg2 = get_freg_value(5);
+  get_end_of_line(6);
+
+  bool is_single_prec =
+    name[name.length() - 2] == '.' && name[name.length() - 1] == 's';
+  if (is_single_prec)
+    {
+      arg1 = current_bb->build_trunc(arg1, 32);
+      arg2 = current_bb->build_trunc(arg2, 32);
+    }
+  Instruction *res = current_bb->build_inst(op, arg1, arg2);
+  if (is_single_prec)
+    {
+      Instruction *m1 = current_bb->value_m1_inst(32);
+      res = current_bb->build_inst(Op::CONCAT, m1, res);
+    }
+  current_bb->build_inst(Op::WRITE, dest, res);
+}
+
+void parser::gen_fcmp(std::string name, Op op)
+{
+  Instruction *dest = get_reg(1);
+  get_comma(2);
+  Instruction *arg1 = get_freg_value(3);
+  get_comma(4);
+  Instruction *arg2 = get_freg_value(5);
+  get_end_of_line(6);
+
+  bool is_single_prec =
+    name[name.length() - 2] == '.' && name[name.length() - 1] == 's';
+  if (is_single_prec)
+    {
+      arg1 = current_bb->build_trunc(arg1, 32);
+      arg2 = current_bb->build_trunc(arg2, 32);
+    }
+  Instruction *res = current_bb->build_inst(op, arg1, arg2);
+  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
+  res = current_bb->build_inst(Op::ZEXT, res, bitsize);
+  current_bb->build_inst(Op::WRITE, dest, res);
 }
 
 void parser::parse_function()
@@ -1240,11 +1386,11 @@ void parser::parse_function()
   else if (name == "lh")
     gen_load(2);
   else if (name == "lhu")
-    gen_load(2, true);
+    gen_load(2, LStype::unsigned_ls);
   else if (name == "lb")
     gen_load(1);
   else if (name == "lbu")
-    gen_load(1, true);
+    gen_load(1, LStype::unsigned_ls);
   else if (name == "sd" && reg_bitsize == 64)
     gen_store(8);
   else if (name == "sw")
@@ -1294,6 +1440,34 @@ void parser::parse_function()
       ret_bbs.push_back(current_bb);
       current_bb = nullptr;
     }
+  else if (name == "fld")
+    gen_load(8, LStype::float_ls);
+  else if (name == "flw")
+    gen_load(4, LStype::float_ls);
+  else if (name == "fsd")
+    gen_store(8, LStype::float_ls);
+  else if (name == "fsw")
+    gen_store(4, LStype::float_ls);
+  else if (name == "fneg.s" || name == "fneg.d")
+    gen_funary(name, Op::FNEG);
+  else if (name == "fadd.s" || name == "fadd.d")
+    gen_fbinary(name, Op::FADD);
+  else if (name == "fsub.s" || name == "fsub.d")
+    gen_fbinary(name, Op::FSUB);
+  else if (name == "fmul.s" || name == "fmul.d")
+    gen_fbinary(name, Op::FMUL);
+  else if (name == "fdiv.s" || name == "fdiv.d")
+    gen_fbinary(name, Op::FDIV);
+  else if (name == "feq.s" || name == "feq.d")
+    gen_fcmp(name, Op::FEQ);
+  else if (name == "flt.s" || name == "flt.d")
+    gen_fcmp(name, Op::FLT);
+  else if (name == "fle.s" || name == "fle.d")
+    gen_fcmp(name, Op::FLE);
+  else if (name == "fgt.s" || name == "fgt.d")
+    gen_fcmp(name, Op::FGT);
+  else if (name == "fge.s" || name == "fge.d")
+    gen_fcmp(name, Op::FGE);
   else
     throw Parse_error("unhandled instruction: "s + name, line_number);
 }
@@ -1401,6 +1575,12 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
 		Instruction *bitsize = entry_bb->value_inst(reg_bitsize, 32);
 		Instruction *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
 		registers.push_back(reg);
+	      }
+	    for (int i = 0; i < 32; i++)
+	      {
+		Instruction *bitsize = entry_bb->value_inst(64, 32);
+		Instruction *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
+		fregisters.push_back(reg);
 	      }
 
 	    Basic_block *bb = current_func->build_bb();

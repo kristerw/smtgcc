@@ -185,6 +185,9 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
       if (param_info.bitsize > 2 * state->reg_bitsize)
 	throw Not_implemented("adjust_abi: too wide param type");
 
+      if (param_info.is_float)
+	throw Not_implemented("adjust_abi: floating point parameter");
+
       param_info.reg_nbr = reg_nbr;
       param_info.num_regs =
 	(param_info.bitsize + state->reg_bitsize - 1) / state->reg_bitsize;

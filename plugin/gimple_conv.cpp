@@ -5601,7 +5601,8 @@ void Converter::process_func_args()
 
       bool type_is_unsigned =
 	INTEGRAL_TYPE_P(TREE_TYPE(decl)) && TYPE_UNSIGNED(TREE_TYPE(decl));
-      state->params.push_back({bitsize, type_is_unsigned, 0, 0});
+      bool type_is_float = FLOAT_TYPE_P(TREE_TYPE(decl));
+      state->params.push_back({bitsize, type_is_unsigned, type_is_float, 0, 0});
 
       // TODO: There must be better ways to determine if this is the "this"
       // pointer of a C++ constructor.
