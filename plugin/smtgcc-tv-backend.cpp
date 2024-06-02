@@ -201,7 +201,6 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
   // Create an Op::PARAM instruction for each function parameter and store
   // it in the registers.
   Basic_block *src_entry_bb = src_func->bbs[0];
-  Instruction *reg_bitsize_inst = entry_bb->value_inst(state->reg_bitsize, 32);
   for (Instruction *inst = src_entry_bb->first_inst; inst; inst = inst->next)
     {
       if (inst->opcode != Op::PARAM)
@@ -218,10 +217,12 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
       // Pad it out to a multiple of the register size.
       if (param->bitsize < state->reg_bitsize * param_info.num_regs)
 	{
+	  Instruction *bs_inst =
+	    entry_bb->value_inst(state->reg_bitsize * param_info.num_regs, 32);
 	  if (param_info.is_unsigned && param->bitsize != 32)
-	    param = create_inst(Op::ZEXT, param, reg_bitsize_inst);
+	    param = create_inst(Op::ZEXT, param, bs_inst);
 	  else
-	    param = create_inst(Op::SEXT, param, reg_bitsize_inst);
+	    param = create_inst(Op::SEXT, param, bs_inst);
 	  param->insert_before(first_inst);
 	}
 
