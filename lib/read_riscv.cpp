@@ -1448,6 +1448,8 @@ void parser::parse_function()
     gen_store(8, LStype::float_ls);
   else if (name == "fsw")
     gen_store(4, LStype::float_ls);
+  else if (name == "fabs.s" || name == "fabs.d")
+    gen_funary(name, Op::FABS);
   else if (name == "fneg.s" || name == "fneg.d")
     gen_funary(name, Op::FNEG);
   else if (name == "fadd.s" || name == "fadd.d")
