@@ -4,7 +4,7 @@
 #include "tree-pass.h"
 #include "context.h"
 #include "tree.h"
-#include "diagnostic.h"
+#include "diagnostic-core.h"
 
 #include "smtgcc.h"
 #include "gimple_conv.h"

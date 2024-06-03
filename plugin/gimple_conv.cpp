@@ -11,7 +11,6 @@
 #include "tree-cfg.h"
 #include "gimple.h"
 #include "gimple-iterator.h"
-#include "gimple-pretty-print.h"
 #include "print-tree.h"
 #include "internal-fn.h"
 #include "tree-ssa-operands.h"

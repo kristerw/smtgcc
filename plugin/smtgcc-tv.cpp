@@ -6,7 +6,7 @@
 #include "tree.h"
 #include "cgraph.h"
 #include "tree.h"
-#include "diagnostic.h"
+#include "diagnostic-core.h"
 
 #include "smtgcc.h"
 #include "gimple_conv.h"
