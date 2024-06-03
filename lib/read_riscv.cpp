@@ -68,8 +68,7 @@ struct parser {
 private:
   Function *current_func = nullptr;
   Basic_block *current_bb = nullptr;
-  std::map<uint32_t, Basic_block *> id2bb;
-  std::map<Basic_block *, uint32_t> bb2id;
+  std::map<std::string, Basic_block *> label2bb;
   std::map<uint32_t, Instruction *> id2inst;
 
   void lex_line(void);
@@ -137,12 +136,10 @@ void parser::lex_label_or_label_def(void)
   if (buf[pos] != 'L')
     throw Parse_error("expected 'L' after '.'", line_number);
   pos++;
-  if (!isdigit(buf[pos]))
+  if (!isalnum(buf[pos]))
     throw Parse_error("expected a digit after \".L\"", line_number);
   pos++;
-  if (isdigit(buf[pos]) && buf[pos - 1] == '0')
-    throw Parse_error("octal numbers are not supported in labels", line_number);
-  while (isdigit(buf[pos]))
+  while (isalnum(buf[pos]))
     pos++;
   if (buf[pos] == ':')
     {
@@ -525,16 +522,15 @@ Basic_block *parser::get_bb(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
- if (tokens[idx].kind != lexeme::label)
-   throw Parse_error("expected a label instead of "
-		     + token_string(tokens[idx]), line_number);
-  uint32_t id = get_u32(&buf[tokens[idx].pos + 2]);
-  auto I = id2bb.find(id);
-  if (I != id2bb.end())
+  if (tokens[idx].kind != lexeme::label)
+    throw Parse_error("expected a label instead of "
+		      + token_string(tokens[idx]), line_number);
+  std::string label(&buf[tokens[idx].pos], tokens[idx].size);
+  auto I = label2bb.find(label);
+  if (I != label2bb.end())
     return I->second;
   Basic_block *bb = current_func->build_bb();
-  id2bb[id] = bb;
-  bb2id[bb] = id;
+  label2bb.insert({label, bb});
   return bb;
 }
 
@@ -542,16 +538,16 @@ Basic_block *parser::get_bb_def(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
- if (tokens[idx].kind != lexeme::label_def)
-   throw Parse_error("expected a label instead of "
-		     + token_string(tokens[idx]), line_number);
-  uint32_t id = get_u32(&buf[tokens[idx].pos + 2]);
-  auto I = id2bb.find(id);
-  if (I != id2bb.end())
+  if (tokens[idx].kind != lexeme::label_def)
+    throw Parse_error("expected a label instead of "
+		      + token_string(tokens[idx]), line_number);
+  assert(tokens[idx].size > 0 && buf[tokens[idx].size - 1] == ':');
+  std::string label(&buf[tokens[idx].pos], tokens[idx].size - 1);
+  auto I = label2bb.find(label);
+  if (I != label2bb.end())
     return I->second;
   Basic_block *bb = current_func->build_bb();
-  id2bb[id] = bb;
-  bb2id[bb] = id;
+  label2bb.insert({label, bb});
   return bb;
 }
 
@@ -811,7 +807,9 @@ void parser::parse_function()
   }
 
   std::string name = get_name(&buf[tokens[0].pos]);
-  if (name == "add" || name == "addw" || name == "addi" || name == "addiw")
+  if (name == ".cfi_startproc" || name == ".cfi_endproc" )
+    ;
+  else if (name == "add" || name == "addw" || name == "addi" || name == "addiw")
     {
       Instruction *dest = get_reg(1);
       get_comma(2);
