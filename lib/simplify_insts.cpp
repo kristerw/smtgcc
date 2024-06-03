@@ -454,18 +454,6 @@ Instruction *simplify_and(Instruction *inst)
   if (arg2->opcode == Op::NOT && arg2->arguments[0] == arg1)
     return inst->bb->value_inst(0, inst->bitsize);
 
-  // and x, (and y, (and x, z)) -> (and y, (and x, z))
-  if ((arg1->opcode == Op::AND && arg2->opcode != Op::AND)
-      || (arg1->opcode != Op::AND && arg2->opcode == Op::AND))
-    {
-      if (arg1->opcode == Op::AND)
-	std::swap(arg1, arg2);
-      std::vector<Instruction *> elems;
-      flatten(arg2, elems);
-      if (std::find(elems.begin(), elems.end(), arg1) != elems.end())
-	return arg2;
-    }
-
   return inst;
 }
 
@@ -747,18 +735,6 @@ Instruction *simplify_or(Instruction *inst)
 	create_inst(Op::ZEXT, new_inst1, arg1->arguments[1]);
       new_inst2->insert_before(inst);
       return new_inst2;
-    }
-
-  // or x, (or y, (or x, z)) -> (or y, (or x, z))
-  if ((arg1->opcode == Op::OR && arg2->opcode != Op::OR)
-      || (arg1->opcode != Op::OR && arg2->opcode == Op::OR))
-    {
-      if (arg1->opcode == Op::OR)
-	std::swap(arg1, arg2);
-      std::vector<Instruction *> elems;
-      flatten(arg2, elems);
-      if (std::find(elems.begin(), elems.end(), arg1) != elems.end())
-	return arg2;
     }
 
   return inst;
