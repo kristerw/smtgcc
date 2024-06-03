@@ -435,11 +435,13 @@ struct MemoryObject {
 // read_riscv.cpp
 struct riscv_state {
   std::vector<Instruction *> registers;
+  std::vector<Instruction *> fregisters;
   std::string func_name;
   Module *module;
   uint32_t reg_bitsize;
   std::vector<Param_info> params;
   std::vector<MemoryObject> memory_objects;
+  bool is_float_retval;
 };
 Function *parse_riscv(std::string const& file_name, riscv_state *state);
 

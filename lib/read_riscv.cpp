@@ -1670,6 +1670,7 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
   exit_bb->build_ret_inst();
 
   rstate->registers = registers;
+  rstate->fregisters = fregisters;
 
   return current_func;
 }

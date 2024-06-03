@@ -54,6 +54,7 @@ unsigned int tv_pass::execute(function *fun)
       rstate.params = state.params;
       rstate.memory_objects = state.memory_objects;
       rstate.func_name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl));
+      rstate.is_float_retval = FLOAT_TYPE_P(TREE_TYPE(DECL_RESULT(fun->decl)));
       functions.push_back(rstate);
     }
   catch (Not_implemented& error)
@@ -241,12 +242,18 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
   if (ret_size > 0 && ret_size <= 2 * state->reg_bitsize)
     {
       Basic_block *exit_bb = func->bbs.back();
-      Instruction *retval =
-	exit_bb->build_inst(Op::READ, state->registers[10]);
-      for (int reg_nbr = 11; retval->bitsize < ret_size; reg_nbr++)
+      Instruction *retval;
+      if (state->is_float_retval)
+	retval = exit_bb->build_inst(Op::READ, state->fregisters[10]);
+      else
+	retval = exit_bb->build_inst(Op::READ, state->registers[10]);
+      if (retval->bitsize < ret_size)
 	{
-	  Instruction *inst =
-	    exit_bb->build_inst(Op::READ, state->registers[reg_nbr]);
+	  Instruction *inst;
+	  if (state->is_float_retval)
+	    inst = exit_bb->build_inst(Op::READ, state->fregisters[11]);
+	  else
+	    inst = exit_bb->build_inst(Op::READ, state->registers[11]);
 	  retval = exit_bb->build_inst(Op::CONCAT, inst, retval);
 	}
       if (ret_size < retval->bitsize)
