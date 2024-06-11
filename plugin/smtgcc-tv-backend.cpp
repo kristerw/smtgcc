@@ -54,7 +54,9 @@ unsigned int tv_pass::execute(function *fun)
       rstate.params = state.params;
       rstate.memory_objects = state.memory_objects;
       rstate.func_name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl));
-      rstate.is_float_retval = FLOAT_TYPE_P(TREE_TYPE(DECL_RESULT(fun->decl)));
+      tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
+      rstate.is_float_retval =
+	SCALAR_FLOAT_TYPE_P(ret_type) || COMPLEX_FLOAT_TYPE_P(ret_type);
       functions.push_back(rstate);
     }
   catch (Not_implemented& error)
@@ -238,49 +240,52 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
 	}
     }
 
-  // Generate the return value from the registers.
-  if (ret_size > 0 && ret_size <= 2 * state->reg_bitsize)
+  if (ret_size > 0)
     {
-      Basic_block *exit_bb = func->bbs.back();
-      Instruction *retval;
-      if (state->is_float_retval)
-	retval = exit_bb->build_inst(Op::READ, state->fregisters[10]);
-      else
-	retval = exit_bb->build_inst(Op::READ, state->registers[10]);
-      if (retval->bitsize < ret_size)
+      if ((state->is_float_retval && ret_size <= 2 * 64)
+	  || (!state->is_float_retval && ret_size <= 2 * state->reg_bitsize))
 	{
-	  Instruction *inst;
+	  // Generate the return value from the registers.
+	  Basic_block *exit_bb = func->bbs.back();
+	  Instruction *retval;
 	  if (state->is_float_retval)
-	    inst = exit_bb->build_inst(Op::READ, state->fregisters[11]);
+	    retval = exit_bb->build_inst(Op::READ, state->fregisters[10]);
 	  else
-	    inst = exit_bb->build_inst(Op::READ, state->registers[11]);
-	  retval = exit_bb->build_inst(Op::CONCAT, inst, retval);
+	    retval = exit_bb->build_inst(Op::READ, state->registers[10]);
+	  if (retval->bitsize < ret_size)
+	    {
+	      Instruction *inst;
+	      if (state->is_float_retval)
+		inst = exit_bb->build_inst(Op::READ, state->fregisters[11]);
+	      else
+		inst = exit_bb->build_inst(Op::READ, state->registers[11]);
+	      retval = exit_bb->build_inst(Op::CONCAT, inst, retval);
+	    }
+	  if (ret_size < retval->bitsize)
+	    retval = exit_bb->build_trunc(retval, ret_size);
+	  destroy_instruction(exit_bb->last_inst);
+	  exit_bb->build_ret_inst(retval);
 	}
-      if (ret_size < retval->bitsize)
-	retval = exit_bb->build_trunc(retval, ret_size);
-      destroy_instruction(exit_bb->last_inst);
-      exit_bb->build_ret_inst(retval);
-    }
-
-  // Generate the return value from the value returned in memory.
-  if (ret_size > 0 && ret_size > 2 * state->reg_bitsize)
-    {
-      assert(ret_mem);
-      Basic_block *exit_bb = func->bbs.back();
-      Instruction *retval = nullptr;
-      uint64_t size = ret_size / 8;
-      for (uint64_t i = 0; i < size; i++)
+      else
 	{
-	  Instruction *offset = exit_bb->value_inst(i, ret_mem->bitsize);
-	  Instruction *ptr = exit_bb->build_inst(Op::ADD, ret_mem, offset);
-	  Instruction *data_byte = exit_bb->build_inst(Op::LOAD, ptr);
-	  if (retval)
-	    retval = exit_bb->build_inst(Op::CONCAT, data_byte, retval);
-	  else
-	    retval = data_byte;
+	  // Generate the return value from the value returned in memory.
+	  assert(ret_mem);
+	  Basic_block *exit_bb = func->bbs.back();
+	  Instruction *retval = nullptr;
+	  uint64_t size = ret_size / 8;
+	  for (uint64_t i = 0; i < size; i++)
+	    {
+	      Instruction *offset = exit_bb->value_inst(i, ret_mem->bitsize);
+	      Instruction *ptr = exit_bb->build_inst(Op::ADD, ret_mem, offset);
+	      Instruction *data_byte = exit_bb->build_inst(Op::LOAD, ptr);
+	      if (retval)
+		retval = exit_bb->build_inst(Op::CONCAT, data_byte, retval);
+	      else
+		retval = data_byte;
+	    }
+	  destroy_instruction(exit_bb->last_inst);
+	  exit_bb->build_ret_inst(retval);
 	}
-      destroy_instruction(exit_bb->last_inst);
-      exit_bb->build_ret_inst(retval);
     }
 }
 
