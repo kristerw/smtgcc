@@ -20,7 +20,7 @@ const pass_data tv_pass_data =
   "smtgcc-tv-backend",
   OPTGROUP_NONE,
   TV_NONE,
-  PROP_gimple_any,
+  PROP_cfg,
   0,
   0,
   0,
