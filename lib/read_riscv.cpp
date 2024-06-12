@@ -622,14 +622,16 @@ void parser::store_ub_check(Instruction *ptr, uint64_t size)
   Instruction *is_const = current_bb->build_inst(Op::IS_CONST_MEM, ptr_mem_id);
   current_bb->build_inst(Op::UB, is_const);
 
-  // It is UB if the store overflow a memory object.
+  // It is UB if the store overflows into a different memory object.
   Instruction *size_inst = current_bb->value_inst(size - 1, 32);
   Instruction *last_addr = current_bb->build_inst(Op::ADD, ptr, size_inst);
   Instruction *last_mem_id = current_bb->build_extract_id(last_addr);
   Instruction *is_ub = current_bb->build_inst(Op::NE, ptr_mem_id, last_mem_id);
   current_bb->build_inst(Op::UB, is_ub);
 
-  // It is UB if the end is outside the memory object.
+  // It is UB if the end is outside the memory object -- the start is
+  // obviously in the memory object if the end is within the object.
+  // Otherwise, the  previous overflow check would have failed.
   Instruction *mem_size = current_bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
   Instruction *offset = current_bb->build_extract_offset(last_addr);
   Instruction *out_of_bound = current_bb->build_inst(Op::UGE, offset, mem_size);
@@ -640,16 +642,32 @@ void parser::load_ub_check(Instruction *ptr, uint64_t size)
 {
   Instruction *ptr_mem_id = current_bb->build_extract_id(ptr);
 
-  // It is UB if the load overflow a memory object.
+  // It is UB if the store overflows into a different memory object.
   Instruction *size_inst = current_bb->value_inst(size - 1, 32);
   Instruction *last_addr = current_bb->build_inst(Op::ADD, ptr, size_inst);
   Instruction *last_mem_id = current_bb->build_extract_id(last_addr);
   Instruction *is_ub = current_bb->build_inst(Op::NE, ptr_mem_id, last_mem_id);
   current_bb->build_inst(Op::UB, is_ub);
 
-  // It is UB if the end is outside the memory object.
+  // It is UB if the start is outside the memory object.
+  // The RISC-V backend sometimes reads where the end is outside the memory
+  // object. For example, consider the variable `c` defined as follows:
+  //
+  //      .globl  c
+  //      .align  2
+  //      .type   c, @object
+  //      .size   c, 3
+  //   c:
+  //      .zero   3
+  //
+  // This variable may be read using a four-byte load, which is acceptable
+  // because the alignment ensures at least one byte is available beyond
+  // the object.
+  //
+  // TODO: We should improve this to verify that it does not read more bytes
+  // than are guaranteed to be available.
   Instruction *mem_size = current_bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
-  Instruction *offset = current_bb->build_extract_offset(last_addr);
+  Instruction *offset = current_bb->build_extract_offset(ptr);
   Instruction *out_of_bound = current_bb->build_inst(Op::UGE, offset, mem_size);
   current_bb->build_inst(Op::UB, out_of_bound);
 }
