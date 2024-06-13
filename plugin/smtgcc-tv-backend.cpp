@@ -141,13 +141,6 @@ static void eliminate_registers(Function *func)
     }
 }
 
-Instruction *extract(Instruction *inst, uint32_t reg_bitsize, uint32_t idx)
-{
-  Instruction *high = inst->bb->value_inst((idx + 1) * reg_bitsize - 1, 32);
-  Instruction *low = inst->bb->value_inst(idx * reg_bitsize, 32);
-  return create_inst(Op::EXTRACT, inst, high, low);
-}
-
 static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
 {
   Basic_block *src_last_bb = src_func->bbs.back();
@@ -178,8 +171,7 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
       Instruction *flags = func->value_inst(0, 32);
       ret_mem = entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
       Instruction *reg = state->registers[reg_nbr++];
-      Instruction *write = create_inst(Op::WRITE, reg, ret_mem);
-      write->insert_before(first_inst);
+      entry_bb->build_inst(Op::WRITE, reg, ret_mem);
     }
 
   for (auto& param_info : state->params)
@@ -214,8 +206,8 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
       Param_info& param_info = state->params.at(param_number);
       Instruction *param_nbr = entry_bb->value_inst(param_number, 32);
       Instruction *param_bitsize = entry_bb->value_inst(inst->bitsize, 32);
-      Instruction *param = create_inst(Op::PARAM, param_nbr, param_bitsize);
-      param->insert_before(first_inst);
+      Instruction *param =
+	entry_bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
 
       // Pad it out to a multiple of the register size.
       if (param->bitsize < state->reg_bitsize * param_info.num_regs)
@@ -223,20 +215,21 @@ static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
 	  Instruction *bs_inst =
 	    entry_bb->value_inst(state->reg_bitsize * param_info.num_regs, 32);
 	  if (param_info.is_unsigned && param->bitsize != 32)
-	    param = create_inst(Op::ZEXT, param, bs_inst);
+	    param = entry_bb->build_inst(Op::ZEXT, param, bs_inst);
 	  else
-	    param = create_inst(Op::SEXT, param, bs_inst);
-	  param->insert_before(first_inst);
+	    param = entry_bb->build_inst(Op::SEXT, param, bs_inst);
 	}
 
       // Write the parameter value to the registers.
       for (uint32_t i = 0; i < param_info.num_regs; i++)
 	{
-	  Instruction *reg_value = extract(param, state->reg_bitsize, i);
-	  reg_value->insert_before(first_inst);
+	  Instruction *high =
+	    entry_bb->value_inst((i + 1) * state->reg_bitsize - 1, 32);
+	  Instruction *low = entry_bb->value_inst(i * state->reg_bitsize, 32);
+	  Instruction *reg_value =
+	    entry_bb->build_inst(Op::EXTRACT, param, high, low);
 	  Instruction *reg = state->registers[param_info.reg_nbr + i];
-	  Instruction *write = create_inst(Op::WRITE, reg, reg_value);
-	  write->insert_before(first_inst);
+	  entry_bb->build_inst(Op::WRITE, reg, reg_value);
 	}
     }
 
