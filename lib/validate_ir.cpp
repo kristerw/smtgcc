@@ -13,12 +13,30 @@ namespace {
 
 void validate(Instruction *inst)
 {
+  // Some instructions are required to be placed in the entry block.
   if (inst->opcode == Op::PARAM
       || inst->opcode == Op::MEMORY
       || inst->opcode == Op::VALUE)
     {
       assert(inst->bb == inst->bb->func->bbs[0]);
     }
+
+  // RET and BR must be the last instruction in the basic block.
+  // All other instructions must have a next instruction.
+  if (inst->opcode == Op::RET || inst->opcode == Op::BR)
+    {
+      assert(inst == inst->bb->last_inst);
+      assert(!inst->next);
+    }
+  else
+    assert(inst->next);
+
+  // The next and prev instructions (if any) must be in the same basic
+  // block as the original instruction.
+  if (inst->prev)
+    assert(inst->bb == inst->prev->bb);
+  if (inst->next)
+    assert(inst->bb == inst->next->bb);
 }
 
 void validate(Basic_block *bb)
@@ -26,6 +44,11 @@ void validate(Basic_block *bb)
   // There must be instructions in the BB.
   assert(bb->first_inst);
   assert(bb->last_inst);
+
+  // Check that the first and last instructions actually are the first
+  // and last instructions in the basic block.
+  assert(!bb->first_inst->prev);
+  assert(!bb->last_inst->next);
 
   // Predecessors must not be in preds multiple times.
   std::set<Basic_block *> pred_set(bb->preds.begin(), bb->preds.end());
@@ -70,10 +93,10 @@ void validate(Basic_block *bb)
 	}
     }
 
-  // TODO: For each inst, check that its BB is correct.
   // TODO: For each inst, check that its used_by is correct.
   for (Instruction *inst = bb->first_inst; inst; inst = inst->next)
     {
+      assert(inst->bb == bb);
       validate(inst);
     }
 }
@@ -86,6 +109,26 @@ void validate(Function *func)
   for (Basic_block *bb : func->bbs)
     {
       validate(bb);
+    }
+
+  // Check that each instruction has been defined before use.
+  std::set<Instruction *> defined;
+  for (Basic_block *bb : func->bbs)
+    {
+      for (Instruction *phi : bb->phis)
+	{
+	  assert(!defined.contains(phi));
+	  defined.insert(phi);
+	}
+      for (Instruction *inst = bb->first_inst; inst; inst = inst->next)
+	{
+	  assert(!defined.contains(inst));
+	  for (unsigned i = 0 ; i < inst->nof_args; i++)
+	    {
+	      assert(defined.contains(inst->arguments[i]));
+	    }
+	  defined.insert(inst);
+	}
     }
 }
 

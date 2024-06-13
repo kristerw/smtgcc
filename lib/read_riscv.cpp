@@ -1700,7 +1700,6 @@ Function *parse_riscv(std::string const& file_name, riscv_state *state)
   parser p;
   Function *func = p.parse(file_name, state);
   reverse_post_order(func);
-  validate(func);
   return func;
 }
 

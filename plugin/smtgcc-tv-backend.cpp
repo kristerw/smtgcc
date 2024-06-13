@@ -300,6 +300,7 @@ static void finish(void *, void *data)
 	  state.reg_bitsize = TARGET_64BIT ? 64 : 32;
 	  Function *func = parse_riscv(asm_file_name, &state);
 	  adjust_abi(func, module->functions[0], &state);
+	  validate(func);
 
 	  simplify_cfg(func);
 	  if (loop_unroll(func))
