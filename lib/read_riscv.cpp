@@ -52,13 +52,19 @@ struct parser {
   std::vector<Instruction *> fregisters;
   std::vector<Basic_block *> ret_bbs;
   std::map<std::string, Instruction *> sym_name2mem;
+  std::map<std::string, std::vector<unsigned char>> sym_name2data;
 
   int line_number = 0;
-  int pos;
+  size_t pos;
 
-  static const int max_line_len = 1000;
-  char buf[max_line_len];
+  std::vector<char> buf;
 
+  std::optional<std::string> parse_label_def();
+  std::string parse_cmd();
+  void parse_data(std::vector<unsigned char>& data);
+  void skip_line();
+  void skip_whitespace();
+  void parse_rodata();
   Function *parse(std::string const& file_name, riscv_state *state);
 
   Module *module;
@@ -541,7 +547,8 @@ Basic_block *parser::get_bb_def(unsigned idx)
   if (tokens[idx].kind != lexeme::label_def)
     throw Parse_error("expected a label instead of "
 		      + token_string(tokens[idx]), line_number);
-  assert(tokens[idx].size > 0 && buf[tokens[idx].size - 1] == ':');
+  assert(tokens[idx].size > 0
+	 && buf[tokens[idx].pos + tokens[idx].size - 1] == ':');
   std::string label(&buf[tokens[idx].pos], tokens[idx].size - 1);
   auto I = label2bb.find(label);
   if (I != label2bb.end())
@@ -1492,9 +1499,8 @@ void parser::parse_function()
 
 void parser::lex_line(void)
 {
-  pos = 0;
   tokens.clear();
-  while (buf[pos])
+  while (buf[pos] != '\n')
     {
       skip_space_and_comments();
       if (!buf[pos])
@@ -1542,6 +1548,243 @@ void parser::lex_line(void)
       else
 	throw Parse_error("syntax error", line_number);
     }
+  pos++;
+}
+
+std::optional<std::string> parser::parse_label_def()
+{
+  size_t start_pos = pos;
+  while (buf[pos] != ':' && buf[pos] != '\n')
+    {
+      pos++;
+    }
+  if (buf[pos] == '\n')
+    {
+      pos++;
+      return {};
+    }
+  std::string label(&buf[start_pos], pos - start_pos);
+  pos++;
+  if (buf[pos] == '\n')
+    {
+      pos++;
+      return label;
+    }
+  return {};
+}
+
+std::string parser::parse_cmd()
+{
+  size_t start_pos = pos;
+  while (buf[pos] == '.' || isalnum(buf[pos]))
+    pos++;
+  assert(buf[pos] == ' ' || buf[pos] == '\t' || buf[pos] == '\n');
+  return std::string(&buf[start_pos], pos - start_pos);
+}
+
+void parser::parse_data(std::vector<unsigned char>& data)
+{
+  for (;;)
+    {
+      size_t start_pos = pos;
+
+      if (pos == buf.size() - 1)
+	break;
+      assert(pos < buf.size());
+
+      skip_whitespace();
+      std::string cmd = parse_cmd();
+      if (cmd == ".dword"
+	  || cmd == ".word"
+	  || cmd == ".half"
+	  || cmd == ".byte")
+	{
+	  skip_whitespace();
+
+	  uint64_t value = 0;
+	  bool negate = false;
+	  if (buf[pos] == '-')
+	    {
+	      pos++;
+	      negate = true;
+	    }
+	  if (!isdigit(buf[pos]))
+	    throw Parse_error(".word value is not a number", line_number);
+	  while (isdigit(buf[pos]))
+	    {
+	      value = value * 10 + (buf[pos] - '0');
+	      pos++;
+	    }
+	  if (negate)
+	    value = -value;
+
+	  int size;
+	  if (cmd == ".byte")
+	    size = 1;
+	  else if (cmd == ".half")
+	    size = 2;
+	  else if (cmd == ".word")
+	    size = 4;
+	  else
+	    size = 8;
+	  for (int i = 0; i < size; i++)
+	    {
+	      data.push_back(value & 0xff);
+	      value = value >> 8;
+	    }
+
+	  assert(buf[pos] == '\n');
+
+	  skip_line();
+	}
+      else if (cmd == ".string" || cmd == ".ascii")
+	{
+	  // TODO: Implement. Note: we must handle escape sequences such as \n.
+	  throw Parse_error(".string/.ascii not implemented", line_number);
+	}
+      else if (cmd == ".zero")
+	{
+	  skip_whitespace();
+	  uint64_t size = 0;
+	  if (!isdigit(buf[pos]))
+	    throw Parse_error(".zero size is not a number", line_number);
+	  while (isdigit(buf[pos]))
+	    {
+	      size = size * 10 + (buf[pos] - '0');
+	      pos++;
+	    }
+
+	  for (size_t i = 0; i < size; i++)
+	    data.push_back(0);
+
+	  assert(buf[pos] == '\n');
+
+	  skip_line();
+	}
+      else
+	{
+	  pos = start_pos;
+	  break;
+	}
+    }
+}
+
+void parser::skip_line()
+{
+  while (buf[pos] != '\n')
+    {
+      pos++;
+    }
+  pos++;
+}
+
+void parser::skip_whitespace()
+{
+  while (buf[pos] == ' ' || buf[pos] == '\t')
+    {
+      pos++;
+    }
+}
+
+void parser::parse_rodata()
+{
+  enum class state {
+    global,
+    memory_section
+  };
+
+  pos = 0;
+  state parser_state = state::global;
+  for (;;)
+    {
+      size_t start_pos = pos;
+
+      if (pos == buf.size() - 1)
+	break;
+      assert(pos < buf.size());
+
+      skip_whitespace();
+      if (buf[pos] == '.'
+	  && buf[pos + 1] == 's'
+	  && buf[pos + 2] == 'e'
+	  && buf[pos + 3] == 'c'
+	  && buf[pos + 4] == 't'
+	  && buf[pos + 5] == 'i'
+	  && buf[pos + 6] == 'o'
+	  && buf[pos + 7] == 'n'
+	  && (buf[pos + 8] == ' ' || buf[pos + 8] == '\t'))
+	{
+	  pos += 9;
+	  skip_whitespace();
+
+	  size_t first_pos = pos;
+	  while (buf[pos] == '.' || isalnum(buf[pos]))
+	    pos++;
+	  std::string name(&buf[first_pos], pos - first_pos);
+	  if (name.starts_with(".rodata") || name.starts_with(".srodata"))
+	    parser_state = state::memory_section;
+	  else
+	    parser_state = state::global;
+	  skip_line();
+	  continue;
+	}
+      if (buf[pos] == '.'
+	  && buf[pos + 1] == 'a'
+	  && buf[pos + 2] == 'l'
+	  && buf[pos + 3] == 'i'
+	  && buf[pos + 4] == 'g'
+	  && buf[pos + 5] == 'n'
+	  && (buf[pos + 6] == ' ' || buf[pos + 6] == '\t'))
+	{
+	  pos += 7;
+	  skip_line();
+	  continue;
+	}
+      if (buf[pos] == '.'
+	  && buf[pos + 1] == 't'
+	  && buf[pos + 2] == 'y'
+	  && buf[pos + 3] == 'p'
+	  && buf[pos + 4] == 'e'
+	  && (buf[pos + 5] == ' ' || buf[pos + 5] == '\t'))
+	{
+	  pos += 6;
+	  skip_line();
+	  continue;
+	}
+      if (buf[pos] == '.'
+	  && buf[pos + 1] == 's'
+	  && buf[pos + 2] == 'i'
+	  && buf[pos + 3] == 'z'
+	  && buf[pos + 4] == 'e'
+	  && (buf[pos + 5] == ' ' || buf[pos + 5] == '\t'))
+	{
+	  pos += 6;
+	  skip_line();
+	  continue;
+	}
+
+      pos = start_pos;
+
+      if (parser_state == state::memory_section)
+	{
+	  std::optional<std::string> label = parse_label_def();
+	  if (label)
+	    {
+	      // TODO: Change to check for duplicated labels.
+	      assert(!sym_name2data.contains(*label));
+
+	      parse_data(sym_name2data[*label]);
+
+	      // TODO: Change to check.
+	      assert(!sym_name2data[*label].empty());
+
+	      continue;
+	    }
+	}
+
+      skip_line();
+      parser_state = state::global;
+    }
 }
 
 Function *parser::parse(std::string const& file_name, riscv_state *rstate)
@@ -1554,37 +1797,49 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
     done
   };
 
-  std::ifstream in(file_name);
-  if (!in)
+  std::ifstream file(file_name);
+  if (!file)
     throw Parse_error("Could not open file.", 0);
+  file.seekg(0, std::ios::end);
+  size_t file_size = file.tellg();
+  file.seekg(0, std::ios::beg);
+  buf.resize(file_size + 1);
+  if (!file.read(buf.data(), file_size))
+    throw Parse_error("Could not read file.", 0);
+  buf[file_size] = '\n';
+
+  // The parsing code has problems with Unicode characters in labels.
+  // Report "not implemented" for all uses of non-ASCII characters for
+  // now.
+  for (auto c : buf)
+    {
+      if ((unsigned char)c > 127)
+	throw Not_implemented("non-ASCII character in assembly file");
+    }
 
   module = rstate->module;
   reg_bitsize = rstate->reg_bitsize;
   assert(module->functions.size() == 1);
   src_func = module->functions[0];
 
-  state parser_state = state::global;
-  while (parser_state != state::done && in.getline(buf, max_line_len)) {
-    line_number++;
+  parse_rodata();
 
-    // The parsing code has problems with Unicode characters in labels.
-    // Report "not implemented" for all uses of non-ASCII characters for
-    // now.
-    for (std::streamsize i = 0; i < in.gcount(); i++)
-      {
-	if ((unsigned char)buf[i] > 127)
-	  throw Not_implemented("non-ASCII character in assembly file");
-      }
+  state parser_state = state::global;
+  pos = 0;
+  while (parser_state != state::done) {
+    if (pos == file_size)
+      break;
+    assert(pos < file_size);
+
+    line_number++;
 
     if (parser_state == state::global)
       {
-	// TODO: Implement real parsing.
-	// Just eat lines until we find "foo:" for now.
-	size_t len = strlen(buf);
-	if (len < 2 || buf[len - 1] != ':')
+	std::optional<std::string> label = parse_label_def();
+	if (!label)
 	  continue;
-	buf[len - 1] = 0;
-	if (buf == rstate->func_name)
+
+	if (label == rstate->func_name)
 	  {
 	    current_func = module->build_function("tgt");
 	    Basic_block *entry_bb = current_func->build_bb();
@@ -1630,6 +1885,34 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
 	    stack = bb->build_inst(Op::ADD, stack, size);
 	    current_bb->build_inst(Op::WRITE, registers[2], stack);
 
+	    // TODO: Do not hard code ID values.
+	    int next_id = -126;
+	    for (const auto& [name, data] : sym_name2data)
+	      {
+		Instruction *mem;
+		if (sym_name2mem.contains(name))
+		  mem = sym_name2mem.at(name);
+		else
+		  {
+		    Instruction *id =
+		      entry_bb->value_inst(next_id++, module->ptr_id_bits);
+		    Instruction *mem_size =
+		      entry_bb->value_inst(data.size(), module->ptr_offset_bits);
+		    Instruction *flags = entry_bb->value_inst(MEM_CONST, 32);
+		    mem = entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
+
+		    assert(!sym_name2mem.contains(name));
+		    sym_name2mem.insert({name, mem});
+		  }
+		for (size_t i = 0; i < data.size(); i++)
+		  {
+		    Instruction *off = entry_bb->value_inst(i, mem->bitsize);
+		    Instruction *ptr = entry_bb->build_inst(Op::ADD, mem, off);
+		    Instruction *byte = entry_bb->value_inst(data[i], 8);
+		    entry_bb->build_inst(Op::STORE, ptr, byte);
+		  }
+	      }
+
 	    parser_state = state::function;
 	  }
 	continue;
@@ -1670,8 +1953,6 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
       }
   }
 
-  if (in.gcount() >= max_line_len - 1)
-    throw Parse_error("line too long", line_number);
   if (parser_state != state::done)
     throw Parse_error("EOF in the middle of a function", line_number);
 
