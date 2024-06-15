@@ -415,16 +415,6 @@ void ls_elim(Module *module);
 // read_ir.cpp
 Module *parse_ir(std::string const& file_name);
 
-struct Param_info
-{
-  uint32_t bitsize;
-  bool is_unsigned;
-  bool is_float;
-
-  uint32_t reg_nbr;
-  uint32_t num_regs;
-};
-
 struct MemoryObject {
   std::string sym_name;
   uint64_t id;
@@ -436,12 +426,17 @@ struct MemoryObject {
 struct riscv_state {
   std::vector<Instruction *> registers;
   std::vector<Instruction *> fregisters;
+
+  // The memory instruction corresponding to each symbol.
+  std::map<std::string, Instruction *> sym_name2mem;
+
   std::string func_name;
   Module *module;
+  Basic_block *entry_bb;
+  Basic_block *exit_bb;
   uint32_t reg_bitsize;
-  std::vector<Param_info> params;
+  uint32_t freg_bitsize;
   std::vector<MemoryObject> memory_objects;
-  bool is_float_retval;
 };
 Function *parse_riscv(std::string const& file_name, riscv_state *state);
 

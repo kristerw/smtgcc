@@ -98,7 +98,6 @@ struct Converter {
   bool is_tgt_func;
 
   uint64_t bytesize_for_type(tree type);
-  uint64_t bitsize_for_type(tree type);
   std::pair<Instruction *, Instruction *> to_mem_repr(Basic_block *bb, Instruction *inst, Instruction *undef, tree type);
   Instruction *to_mem_repr(Basic_block *bb, Instruction *inst, tree type);
   std::pair<Instruction *, Instruction *> from_mem_repr(Basic_block *bb, Instruction *inst, Instruction *undef, tree type);
@@ -316,28 +315,6 @@ void check_type(tree type)
       if (TYPE_PRECISION(type) > 64 * unroll_limit)
 	throw Not_implemented("check_type: too wide BITINT");
     }
-}
-
-// The logical bitsize used in the IR for the GCC type/
-uint64_t Converter::bitsize_for_type(tree type)
-{
-  check_type(type);
-
-  if (INTEGRAL_TYPE_P(type))
-    return TYPE_PRECISION(type);
-  if (VECTOR_TYPE_P(type) && bitsize_for_type(TREE_TYPE(type)) == 1)
-    return 1 << VECTOR_TYPE_CHECK(type)->type_common.precision;
-
-  tree size_tree = TYPE_SIZE(type);
-  if (size_tree == NULL_TREE)
-    throw Not_implemented("bitsize_for_type: incomplete type");
-  if (TREE_CODE(size_tree) != INTEGER_CST)
-    {
-      // Things like function parameters
-      //   int foo(int n, struct T { char a[n]; } b);
-      throw Not_implemented("bitsize_for_type: dynamically sized type");
-    }
-  return TREE_INT_CST_LOW(size_tree);
 }
 
 // The size of the GCC type when stored in memory etc.
@@ -5598,11 +5575,6 @@ void Converter::process_func_args()
       if (bitsize <= 0)
 	throw Not_implemented("Parameter size == 0");
 
-      bool type_is_unsigned =
-	INTEGRAL_TYPE_P(TREE_TYPE(decl)) && TYPE_UNSIGNED(TREE_TYPE(decl));
-      bool type_is_float = FLOAT_TYPE_P(TREE_TYPE(decl));
-      state->params.push_back({bitsize, type_is_unsigned, type_is_float, 0, 0});
-
       // TODO: There must be better ways to determine if this is the "this"
       // pointer of a C++ constructor.
       if (param_number == 0 && !strcmp(decl_name, "__ct_base "))
@@ -6016,4 +5988,26 @@ void adjust_loop_vectorized(smtgcc::Module *module)
   Instruction *tgt_lv_inst = get_lv_inst(tgt);
   if (src_lv_inst && !tgt_lv_inst)
     src_lv_inst->replace_all_uses_with(src_lv_inst->bb->value_inst(0, 1));
+}
+
+// The logical bitsize used in the IR for the GCC type/
+uint64_t bitsize_for_type(tree type)
+{
+  check_type(type);
+
+  if (INTEGRAL_TYPE_P(type))
+    return TYPE_PRECISION(type);
+  if (VECTOR_TYPE_P(type) && bitsize_for_type(TREE_TYPE(type)) == 1)
+    return 1 << VECTOR_TYPE_CHECK(type)->type_common.precision;
+
+  tree size_tree = TYPE_SIZE(type);
+  if (size_tree == NULL_TREE)
+    throw Not_implemented("bitsize_for_type: incomplete type");
+  if (TREE_CODE(size_tree) != INTEGER_CST)
+    {
+      // Things like function parameters
+      //   int foo(int n, struct T { char a[n]; } b);
+      throw Not_implemented("bitsize_for_type: dynamically sized type");
+    }
+  return TREE_INT_CST_LOW(size_tree);
 }

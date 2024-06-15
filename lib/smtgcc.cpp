@@ -271,6 +271,7 @@ Instruction *create_inst(Op opcode, Instruction *arg1, Instruction *arg2)
   else if (opcode == Op::WRITE)
     {
       assert(arg1->opcode == Op::REGISTER);
+      assert(arg1->arguments[0]->value() == arg2->bitsize);
       inst->bitsize = 0;
     }
   else if (opcode == Op::PRINT)

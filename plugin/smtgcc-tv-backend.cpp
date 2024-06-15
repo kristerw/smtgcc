@@ -38,6 +38,283 @@ struct tv_pass : gimple_opt_pass
   std::vector<riscv_state> functions;
 };
 
+struct Regs
+{
+  Instruction *regs[2] = {nullptr, nullptr};
+  Instruction *fregs[2] = {nullptr, nullptr};
+};
+
+static std::optional<Regs> regs_for_value(riscv_state *rstate, Instruction *value, tree type)
+{
+  Basic_block *bb = value->bb;
+
+  if (COMPLEX_FLOAT_TYPE_P(type) && value->bitsize <= 2 * rstate->freg_bitsize)
+    {
+      Regs regs;
+      uint64_t elt_bitsize = value->bitsize / 2;
+      assert(elt_bitsize == 16 || elt_bitsize == 32 || elt_bitsize == 64);
+      Instruction *reg_value = bb->build_trunc(value, elt_bitsize);
+      if (reg_value->bitsize < rstate->freg_bitsize)
+	{
+	  uint32_t padding_bitsize =
+	    rstate->freg_bitsize - reg_value->bitsize;
+	  Instruction *m1 = bb->value_m1_inst(padding_bitsize);
+	  reg_value = bb->build_inst(Op::CONCAT, m1, reg_value);
+	}
+      regs.fregs[0] = reg_value;
+      Instruction *high = bb->value_inst(value->bitsize - 1, 32);
+      Instruction *low = bb->value_inst(elt_bitsize, 32);
+      reg_value = bb->build_inst(Op::EXTRACT, value, high, low);
+      if (reg_value->bitsize < rstate->freg_bitsize)
+	{
+	  uint32_t padding_bitsize =
+	    rstate->freg_bitsize - reg_value->bitsize;
+	  Instruction *m1 = bb->value_m1_inst(padding_bitsize);
+	  reg_value = bb->build_inst(Op::CONCAT, m1, reg_value);
+	}
+      regs.fregs[1] = reg_value;
+      return regs;
+    }
+
+  if (SCALAR_FLOAT_TYPE_P(type) && value->bitsize <= rstate->freg_bitsize)
+    {
+      Instruction *reg_value = value;
+      if (reg_value->bitsize < rstate->freg_bitsize)
+	{
+	  uint32_t padding_bitsize =
+	    rstate->freg_bitsize - reg_value->bitsize;
+	  Instruction *m1 = bb->value_m1_inst(padding_bitsize);
+	  reg_value = bb->build_inst(Op::CONCAT, m1, reg_value);
+	}
+      Regs regs;
+      regs.fregs[0] = reg_value;
+      return regs;
+    }
+
+  if (value->bitsize <= 2 * rstate->reg_bitsize)
+    {
+      // Pad it out to a multiple of the register size.
+      uint32_t num_regs = value->bitsize <= rstate->reg_bitsize ? 1 : 2;
+      if (value->bitsize < rstate->reg_bitsize * num_regs)
+	{
+	  bool is_unsigned = INTEGRAL_TYPE_P(type) && TYPE_UNSIGNED(type);
+	  Instruction *bs_inst =
+	    bb->value_inst(rstate->reg_bitsize * num_regs, 32);
+	  if (is_unsigned && value->bitsize != 32)
+	    value = bb->build_inst(Op::ZEXT, value, bs_inst);
+	  else
+	    value = bb->build_inst(Op::SEXT, value, bs_inst);
+	}
+
+      Regs regs;
+      regs.regs[0] = bb->build_trunc(value, rstate->reg_bitsize);
+      if (num_regs > 1)
+	{
+	  Instruction *high = bb->value_inst(value->bitsize - 1, 32);
+	  Instruction *low = bb->value_inst(rstate->reg_bitsize, 32);
+	  regs.regs[1] = bb->build_inst(Op::EXTRACT, value, high, low);
+	}
+      return regs;
+    }
+
+  return {};
+}
+
+static void setup_riscv_function(riscv_state *rstate, Function *src_func, function *fun)
+{
+  assert(rstate->module->functions.size() == 2);
+  Function *tgt = rstate->module->functions[1];
+  Basic_block *entry_bb = rstate->entry_bb;
+  Basic_block *exit_bb = rstate->exit_bb;
+
+  // Registers x0-x31.
+  for (int i = 0; i < 32; i++)
+    {
+      Instruction *bitsize = entry_bb->value_inst(rstate->reg_bitsize, 32);
+      Instruction *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
+      rstate->registers.push_back(reg);
+    }
+
+  // Registers f0-f31.
+  for (int i = 0; i < 32; i++)
+    {
+      Instruction *bitsize = entry_bb->value_inst(rstate->freg_bitsize, 32);
+      Instruction *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
+      rstate->fregisters.push_back(reg);
+    }
+
+  // Create MEMORY instructions for the global variables we saw in the
+  // GIMPLE IR.
+  for (const auto& mem_obj : rstate->memory_objects)
+    {
+      Instruction *id =
+	entry_bb->value_inst(mem_obj.id, rstate->module->ptr_id_bits);
+      Instruction *size =
+	entry_bb->value_inst(mem_obj.size, rstate->module->ptr_offset_bits);
+      Instruction *flags = entry_bb->value_inst(mem_obj.flags, 32);
+      Instruction *mem = entry_bb->build_inst(Op::MEMORY, id, size, flags);
+      rstate->sym_name2mem.insert({mem_obj.sym_name, mem});
+    }
+
+  // Determine the register to use for each function parameter.
+  uint32_t reg_nbr = 10;
+  uint32_t freg_nbr = 10;
+
+  Basic_block *src_last_bb = src_func->bbs.back();
+  assert(src_last_bb->last_inst->opcode == Op::RET);
+  uint64_t ret_bitsize = 0;
+  if (src_last_bb->last_inst->nof_args > 0)
+    ret_bitsize = src_last_bb->last_inst->arguments[0]->bitsize;
+  if (ret_bitsize > 0)
+    {
+      Instruction *retval = nullptr;
+      tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
+      if (COMPLEX_FLOAT_TYPE_P(ret_type)
+	  && ret_bitsize <= 2 * rstate->freg_bitsize)
+	{
+	  // Generate the return value from the registers.
+	  uint64_t elt_bitsize = ret_bitsize / 2;
+	  assert(elt_bitsize == 16 || elt_bitsize == 32 || elt_bitsize == 64);
+	  Instruction *real =
+	    exit_bb->build_inst(Op::READ, rstate->fregisters[10]);
+	  real = exit_bb->build_trunc(real, elt_bitsize);
+	  Instruction *imag =
+	    exit_bb->build_inst(Op::READ, rstate->fregisters[11]);
+	  imag = exit_bb->build_trunc(imag, elt_bitsize);
+	  retval = exit_bb->build_inst(Op::CONCAT, imag, real);
+	}
+      else if (SCALAR_FLOAT_TYPE_P(ret_type)
+	       && ret_bitsize <= rstate->freg_bitsize)
+	{
+	  // Generate the return value from the registers.
+	  retval = exit_bb->build_inst(Op::READ, rstate->fregisters[10]);
+	  if (ret_bitsize < retval->bitsize)
+	    retval = exit_bb->build_trunc(retval, ret_bitsize);
+	}
+      else if (ret_bitsize <= 2 * rstate->reg_bitsize)
+	{
+	  // Generate the return value from the registers.
+	  retval = exit_bb->build_inst(Op::READ, rstate->registers[10]);
+	  if (retval->bitsize < ret_bitsize)
+	    {
+	      Instruction *inst =
+		exit_bb->build_inst(Op::READ, rstate->registers[11]);
+	      retval = exit_bb->build_inst(Op::CONCAT, inst, retval);
+	    }
+	  if (ret_bitsize < retval->bitsize)
+	    retval = exit_bb->build_trunc(retval, ret_bitsize);
+	}
+      else
+	{
+	  // Return of values wider than 2*reg_bitsize are passed in memory,
+	  // where the address is specified by an implicit first parameter.
+	  assert((ret_bitsize & 7) == 0);
+	  Instruction *id = tgt->value_inst(-127, tgt->module->ptr_id_bits);
+	  Instruction *mem_size =
+	    tgt->value_inst(ret_bitsize / 8, tgt->module->ptr_offset_bits);
+	  Instruction *flags = tgt->value_inst(0, 32);
+
+	  Instruction *ret_mem =
+	    entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
+	  Instruction *reg = rstate->registers[reg_nbr++];
+	  entry_bb->build_inst(Op::WRITE, reg, ret_mem);
+
+	  // Generate the return value from the value returned in memory.
+	  uint64_t size = ret_bitsize / 8;
+	  for (uint64_t i = 0; i < size; i++)
+	    {
+	      Instruction *offset = exit_bb->value_inst(i, ret_mem->bitsize);
+	      Instruction *ptr = exit_bb->build_inst(Op::ADD, ret_mem, offset);
+	      Instruction *data_byte = exit_bb->build_inst(Op::LOAD, ptr);
+	      if (retval)
+		retval = exit_bb->build_inst(Op::CONCAT, data_byte, retval);
+	      else
+		retval = data_byte;
+	    }
+	}
+      exit_bb->build_ret_inst(retval);
+    }
+  else
+    exit_bb->build_ret_inst();
+
+  // Set up the PARAM instructions and copy the result to the correct
+  // register or memory as required by the ABI.
+  int param_number = 0;
+  for (tree decl = DECL_ARGUMENTS(fun->decl); decl; decl = DECL_CHAIN(decl))
+    {
+      uint32_t bitsize = bitsize_for_type(TREE_TYPE(decl));
+      if (bitsize <= 0)
+	throw Not_implemented("Parameter size == 0");
+
+      Instruction *param_nbr = entry_bb->value_inst(param_number, 32);
+      Instruction *param_bitsize = entry_bb->value_inst(bitsize, 32);
+      Instruction *param =
+	entry_bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
+
+      tree type = TREE_TYPE(decl);
+      if (param_number == 0
+	  && !strcmp(IDENTIFIER_POINTER(DECL_NAME(fun->decl)), "__ct_base "))
+	{
+	  // TODO: The "this" pointer in C++ constructors needs to be handled
+	  // as a special case in the same way as in gimple_conv.cpp when
+	  // setting up the parameters.
+	  throw Not_implemented("setup_riscv_function: C++ constructors");
+	}
+
+      std::optional<Regs> arg_regs = regs_for_value(rstate, param, type);
+      if (arg_regs)
+	{
+	  if ((*arg_regs).regs[0])
+	    {
+	      // TODO: Values are passed on the stack when all registers
+	      // are used.
+	      if (reg_nbr > 17)
+		throw Not_implemented("riscv: too many arguments");
+
+	      Instruction *reg = rstate->registers[reg_nbr++];
+	      entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).regs[0]);
+	    }
+	  if ((*arg_regs).regs[1])
+	    {
+	      // TODO: Values are passed on the stack when all registers
+	      // are used.
+	      if (reg_nbr > 17)
+		throw Not_implemented("riscv: too many arguments");
+
+	      Instruction *reg = rstate->registers[reg_nbr++];
+	      entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).regs[1]);
+	    }
+	  if ((*arg_regs).fregs[0])
+	    {
+	      // TODO: Values are passed on the stack when all registers
+	      // are used.
+	      if (freg_nbr > 17)
+		throw Not_implemented("riscv: too many arguments");
+
+	      Instruction *reg = rstate->fregisters[freg_nbr++];
+	      entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[0]);
+	    }
+	  if ((*arg_regs).fregs[1])
+	    {
+	      // TODO: Values are passed on the stack when all registers
+	      // are used.
+	      if (freg_nbr > 17)
+		throw Not_implemented("riscv: too many arguments");
+
+	      Instruction *reg = rstate->fregisters[freg_nbr++];
+	      entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[1]);
+	    }
+	}
+      else
+	{
+	  // TODO: Implement passing of large params in memory.
+	  throw Not_implemented("setup_riscv_function: too wide param type");
+	}
+
+      param_number++;
+    }
+}
+
 unsigned int tv_pass::execute(function *fun)
 {
   if (error_has_been_reported)
@@ -47,16 +324,23 @@ unsigned int tv_pass::execute(function *fun)
     {
       CommonState state;
       Module *module = create_module();
-      Function *func = process_function(module, &state, fun, false);
-      unroll_and_optimize(func);
+      Function *src = process_function(module, &state, fun, false);
+      src->name = "src";
+      unroll_and_optimize(src);
+
       riscv_state rstate;
+      rstate.reg_bitsize = TARGET_64BIT ? 64 : 32;
+      rstate.freg_bitsize = 64;
       rstate.module = module;
-      rstate.params = state.params;
       rstate.memory_objects = state.memory_objects;
       rstate.func_name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl));
-      tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
-      rstate.is_float_retval =
-	SCALAR_FLOAT_TYPE_P(ret_type) || COMPLEX_FLOAT_TYPE_P(ret_type);
+
+      Function *tgt = module->build_function("tgt");
+      rstate.entry_bb = tgt->build_bb();
+      rstate.exit_bb = tgt->build_bb();
+
+      setup_riscv_function(&rstate, src, fun);
+
       functions.push_back(rstate);
     }
   catch (Not_implemented& error)
@@ -141,147 +425,6 @@ static void eliminate_registers(Function *func)
     }
 }
 
-static void adjust_abi(Function *func, Function *src_func, riscv_state *state)
-{
-  Basic_block *src_last_bb = src_func->bbs.back();
-  Basic_block *entry_bb = func->bbs[0];
-
-  // Find the first instruction that is not a VALUE instruction.
-  Instruction *first_inst = entry_bb->first_inst;
-  while (first_inst->opcode == Op::VALUE)
-    first_inst = first_inst->next;
-
-  // Determine the register to use for each function parameter.
-  int reg_nbr = 10;
-
-  // Return of values wider than 2*reg_bitsize are passed in memory,
-  // where the address is specified by an implicit first parameter.
-  assert(src_last_bb->last_inst->opcode == Op::RET);
-  uint64_t ret_size = 0;
-  if (src_last_bb->last_inst->nof_args > 0)
-    ret_size = src_last_bb->last_inst->arguments[0]->bitsize;
-  Instruction *ret_mem = nullptr;
-  if (ret_size > 2 * state->reg_bitsize)
-    {
-      assert((ret_size & 7) == 0);
-      // TODO: Set up memory consistent with the src function.
-      Instruction *id = func->value_inst(-127, func->module->ptr_id_bits);
-      Instruction *mem_size =
-	func->value_inst(ret_size / 8, func->module->ptr_offset_bits);
-      Instruction *flags = func->value_inst(0, 32);
-      ret_mem = entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
-      Instruction *reg = state->registers[reg_nbr++];
-      entry_bb->build_inst(Op::WRITE, reg, ret_mem);
-    }
-
-  for (auto& param_info : state->params)
-    {
-      // Parameters wider than 2*reg_bitsize are passed in memory.
-      if (param_info.bitsize > 2 * state->reg_bitsize)
-	throw Not_implemented("adjust_abi: too wide param type");
-
-      if (param_info.is_float)
-	throw Not_implemented("adjust_abi: floating point parameter");
-
-      param_info.reg_nbr = reg_nbr;
-      param_info.num_regs =
-	(param_info.bitsize + state->reg_bitsize - 1) / state->reg_bitsize;
-      reg_nbr += param_info.num_regs;
-
-      // Values are passed on the stack when all registers are used.
-      if (reg_nbr > 18)
-	throw Not_implemented("adjust_abi: too many arguments");
-    }
-
-  // Create an Op::PARAM instruction for each function parameter and store
-  // it in the registers.
-  Basic_block *src_entry_bb = src_func->bbs[0];
-  for (Instruction *inst = src_entry_bb->first_inst; inst; inst = inst->next)
-    {
-      if (inst->opcode != Op::PARAM)
-	continue;
-
-      // Create a copy of the source function's Op::PARAM instruction.
-      int param_number = inst->arguments[0]->value();
-      Param_info& param_info = state->params.at(param_number);
-      Instruction *param_nbr = entry_bb->value_inst(param_number, 32);
-      Instruction *param_bitsize = entry_bb->value_inst(inst->bitsize, 32);
-      Instruction *param =
-	entry_bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
-
-      // Pad it out to a multiple of the register size.
-      if (param->bitsize < state->reg_bitsize * param_info.num_regs)
-	{
-	  Instruction *bs_inst =
-	    entry_bb->value_inst(state->reg_bitsize * param_info.num_regs, 32);
-	  if (param_info.is_unsigned && param->bitsize != 32)
-	    param = entry_bb->build_inst(Op::ZEXT, param, bs_inst);
-	  else
-	    param = entry_bb->build_inst(Op::SEXT, param, bs_inst);
-	}
-
-      // Write the parameter value to the registers.
-      for (uint32_t i = 0; i < param_info.num_regs; i++)
-	{
-	  Instruction *high =
-	    entry_bb->value_inst((i + 1) * state->reg_bitsize - 1, 32);
-	  Instruction *low = entry_bb->value_inst(i * state->reg_bitsize, 32);
-	  Instruction *reg_value =
-	    entry_bb->build_inst(Op::EXTRACT, param, high, low);
-	  Instruction *reg = state->registers[param_info.reg_nbr + i];
-	  entry_bb->build_inst(Op::WRITE, reg, reg_value);
-	}
-    }
-
-  if (ret_size > 0)
-    {
-      if ((state->is_float_retval && ret_size <= 2 * 64)
-	  || (!state->is_float_retval && ret_size <= 2 * state->reg_bitsize))
-	{
-	  // Generate the return value from the registers.
-	  Basic_block *exit_bb = func->bbs.back();
-	  Instruction *retval;
-	  if (state->is_float_retval)
-	    retval = exit_bb->build_inst(Op::READ, state->fregisters[10]);
-	  else
-	    retval = exit_bb->build_inst(Op::READ, state->registers[10]);
-	  if (retval->bitsize < ret_size)
-	    {
-	      Instruction *inst;
-	      if (state->is_float_retval)
-		inst = exit_bb->build_inst(Op::READ, state->fregisters[11]);
-	      else
-		inst = exit_bb->build_inst(Op::READ, state->registers[11]);
-	      retval = exit_bb->build_inst(Op::CONCAT, inst, retval);
-	    }
-	  if (ret_size < retval->bitsize)
-	    retval = exit_bb->build_trunc(retval, ret_size);
-	  destroy_instruction(exit_bb->last_inst);
-	  exit_bb->build_ret_inst(retval);
-	}
-      else
-	{
-	  // Generate the return value from the value returned in memory.
-	  assert(ret_mem);
-	  Basic_block *exit_bb = func->bbs.back();
-	  Instruction *retval = nullptr;
-	  uint64_t size = ret_size / 8;
-	  for (uint64_t i = 0; i < size; i++)
-	    {
-	      Instruction *offset = exit_bb->value_inst(i, ret_mem->bitsize);
-	      Instruction *ptr = exit_bb->build_inst(Op::ADD, ret_mem, offset);
-	      Instruction *data_byte = exit_bb->build_inst(Op::LOAD, ptr);
-	      if (retval)
-		retval = exit_bb->build_inst(Op::CONCAT, data_byte, retval);
-	      else
-		retval = data_byte;
-	    }
-	  destroy_instruction(exit_bb->last_inst);
-	  exit_bb->build_ret_inst(retval);
-	}
-    }
-}
-
 static void finish(void *, void *data)
 {
   if (seen_error())
@@ -296,10 +439,7 @@ static void finish(void *, void *data)
       try
 	{
 	  Module *module = state.module;
-	  module->functions[0]->name = "src";
-	  state.reg_bitsize = TARGET_64BIT ? 64 : 32;
 	  Function *func = parse_riscv(asm_file_name, &state);
-	  adjust_abi(func, module->functions[0], &state);
 	  validate(func);
 
 	  simplify_cfg(func);

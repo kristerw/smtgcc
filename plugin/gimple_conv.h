@@ -14,7 +14,6 @@ struct CommonState {
   int64_t id_global = 2;
   std::map<tree, int64_t> decl2id;
 
-  std::vector<smtgcc::Param_info> params;
   std::vector<smtgcc::MemoryObject> memory_objects;
 };
 
@@ -23,5 +22,6 @@ void unroll_and_optimize(smtgcc::Function *func);
 void unroll_and_optimize(smtgcc::Module *module);
 smtgcc::Module *create_module();
 void adjust_loop_vectorized(smtgcc::Module *module);
+uint64_t bitsize_for_type(tree type);
 
 #endif

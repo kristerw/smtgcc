@@ -19,6 +19,8 @@ const int stack_size = 1024;
 // I am not sure that the "w" version of sgt is supported...
 
 struct parser {
+  parser(riscv_state *rstate) : rstate{rstate} {}
+
   enum class lexeme {
     label,
     label_def,
@@ -48,10 +50,6 @@ struct parser {
     int size;
   };
   std::vector<token> tokens;
-  std::vector<Instruction *> registers;
-  std::vector<Instruction *> fregisters;
-  std::vector<Basic_block *> ret_bbs;
-  std::map<std::string, Instruction *> sym_name2mem;
   std::map<std::string, std::vector<unsigned char>> sym_name2data;
 
   int line_number = 0;
@@ -65,8 +63,9 @@ struct parser {
   void skip_line();
   void skip_whitespace();
   void parse_rodata();
-  Function *parse(std::string const& file_name, riscv_state *state);
+  Function *parse(std::string const& file_name);
 
+  riscv_state *rstate;
   Module *module;
   uint32_t reg_bitsize;
   Function *src_func;
@@ -315,11 +314,11 @@ Instruction *parser::get_reg(unsigned idx)
   if (tokens[idx].size == 2
       && buf[tokens[idx].pos + 0] == 's'
       && buf[tokens[idx].pos + 1] == 'p')
-    return registers[2];
+    return rstate->registers[2];
   if (tokens[idx].size == 2
       && buf[tokens[idx].pos + 0] == 'r'
       && buf[tokens[idx].pos + 1] == 'a')
-    return registers[1];
+    return rstate->registers[1];
   if (tokens[idx].kind != lexeme::name
       || (buf[tokens[idx].pos] != 'a'
 	  && buf[tokens[idx].pos] != 's'
@@ -331,20 +330,20 @@ Instruction *parser::get_reg(unsigned idx)
   if (tokens[idx].size == 3)
     value = value * 10 + (buf[tokens[idx].pos + 1] - '0');
   if (buf[tokens[idx].pos] == 'a')
-    return registers[10 + value];
+    return rstate->registers[10 + value];
   else if (buf[tokens[idx].pos] == 's')
     {
       if (value < 2)
-	return registers[8 + value];
+	return rstate->registers[8 + value];
       else
-	return registers[18 - 2 + value];
+	return rstate->registers[18 - 2 + value];
     }
   else if (buf[tokens[idx].pos] == 't')
     {
       if (value < 3)
-	return registers[5 + value];
+	return rstate->registers[5 + value];
       else
-	return registers[28 - 3 + value];
+	return rstate->registers[28 - 3 + value];
     }
   else
     throw Parse_error("expected a register instead of "
@@ -378,24 +377,24 @@ Instruction *parser::get_freg(unsigned idx)
       if (c == 's')
 	{
 	  if (value == 0)
-	    return fregisters[8];
+	    return rstate->fregisters[8];
 	  else if (value == 1)
-	    return fregisters[9];
+	    return rstate->fregisters[9];
 	  else
-	    return fregisters[16 + value];
+	    return rstate->fregisters[16 + value];
 	}
       else if (c == 't')
 	{
 	  if (value <= 7)
-	    return fregisters[value];
+	    return rstate->fregisters[value];
 	  else
-	    return fregisters[value + 21];
+	    return rstate->fregisters[value + 21];
 	}
       else
-	return fregisters[10 + value];
+	return rstate->fregisters[10 + value];
     }
   else
-    return fregisters[value];
+    return rstate->fregisters[value];
 }
 
 Instruction *parser::get_hilo_addr(const token& tok)
@@ -410,9 +409,9 @@ Instruction *parser::get_hilo_addr(const token& tok)
 	 || buf[pos] == '.')
     pos++;
   std::string sym_name(&buf[tok.pos + 4], pos - (tok.pos + 4));
-  if (!sym_name2mem.contains(sym_name))
+  if (!rstate->sym_name2mem.contains(sym_name))
     throw Parse_error("unknown symbol " + sym_name, line_number);
-  Instruction *addr = sym_name2mem.at(sym_name);
+  Instruction *addr = rstate->sym_name2mem.at(sym_name);
   if (buf[pos] == '+')
     {
       pos++;
@@ -483,11 +482,11 @@ Instruction *parser::get_reg_value(unsigned idx)
   if (tokens[idx].size == 2
       && buf[tokens[idx].pos + 0] == 'r'
       && buf[tokens[idx].pos + 1] == 'a')
-    return current_bb->build_inst(Op::READ, registers[1]);
+    return current_bb->build_inst(Op::READ, rstate->registers[1]);
   if (tokens[idx].size == 2
       && buf[tokens[idx].pos + 0] == 's'
       && buf[tokens[idx].pos + 1] == 'p')
-    return current_bb->build_inst(Op::READ, registers[2]);
+    return current_bb->build_inst(Op::READ, rstate->registers[2]);
   if (tokens[idx].kind != lexeme::name
       || (buf[tokens[idx].pos] != 'a'
 	  && buf[tokens[idx].pos] != 's'
@@ -499,20 +498,20 @@ Instruction *parser::get_reg_value(unsigned idx)
   if (tokens[idx].size == 3)
     value = value * 10 + (buf[tokens[idx].pos + 1] - '0');
   if (buf[tokens[idx].pos] == 'a')
-    return current_bb->build_inst(Op::READ, registers[10 + value]);
+    return current_bb->build_inst(Op::READ, rstate->registers[10 + value]);
   else if (buf[tokens[idx].pos] == 's')
     {
       if (value < 2)
-	return current_bb->build_inst(Op::READ, registers[8 + value]);
+	return current_bb->build_inst(Op::READ, rstate->registers[8 + value]);
       else
-	return current_bb->build_inst(Op::READ, registers[18 - 2 + value]);
+	return current_bb->build_inst(Op::READ, rstate->registers[18 - 2 + value]);
     }
   else if (buf[tokens[idx].pos] == 't')
     {
       if (value < 3)
-	return current_bb->build_inst(Op::READ, registers[5 + value]);
+	return current_bb->build_inst(Op::READ, rstate->registers[5 + value]);
       else
-	return current_bb->build_inst(Op::READ, registers[28 - 3 + value]);
+	return current_bb->build_inst(Op::READ, rstate->registers[28 - 3 + value]);
     }
   else
     throw Parse_error("expected a register instead of "
@@ -1453,14 +1452,14 @@ void parser::parse_function()
   else if (name == "ebreak")
     {
       current_bb->build_inst(Op::UB, current_bb->value_inst(1, 1));
-      ret_bbs.push_back(current_bb);
+      current_bb->build_br_inst(rstate->exit_bb);
       current_bb = nullptr;
     }
   else if (name == "ret" || name == "jr")
     {
       // TODO: jr and ret are pseudoinstructions. Verify that they
       // jump to the correct location.
-      ret_bbs.push_back(current_bb);
+      current_bb->build_br_inst(rstate->exit_bb);
       current_bb = nullptr;
     }
   else if (name == "fld")
@@ -1473,6 +1472,8 @@ void parser::parse_function()
     gen_store(4, LStype::float_ls);
   else if (name == "fabs.s" || name == "fabs.d")
     gen_funary(name, Op::FABS);
+  else if (name == "fmv.s" || name == "fmv.d")
+    gen_funary(name, Op::MOV);
   else if (name == "fneg.s" || name == "fneg.d")
     gen_funary(name, Op::FNEG);
   else if (name == "fadd.s" || name == "fadd.d")
@@ -1787,7 +1788,7 @@ void parser::parse_rodata()
     }
 }
 
-Function *parser::parse(std::string const& file_name, riscv_state *rstate)
+Function *parser::parse(std::string const& file_name)
 {
   enum class state {
     global,
@@ -1818,8 +1819,8 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
     }
 
   module = rstate->module;
+  assert(module->functions.size() == 2);
   reg_bitsize = rstate->reg_bitsize;
-  assert(module->functions.size() == 1);
   src_func = module->functions[0];
 
   parse_rodata();
@@ -1841,37 +1842,13 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
 
 	if (label == rstate->func_name)
 	  {
-	    current_func = module->build_function("tgt");
-	    Basic_block *entry_bb = current_func->build_bb();
-	    for (int i = 0; i < 32; i++)
-	      {
-		Instruction *bitsize = entry_bb->value_inst(reg_bitsize, 32);
-		Instruction *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
-		registers.push_back(reg);
-	      }
-	    for (int i = 0; i < 32; i++)
-	      {
-		Instruction *bitsize = entry_bb->value_inst(64, 32);
-		Instruction *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
-		fregisters.push_back(reg);
-	      }
+	    current_func = module->functions[1];
+	    Basic_block *entry_bb = rstate->entry_bb;
 
 	    Basic_block *bb = current_func->build_bb();
 	    entry_bb->build_br_inst(bb);
 
 	    current_bb = bb;
-
-	    for (const auto& mem_obj : rstate->memory_objects)
-	      {
-		Instruction *id =
-		  current_bb->value_inst(mem_obj.id, module->ptr_id_bits);
-		Instruction *size =
-		  current_bb->value_inst(mem_obj.size, module->ptr_offset_bits);
-		Instruction *flags = current_bb->value_inst(mem_obj.flags, 32);
-		Instruction *inst =
-		  entry_bb->build_inst(Op::MEMORY, id, size, flags);
-		sym_name2mem.insert({mem_obj.sym_name, inst});
-	      }
 
 	    // Set up the stack.
 	    // TODO: Set up memory consistent with the src function.
@@ -1883,15 +1860,15 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
 	      entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
 	    Instruction *size = bb->value_inst(stack_size, stack->bitsize);
 	    stack = bb->build_inst(Op::ADD, stack, size);
-	    current_bb->build_inst(Op::WRITE, registers[2], stack);
+	    current_bb->build_inst(Op::WRITE, rstate->registers[2], stack);
 
 	    // TODO: Do not hard code ID values.
 	    int next_id = -126;
 	    for (const auto& [name, data] : sym_name2data)
 	      {
 		Instruction *mem;
-		if (sym_name2mem.contains(name))
-		  mem = sym_name2mem.at(name);
+		if (rstate->sym_name2mem.contains(name))
+		  mem = rstate->sym_name2mem.at(name);
 		else
 		  {
 		    Instruction *id =
@@ -1901,8 +1878,8 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
 		    Instruction *flags = entry_bb->value_inst(MEM_CONST, 32);
 		    mem = entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
 
-		    assert(!sym_name2mem.contains(name));
-		    sym_name2mem.insert({name, mem});
+		    assert(!rstate->sym_name2mem.contains(name));
+		    rstate->sym_name2mem.insert({name, mem});
 		  }
 		for (size_t i = 0; i < data.size(); i++)
 		  {
@@ -1956,21 +1933,6 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
   if (parser_state != state::done)
     throw Parse_error("EOF in the middle of a function", line_number);
 
-  // TODO: This should be a state check to ensure we are not within a function.
-  // Hmm. But we probably want to check size too, but with a throw if 0.
-  // Note: ret_bbs.size()); may be 0 for e.g. a function such as
-  // int foo(void) {
-  //     __builtin_trap();
-  // }
-  // Hmm. But we should treat the ebreak as a return in that case.
-  Basic_block *exit_bb = current_func->build_bb();
-  for (auto bb : ret_bbs)
-    bb->build_br_inst(exit_bb);
-  exit_bb->build_ret_inst();
-
-  rstate->registers = registers;
-  rstate->fregisters = fregisters;
-
   return current_func;
 }
 
@@ -1978,8 +1940,8 @@ Function *parser::parse(std::string const& file_name, riscv_state *rstate)
 
 Function *parse_riscv(std::string const& file_name, riscv_state *state)
 {
-  parser p;
-  Function *func = p.parse(file_name, state);
+  parser p(state);
+  Function *func = p.parse(file_name);
   reverse_post_order(func);
   return func;
 }
