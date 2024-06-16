@@ -116,6 +116,10 @@ private:
   void gen_funary(std::string name, Op op);
   void gen_fbinary(std::string name, Op op);
   void gen_fcmp(std::string name, Op op);
+  void gen_iunary(std::string name, Op op);
+  void gen_ibinary(std::string name, Op op);
+  void gen_icmp(std::string name, Op op);
+  void gen_ishift(std::string name, Op op);
 
   void parse_function();
 
@@ -817,6 +821,127 @@ void parser::gen_fcmp(std::string name, Op op)
   current_bb->build_inst(Op::WRITE, dest, res);
 }
 
+void parser::gen_iunary(std::string name, Op op)
+{
+  Instruction *dest = get_reg(1);
+  get_comma(2);
+  Instruction *arg1 = get_reg_value(3);
+  get_end_of_line(4);
+
+  bool has_w_suffix = name[name.length() - 1] == 'w';
+  if (has_w_suffix)
+    arg1 = current_bb->build_trunc(arg1, 32);
+  Instruction *res = current_bb->build_inst(op, arg1);
+  if (has_w_suffix)
+    {
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
+      res = current_bb->build_inst(Op::SEXT, res, bitsize);
+    }
+  current_bb->build_inst(Op::WRITE, dest, res);
+}
+
+void parser::gen_ibinary(std::string name, Op op)
+{
+  Instruction *dest = get_reg(1);
+  get_comma(2);
+  Instruction *arg1 = get_reg_value(3);
+  get_comma(4);
+  Instruction *arg2;
+  bool is_imm =
+    name[name.length() - 1] == 'i'
+    || (name[name.length() - 2] == 'i' && name[name.length() - 1] == 'w');
+  if (is_imm)
+    arg2 = get_imm(5);
+  else
+    arg2 = get_reg_value(5);
+  get_end_of_line(6);
+
+  bool has_w_suffix = name[name.length() - 1] == 'w';
+  if (has_w_suffix)
+    {
+      arg1 = current_bb->build_trunc(arg1, 32);
+      arg2 = current_bb->build_trunc(arg2, 32);
+    }
+  Instruction *res = current_bb->build_inst(op, arg1, arg2);
+  if (has_w_suffix)
+    {
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
+      res = current_bb->build_inst(Op::SEXT, res, bitsize);
+    }
+  current_bb->build_inst(Op::WRITE, dest, res);
+}
+
+void parser::gen_ishift(std::string name, Op op)
+{
+  Instruction *dest = get_reg(1);
+  get_comma(2);
+  Instruction *arg1 = get_reg_value(3);
+  get_comma(4);
+  Instruction *arg2;
+  bool is_imm =
+    name[name.length() - 1] == 'i'
+    || (name[name.length() - 2] == 'i' && name[name.length() - 1] == 'w');
+  if (is_imm)
+    arg2 = get_imm(5);
+  else
+    arg2 = get_reg_value(5);
+  get_end_of_line(6);
+
+  bool has_w_suffix = name[name.length() - 1] == 'w';
+  if (reg_bitsize == 32 || has_w_suffix)
+    {
+      arg1 = current_bb->build_trunc(arg1, 32);
+      arg2 = current_bb->build_trunc(arg2, 5);
+      Instruction *bitsize = current_bb->value_inst(32, 32);
+      arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
+    }
+  else
+    {
+      arg2 = current_bb->build_trunc(arg2, 6);
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
+      arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
+    }
+  Instruction *res = current_bb->build_inst(op, arg1, arg2);
+  if (has_w_suffix)
+    {
+      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
+      res = current_bb->build_inst(Op::SEXT, res, bitsize);
+    }
+  current_bb->build_inst(Op::WRITE, dest, res);
+}
+
+void parser::gen_icmp(std::string name, Op op)
+{
+  Instruction *dest = get_reg(1);
+  get_comma(2);
+  Instruction *arg1 = get_reg_value(3);
+  get_comma(4);
+  Instruction *arg2;
+  bool is_imm =
+    name[name.length() - 1] == 'i'
+    || (name[name.length() - 2] == 'i' && name[name.length() - 1] == 'u')
+    || (name[name.length() - 2] == 'i' && name[name.length() - 1] == 'w')
+    || (name[name.length() - 3] == 'i'
+	&& name[name.length() - 2] == 'u'
+	&& name[name.length() - 1] == 'w');
+  if (is_imm)
+    arg2 = get_imm(5);
+  else
+    arg2 = get_reg_value(5);
+  get_end_of_line(6);
+
+  bool has_w_suffix = name[name.length() - 1] == 'w';
+  if (has_w_suffix)
+    {
+      arg1 = current_bb->build_trunc(arg1, 32);
+      arg2 = current_bb->build_trunc(arg2, 32);
+    }
+  Instruction *res = current_bb->build_inst(op, arg1, arg2);
+  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
+  res = current_bb->build_inst(Op::ZEXT, res, bitsize);
+  current_bb->build_inst(Op::WRITE, dest, res);
+}
+
 void parser::parse_function()
 {
   if (tokens[0].kind == lexeme::label_def)
@@ -834,53 +959,9 @@ void parser::parse_function()
   if (name == ".cfi_startproc" || name == ".cfi_endproc" )
     ;
   else if (name == "add" || name == "addw" || name == "addi" || name == "addiw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2;
-      if (name == "addi" || name == "addiw")
-	arg2 = get_imm(5);
-      else
-	arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "addw" || name == "addiw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::ADD, arg1, arg2);
-      if (name == "addw" || name == "addiw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_ibinary(name, Op::ADD);
   else if (name == "mul" || name == "mulw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "mulw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::MUL, arg1, arg2);
-      if (name == "mulw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_ibinary(name, Op::MUL);
   else if (name == "mulh" || name == "mulhu" || name == "mulhsu")
     {
       Instruction *dest = get_reg(1);
@@ -909,180 +990,22 @@ void parser::parse_function()
       current_bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "div" || name == "divw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "divw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::SDIV, arg1, arg2);
-      if (name == "divw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_ibinary(name, Op::SDIV);
   else if (name == "divu" || name == "divuw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "divuw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::UDIV, arg1, arg2);
-      if (name == "divuw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_ibinary(name, Op::UDIV);
   else if (name == "rem" || name == "remw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "remw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::SREM, arg1, arg2);
-      if (name == "remw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_ibinary(name, Op::SREM);
   else if (name == "remu" || name == "remuw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "remuw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::UREM, arg1, arg2);
-      if (name == "remuw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_ibinary(name, Op::UREM);
   else if (name == "slt" || name == "sltw" || name == "slti" || name == "sltiw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2;
-      if (name == "slti" || name == "sltiw")
-	arg2 = get_imm(5);
-      else
-	arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "sltw" || name == "sltiw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::SLT, arg1, arg2);
-      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      res = current_bb->build_inst(Op::ZEXT, res, bitsize);
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_icmp(name, Op::SLT);
   else if (name == "sltu" || name == "sltuw"
 	   || name == "sltiu" || name == "sltiuw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2;
-      if (name == "sltiu" || name == "sltiuw")
-	arg2 = get_imm(5);
-      else
-	arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "sltuw" || name == "sltiuw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::ULT, arg1, arg2);
-      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      res = current_bb->build_inst(Op::ZEXT, res, bitsize);
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_icmp(name, Op::ULT);
   else if (name == "sgt" || name == "sgtw")
-    {
-      // Pseudo instruction.
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "sgtuw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::SGT, arg1, arg2);
-      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      res = current_bb->build_inst(Op::ZEXT, res, bitsize);
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_icmp(name, Op::SGT);
   else if (name == "sgtu" || name == "sgtuw")
-    {
-      // Pseudo instruction.
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "sgtuw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::UGT, arg1, arg2);
-      Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      res = current_bb->build_inst(Op::ZEXT, res, bitsize);
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_icmp(name, Op::UGT);
   else if (name == "seqz" || name == "seqzw")
     {
       // Pseudo instruction.
@@ -1119,227 +1042,23 @@ void parser::parse_function()
       res = current_bb->build_inst(Op::ZEXT, res, bitsize);
       current_bb->build_inst(Op::WRITE, dest, res);
     }
-  else if (name == "and" || name == "andw" || name == "andi" || name == "andiw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2;
-      if (name == "andi" || name == "andiw")
-	arg2 = get_imm(5);
-      else
-	arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "andw" || name == "andiw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::AND, arg1, arg2);
-      if (name == "andw" || name == "andiw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+  else if (name == "and" || name == "andw"
+	   || name == "andi" || name == "andiw")
+    gen_ibinary(name, Op::AND);
   else if (name == "or" || name == "orw" || name == "ori" || name == "oriw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2;
-      if (name == "ori" || name == "oriw")
-	arg2 = get_imm(5);
-      else
-	arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "orw" || name == "oriw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::OR, arg1, arg2);
-      if (name == "orw" || name == "oriw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_ibinary(name, Op::OR);
   else if (name == "xor" || name == "xorw" || name == "xori" || name == "xoriw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2;
-      if (name == "xori" || name == "xoriw")
-	arg2 = get_imm(5);
-      else
-	arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "xorw" || name == "xoriw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::XOR, arg1, arg2);
-      if (name == "xorw" || name == "xoriw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_ibinary(name, Op::XOR);
   else if (name == "sll" || name == "sllw" || name == "slli" || name == "slliw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2;
-      if (name == "slli" || name == "slliw")
-	arg2 = get_imm(5);
-      else
-	arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (reg_bitsize == 32 || name == "sllw" || name == "slliw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 5);
-	  Instruction *bitsize = current_bb->value_inst(32, 32);
-	  arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
-	}
-      else
-	{
-	  arg2 = current_bb->build_trunc(arg2, 6);
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
-	}
-      Instruction *res = current_bb->build_inst(Op::SHL, arg1, arg2);
-      if (name == "sllw" || name == "slliw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_ishift(name, Op::SHL);
   else if (name == "srl" || name == "srlw" || name == "srli" || name == "srliw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2;
-      if (name == "srli" || name == "srliw")
-	arg2 = get_imm(5);
-      else
-	arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (reg_bitsize == 32 || name == "srlw" || name == "srliw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 5);
-	  Instruction *bitsize = current_bb->value_inst(32, 32);
-	  arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
-	}
-      else
-	{
-	  arg2 = current_bb->build_trunc(arg2, 6);
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
-	}
-      Instruction *res = current_bb->build_inst(Op::LSHR, arg1, arg2);
-      if (name == "srlw" || name == "srliw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_ishift(name, Op::LSHR);
   else if (name == "sra" || name == "sraw" || name == "srai" || name == "sraiw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2;
-      if (name == "srai" || name == "sraiw")
-	arg2 = get_imm(5);
-      else
-	arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (reg_bitsize == 32 || name == "sraw" || name == "sraiw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 5);
-	  Instruction *bitsize = current_bb->value_inst(32, 32);
-	  arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
-	}
-      else
-	{
-	  arg2 = current_bb->build_trunc(arg2, 6);
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
-	}
-      Instruction *res = current_bb->build_inst(Op::ASHR, arg1, arg2);
-      if (name == "sraw" || name == "sraiw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_ishift(name, Op::ASHR);
   else if (name == "sub" || name == "subw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_comma(4);
-      Instruction *arg2 = get_reg_value(5);
-      get_end_of_line(6);
-
-      if (name == "subw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	  arg2 = current_bb->build_trunc(arg2, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::SUB, arg1, arg2);
-      if (name == "subw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_ibinary(name, Op::SUB);
   else if (name == "neg" || name == "negw")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_end_of_line(4);
-
-      if (name == "negw")
-	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
-	}
-      Instruction *res = current_bb->build_inst(Op::NEG, arg1);
-      if (name == "negw")
-	{
-	  Instruction *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
-	}
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_iunary(name, Op::NEG);
   else if (name == "sext.w")
     {
       Instruction *dest = get_reg(1);
@@ -1353,24 +1072,9 @@ void parser::parse_function()
       current_bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "not")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_end_of_line(4);
-
-      Instruction *res = current_bb->build_inst(Op::NOT, arg1);
-      current_bb->build_inst(Op::WRITE, dest, res);
-    }
+    gen_iunary(name, Op::NOT);
   else if (name == "mv")
-    {
-      Instruction *dest = get_reg(1);
-      get_comma(2);
-      Instruction *arg1 = get_reg_value(3);
-      get_end_of_line(4);
-
-      current_bb->build_inst(Op::WRITE, dest, arg1);
-    }
+    gen_iunary(name, Op::MOV);
   else if (name == "li")
     {
       Instruction *dest = get_reg(1);
