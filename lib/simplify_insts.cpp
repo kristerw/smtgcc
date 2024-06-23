@@ -559,6 +559,15 @@ Instruction *simplify_eq(Instruction *inst)
   if (arg1 == arg2)
     return inst->bb->value_inst(1, 1);
 
+  // (x - y) == 0 -> x == y
+  if (arg1->opcode == Op::SUB && is_value_zero(arg2))
+    {
+      Instruction *new_inst =
+	create_inst(Op::EQ, arg1->arguments[0], arg1->arguments[1]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   return inst;
 }
 
@@ -619,6 +628,15 @@ Instruction *simplify_ne(Instruction *inst)
 	  new_inst->insert_before(inst);
 	  return new_inst;
 	}
+    }
+
+  // (x - y) != 0 -> x != y
+  if (arg1->opcode == Op::SUB && is_value_zero(arg2))
+    {
+      Instruction *new_inst =
+	create_inst(Op::NE, arg1->arguments[0], arg1->arguments[1]);
+      new_inst->insert_before(inst);
+      return new_inst;
     }
 
   return inst;
