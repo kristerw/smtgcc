@@ -107,6 +107,8 @@ struct Converter {
   Instruction *build_memory_inst(uint64_t id, uint64_t size, uint32_t flags);
   void constrain_range(Basic_block *bb, tree expr, Instruction *inst, Instruction *undef=nullptr);
   void mem_access_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, uint64_t size);
+  bool is_extracting_from_value(tree expr);
+  std::tuple<Instruction *, Instruction *, Instruction *> extract_component_ref(Basic_block *bb, tree expr);
   std::tuple<Instruction *, Instruction *, Instruction *> tree2inst_undef_prov(Basic_block *bb, tree expr);
   std::pair<Instruction *, Instruction *>tree2inst_undef(Basic_block *bb, tree expr);
   std::pair<Instruction *, Instruction *>tree2inst_prov(Basic_block *bb, tree expr);
@@ -905,6 +907,43 @@ uint8_t Converter::padding_at_offset(tree type, uint64_t offset)
   return 0;
 }
 
+bool Converter::is_extracting_from_value(tree expr)
+{
+  if (tree2instruction.contains(expr))
+    return true;
+  if (TREE_CODE(expr) == SSA_NAME)
+    return true;
+  if (TREE_CODE(expr) == COMPONENT_REF)
+    return is_extracting_from_value(TREE_OPERAND(expr, 0));
+  return false;
+}
+
+std::tuple<Instruction *, Instruction *, Instruction *> Converter::extract_component_ref(Basic_block *bb, tree expr)
+{
+  tree object = TREE_OPERAND(expr, 0);
+  tree field = TREE_OPERAND(expr, 1);
+  auto [inst, undef, prov] = tree2inst_undef_prov(bb, object);
+
+  // TODO: This will need implementation of index checking in variably sized
+  //       array too, otherwise we will fail to catch when k is too big in
+  //         struct A {int c[k]; int x[n];};
+  //       from gcc.dg/pr51628-18.c.
+  if (TREE_CODE(DECL_FIELD_OFFSET(field)) != INTEGER_CST)
+    throw Not_implemented("process_component_ref: non-constant field offset");
+  uint64_t offset = get_int_cst_val(DECL_FIELD_OFFSET(field));
+  uint64_t bit_offset = get_int_cst_val(DECL_FIELD_BIT_OFFSET(field));
+  uint64_t low_val = 8 * offset + bit_offset;
+  uint64_t high_val = low_val + bitsize_for_type(TREE_TYPE(expr)) - 1;
+  Instruction *high = bb->value_inst(high_val, 32);
+  Instruction *low = bb->value_inst(low_val, 32);
+  inst = bb->build_inst(Op::EXTRACT, inst, high, low);
+  if (undef)
+    undef = bb->build_inst(Op::EXTRACT, undef, high, low);
+  if (!prov && POINTER_TYPE_P(TREE_TYPE(expr)))
+    prov = bb->build_extract_id(inst);
+  return {inst, undef, prov};
+}
+
 std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_undef_prov(Basic_block *bb, tree expr)
 {
   check_type(TREE_TYPE(expr));
@@ -1111,8 +1150,12 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_und
 	  return vector_as_array(bb, expr);
 	return process_load(bb, expr);
       }
-    case MEM_REF:
     case COMPONENT_REF:
+      if (is_extracting_from_value(expr))
+	return extract_component_ref(bb, expr);
+      else
+	return process_load(bb, expr);
+    case MEM_REF:
     case TARGET_MEM_REF:
     case VAR_DECL:
     case RESULT_DECL:
