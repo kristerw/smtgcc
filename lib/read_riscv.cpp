@@ -332,7 +332,7 @@ Instruction *parser::get_reg(unsigned idx)
   // TODO: Check length.
   uint32_t value = buf[tokens[idx].pos + 1] - '0';
   if (tokens[idx].size == 3)
-    value = value * 10 + (buf[tokens[idx].pos + 1] - '0');
+    value = value * 10 + (buf[tokens[idx].pos + 2] - '0');
   if (buf[tokens[idx].pos] == 'a')
     return rstate->registers[10 + value];
   else if (buf[tokens[idx].pos] == 's')
@@ -372,7 +372,7 @@ Instruction *parser::get_freg(unsigned idx)
       pos++;
     }
   uint32_t value = buf[pos] - '0';
-  if (tokens[idx].size == pos)
+  if (tokens[idx].size == 2 + pos - tokens[idx].pos)
     value = value * 10 + (buf[pos + 1] - '0');
   if (is_pseudo_reg)
     {
@@ -392,7 +392,7 @@ Instruction *parser::get_freg(unsigned idx)
 	  if (value <= 7)
 	    return rstate->fregisters[value];
 	  else
-	    return rstate->fregisters[value + 21];
+	    return rstate->fregisters[value + 20];
 	}
       else
 	return rstate->fregisters[10 + value];
@@ -483,43 +483,7 @@ Instruction *parser::get_reg_value(unsigned idx)
       && buf[tokens[idx].pos + 2] == 'r'
       && buf[tokens[idx].pos + 3] == 'o')
     return current_bb->value_inst(0, reg_bitsize);
-  if (tokens[idx].size == 2
-      && buf[tokens[idx].pos + 0] == 'r'
-      && buf[tokens[idx].pos + 1] == 'a')
-    return current_bb->build_inst(Op::READ, rstate->registers[1]);
-  if (tokens[idx].size == 2
-      && buf[tokens[idx].pos + 0] == 's'
-      && buf[tokens[idx].pos + 1] == 'p')
-    return current_bb->build_inst(Op::READ, rstate->registers[2]);
-  if (tokens[idx].kind != lexeme::name
-      || (buf[tokens[idx].pos] != 'a'
-	  && buf[tokens[idx].pos] != 's'
-	  && buf[tokens[idx].pos] != 't'))
-    throw Parse_error("expected a register instead of "
-		      + token_string(tokens[idx]), line_number);
-  // TODO: Check length.
-  uint32_t value = buf[tokens[idx].pos + 1] - '0';
-  if (tokens[idx].size == 3)
-    value = value * 10 + (buf[tokens[idx].pos + 1] - '0');
-  if (buf[tokens[idx].pos] == 'a')
-    return current_bb->build_inst(Op::READ, rstate->registers[10 + value]);
-  else if (buf[tokens[idx].pos] == 's')
-    {
-      if (value < 2)
-	return current_bb->build_inst(Op::READ, rstate->registers[8 + value]);
-      else
-	return current_bb->build_inst(Op::READ, rstate->registers[18 - 2 + value]);
-    }
-  else if (buf[tokens[idx].pos] == 't')
-    {
-      if (value < 3)
-	return current_bb->build_inst(Op::READ, rstate->registers[5 + value]);
-      else
-	return current_bb->build_inst(Op::READ, rstate->registers[28 - 3 + value]);
-    }
-  else
-    throw Parse_error("expected a register instead of "
-		      + token_string(tokens[idx]), line_number);
+  return current_bb->build_inst(Op::READ, get_reg(idx));
 }
 
 Instruction *parser::get_freg_value(unsigned idx)
