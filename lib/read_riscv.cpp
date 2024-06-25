@@ -956,7 +956,7 @@ void parser::parse_function()
   }
 
   std::string name = get_name(&buf[tokens[0].pos]);
-  if (name == ".cfi_startproc" || name == ".cfi_endproc" )
+  if (name.starts_with(".cfi"))
     ;
   else if (name == "add" || name == "addw" || name == "addi" || name == "addiw")
     gen_ibinary(name, Op::ADD);
