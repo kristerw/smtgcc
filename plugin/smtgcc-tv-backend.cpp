@@ -44,53 +44,168 @@ struct Regs
   Instruction *fregs[2] = {nullptr, nullptr};
 };
 
+static Instruction *pad_to_freg_size(riscv_state *rstate, Instruction *inst)
+{
+  assert(inst->bitsize <= rstate->freg_bitsize);
+  if (inst->bitsize < rstate->freg_bitsize)
+    {
+      uint32_t padding_bitsize = rstate->freg_bitsize - inst->bitsize;
+      Instruction *m1 = inst->bb->value_m1_inst(padding_bitsize);
+      inst = inst->bb->build_inst(Op::CONCAT, m1, inst);
+    }
+  return inst;
+}
+
+static Instruction *pad_to_reg_size(riscv_state *rstate, Instruction *inst, tree type)
+{
+  assert(inst->bitsize <= rstate->reg_bitsize);
+  if (inst->bitsize < rstate->reg_bitsize)
+    {
+      Instruction *bs_inst = inst->bb->value_inst(rstate->reg_bitsize, 32);
+      if (INTEGRAL_TYPE_P(type) && TYPE_UNSIGNED(type))
+	inst = inst->bb->build_inst(Op::ZEXT, inst, bs_inst);
+      else
+	inst = inst->bb->build_inst(Op::SEXT, inst, bs_inst);
+    }
+  return inst;
+}
+
+// Flatten structure fields as described in the hardware floating-point
+// calling convention.
+// Returns false if the structure cannot be handled by the calling convention
+// (and therefore must fall back to the integer calling convention).
+static bool flatten_struct(riscv_state *rstate, tree struct_type, std::vector<tree>& elems, int& nof_r, int& nof_f)
+{
+  for (tree fld = TYPE_FIELDS(struct_type); fld; fld = DECL_CHAIN(fld))
+    {
+      if (TREE_CODE(fld) != FIELD_DECL)
+	continue;
+      tree type = TREE_TYPE(fld);
+      uint64_t bitsize = bitsize_for_type(type);
+      if (bitsize == 0)
+	continue;
+      if (SCALAR_FLOAT_TYPE_P(type) && bitsize <= rstate->freg_bitsize)
+	{
+	  elems.push_back(fld);
+	  nof_f++;
+	}
+      else if (COMPLEX_FLOAT_TYPE_P(type) &&
+	       bitsize <= 2 * rstate->freg_bitsize)
+	{
+	  elems.push_back(fld);
+	  nof_f += 2;
+	}
+      else if (INTEGRAL_TYPE_P(type) && bitsize <= rstate->reg_bitsize)
+	{
+	  elems.push_back(fld);
+	  nof_r++;
+	}
+      else if (TREE_CODE(type) == RECORD_TYPE)
+	{
+	  if (!flatten_struct(rstate, type, elems, nof_r, nof_f))
+	    return false;
+	}
+      else
+	return false;
+    }
+
+  if (nof_f == 0)
+    return false;
+  if (nof_r + nof_f > 2)
+    return false;
+
+  return true;
+}
+
+// Determines if the structure can be handled by the hardware floating-point
+// calling convention, and in that case, splits the structure into
+// instructions for each register the structure will be passed in.
+static std::optional<Regs> regs_for_fp_struct(riscv_state *rstate, Instruction *value, tree struct_type)
+{
+  std::vector<tree> elems;
+  int nof_r = 0;
+  int nof_f = 0;
+  if (!flatten_struct(rstate, struct_type, elems, nof_r, nof_f))
+    return {};
+
+  Basic_block *bb = value->bb;
+  Regs regs;
+  int reg_nbr = 0;
+  int freg_nbr = 0;
+  for (tree fld : elems)
+    {
+      tree type = TREE_TYPE(fld);
+      uint64_t offset = get_int_cst_val(DECL_FIELD_OFFSET(fld));
+      uint64_t bit_offset = get_int_cst_val(DECL_FIELD_BIT_OFFSET(fld));
+      uint64_t low_val = 8 * offset + bit_offset;
+      uint64_t high_val = low_val + bitsize_for_type(type) - 1;
+      Instruction *high = bb->value_inst(high_val, 32);
+      Instruction *low = bb->value_inst(low_val, 32);
+      Instruction *inst = bb->build_inst(Op::EXTRACT, value, high, low);
+      if (SCALAR_FLOAT_TYPE_P(type))
+	{
+	  assert(freg_nbr < 2);
+	  regs.fregs[freg_nbr++] = pad_to_freg_size(rstate, inst);
+	}
+      else if (COMPLEX_FLOAT_TYPE_P(type))
+	{
+	  assert(freg_nbr == 0);
+	  uint64_t elt_bitsize = value->bitsize / 2;
+	  assert(elt_bitsize == 16 || elt_bitsize == 32 || elt_bitsize == 64);
+	  Instruction *reg_value = bb->build_trunc(value, elt_bitsize);
+	  regs.fregs[freg_nbr++] = pad_to_freg_size(rstate, reg_value);
+	  Instruction *high = bb->value_inst(value->bitsize - 1, 32);
+	  Instruction *low = bb->value_inst(elt_bitsize, 32);
+	  reg_value = bb->build_inst(Op::EXTRACT, value, high, low);
+	  regs.fregs[freg_nbr++] = pad_to_freg_size(rstate, reg_value);
+	}
+      else if (INTEGRAL_TYPE_P(type))
+	{
+	  assert(reg_nbr < 2);
+	  regs.regs[reg_nbr++] = pad_to_reg_size(rstate, inst, type);
+	}
+      else
+	assert(0);
+    }
+
+  return regs;
+}
+
+// Determines if the value can be passed in registers, and in that case,
+// splits the structure into instructions for each register the structure
+// will be passed in.
 static std::optional<Regs> regs_for_value(riscv_state *rstate, Instruction *value, tree type)
 {
   Basic_block *bb = value->bb;
 
+  // Handle the hardware floating-point calling convention.
   if (COMPLEX_FLOAT_TYPE_P(type) && value->bitsize <= 2 * rstate->freg_bitsize)
     {
       Regs regs;
       uint64_t elt_bitsize = value->bitsize / 2;
       assert(elt_bitsize == 16 || elt_bitsize == 32 || elt_bitsize == 64);
       Instruction *reg_value = bb->build_trunc(value, elt_bitsize);
-      if (reg_value->bitsize < rstate->freg_bitsize)
-	{
-	  uint32_t padding_bitsize =
-	    rstate->freg_bitsize - reg_value->bitsize;
-	  Instruction *m1 = bb->value_m1_inst(padding_bitsize);
-	  reg_value = bb->build_inst(Op::CONCAT, m1, reg_value);
-	}
-      regs.fregs[0] = reg_value;
+      regs.fregs[0] = pad_to_freg_size(rstate, reg_value);
       Instruction *high = bb->value_inst(value->bitsize - 1, 32);
       Instruction *low = bb->value_inst(elt_bitsize, 32);
       reg_value = bb->build_inst(Op::EXTRACT, value, high, low);
-      if (reg_value->bitsize < rstate->freg_bitsize)
-	{
-	  uint32_t padding_bitsize =
-	    rstate->freg_bitsize - reg_value->bitsize;
-	  Instruction *m1 = bb->value_m1_inst(padding_bitsize);
-	  reg_value = bb->build_inst(Op::CONCAT, m1, reg_value);
-	}
-      regs.fregs[1] = reg_value;
+      regs.fregs[1] = pad_to_freg_size(rstate, reg_value);
       return regs;
     }
-
   if (SCALAR_FLOAT_TYPE_P(type) && value->bitsize <= rstate->freg_bitsize)
     {
-      Instruction *reg_value = value;
-      if (reg_value->bitsize < rstate->freg_bitsize)
-	{
-	  uint32_t padding_bitsize =
-	    rstate->freg_bitsize - reg_value->bitsize;
-	  Instruction *m1 = bb->value_m1_inst(padding_bitsize);
-	  reg_value = bb->build_inst(Op::CONCAT, m1, reg_value);
-	}
       Regs regs;
-      regs.fregs[0] = reg_value;
+      regs.fregs[0] = pad_to_freg_size(rstate, value);
       return regs;
     }
+  if (TREE_CODE(type) == RECORD_TYPE)
+    {
+      std::optional<Regs> res = regs_for_fp_struct(rstate, value, type);
+      if (res)
+	return res;
+    }
 
+  // Handle the integer calling convention.
   if (value->bitsize <= 2 * rstate->reg_bitsize)
     {
       // Pad it out to a multiple of the register size.
@@ -120,12 +235,159 @@ static std::optional<Regs> regs_for_value(riscv_state *rstate, Instruction *valu
   return {};
 }
 
+static void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32_t *reg_nbr)
+{
+  Function *tgt = rstate->module->functions[1];
+  Basic_block *bb = rstate->exit_bb;
+  tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
+
+  Basic_block *src_last_bb = src_func->bbs.back();
+  assert(src_last_bb->last_inst->opcode == Op::RET);
+  uint64_t ret_bitsize = 0;
+  if (src_last_bb->last_inst->nof_args > 0)
+    ret_bitsize = src_last_bb->last_inst->arguments[0]->bitsize;
+  if (ret_bitsize == 0)
+    {
+      bb->build_ret_inst();
+      return;
+    }
+
+  // Handle the hardware floating-point calling convention.
+  std::vector<tree> elems;
+  int nof_r = 0;
+  int nof_f = 0;
+  if (TREE_CODE(ret_type) == RECORD_TYPE
+      && flatten_struct(rstate, ret_type, elems, nof_r, nof_f))
+    {
+      uint32_t reg_nbr = 10;
+      uint32_t freg_nbr = 10;
+      Instruction *retval = nullptr;
+      for (tree fld : elems)
+	{
+	  tree type = TREE_TYPE(fld);
+	  uint64_t type_bitsize = bitsize_for_type(type);
+	  Instruction *value = nullptr;
+	  if (SCALAR_FLOAT_TYPE_P(type))
+	    value = bb->build_inst(Op::READ, rstate->fregisters[freg_nbr++]);
+	  else if (INTEGRAL_TYPE_P(type))
+	    value = bb->build_inst(Op::READ, rstate->registers[reg_nbr++]);
+	  else if (COMPLEX_FLOAT_TYPE_P(type))
+	    {
+	      assert(elems.size() == 1);
+	      uint64_t elt_bitsize = type_bitsize / 2;
+	      assert(elt_bitsize == 16
+		     || elt_bitsize == 32
+		     || elt_bitsize == 64);
+	      Instruction *real =
+		bb->build_inst(Op::READ, rstate->fregisters[10]);
+	      real = bb->build_trunc(real, elt_bitsize);
+	      Instruction *imag =
+		bb->build_inst(Op::READ, rstate->fregisters[11]);
+	      imag = bb->build_trunc(imag, elt_bitsize);
+	      value =
+		bb->build_ret_inst(bb->build_inst(Op::CONCAT, imag, real));
+	      return;
+	    }
+	  uint64_t offset = get_int_cst_val(DECL_FIELD_OFFSET(fld));
+	  uint64_t bit_offset = get_int_cst_val(DECL_FIELD_BIT_OFFSET(fld));
+	  uint64_t low_val = 8 * offset + bit_offset;
+	  if (low_val > 0 && (!retval || retval->bitsize < low_val))
+	    {
+	      uint64_t nof_pad = retval ? low_val - retval->bitsize : low_val;
+	      Instruction *pad = bb->value_inst(0, nof_pad);
+	      if (retval)
+		retval = bb->build_inst(Op::CONCAT, pad, retval);
+	      else
+		retval = pad;
+	    }
+	  value = bb->build_trunc(value, type_bitsize);
+	  if (retval)
+	    retval = bb->build_inst(Op::CONCAT, value, retval);
+	  else
+	    retval = value;
+	}
+      if (retval->bitsize != ret_bitsize)
+	{
+	  Instruction *pad = bb->value_inst(0, ret_bitsize - retval->bitsize);
+	  retval = bb->build_inst(Op::CONCAT, pad, retval);
+	}
+      bb->build_ret_inst(retval);
+      return;
+    }
+  if (COMPLEX_FLOAT_TYPE_P(ret_type)
+      && ret_bitsize <= 2 * rstate->freg_bitsize)
+    {
+      uint64_t elt_bitsize = ret_bitsize / 2;
+      assert(elt_bitsize == 16 || elt_bitsize == 32 || elt_bitsize == 64);
+      Instruction *real = bb->build_inst(Op::READ, rstate->fregisters[10]);
+      real = bb->build_trunc(real, elt_bitsize);
+      Instruction *imag = bb->build_inst(Op::READ, rstate->fregisters[11]);
+      imag = bb->build_trunc(imag, elt_bitsize);
+      bb->build_ret_inst(bb->build_inst(Op::CONCAT, imag, real));
+      return;
+    }
+  if (SCALAR_FLOAT_TYPE_P(ret_type) && ret_bitsize <= rstate->freg_bitsize)
+    {
+      Instruction *retval =
+	bb->build_inst(Op::READ, rstate->fregisters[10]);
+      if (ret_bitsize < retval->bitsize)
+	retval = bb->build_trunc(retval, ret_bitsize);
+      bb->build_ret_inst(retval);
+      return;
+    }
+
+  // Handle the integer calling convention.
+  if (ret_bitsize <= 2 * rstate->reg_bitsize)
+    {
+      Instruction *retval =
+	bb->build_inst(Op::READ, rstate->registers[10]);
+      if (retval->bitsize < ret_bitsize)
+	{
+	  Instruction *inst =
+	    bb->build_inst(Op::READ, rstate->registers[11]);
+	  retval = bb->build_inst(Op::CONCAT, inst, retval);
+	}
+      if (ret_bitsize < retval->bitsize)
+	retval = bb->build_trunc(retval, ret_bitsize);
+      bb->build_ret_inst(retval);
+    }
+  else
+    {
+      // Return of values wider than 2*reg_bitsize are passed in memory,
+      // where the address is specified by an implicit first parameter.
+      assert((ret_bitsize & 7) == 0);
+      Instruction *id = tgt->value_inst(-127, tgt->module->ptr_id_bits);
+      Instruction *mem_size =
+	tgt->value_inst(ret_bitsize / 8, tgt->module->ptr_offset_bits);
+      Instruction *flags = tgt->value_inst(0, 32);
+
+      Basic_block *entry_bb = rstate->entry_bb;
+      Instruction *ret_mem =
+	entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
+      Instruction *reg = rstate->registers[(*reg_nbr)++];
+      entry_bb->build_inst(Op::WRITE, reg, ret_mem);
+
+      // Generate the return value from the value returned in memory.
+      uint64_t size = ret_bitsize / 8;
+      Instruction *retval = 0;
+      for (uint64_t i = 0; i < size; i++)
+	{
+	  Instruction *offset = bb->value_inst(i, ret_mem->bitsize);
+	  Instruction *ptr = bb->build_inst(Op::ADD, ret_mem, offset);
+	  Instruction *data_byte = bb->build_inst(Op::LOAD, ptr);
+	  if (retval)
+	    retval = bb->build_inst(Op::CONCAT, data_byte, retval);
+	  else
+	    retval = data_byte;
+	}
+      bb->build_ret_inst(retval);
+    }
+}
+
 static void setup_riscv_function(riscv_state *rstate, Function *src_func, function *fun)
 {
   assert(rstate->module->functions.size() == 2);
-  Function *tgt = rstate->module->functions[1];
   Basic_block *entry_bb = rstate->entry_bb;
-  Basic_block *exit_bb = rstate->exit_bb;
 
   // Registers x0-x31.
   for (int i = 0; i < 32; i++)
@@ -156,86 +418,10 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
       rstate->sym_name2mem.insert({mem_obj.sym_name, mem});
     }
 
-  // Determine the register to use for each function parameter.
   uint32_t reg_nbr = 10;
   uint32_t freg_nbr = 10;
 
-  Basic_block *src_last_bb = src_func->bbs.back();
-  assert(src_last_bb->last_inst->opcode == Op::RET);
-  uint64_t ret_bitsize = 0;
-  if (src_last_bb->last_inst->nof_args > 0)
-    ret_bitsize = src_last_bb->last_inst->arguments[0]->bitsize;
-  if (ret_bitsize > 0)
-    {
-      Instruction *retval = nullptr;
-      tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
-      if (COMPLEX_FLOAT_TYPE_P(ret_type)
-	  && ret_bitsize <= 2 * rstate->freg_bitsize)
-	{
-	  // Generate the return value from the registers.
-	  uint64_t elt_bitsize = ret_bitsize / 2;
-	  assert(elt_bitsize == 16 || elt_bitsize == 32 || elt_bitsize == 64);
-	  Instruction *real =
-	    exit_bb->build_inst(Op::READ, rstate->fregisters[10]);
-	  real = exit_bb->build_trunc(real, elt_bitsize);
-	  Instruction *imag =
-	    exit_bb->build_inst(Op::READ, rstate->fregisters[11]);
-	  imag = exit_bb->build_trunc(imag, elt_bitsize);
-	  retval = exit_bb->build_inst(Op::CONCAT, imag, real);
-	}
-      else if (SCALAR_FLOAT_TYPE_P(ret_type)
-	       && ret_bitsize <= rstate->freg_bitsize)
-	{
-	  // Generate the return value from the registers.
-	  retval = exit_bb->build_inst(Op::READ, rstate->fregisters[10]);
-	  if (ret_bitsize < retval->bitsize)
-	    retval = exit_bb->build_trunc(retval, ret_bitsize);
-	}
-      else if (ret_bitsize <= 2 * rstate->reg_bitsize)
-	{
-	  // Generate the return value from the registers.
-	  retval = exit_bb->build_inst(Op::READ, rstate->registers[10]);
-	  if (retval->bitsize < ret_bitsize)
-	    {
-	      Instruction *inst =
-		exit_bb->build_inst(Op::READ, rstate->registers[11]);
-	      retval = exit_bb->build_inst(Op::CONCAT, inst, retval);
-	    }
-	  if (ret_bitsize < retval->bitsize)
-	    retval = exit_bb->build_trunc(retval, ret_bitsize);
-	}
-      else
-	{
-	  // Return of values wider than 2*reg_bitsize are passed in memory,
-	  // where the address is specified by an implicit first parameter.
-	  assert((ret_bitsize & 7) == 0);
-	  Instruction *id = tgt->value_inst(-127, tgt->module->ptr_id_bits);
-	  Instruction *mem_size =
-	    tgt->value_inst(ret_bitsize / 8, tgt->module->ptr_offset_bits);
-	  Instruction *flags = tgt->value_inst(0, 32);
-
-	  Instruction *ret_mem =
-	    entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
-	  Instruction *reg = rstate->registers[reg_nbr++];
-	  entry_bb->build_inst(Op::WRITE, reg, ret_mem);
-
-	  // Generate the return value from the value returned in memory.
-	  uint64_t size = ret_bitsize / 8;
-	  for (uint64_t i = 0; i < size; i++)
-	    {
-	      Instruction *offset = exit_bb->value_inst(i, ret_mem->bitsize);
-	      Instruction *ptr = exit_bb->build_inst(Op::ADD, ret_mem, offset);
-	      Instruction *data_byte = exit_bb->build_inst(Op::LOAD, ptr);
-	      if (retval)
-		retval = exit_bb->build_inst(Op::CONCAT, data_byte, retval);
-	      else
-		retval = data_byte;
-	    }
-	}
-      exit_bb->build_ret_inst(retval);
-    }
-  else
-    exit_bb->build_ret_inst();
+  build_return(rstate, src_func, fun, &reg_nbr);
 
   // Set up the PARAM instructions and copy the result to the correct
   // register or memory as required by the ABI.

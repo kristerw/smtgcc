@@ -23,5 +23,6 @@ void unroll_and_optimize(smtgcc::Module *module);
 smtgcc::Module *create_module();
 void adjust_loop_vectorized(smtgcc::Module *module);
 uint64_t bitsize_for_type(tree type);
+unsigned __int128 get_int_cst_val(tree expr);
 
 #endif

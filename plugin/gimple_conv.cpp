@@ -264,25 +264,6 @@ unsigned __int128 get_wide_int_val(wide_int v)
   return value;
 }
 
-unsigned __int128 get_int_cst_val(tree expr)
-{
-  assert(TREE_CODE(expr) == INTEGER_CST);
-  uint32_t precision = TYPE_PRECISION(TREE_TYPE(expr));
-  if (precision > 128)
-    throw Not_implemented("get_int_cst_val: INTEGER_CST precision > 128");
-  assert(precision > 0 && precision <= 128);
-  unsigned __int128 value = 0;
-  if (TREE_INT_CST_NUNITS(expr) == 2)
-    {
-      value = TREE_INT_CST_ELT(expr, 1);
-      value <<= 64;
-      value |= (uint64_t)TREE_INT_CST_ELT(expr, 0);
-    }
-  else
-    value = (int64_t)TREE_INT_CST_ELT(expr, 0);
-  return value;
-}
-
 void check_type(tree type)
 {
   // Note: We do not check that all elements in structures/arrays have
@@ -6053,4 +6034,23 @@ uint64_t bitsize_for_type(tree type)
       throw Not_implemented("bitsize_for_type: dynamically sized type");
     }
   return TREE_INT_CST_LOW(size_tree);
+}
+
+unsigned __int128 get_int_cst_val(tree expr)
+{
+  assert(TREE_CODE(expr) == INTEGER_CST);
+  uint32_t precision = TYPE_PRECISION(TREE_TYPE(expr));
+  if (precision > 128)
+    throw Not_implemented("get_int_cst_val: INTEGER_CST precision > 128");
+  assert(precision > 0 && precision <= 128);
+  unsigned __int128 value = 0;
+  if (TREE_INT_CST_NUNITS(expr) == 2)
+    {
+      value = TREE_INT_CST_ELT(expr, 1);
+      value <<= 64;
+      value |= (uint64_t)TREE_INT_CST_ELT(expr, 0);
+    }
+  else
+    value = (int64_t)TREE_INT_CST_ELT(expr, 0);
+  return value;
 }
