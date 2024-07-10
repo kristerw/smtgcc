@@ -25,6 +25,7 @@
 #include "attribs.h"
 
 #include "smtgcc.h"
+#include "util.h"
 #include "gimple_conv.h"
 
 static_assert(sizeof(HOST_WIDE_INT) == 8);
@@ -480,30 +481,6 @@ void build_ub_if_not_zero(Basic_block *bb, Instruction *inst)
   Instruction *zero = bb->value_inst(0, inst->bitsize);
   Instruction *cmp = bb->build_inst(Op::NE, inst, zero);
   bb->build_inst(Op::UB, cmp);
-}
-
-int popcount(unsigned __int128 x)
-{
-  int result = 0;
-  for (int i = 0; i < 4; i++)
-    {
-      uint32_t t = x >> (i* 32);
-      result += __builtin_popcount(t);
-    }
-  return result;
-}
-
-int clz(unsigned __int128 x)
-{
-  int result = 0;
-  for (int i = 0; i < 4; i++)
-    {
-      uint32_t t = x >> ((3 - i) * 32);
-      if (t)
-	return result + __builtin_clz(t);
-      result += 32;
-    }
-  return result;
 }
 
 void Converter::constrain_range(Basic_block *bb, tree expr, Instruction *inst, Instruction *undef)

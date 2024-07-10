@@ -29,6 +29,7 @@ lib_sources = \
 	lib/smt_cvc5.cpp \
 	lib/smt_z3.cpp \
 	lib/smtgcc.cpp \
+	lib/util.cpp \
 	lib/validate_ir.cpp
 lib_objects = $(lib_sources:.cpp=.o)
 

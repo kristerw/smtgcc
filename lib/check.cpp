@@ -15,6 +15,7 @@
 #include <cinttypes>
 
 #include "smtgcc.h"
+#include "util.h"
 
 using namespace std::string_literals;
 namespace smtgcc {
@@ -153,6 +154,8 @@ class Converter {
   Instruction *get_inst(const Cse_key& key, bool may_add_insts = true);
   Instruction *value_inst(unsigned __int128 value, uint32_t bitsize);
   Instruction *update_key2inst(Instruction *inst);
+  Instruction *fixup_concat(Instruction *inst);
+  Instruction *fixup(Instruction *inst);
   Instruction *simplify(Instruction *inst);
   Instruction *build_inst(Op opcode);
   Instruction *build_inst(Op opcode, Instruction *arg);
@@ -340,6 +343,160 @@ Instruction *Converter::update_key2inst(Instruction *inst)
   return inst;
 }
 
+Instruction *Converter::fixup_concat(Instruction *inst)
+{
+  Instruction *const arg1 = inst->arguments[0];
+  Instruction *const arg2 = inst->arguments[1];
+
+  // concat 0, (extract x) -> lshr x, c
+  if (inst->bitsize <= 128
+      && is_value_zero(arg1)
+      && arg2->opcode == Op::EXTRACT
+      && arg2->arguments[0]->bitsize == inst->bitsize
+      && arg2->arguments[1]->value() == inst->bitsize - 1
+      && arg2->arguments[2]->value() == arg1->bitsize)
+    {
+      bool old_run_simplify_inst = run_simplify_inst;
+      run_simplify_inst = false;
+
+      Instruction *c = value_inst(arg1->bitsize, inst->bitsize);
+      inst = build_inst(Op::LSHR, arg2->arguments[0], c);
+
+      run_simplify_inst = old_run_simplify_inst;
+      return inst;
+    }
+
+  // concat (extract x), 0 -> and x, c
+  if (inst->bitsize <= 128
+      && is_value_zero(arg2)
+      && arg1->opcode == Op::EXTRACT
+      && arg1->arguments[0]->bitsize == inst->bitsize
+      && arg1->arguments[1]->value() == inst->bitsize - 1
+      && arg1->arguments[2]->value() == arg2->bitsize)
+    {
+      bool old_run_simplify_inst = run_simplify_inst;
+      run_simplify_inst = false;
+
+      unsigned __int128 mask = ((unsigned __int128)-1) << arg2->bitsize;
+      Instruction *c = value_inst(mask, inst->bitsize);
+      inst = build_inst(Op::AND, arg1->arguments[0], c);
+
+      run_simplify_inst = old_run_simplify_inst;
+      return inst;
+    }
+
+  // concat (extract x, hi, 0), 0 -> shl x, c
+  if (inst->bitsize <= 128
+      && is_value_zero(arg2)
+      && arg1->opcode == Op::EXTRACT
+      && arg1->arguments[2]->value() == 0
+      && arg1->arguments[0]->bitsize == inst->bitsize)
+    {
+      bool old_run_simplify_inst = run_simplify_inst;
+      run_simplify_inst = false;
+
+      Instruction *c = value_inst(arg2->bitsize, inst->bitsize);
+      inst = build_inst(Op::SHL, arg1->arguments[0], c);
+
+      run_simplify_inst = old_run_simplify_inst;
+      return inst;
+    }
+
+  // concat (sext x), 0 -> shl (sext x), c
+  if (inst->bitsize <= 128
+      && is_value_zero(arg2)
+      && arg1->opcode == Op::SEXT)
+    {
+      bool old_run_simplify_inst = run_simplify_inst;
+      run_simplify_inst = false;
+
+      Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
+      inst = build_inst(Op::SEXT, arg1->arguments[0], bs);
+      Instruction *c = value_inst(arg2->bitsize, inst->bitsize);
+      inst = build_inst(Op::SHL, inst, c);
+
+      run_simplify_inst = old_run_simplify_inst;
+      return inst;
+    }
+
+  // Improve "concat (mul x, y), 0" if x or y is an extraction, where we
+  // may be able to remove extractions (if the original type is wide enough)
+  // and transform this to "mul (shl x, c), y".
+  if (inst->bitsize <= 128
+      && is_value_zero(arg2)
+      && arg1->opcode == Op::MUL
+      && (arg1->arguments[0]->opcode == Op::EXTRACT
+	  || arg1->arguments[1]->opcode == Op::EXTRACT))
+    {
+      bool old_run_simplify_inst = run_simplify_inst;
+      run_simplify_inst = false;
+
+      Instruction *x = arg1->arguments[0];
+      Instruction *y = arg1->arguments[1];
+
+      if (x->opcode == Op::EXTRACT
+	  && x->arguments[2]->value() == 0
+	  && x->arguments[0]->bitsize >= inst->bitsize)
+	{
+	  if (x->arguments[0]->bitsize == inst->bitsize)
+	    x = x->arguments[0];
+	  else
+	    {
+	      Instruction *hi = value_inst(inst->bitsize - 1, 32);
+	      Instruction *lo = x->arguments[2];
+	      x = build_inst(Op::EXTRACT, x->arguments[0], hi, lo);
+	    }
+	}
+      if (y->opcode == Op::EXTRACT
+	  && y->arguments[2]->value() == 0
+	  && y->arguments[0]->bitsize >= inst->bitsize)
+	{
+	  if (y->arguments[0]->bitsize == inst->bitsize)
+	    y = y->arguments[0];
+	  else
+	    {
+	      Instruction *hi = value_inst(inst->bitsize - 1, 32);
+	      Instruction *lo = y->arguments[2];
+	      y = build_inst(Op::EXTRACT, y->arguments[0], hi, lo);
+	    }
+	}
+
+      if (x->bitsize == inst->bitsize && y->bitsize == inst->bitsize)
+	{
+	  Instruction *c = value_inst(arg2->bitsize, inst->bitsize);
+	  x = build_inst(Op::SHL, x, c);
+	}
+      else if (x->bitsize != inst->bitsize)
+	x = build_inst(Op::CONCAT, x, arg2);
+      else
+	y = build_inst(Op::CONCAT, y, arg2);
+      if (y->bitsize != inst->bitsize)
+	y = build_inst(Op::CONCAT, arg2, y);
+
+      Instruction *mul = build_inst(Op::MUL, x, y);
+
+      run_simplify_inst = old_run_simplify_inst;
+      return mul;
+    }
+
+  return inst;
+}
+
+// Our canonical form is not optimal for SMT solvers. This function
+// converts the IR back to what the SMT solver prefers.
+Instruction *Converter::fixup(Instruction *inst)
+{
+  switch (inst->opcode)
+    {
+    case Op::CONCAT:
+      inst = fixup_concat(inst);
+      break;
+    default:
+      break;
+    }
+  return inst;
+}
+
 Instruction *Converter::simplify(Instruction *inst)
 {
   if (!run_simplify_inst)
@@ -408,6 +565,7 @@ Instruction *Converter::build_inst(Op opcode, Instruction *arg1, Instruction *ar
     {
       inst = dest_bb->build_inst(opcode, arg1, arg2);
       inst = simplify(inst);
+      inst = fixup(inst);
       key2inst.insert({key, inst});
     }
   return inst;
