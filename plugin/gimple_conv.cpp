@@ -706,6 +706,23 @@ void load_ub_check(Basic_block *bb, Instruction *ptr, Instruction *provenance, u
     }
 }
 
+// Mark the execution as UB if the source and destination ranges overlap
+// unless they are identical.
+void overlap_ub_check(Basic_block *bb, Instruction *src_ptr, Instruction *dst_ptr, uint64_t size)
+{
+  Instruction *size_inst = bb->value_inst(size - 1, src_ptr->bitsize);
+  Instruction *src_end = bb->build_inst(Op::ADD, src_ptr, size_inst);
+  Instruction *dst_end = bb->build_inst(Op::ADD, dst_ptr, size_inst);
+
+  Instruction *cond1 = bb->build_inst(Op::ULT, src_ptr, dst_ptr);
+  Instruction *cond2 = bb->build_inst(Op::ULT, dst_ptr, src_end);
+  bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
+
+  Instruction *cond3 = bb->build_inst(Op::ULT, dst_ptr, src_ptr);
+  Instruction *cond4 = bb->build_inst(Op::ULT, src_ptr, dst_end);
+  bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond3, cond4));
+}
+
 std::pair<Instruction *, Instruction *> Converter::to_mem_repr(Basic_block *bb, Instruction *inst, Instruction *undef, tree type)
 {
   uint64_t bitsize = bytesize_for_type(type) * 8;
@@ -4237,6 +4254,7 @@ void Converter::process_cfn_memcpy(gimple *stmt, Basic_block *bb)
 
   store_ub_check(bb, orig_dest_ptr, dest_prov, size);
   load_ub_check(bb, orig_src_ptr, src_prov, size);
+  overlap_ub_check(bb, orig_src_ptr, orig_dest_ptr, size);
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
