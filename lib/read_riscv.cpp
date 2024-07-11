@@ -13,7 +13,7 @@ using namespace smtgcc;
 namespace smtgcc {
 namespace {
 
-const int stack_size = 1024;
+const int stack_size = 1024 * 100;
 
 // TODO: Check that all instructions are supported by asm. For example,
 // I am not sure that the "w" version of sgt is supported...
@@ -1520,6 +1520,7 @@ Function *parser::parse(std::string const& file_name)
 
 	    // Set up the stack.
 	    // TODO: Set up memory consistent with the src function.
+	    assert(stack_size < (((uint64_t)1) << module->ptr_offset_bits));
 	    Instruction *id = bb->value_inst(-128, module->ptr_id_bits);
 	    Instruction *mem_size =
 	      bb->value_inst(stack_size, module->ptr_offset_bits);
