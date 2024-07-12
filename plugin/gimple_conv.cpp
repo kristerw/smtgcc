@@ -1101,7 +1101,7 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_und
     case BIT_FIELD_REF:
       {
 	tree arg = TREE_OPERAND(expr, 0);
-	auto [value, undef] = tree2inst_undef(bb, arg);
+	auto [value, undef, provenance] = tree2inst_undef_prov(bb, arg);
 	uint64_t bitsize = get_int_cst_val(TREE_OPERAND(expr, 1));
 	uint64_t bit_offset = get_int_cst_val(TREE_OPERAND(expr, 2));
 	Instruction *high =
@@ -1113,7 +1113,9 @@ std::tuple<Instruction *, Instruction *, Instruction *> Converter::tree2inst_und
 	  undef = bb->build_inst(Op::EXTRACT, undef, high, low);
 	std::tie(value, undef) =
 	  from_mem_repr(bb, value, undef, TREE_TYPE(expr));
-	return {value, undef, nullptr};
+	if (POINTER_TYPE_P(TREE_TYPE(expr)) && !provenance)
+	  provenance = bb->build_extract_id(value);
+	return {value, undef, provenance};
       }
     case ARRAY_REF:
       {
