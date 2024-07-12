@@ -15,202 +15,202 @@ namespace smtgcc {
 
 namespace {
 
-bool is_boolean_sext(Instruction *inst)
+bool is_boolean_sext(Inst *inst)
 {
-  return inst->opcode == Op::SEXT && inst->arguments[0]->bitsize == 1;
+  return inst->op == Op::SEXT && inst->args[0]->bitsize == 1;
 }
 
-void flatten(Instruction *inst, std::vector<Instruction *>& elems)
+void flatten(Inst *inst, std::vector<Inst *>& elems)
 {
-  Op op = inst->opcode;
-  if (inst->arguments[1]->opcode == op)
-    flatten(inst->arguments[1], elems);
+  Op op = inst->op;
+  if (inst->args[1]->op == op)
+    flatten(inst->args[1], elems);
   else
-    elems.push_back(inst->arguments[1]);
-  if (inst->arguments[0]->opcode == op)
-    flatten(inst->arguments[0], elems);
+    elems.push_back(inst->args[1]);
+  if (inst->args[0]->op == op)
+    flatten(inst->args[0], elems);
   else
-    elems.push_back(inst->arguments[0]);
+    elems.push_back(inst->args[0]);
 }
 
-Instruction *cfold_add(Instruction *inst)
+Inst *cfold_add(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val + arg2_val, inst->bitsize);
 }
 
-Instruction *cfold_sub(Instruction *inst)
+Inst *cfold_sub(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val - arg2_val, inst->bitsize);
 }
 
-Instruction *cfold_and(Instruction *inst)
+Inst *cfold_and(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val & arg2_val, inst->bitsize);
 }
 
-Instruction *cfold_or(Instruction *inst)
+Inst *cfold_or(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val | arg2_val, inst->bitsize);
 }
 
-Instruction *cfold_xor(Instruction *inst)
+Inst *cfold_xor(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val ^ arg2_val, inst->bitsize);
 }
 
-Instruction *cfold_concat(Instruction *inst)
+Inst *cfold_concat(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
-  unsigned __int128 val = (arg1_val << inst->arguments[1]->bitsize) | arg2_val;
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
+  unsigned __int128 val = (arg1_val << inst->args[1]->bitsize) | arg2_val;
   return inst->bb->value_inst(val, inst->bitsize);
 }
 
-Instruction *cfold_mul(Instruction *inst)
+Inst *cfold_mul(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val * arg2_val, inst->bitsize);
 }
 
-Instruction *cfold_extract(Instruction *inst)
+Inst *cfold_extract(Inst *inst)
 {
-  unsigned __int128 arg_val = inst->arguments[0]->value();
-  arg_val >>= inst->arguments[2]->value();
+  unsigned __int128 arg_val = inst->args[0]->value();
+  arg_val >>= inst->args[2]->value();
   return inst->bb->value_inst(arg_val, inst->bitsize);
 }
 
-Instruction *cfold_neg(Instruction *inst)
+Inst *cfold_neg(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
   return inst->bb->value_inst(-arg1_val, inst->bitsize);
 }
 
-Instruction *cfold_not(Instruction *inst)
+Inst *cfold_not(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
   return inst->bb->value_inst(~arg1_val, inst->bitsize);
 }
 
-Instruction *cfold_ne(Instruction *inst)
+Inst *cfold_ne(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val != arg2_val, 1);
 }
 
-Instruction *cfold_eq(Instruction *inst)
+Inst *cfold_eq(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val == arg2_val, 1);
 }
 
-Instruction *cfold_uge(Instruction *inst)
+Inst *cfold_uge(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val >= arg2_val, 1);
 }
 
-Instruction *cfold_ugt(Instruction *inst)
+Inst *cfold_ugt(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val > arg2_val, 1);
 }
 
-Instruction *cfold_ule(Instruction *inst)
+Inst *cfold_ule(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val <= arg2_val, 1);
 }
 
-Instruction *cfold_ult(Instruction *inst)
+Inst *cfold_ult(Inst *inst)
 {
-  unsigned __int128 arg1_val = inst->arguments[0]->value();
-  unsigned __int128 arg2_val = inst->arguments[1]->value();
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val < arg2_val, 1);
 }
 
-Instruction *cfold_sge(Instruction *inst)
+Inst *cfold_sge(Inst *inst)
 {
-  uint32_t shift = 128 - inst->arguments[0]->bitsize;
-  __int128 arg1_val = inst->arguments[0]->value();
+  uint32_t shift = 128 - inst->args[0]->bitsize;
+  __int128 arg1_val = inst->args[0]->value();
   arg1_val = (arg1_val << shift) >> shift;
-  __int128 arg2_val = inst->arguments[1]->value();
+  __int128 arg2_val = inst->args[1]->value();
   arg2_val = (arg2_val << shift) >> shift;
   return inst->bb->value_inst(arg1_val >= arg2_val, 1);
 }
 
-Instruction *cfold_sgt(Instruction *inst)
+Inst *cfold_sgt(Inst *inst)
 {
-  uint32_t shift = 128 - inst->arguments[0]->bitsize;
-  __int128 arg1_val = inst->arguments[0]->value();
+  uint32_t shift = 128 - inst->args[0]->bitsize;
+  __int128 arg1_val = inst->args[0]->value();
   arg1_val = (arg1_val << shift) >> shift;
-  __int128 arg2_val = inst->arguments[1]->value();
+  __int128 arg2_val = inst->args[1]->value();
   arg2_val = (arg2_val << shift) >> shift;
   return inst->bb->value_inst(arg1_val > arg2_val, 1);
 }
 
-Instruction *cfold_sle(Instruction *inst)
+Inst *cfold_sle(Inst *inst)
 {
-  uint32_t shift = 128 - inst->arguments[0]->bitsize;
-  __int128 arg1_val = inst->arguments[0]->value();
+  uint32_t shift = 128 - inst->args[0]->bitsize;
+  __int128 arg1_val = inst->args[0]->value();
   arg1_val = (arg1_val << shift) >> shift;
-  __int128 arg2_val = inst->arguments[1]->value();
+  __int128 arg2_val = inst->args[1]->value();
   arg2_val = (arg2_val << shift) >> shift;
   return inst->bb->value_inst(arg1_val <= arg2_val, 1);
 }
 
-Instruction *cfold_slt(Instruction *inst)
+Inst *cfold_slt(Inst *inst)
 {
-  uint32_t shift = 128 - inst->arguments[0]->bitsize;
-  __int128 arg1_val = inst->arguments[0]->value();
+  uint32_t shift = 128 - inst->args[0]->bitsize;
+  __int128 arg1_val = inst->args[0]->value();
   arg1_val = (arg1_val << shift) >> shift;
-  __int128 arg2_val = inst->arguments[1]->value();
+  __int128 arg2_val = inst->args[1]->value();
   arg2_val = (arg2_val << shift) >> shift;
   return inst->bb->value_inst(arg1_val < arg2_val, 1);
 }
 
-Instruction *cfold_zext(Instruction *inst)
+Inst *cfold_zext(Inst *inst)
 {
-  unsigned __int128 arg_val = inst->arguments[0]->value();
+  unsigned __int128 arg_val = inst->args[0]->value();
   return inst->bb->value_inst(arg_val, inst->bitsize);
 }
 
-Instruction *cfold_sext(Instruction *inst)
+Inst *cfold_sext(Inst *inst)
 {
-  __int128 arg_val = inst->arguments[0]->value();
-  uint32_t shift = 128 - inst->arguments[0]->bitsize;
+  __int128 arg_val = inst->args[0]->value();
+  uint32_t shift = 128 - inst->args[0]->bitsize;
   arg_val <<= shift;
   arg_val >>= shift;
   return inst->bb->value_inst(arg_val, inst->bitsize);
 }
 
-Instruction *constant_fold_inst(Instruction *inst)
+Inst *constant_fold_inst(Inst *inst)
 {
   if (inst->bitsize > 128)
     return inst;
   for (uint64_t i = 0; i < inst->nof_args; i++)
     {
-      Instruction *arg = inst->arguments[i];
-      if (arg->opcode != Op::VALUE)
+      Inst *arg = inst->args[i];
+      if (arg->op != Op::VALUE)
 	return inst;
     }
 
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::ADD:
       inst = cfold_add(inst);
@@ -285,11 +285,11 @@ Instruction *constant_fold_inst(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_mem_size(Instruction *inst, const std::map<uint64_t,uint64_t>& id2size)
+Inst *simplify_mem_size(Inst *inst, const std::map<uint64_t,uint64_t>& id2size)
 {
-  if (inst->arguments[0]->opcode == Op::VALUE)
+  if (inst->args[0]->op == Op::VALUE)
     {
-      uint64_t id = inst->arguments[0]->value();
+      uint64_t id = inst->args[0]->value();
       auto it = id2size.find(id);
       if (it != id2size.end())
 	return inst->bb->value_inst(it->second, inst->bitsize);
@@ -297,10 +297,10 @@ Instruction *simplify_mem_size(Instruction *inst, const std::map<uint64_t,uint64
   return inst;
 }
 
-Instruction *simplify_add(Instruction *inst)
+Inst *simplify_add(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // add 0, x -> x
   if (is_value_zero(arg1))
@@ -311,14 +311,14 @@ Instruction *simplify_add(Instruction *inst)
     return arg1;
 
   // add (add, x, c2), c1 -> add x, (c1 + c2)
-  if (arg2->opcode == Op::VALUE &&
-      arg1->opcode == Op::ADD &&
-      arg1->arguments[1]->opcode == Op::VALUE)
+  if (arg2->op == Op::VALUE &&
+      arg1->op == Op::ADD &&
+      arg1->args[1]->op == Op::VALUE)
     {
       unsigned __int128 c1 = arg2->value();
-      unsigned __int128 c2 = arg1->arguments[1]->value();
-      Instruction *val = inst->bb->value_inst(c1 + c2, inst->bitsize);
-      Instruction *new_inst = create_inst(Op::ADD, arg1->arguments[0], val);
+      unsigned __int128 c2 = arg1->args[1]->value();
+      Inst *val = inst->bb->value_inst(c1 + c2, inst->bitsize);
+      Inst *new_inst = create_inst(Op::ADD, arg1->args[0], val);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -326,10 +326,10 @@ Instruction *simplify_add(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_and(Instruction *inst)
+Inst *simplify_and(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // and x, 0 -> 0
   if (is_value_zero(arg2))
@@ -340,29 +340,27 @@ Instruction *simplify_and(Instruction *inst)
     return arg1;
 
   // and (and, x, c2), c1 -> and x, (c1 & c2)
-  if (arg2->opcode == Op::VALUE &&
-      arg1->opcode == Op::AND &&
-      arg1->arguments[1]->opcode == Op::VALUE)
+  if (arg2->op == Op::VALUE &&
+      arg1->op == Op::AND &&
+      arg1->args[1]->op == Op::VALUE)
     {
       unsigned __int128 c1 = arg2->value();
-      unsigned __int128 c2 = arg1->arguments[1]->value();
-      Instruction *val = inst->bb->value_inst(c1 & c2, inst->bitsize);
-      Instruction *new_inst = create_inst(Op::AND, arg1->arguments[0], val);
+      unsigned __int128 c2 = arg1->args[1]->value();
+      Inst *val = inst->bb->value_inst(c1 & c2, inst->bitsize);
+      Inst *new_inst = create_inst(Op::AND, arg1->args[0], val);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // and (sext x) (sext y) -> sext (and x, y)
-  if (arg1->opcode == Op::SEXT
-      && arg2->opcode == Op::SEXT
-      && arg1->arguments[0]->bitsize == arg2->arguments[0]->bitsize)
+  if (arg1->op == Op::SEXT
+      && arg2->op == Op::SEXT
+      && arg1->args[0]->bitsize == arg2->args[0]->bitsize)
     {
-      Instruction *new_inst1 =
-	create_inst(Op::AND, arg1->arguments[0], arg2->arguments[0]);
+      Inst *new_inst1 = create_inst(Op::AND, arg1->args[0], arg2->args[0]);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *new_inst2 =
-	create_inst(Op::SEXT, new_inst1, arg1->arguments[1]);
+      Inst *new_inst2 = create_inst(Op::SEXT, new_inst1, arg1->args[1]);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
@@ -383,147 +381,139 @@ Instruction *simplify_and(Instruction *inst)
   //   and y (concat x1, x2)
   //     -> concat (and x1, (extract y)) (and x2, (extract y))
   // when x1 or x2 is 0.
-  if (arg1->opcode == Op::CONCAT
-      && arg2->opcode == Op::CONCAT
-      && arg1->arguments[0]->bitsize == arg2->arguments[0]->bitsize
-      && (is_value_zero(arg1->arguments[0])
-	  || is_value_zero(arg1->arguments[1])
-	  || is_value_zero(arg2->arguments[0])
-	  || is_value_zero(arg2->arguments[1])))
+  if (arg1->op == Op::CONCAT
+      && arg2->op == Op::CONCAT
+      && arg1->args[0]->bitsize == arg2->args[0]->bitsize
+      && (is_value_zero(arg1->args[0])
+	  || is_value_zero(arg1->args[1])
+	  || is_value_zero(arg2->args[0])
+	  || is_value_zero(arg2->args[1])))
     {
-      Instruction *r1 =
-	create_inst(Op::AND, arg1->arguments[0], arg2->arguments[0]);
+      Inst *r1 = create_inst(Op::AND, arg1->args[0], arg2->args[0]);
       r1->insert_before(inst);
       r1 = simplify_inst(r1);
-      Instruction *r2 =
-	create_inst(Op::AND, arg1->arguments[1], arg2->arguments[1]);
+      Inst *r2 = create_inst(Op::AND, arg1->args[1], arg2->args[1]);
       r2->insert_before(inst);
       r2 = simplify_inst(r2);
-      Instruction *new_inst = create_inst(Op::CONCAT, r1, r2);
+      Inst *new_inst = create_inst(Op::CONCAT, r1, r2);
       new_inst->insert_before(inst);
       return new_inst;
     }
-  if ((arg1->opcode == Op::CONCAT
-       && arg2->opcode != Op::CONCAT
-       && (is_value_zero(arg1->arguments[0])
-	   || is_value_zero(arg1->arguments[1])))
-      || (arg1->opcode != Op::CONCAT
-	  && arg2->opcode == Op::CONCAT
-	  && (is_value_zero(arg2->arguments[0])
-	      || is_value_zero(arg2->arguments[1]))))
+  if ((arg1->op == Op::CONCAT
+       && arg2->op != Op::CONCAT
+       && (is_value_zero(arg1->args[0]) || is_value_zero(arg1->args[1])))
+      || (arg1->op != Op::CONCAT
+	  && arg2->op == Op::CONCAT
+	  && (is_value_zero(arg2->args[0]) || is_value_zero(arg2->args[1]))))
     {
-      Instruction *x = arg1->opcode == Op::CONCAT ? arg1 : arg2;
-      Instruction *y = arg1->opcode == Op::CONCAT ? arg2 : arg1;
-      Instruction *hi = inst->bb->value_inst(y->bitsize - 1, 32);
-      Instruction *lo = inst->bb->value_inst(x->arguments[1]->bitsize, 32);
-      Instruction *y1 = create_inst(Op::EXTRACT, y, hi, lo);
+      Inst *x = arg1->op == Op::CONCAT ? arg1 : arg2;
+      Inst *y = arg1->op == Op::CONCAT ? arg2 : arg1;
+      Inst *hi = inst->bb->value_inst(y->bitsize - 1, 32);
+      Inst *lo = inst->bb->value_inst(x->args[1]->bitsize, 32);
+      Inst *y1 = create_inst(Op::EXTRACT, y, hi, lo);
       y1->insert_before(inst);
       y1 = simplify_inst(y1);
-      hi = inst->bb->value_inst(x->arguments[1]->bitsize - 1, 32);
+      hi = inst->bb->value_inst(x->args[1]->bitsize - 1, 32);
       lo = inst->bb->value_inst(0, 32);
-      Instruction *y2 = create_inst(Op::EXTRACT, y, hi, lo);
+      Inst *y2 = create_inst(Op::EXTRACT, y, hi, lo);
       y2->insert_before(inst);
       y2 = simplify_inst(y2);
-      Instruction *r1 = create_inst(Op::AND, x->arguments[0], y1);
+      Inst *r1 = create_inst(Op::AND, x->args[0], y1);
       r1->insert_before(inst);
       r1 = simplify_inst(r1);
-      Instruction *r2 = create_inst(Op::AND, x->arguments[1], y2);
+      Inst *r2 = create_inst(Op::AND, x->args[1], y2);
       r2->insert_before(inst);
       r2 = simplify_inst(r2);
-      Instruction *new_inst = create_inst(Op::CONCAT, r1, r2);
+      Inst *new_inst = create_inst(Op::CONCAT, r1, r2);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // and (eq x, y), (ne x, y) -> 0
   // and (ne x, y), (eq x, y) -> 0
-  if (((arg1->opcode == Op::EQ && arg2->opcode == Op::NE)
-       || (arg1->opcode == Op::NE && arg2->opcode == Op::EQ))
-      && ((arg1->arguments[0] == arg2->arguments[0]
-	   && arg1->arguments[1] == arg2->arguments[1])
-	  || (arg1->arguments[0] == arg2->arguments[1]
-	      && arg1->arguments[1] == arg2->arguments[0])))
+  if (((arg1->op == Op::EQ && arg2->op == Op::NE)
+       || (arg1->op == Op::NE && arg2->op == Op::EQ))
+      && ((arg1->args[0] == arg2->args[0]
+	   && arg1->args[1] == arg2->args[1])
+	  || (arg1->args[0] == arg2->args[1]
+	      && arg1->args[1] == arg2->args[0])))
     return inst->bb->value_inst(0, 1);
 
   // and (not x), x -> 0
   // and x, (not x) -> 0
-  if (arg1->opcode == Op::NOT && arg1->arguments[0] == arg2)
+  if (arg1->op == Op::NOT && arg1->args[0] == arg2)
     return inst->bb->value_inst(0, inst->bitsize);
-  if (arg2->opcode == Op::NOT && arg2->arguments[0] == arg1)
+  if (arg2->op == Op::NOT && arg2->args[0] == arg1)
     return inst->bb->value_inst(0, inst->bitsize);
 
   return inst;
 }
 
-Instruction *simplify_concat(Instruction *inst)
+Inst *simplify_concat(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // concat (extract x, hi1, lo1), (extract x, hi2, lo2)
   //   -> extract x, hi1, lo2) if lo1 = hi2 + 1
-  if (arg1->opcode == Op::EXTRACT
-      && arg2->opcode == Op::EXTRACT
-      && arg1->arguments[0] == arg2->arguments[0]
-      && arg1->arguments[2]->value() == arg2->arguments[1]->value() + 1)
+  if (arg1->op == Op::EXTRACT
+      && arg2->op == Op::EXTRACT
+      && arg1->args[0] == arg2->args[0]
+      && arg1->args[2]->value() == arg2->args[1]->value() + 1)
     {
-      Instruction *x = arg1->arguments[0];
-      Instruction *hi1 = arg1->arguments[1];
-      Instruction *lo2 = arg2->arguments[2];
-      Instruction *new_inst = create_inst(Op::EXTRACT, x, hi1, lo2);
+      Inst *x = arg1->args[0];
+      Inst *hi1 = arg1->args[1];
+      Inst *lo2 = arg2->args[2];
+      Inst *new_inst = create_inst(Op::EXTRACT, x, hi1, lo2);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // concat (extract x, hi1, lo1), (concat (extract x, hi2, lo2), y)
   //   -> (concat (extract x, hi1, lo2)), y) if lo1 = hi2 + 1
-  if (arg1->opcode == Op::EXTRACT
-      && arg2->opcode == Op::CONCAT
-      && arg2->arguments[0]->opcode == Op::EXTRACT
-      && arg1->arguments[0] == arg2->arguments[0]->arguments[0]
-      && (arg1->arguments[2]->value()
-	  == arg2->arguments[0]->arguments[1]->value() + 1))
+  if (arg1->op == Op::EXTRACT
+      && arg2->op == Op::CONCAT
+      && arg2->args[0]->op == Op::EXTRACT
+      && arg1->args[0] == arg2->args[0]->args[0]
+      && (arg1->args[2]->value()
+	  == arg2->args[0]->args[1]->value() + 1))
     {
-      Instruction *x = arg1->arguments[0];
-      Instruction *y = arg2->arguments[1];
-      Instruction *hi1 = arg1->arguments[1];
-      Instruction *lo2 = arg2->arguments[0]->arguments[2];
-      Instruction *new_inst1 = create_inst(Op::EXTRACT, x, hi1, lo2);
+      Inst *x = arg1->args[0];
+      Inst *y = arg2->args[1];
+      Inst *hi1 = arg1->args[1];
+      Inst *lo2 = arg2->args[0]->args[2];
+      Inst *new_inst1 = create_inst(Op::EXTRACT, x, hi1, lo2);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *new_inst2 = create_inst(Op::CONCAT, new_inst1, y);
+      Inst *new_inst2 = create_inst(Op::CONCAT, new_inst1, y);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
 
   // concat c1, (concat c2, x)) -> concat c, x
-  if (arg1->opcode == Op::VALUE
-      && arg2->opcode == Op::CONCAT
-      && arg2->arguments[0]->opcode == Op::VALUE
-      && arg1->bitsize + arg2->arguments[0]->bitsize <= 128)
+  if (arg1->op == Op::VALUE
+      && arg2->op == Op::CONCAT
+      && arg2->args[0]->op == Op::VALUE
+      && arg1->bitsize + arg2->args[0]->bitsize <= 128)
     {
-      Instruction *new_const =
-	create_inst(Op::CONCAT, arg1, arg2->arguments[0]);
+      Inst *new_const = create_inst(Op::CONCAT, arg1, arg2->args[0]);
       new_const->insert_before(inst);
       new_const = simplify_inst(new_const);
-      Instruction *new_inst =
-	create_inst(Op::CONCAT, new_const, arg2->arguments[1]);
+      Inst *new_inst = create_inst(Op::CONCAT, new_const, arg2->args[1]);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // concat (concat x, c2), c1 -> concat x, c
-  if (arg2->opcode == Op::VALUE
-      && arg1->opcode == Op::CONCAT
-      && arg1->arguments[1]->opcode == Op::VALUE
-      && arg2->bitsize + arg1->arguments[1]->bitsize <= 128)
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::CONCAT
+      && arg1->args[1]->op == Op::VALUE
+      && arg2->bitsize + arg1->args[1]->bitsize <= 128)
     {
-      Instruction *new_const =
-	create_inst(Op::CONCAT, arg1->arguments[1], arg2);
+      Inst *new_const = create_inst(Op::CONCAT, arg1->args[1], arg2);
       new_const->insert_before(inst);
       new_const = simplify_inst(new_const);
-      Instruction *new_inst =
-	create_inst(Op::CONCAT, arg1->arguments[0], new_const);
+      Inst *new_inst = create_inst(Op::CONCAT, arg1->args[0], new_const);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -531,22 +521,21 @@ Instruction *simplify_concat(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_eq(Instruction *inst)
+Inst *simplify_eq(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // Comparing MININT with a sign extended value is always false.
   // This is common in UB checks when code is negating a promoted char/short.
-  if (arg1->opcode == Op::SEXT
-      && arg2->opcode == Op::VALUE
+  if (arg1->op == Op::SEXT
+      && arg2->op == Op::VALUE
       && is_value_signed_min(arg2))
     return inst->bb->value_inst(0, 1);
 
   // Comparing MININT with "concat 0, x" is always false.
-  if (arg1->opcode == Op::CONCAT
-      && (is_value_zero(arg1->arguments[0])
-	  || is_value_zero(arg1->arguments[1]))
+  if (arg1->op == Op::CONCAT
+      && (is_value_zero(arg1->args[0]) || is_value_zero(arg1->args[1]))
       && is_value_signed_min(arg2))
     return inst->bb->value_inst(0, 1);
 
@@ -557,54 +546,53 @@ Instruction *simplify_eq(Instruction *inst)
   // For Boolean x: x == 0 -> not x
   if (arg1->bitsize == 1 && is_value_zero(arg2))
     {
-      Instruction *new_inst = create_inst(Op::NOT, arg1);
+      Inst *new_inst = create_inst(Op::NOT, arg1);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // For Boolean x: (sext x) == 0 -> not x
-  if (arg1->opcode == Op::SEXT
-      && arg1->arguments[0]->bitsize == 1
+  if (arg1->op == Op::SEXT
+      && arg1->args[0]->bitsize == 1
       && is_value_zero(arg2))
     {
-      Instruction *new_inst = create_inst(Op::NOT, arg1->arguments[0]);
+      Inst *new_inst = create_inst(Op::NOT, arg1->args[0]);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // For Boolean x: (sext x) == -1 -> x
-  if (arg1->opcode == Op::SEXT
-      && arg1->arguments[0]->bitsize == 1
+  if (arg1->op == Op::SEXT
+      && arg1->args[0]->bitsize == 1
       && is_value_m1(arg2))
-    return arg1->arguments[0];
+    return arg1->args[0];
 
   // For Boolean x: (concat 0, x) == 0 -> not x
-  if (arg1->opcode == Op::CONCAT
-      && arg1->arguments[1]->bitsize == 1
-      && is_value_zero(arg1->arguments[0])
+  if (arg1->op == Op::CONCAT
+      && arg1->args[1]->bitsize == 1
+      && is_value_zero(arg1->args[0])
       && is_value_zero(arg2))
     {
-      Instruction *new_inst = create_inst(Op::NOT, arg1->arguments[1]);
+      Inst *new_inst = create_inst(Op::NOT, arg1->args[1]);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // For Boolean x: (concat 0, x) == 1 -> x
-  if (arg1->opcode == Op::CONCAT
-      && arg1->arguments[1]->bitsize == 1
-      && is_value_zero(arg1->arguments[0])
+  if (arg1->op == Op::CONCAT
+      && arg1->args[1]->bitsize == 1
+      && is_value_zero(arg1->args[0])
       && is_value_one(arg2))
-    return arg1->arguments[1];
+    return arg1->args[1];
 
   // x == x -> true
   if (arg1 == arg2)
     return inst->bb->value_inst(1, 1);
 
   // (x - y) == 0 -> x == y
-  if (arg1->opcode == Op::SUB && is_value_zero(arg2))
+  if (arg1->op == Op::SUB && is_value_zero(arg2))
     {
-      Instruction *new_inst =
-	create_inst(Op::EQ, arg1->arguments[0], arg1->arguments[1]);
+      Inst *new_inst = create_inst(Op::EQ, arg1->args[0], arg1->args[1]);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -612,10 +600,10 @@ Instruction *simplify_eq(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_ne(Instruction *inst)
+Inst *simplify_ne(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // For Boolean x: x != 0 -> x
   if (arg1->bitsize == 1 && is_value_zero(arg2))
@@ -624,41 +612,41 @@ Instruction *simplify_ne(Instruction *inst)
   // For Boolean x: x != 1 -> not x
   if (arg1->bitsize == 1 && is_value_one(arg2))
     {
-      Instruction *new_inst = create_inst(Op::NOT, arg1);
+      Inst *new_inst = create_inst(Op::NOT, arg1);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // For Boolean x: (sext x) != 0 -> x
-  if (arg1->opcode == Op::SEXT
-      && arg1->arguments[0]->bitsize == 1
+  if (arg1->op == Op::SEXT
+      && arg1->args[0]->bitsize == 1
       && is_value_zero(arg2))
-    return arg1->arguments[0];
+    return arg1->args[0];
 
   // For Boolean x: (sext x) != -1 -> not x
-  if (arg1->opcode == Op::SEXT
-      && arg1->arguments[0]->bitsize == 1
+  if (arg1->op == Op::SEXT
+      && arg1->args[0]->bitsize == 1
       && is_value_m1(arg2))
     {
-      Instruction *new_inst = create_inst(Op::NOT, arg1->arguments[0]);
+      Inst *new_inst = create_inst(Op::NOT, arg1->args[0]);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // For Boolean x: (concat 0, x) != 0 -> x
-  if (arg1->opcode == Op::CONCAT
-      && arg1->arguments[1]->bitsize == 1
-      && is_value_zero(arg1->arguments[0])
+  if (arg1->op == Op::CONCAT
+      && arg1->args[1]->bitsize == 1
+      && is_value_zero(arg1->args[0])
       && is_value_zero(arg2))
-    return arg1->arguments[1];
+    return arg1->args[1];
 
   // For Boolean x: (concat 0, x) != 1 -> not x
-  if (arg1->opcode == Op::CONCAT
-      && arg1->arguments[1]->bitsize == 1
-      && is_value_zero(arg1->arguments[0])
+  if (arg1->op == Op::CONCAT
+      && arg1->args[1]->bitsize == 1
+      && is_value_zero(arg1->args[0])
       && is_value_one(arg2))
     {
-      Instruction *new_inst = create_inst(Op::NOT, arg1->arguments[1]);
+      Inst *new_inst = create_inst(Op::NOT, arg1->args[1]);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -671,28 +659,27 @@ Instruction *simplify_ne(Instruction *inst)
   // compare one element with 0. For example,
   //   (concat (concat x, x), x) != 0 -> x != 0
   // This is common in checks for uninitialized memory.
-  if (arg1->opcode == Op::CONCAT && is_value_zero(arg2))
+  if (arg1->op == Op::CONCAT && is_value_zero(arg2))
     {
-      std::vector<Instruction *> elems;
+      std::vector<Inst *> elems;
       flatten(arg1, elems);
       bool are_identical =
 	std::all_of(elems.begin(), elems.end(),
 		    [&](auto elem) { return elem == elems.front(); });
       if (are_identical)
 	{
-	  Instruction *elem = elems.front();
-	  Instruction *zero = inst->bb->value_inst(0, elem->bitsize);
-	  Instruction *new_inst = create_inst(Op::NE, elem, zero);
+	  Inst *elem = elems.front();
+	  Inst *zero = inst->bb->value_inst(0, elem->bitsize);
+	  Inst *new_inst = create_inst(Op::NE, elem, zero);
 	  new_inst->insert_before(inst);
 	  return new_inst;
 	}
     }
 
   // (x - y) != 0 -> x != y
-  if (arg1->opcode == Op::SUB && is_value_zero(arg2))
+  if (arg1->op == Op::SUB && is_value_zero(arg2))
     {
-      Instruction *new_inst =
-	create_inst(Op::NE, arg1->arguments[0], arg1->arguments[1]);
+      Inst *new_inst = create_inst(Op::NE, arg1->args[0], arg1->args[1]);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -700,40 +687,40 @@ Instruction *simplify_ne(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_ashr(Instruction *inst)
+Inst *simplify_ashr(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // ashr x, 0 -> x
   if (is_value_zero(arg2))
     return arg1;
 
   // ashr x, c -> sext (extract x (bitsize-1) (bitsize-1)) if c >= (bitsize-1)
-  if (arg2->opcode == Op::VALUE && arg2->value() >= (inst->bitsize - 1))
+  if (arg2->op == Op::VALUE && arg2->value() >= (inst->bitsize - 1))
     {
-      Instruction *idx = inst->bb->value_inst(inst->bitsize - 1, 32);
-      Instruction *new_inst1 = create_inst(Op::EXTRACT, arg1, idx, idx);
+      Inst *idx = inst->bb->value_inst(inst->bitsize - 1, 32);
+      Inst *new_inst1 = create_inst(Op::EXTRACT, arg1, idx, idx);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
-      Instruction *new_inst2 = create_inst(Op::SEXT, new_inst1, bs);
+      Inst *bs = inst->bb->value_inst(inst->bitsize, 32);
+      Inst *new_inst2 = create_inst(Op::SEXT, new_inst1, bs);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
 
   // ashr (ashr x, c1), c2 -> ashr x, (c1 + c2)
-  if (arg2->opcode == Op::VALUE &&
-      arg1->opcode == Op::ASHR &&
-      arg1->arguments[1]->opcode == Op::VALUE)
+  if (arg2->op == Op::VALUE &&
+      arg1->op == Op::ASHR &&
+      arg1->args[1]->op == Op::VALUE)
     {
-      Instruction *x = arg1->arguments[0];
-      unsigned __int128 c1 = arg1->arguments[1]->value();
+      Inst *x = arg1->args[0];
+      unsigned __int128 c1 = arg1->args[1]->value();
       unsigned __int128 c2 = arg2->value();
       assert(c1 > 0 && c1 < inst->bitsize);
       assert(c2 > 0 && c2 < inst->bitsize);
-      Instruction *c = inst->bb->value_inst(c1 + c2, inst->bitsize);
-      Instruction *new_inst = create_inst(Op::ASHR, x, c);
+      Inst *c = inst->bb->value_inst(c1 + c2, inst->bitsize);
+      Inst *new_inst = create_inst(Op::ASHR, x, c);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -743,20 +730,20 @@ Instruction *simplify_ashr(Instruction *inst)
   // We only do this if x is a "concat", "sext", or "extract" instruction,
   // as it is only then that the transformation has any real possibility of
   // improving the result.
-  if (arg2->opcode == Op::VALUE
-      && (arg1->opcode == Op::CONCAT
-	  || arg1->opcode == Op::SEXT
-	  || arg1->opcode == Op::EXTRACT))
+  if (arg2->op == Op::VALUE
+      && (arg1->op == Op::CONCAT
+	  || arg1->op == Op::SEXT
+	  || arg1->op == Op::EXTRACT))
     {
       uint64_t c = arg2->value();
       assert(c > 0 && c < arg1->bitsize);
-      Instruction *high = inst->bb->value_inst(arg1->bitsize - 1, 32);
-      Instruction *low = inst->bb->value_inst(c, 32);
-      Instruction *new_inst1 = create_inst(Op::EXTRACT, arg1, high, low);
+      Inst *high = inst->bb->value_inst(arg1->bitsize - 1, 32);
+      Inst *low = inst->bb->value_inst(c, 32);
+      Inst *new_inst1 = create_inst(Op::EXTRACT, arg1, high, low);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
-      Instruction *new_inst2 = create_inst(Op::SEXT, new_inst1, bs);
+      Inst *bs = inst->bb->value_inst(inst->bitsize, 32);
+      Inst *new_inst2 = create_inst(Op::SEXT, new_inst1, bs);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
@@ -764,31 +751,31 @@ Instruction *simplify_ashr(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_lshr(Instruction *inst)
+Inst *simplify_lshr(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // lshr x, 0 -> x
   if (is_value_zero(arg2))
-    return inst->arguments[0];
+    return inst->args[0];
 
   // lshr x, c -> 0 if c >= bitsize
-  if (arg2->opcode == Op::VALUE && arg2->value() >= inst->bitsize)
+  if (arg2->op == Op::VALUE && arg2->value() >= inst->bitsize)
     return inst->bb->value_inst(0, inst->bitsize);
 
   // lshr x, c -> concat 0, (extract x)
-  if (arg2->opcode == Op::VALUE)
+  if (arg2->op == Op::VALUE)
     {
       uint64_t c = arg2->value();
       assert(c > 0 && c < arg1->bitsize);
-      Instruction *high = inst->bb->value_inst(arg1->bitsize - 1, 32);
-      Instruction *low = inst->bb->value_inst(c, 32);
-      Instruction *new_inst1 = create_inst(Op::EXTRACT, arg1, high, low);
+      Inst *high = inst->bb->value_inst(arg1->bitsize - 1, 32);
+      Inst *low = inst->bb->value_inst(c, 32);
+      Inst *new_inst1 = create_inst(Op::EXTRACT, arg1, high, low);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *zero = inst->bb->value_inst(0, c);
-      Instruction *new_inst2 = create_inst(Op::CONCAT, zero, new_inst1);
+      Inst *zero = inst->bb->value_inst(0, c);
+      Inst *new_inst2 = create_inst(Op::CONCAT, zero, new_inst1);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
@@ -796,10 +783,10 @@ Instruction *simplify_lshr(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_or(Instruction *inst)
+Inst *simplify_or(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // or x, 0 -> x
   if (is_value_zero(arg2))
@@ -812,12 +799,10 @@ Instruction *simplify_or(Instruction *inst)
   // For Boolean x, y: or (sext x) (sext y) -> sext (or x, y)
   if (is_boolean_sext(arg1) && is_boolean_sext(arg2))
     {
-      Instruction *new_inst1 =
-	create_inst(Op::OR, arg1->arguments[0], arg2->arguments[0]);
+      Inst *new_inst1 = create_inst(Op::OR, arg1->args[0], arg2->args[0]);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *new_inst2 =
-	create_inst(Op::SEXT, new_inst1, arg1->arguments[1]);
+      Inst *new_inst2 = create_inst(Op::SEXT, new_inst1, arg1->args[1]);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
@@ -831,41 +816,39 @@ Instruction *simplify_or(Instruction *inst)
   // on an original, wider value. We therefore only do this when at least
   // one of the elements is 0, as we then know that we reduce the number
   // of instructions.
-  if (arg1->opcode == Op::CONCAT
-      && arg2->opcode == Op::CONCAT
-      && arg1->arguments[0]->bitsize == arg2->arguments[0]->bitsize
-      && (is_value_zero(arg1->arguments[0])
-	  || is_value_zero(arg1->arguments[1])
-	  || is_value_zero(arg2->arguments[0])
-	  || is_value_zero(arg2->arguments[1])))
+  if (arg1->op == Op::CONCAT
+      && arg2->op == Op::CONCAT
+      && arg1->args[0]->bitsize == arg2->args[0]->bitsize
+      && (is_value_zero(arg1->args[0])
+	  || is_value_zero(arg1->args[1])
+	  || is_value_zero(arg2->args[0])
+	  || is_value_zero(arg2->args[1])))
     {
-      Instruction *r1 =
-	create_inst(Op::OR, arg1->arguments[0], arg2->arguments[0]);
+      Inst *r1 = create_inst(Op::OR, arg1->args[0], arg2->args[0]);
       r1->insert_before(inst);
       r1 = simplify_inst(r1);
-      Instruction *r2 =
-	create_inst(Op::OR, arg1->arguments[1], arg2->arguments[1]);
+      Inst *r2 = create_inst(Op::OR, arg1->args[1], arg2->args[1]);
       r2->insert_before(inst);
       r2 = simplify_inst(r2);
-      Instruction *new_inst = create_inst(Op::CONCAT, r1, r2);
+      Inst *new_inst = create_inst(Op::CONCAT, r1, r2);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // For Boolean x: or (concat 0, x), 1 -> 1
-  if (arg1->opcode == Op::CONCAT
-      && is_value_zero(arg1->arguments[0])
-      && arg1->arguments[1]->bitsize == 1
+  if (arg1->op == Op::CONCAT
+      && is_value_zero(arg1->args[0])
+      && arg1->args[1]->bitsize == 1
       && is_value_one(arg2))
     return arg2;
 
   return inst;
 }
 
-Instruction *simplify_xor(Instruction *inst)
+Inst *simplify_xor(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // xor x, 0 -> x
   if (is_value_zero(arg2))
@@ -874,7 +857,7 @@ Instruction *simplify_xor(Instruction *inst)
   // xor x, -1 -> not x
   if (is_value_m1(arg2))
     {
-      Instruction *new_inst = create_inst(Op::NOT, arg1);
+      Inst *new_inst = create_inst(Op::NOT, arg1);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -882,12 +865,10 @@ Instruction *simplify_xor(Instruction *inst)
   // For Boolean x, y: xor (sext x) (sext y) -> sext (xor x, y)
   if (is_boolean_sext(arg1) && is_boolean_sext(arg2))
     {
-      Instruction *new_inst1 =
-	create_inst(Op::XOR, arg1->arguments[0], arg2->arguments[0]);
+      Inst *new_inst1 = create_inst(Op::XOR, arg1->args[0], arg2->args[0]);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *new_inst2 =
-	create_inst(Op::SEXT, new_inst1, arg1->arguments[1]);
+      Inst *new_inst2 = create_inst(Op::SEXT, new_inst1, arg1->args[1]);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
@@ -901,38 +882,35 @@ Instruction *simplify_xor(Instruction *inst)
   // on an original, wider value. We therefore only do this when at least
   // one of the elements is 0, as we then know that we reduce the number
   // of instructions.
-  if (arg1->opcode == Op::CONCAT
-      && arg2->opcode == Op::CONCAT
-      && arg1->arguments[0]->bitsize == arg2->arguments[0]->bitsize
-      && (is_value_zero(arg1->arguments[0])
-	  || is_value_zero(arg1->arguments[1])
-	  || is_value_zero(arg2->arguments[0])
-	  || is_value_zero(arg2->arguments[1])))
+  if (arg1->op == Op::CONCAT
+      && arg2->op == Op::CONCAT
+      && arg1->args[0]->bitsize == arg2->args[0]->bitsize
+      && (is_value_zero(arg1->args[0])
+	  || is_value_zero(arg1->args[1])
+	  || is_value_zero(arg2->args[0])
+	  || is_value_zero(arg2->args[1])))
     {
-      Instruction *r1 =
-	create_inst(Op::XOR, arg1->arguments[0], arg2->arguments[0]);
+      Inst *r1 = create_inst(Op::XOR, arg1->args[0], arg2->args[0]);
       r1->insert_before(inst);
       r1 = simplify_inst(r1);
-      Instruction *r2 =
-	create_inst(Op::XOR, arg1->arguments[1], arg2->arguments[1]);
+      Inst *r2 = create_inst(Op::XOR, arg1->args[1], arg2->args[1]);
       r2->insert_before(inst);
       r2 = simplify_inst(r2);
-      Instruction *new_inst = create_inst(Op::CONCAT, r1, r2);
+      Inst *new_inst = create_inst(Op::CONCAT, r1, r2);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // For Boolean x: xor (concat 0, x), 1 -> concat 0, (not x)
-  if (arg1->opcode == Op::CONCAT
-      && is_value_zero(arg1->arguments[0])
-      && arg1->arguments[1]->bitsize == 1
+  if (arg1->op == Op::CONCAT
+      && is_value_zero(arg1->args[0])
+      && arg1->args[1]->bitsize == 1
       && is_value_one(arg2))
     {
-      Instruction *new_inst1 = create_inst(Op::NOT, arg1->arguments[1]);
+      Inst *new_inst1 = create_inst(Op::NOT, arg1->args[1]);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *new_inst2 =
-	create_inst(Op::CONCAT, arg1->arguments[0], new_inst1);
+      Inst *new_inst2 = create_inst(Op::CONCAT, arg1->args[0], new_inst1);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
@@ -940,49 +918,49 @@ Instruction *simplify_xor(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_sext(Instruction *inst)
+Inst *simplify_sext(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // sext (sext x) -> sext x
-  if (arg1->opcode == Op::SEXT)
+  if (arg1->op == Op::SEXT)
     {
-      Instruction *new_inst = create_inst(Op::SEXT, arg1->arguments[0], arg2);
+      Inst *new_inst = create_inst(Op::SEXT, arg1->args[0], arg2);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // sext (extract (sext x)) -> sext (extract x)
-  if (arg1->opcode == Op::EXTRACT && arg1->arguments[0]->opcode == Op::SEXT)
+  if (arg1->op == Op::EXTRACT && arg1->args[0]->op == Op::SEXT)
     {
-      Instruction *x = arg1->arguments[0]->arguments[0];
+      Inst *x = arg1->args[0]->args[0];
 
       // Extraction from only the original instruction or only the extended
       // bits should have been simplified by simplify_extract.
-      assert(arg1->arguments[2]->value() < x->bitsize);
-      assert(arg1->arguments[1]->value() >= x->bitsize);
+      assert(arg1->args[2]->value() < x->bitsize);
+      assert(arg1->args[1]->value() >= x->bitsize);
 
-      Instruction *high = inst->bb->value_inst(x->bitsize - 1, 32);
-      Instruction *low = arg1->arguments[2];
-      Instruction *new_inst1 = create_inst(Op::EXTRACT, x, high, low);
+      Inst *high = inst->bb->value_inst(x->bitsize - 1, 32);
+      Inst *low = arg1->args[2];
+      Inst *new_inst1 = create_inst(Op::EXTRACT, x, high, low);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *new_inst2 = create_inst(Op::SEXT, new_inst1, arg2);
+      Inst *new_inst2 = create_inst(Op::SEXT, new_inst1, arg2);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
 
   // sext (concat x, y) -> concat (sext x), y
-  if (arg1->opcode == Op::CONCAT)
+  if (arg1->op == Op::CONCAT)
     {
-      Instruction *x = arg1->arguments[0];
-      Instruction *y = arg1->arguments[1];
-      Instruction *bs = inst->bb->value_inst(inst->bitsize - y->bitsize, 32);
-      Instruction *new_inst1 = create_inst(Op::SEXT, x, bs);
+      Inst *x = arg1->args[0];
+      Inst *y = arg1->args[1];
+      Inst *bs = inst->bb->value_inst(inst->bitsize - y->bitsize, 32);
+      Inst *new_inst1 = create_inst(Op::SEXT, x, bs);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *new_inst2 = create_inst(Op::CONCAT, new_inst1, y);
+      Inst *new_inst2 = create_inst(Op::CONCAT, new_inst1, y);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
@@ -990,130 +968,130 @@ Instruction *simplify_sext(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_zext(Instruction *inst)
+Inst *simplify_zext(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
+  Inst *const arg1 = inst->args[0];
 
   // zext x -> concat 0, x
-  Instruction *zero = inst->bb->value_inst(0, inst->bitsize - arg1->bitsize);
-  Instruction *new_inst = create_inst(Op::CONCAT, zero, arg1);
+  Inst *zero = inst->bb->value_inst(0, inst->bitsize - arg1->bitsize);
+  Inst *new_inst = create_inst(Op::CONCAT, zero, arg1);
   new_inst->insert_before(inst);
   return new_inst;
 }
 
-Instruction *simplify_mov(Instruction *inst)
+Inst *simplify_mov(Inst *inst)
 {
-  return inst->arguments[0];
+  return inst->args[0];
 }
 
-Instruction *simplify_mul(Instruction *inst)
+Inst *simplify_mul(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // mul 0, x -> 0
-  if (is_value_zero(inst->arguments[0]))
-    return inst->arguments[0];
+  if (is_value_zero(inst->args[0]))
+    return inst->args[0];
 
   // mul x, 0 -> 0
-  if (is_value_zero(inst->arguments[1]))
-    return inst->arguments[1];
+  if (is_value_zero(inst->args[1]))
+    return inst->args[1];
 
   // mul 1, x -> x
-  if (is_value_one(inst->arguments[0]))
-    return inst->arguments[1];
+  if (is_value_one(inst->args[0]))
+    return inst->args[1];
 
   // mul x, 1 -> x
-  if (is_value_one(inst->arguments[1]))
-    return inst->arguments[0];
+  if (is_value_one(inst->args[1]))
+    return inst->args[0];
 
   // mul x, (1 << c) -> concat (extract x), 0
   if (is_value_pow2(arg2))
     {
       uint64_t c = ctz(arg2->value());
-      Instruction *high = inst->bb->value_inst(arg1->bitsize - 1 - c, 32);
-      Instruction *low = inst->bb->value_inst(0, 32);
-      Instruction *new_inst1 = create_inst(Op::EXTRACT, arg1, high, low);
+      Inst *high = inst->bb->value_inst(arg1->bitsize - 1 - c, 32);
+      Inst *low = inst->bb->value_inst(0, 32);
+      Inst *new_inst1 = create_inst(Op::EXTRACT, arg1, high, low);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *zero = inst->bb->value_inst(0, c);
-      Instruction *new_inst2 = create_inst(Op::CONCAT, new_inst1, zero);
+      Inst *zero = inst->bb->value_inst(0, c);
+      Inst *new_inst2 = create_inst(Op::CONCAT, new_inst1, zero);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
 
   // mul (concat x, 0), (concat y, 0)
   //    -> concat (mul (extract x), (extract y)), 0
-  if (arg1->opcode == Op::CONCAT && is_value_zero(arg1->arguments[1])
-      && arg2->opcode == Op::CONCAT && is_value_zero(arg2->arguments[1]))
+  if (arg1->op == Op::CONCAT && is_value_zero(arg1->args[1])
+      && arg2->op == Op::CONCAT && is_value_zero(arg2->args[1]))
     {
-      uint64_t a1_zero_bits = arg1->arguments[1]->bitsize;
-      uint64_t a2_zero_bits = arg2->arguments[1]->bitsize;
+      uint64_t a1_zero_bits = arg1->args[1]->bitsize;
+      uint64_t a2_zero_bits = arg2->args[1]->bitsize;
       if (a1_zero_bits + a2_zero_bits >= inst->bitsize)
 	return inst->bb->value_inst(0, inst->bitsize);
       uint64_t mul_bits = inst->bitsize - (a1_zero_bits + a2_zero_bits);
-      Instruction *high = inst->bb->value_inst(mul_bits - 1, 32);
-      Instruction *low = inst->bb->value_inst(0, 32);
-      Instruction *a1 = create_inst(Op::EXTRACT, arg1->arguments[0], high, low);
+      Inst *high = inst->bb->value_inst(mul_bits - 1, 32);
+      Inst *low = inst->bb->value_inst(0, 32);
+      Inst *a1 = create_inst(Op::EXTRACT, arg1->args[0], high, low);
       a1->insert_before(inst);
       a1 = simplify_inst(a1);
-      Instruction *a2 = create_inst(Op::EXTRACT, arg2->arguments[0], high, low);
+      Inst *a2 = create_inst(Op::EXTRACT, arg2->args[0], high, low);
       a2->insert_before(inst);
       a2 = simplify_inst(a2);
-      Instruction *mul = create_inst(Op::MUL, a1, a2);
+      Inst *mul = create_inst(Op::MUL, a1, a2);
       mul->insert_before(inst);
       mul = simplify_inst(mul);
-      Instruction *zero = inst->bb->value_inst(0, inst->bitsize - mul_bits);
-      Instruction *concat = create_inst(Op::CONCAT, mul, zero);
+      Inst *zero = inst->bb->value_inst(0, inst->bitsize - mul_bits);
+      Inst *concat = create_inst(Op::CONCAT, mul, zero);
       concat->insert_before(inst);
       return concat;
     }
 
   // mul (concat x, 0), y -> concat (mul x, (extract y)), 0
   // mul y, (concat x, 0) -> concat (mul x, (extract y)), 0
-  if ((arg1->opcode == Op::CONCAT && is_value_zero(arg1->arguments[1]))
-      || (arg2->opcode == Op::CONCAT && is_value_zero(arg2->arguments[1])))
+  if ((arg1->op == Op::CONCAT && is_value_zero(arg1->args[1]))
+      || (arg2->op == Op::CONCAT && is_value_zero(arg2->args[1])))
     {
-      Instruction *x, *y;
-      Instruction *zero;
-      if (arg1->opcode == Op::CONCAT && is_value_zero(arg1->arguments[1]))
+      Inst *x, *y;
+      Inst *zero;
+      if (arg1->op == Op::CONCAT && is_value_zero(arg1->args[1]))
 	{
-	  x = arg1->arguments[0];
+	  x = arg1->args[0];
 	  y = arg2;
-	  zero = arg1->arguments[1];
+	  zero = arg1->args[1];
 	}
       else
 	{
-	  x = arg2->arguments[0];
+	  x = arg2->args[0];
 	  y = arg1;
-	  zero = arg2->arguments[1];
+	  zero = arg2->args[1];
 	}
       uint64_t mul_bits = inst->bitsize - zero->bitsize;
-      Instruction *high = inst->bb->value_inst(mul_bits - 1, 32);
-      Instruction *low = inst->bb->value_inst(0, 32);
+      Inst *high = inst->bb->value_inst(mul_bits - 1, 32);
+      Inst *low = inst->bb->value_inst(0, 32);
       y = create_inst(Op::EXTRACT, y, high, low);
       y->insert_before(inst);
       y = simplify_inst(y);
-      Instruction *mul = create_inst(Op::MUL, x, y);
+      Inst *mul = create_inst(Op::MUL, x, y);
       mul->insert_before(inst);
       mul = simplify_inst(mul);
-      Instruction *concat = create_inst(Op::CONCAT, mul, zero);
+      Inst *concat = create_inst(Op::CONCAT, mul, zero);
       concat->insert_before(inst);
       return concat;
     }
 
   // mul (add, x, c2), c1 -> add (mul x, c1), (c1 * c2)
-  if (arg2->opcode == Op::VALUE &&
-      arg1->opcode == Op::ADD &&
-      arg1->arguments[1]->opcode == Op::VALUE)
+  if (arg2->op == Op::VALUE &&
+      arg1->op == Op::ADD &&
+      arg1->args[1]->op == Op::VALUE)
     {
       unsigned __int128 c1 = arg2->value();
-      unsigned __int128 c2 = arg1->arguments[1]->value();
-      Instruction *new_inst1 = create_inst(Op::MUL, arg1->arguments[0], arg2);
+      unsigned __int128 c2 = arg1->args[1]->value();
+      Inst *new_inst1 = create_inst(Op::MUL, arg1->args[0], arg2);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *val = inst->bb->value_inst(c1 * c2, inst->bitsize);
-      Instruction *new_inst2 = create_inst(Op::ADD, new_inst1, val);
+      Inst *val = inst->bb->value_inst(c1 * c2, inst->bitsize);
+      Inst *new_inst2 = create_inst(Op::ADD, new_inst1, val);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
@@ -1121,22 +1099,21 @@ Instruction *simplify_mul(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_not(Instruction *inst)
+Inst *simplify_not(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
+  Inst *const arg1 = inst->args[0];
 
   // not (not x) -> x
-  if (arg1->opcode == Op::NOT)
-    return arg1->arguments[0];
+  if (arg1->op == Op::NOT)
+    return arg1->args[0];
 
   // For Boolean x: not (sext x) -> sext (not x)
   if (is_boolean_sext(arg1))
     {
-      Instruction *new_inst1 = create_inst(Op::NOT, arg1->arguments[0]);
+      Inst *new_inst1 = create_inst(Op::NOT, arg1->args[0]);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *new_inst2 =
-	create_inst(Op::SEXT, new_inst1, arg1->arguments[1]);
+      Inst *new_inst2 = create_inst(Op::SEXT, new_inst1, arg1->args[1]);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
@@ -1147,19 +1124,19 @@ Instruction *simplify_not(Instruction *inst)
 // Helper function for simplify_sadd_wraps and simplify_ssub_wraps.
 // Check if inst is an instruction that extends more than one bit, or a
 // VALUE where the two most significant bits are `00` or `11`.
-bool is_ext(Instruction *inst)
+bool is_ext(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
+  Inst *const arg1 = inst->args[0];
 
-  if (inst->opcode == Op::SEXT && arg1->bitsize < inst->bitsize - 1)
+  if (inst->op == Op::SEXT && arg1->bitsize < inst->bitsize - 1)
     return true;
 
-  if (inst->opcode == Op::CONCAT
-      && is_value_zero(inst->arguments[0])
-      && inst->arguments[0]->bitsize < inst->bitsize - 1)
+  if (inst->op == Op::CONCAT
+      && is_value_zero(inst->args[0])
+      && inst->args[0]->bitsize < inst->bitsize - 1)
     return true;
 
-  if (inst->opcode == Op::VALUE && inst->bitsize >= 3)
+  if (inst->op == Op::VALUE && inst->bitsize >= 3)
     {
       unsigned __int128 top_bits = inst->value() >> (inst->bitsize - 2);
       if (top_bits == 0 || top_bits == 3)
@@ -1169,10 +1146,10 @@ bool is_ext(Instruction *inst)
   return false;
 }
 
-Instruction *simplify_sge(Instruction *inst)
+Inst *simplify_sge(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // sge x, x -> true
   if (arg1 == arg2)
@@ -1181,10 +1158,10 @@ Instruction *simplify_sge(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_sgt(Instruction *inst)
+Inst *simplify_sgt(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // sgt signed_min_val, x -> false
   if (is_value_signed_min(arg1))
@@ -1197,33 +1174,33 @@ Instruction *simplify_sgt(Instruction *inst)
   // For Boolean x: sgt (concat 0, x), c -> false if c is a constant > 0.
   // This is rather common in UB checks of range information where a Boolean
   // has been extended to an integer.
-  if (arg1->opcode == Op::CONCAT
-      && arg1->arguments[1]->bitsize == 1
-      && is_value_zero(arg1->arguments[0])
-      && arg2->opcode == Op::VALUE
+  if (arg1->op == Op::CONCAT
+      && arg1->args[1]->bitsize == 1
+      && is_value_zero(arg1->args[0])
+      && arg2->op == Op::VALUE
       && arg2->signed_value() > 0)
     return inst->bb->value_inst(0, 1);
 
   // For Boolean x: sgt c, (concat 0, x) -> false if c is a constant <= 0.
-  if (arg1->opcode == Op::VALUE
+  if (arg1->op == Op::VALUE
       && arg1->signed_value() <= 0
-      && arg2->opcode == Op::CONCAT
-      && arg2->arguments[1]->bitsize == 1
-      && is_value_zero(arg2->arguments[0]))
+      && arg2->op == Op::CONCAT
+      && arg2->args[1]->bitsize == 1
+      && is_value_zero(arg2->args[0]))
     return inst->bb->value_inst(0, 1);
 
   // sgt 0, (concat 0, x) -> false
   if (is_value_zero(arg1)
-      && arg2->opcode == Op::CONCAT
-      && is_value_zero(arg2->arguments[0]))
+      && arg2->op == Op::CONCAT
+      && is_value_zero(arg2->args[0]))
     return inst->bb->value_inst(0, 1);
 
   // sgt (concat 0, x), c -> false if c >= (zext -1)
   if (arg1->bitsize <= 128
-      && arg1->opcode == Op::CONCAT
-      &&is_value_zero(arg1->arguments[0])
-      && arg2->opcode == Op::VALUE
-      && arg2->signed_value() >= (((__int128)1 << arg1->arguments[1]->bitsize) - 1))
+      && arg1->op == Op::CONCAT
+      &&is_value_zero(arg1->args[0])
+      && arg2->op == Op::VALUE
+      && arg2->signed_value() >= (((__int128)1 << arg1->args[1]->bitsize) - 1))
     return inst->bb->value_inst(0, 1);
 
   // sgt x, x -> false
@@ -1233,10 +1210,10 @@ Instruction *simplify_sgt(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_sle(Instruction *inst)
+Inst *simplify_sle(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // sle x, x -> true
   if (arg1 == arg2)
@@ -1245,10 +1222,10 @@ Instruction *simplify_sle(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_slt(Instruction *inst)
+Inst *simplify_slt(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // slt x, x -> false
   if (arg1 == arg2)
@@ -1257,10 +1234,10 @@ Instruction *simplify_slt(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_sadd_wraps(Instruction *inst)
+Inst *simplify_sadd_wraps(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // sadd_wraps 0, x -> false
   if (is_value_zero(arg1))
@@ -1280,17 +1257,17 @@ Instruction *simplify_sadd_wraps(Instruction *inst)
   return inst;
  }
 
-Instruction *simplify_ssub_wraps(Instruction *inst)
+Inst *simplify_ssub_wraps(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // ssub_wraps 0, x -> x == minint
   if (is_value_zero(arg1))
     {
       unsigned __int128 minint = ((unsigned __int128)1) << (arg2->bitsize - 1);
-      Instruction *minint_inst = inst->bb->value_inst(minint, arg2->bitsize);
-      Instruction *new_inst = create_inst(Op::EQ, arg2, minint_inst);
+      Inst *minint_inst = inst->bb->value_inst(minint, arg2->bitsize);
+      Inst *new_inst = create_inst(Op::EQ, arg2, minint_inst);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -1309,16 +1286,16 @@ Instruction *simplify_ssub_wraps(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_sub(Instruction *inst)
+Inst *simplify_sub(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // sub x, c -> add x, -c
-  if (arg2->opcode == Op::VALUE)
+  if (arg2->op == Op::VALUE)
     {
-      Instruction *val = inst->bb->value_inst(-arg2->value(), inst->bitsize);
-      Instruction *new_inst = create_inst(Op::ADD, arg1, val);
+      Inst *val = inst->bb->value_inst(-arg2->value(), inst->bitsize);
+      Inst *new_inst = create_inst(Op::ADD, arg1, val);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -1326,11 +1303,11 @@ Instruction *simplify_sub(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_ite(Instruction *inst)
+Inst *simplify_ite(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
-  Instruction *const arg3 = inst->arguments[2];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+  Inst *const arg3 = inst->args[2];
 
   // ite 0, a, b -> b
   if (is_value_zero(arg1))
@@ -1349,8 +1326,8 @@ Instruction *simplify_ite(Instruction *inst)
     {
       if (inst->bitsize == 1)
 	return arg1;
-      Instruction *zero = inst->bb->value_inst(0, inst->bitsize - 1);
-      Instruction *new_inst = create_inst(Op::CONCAT, zero, arg1);
+      Inst *zero = inst->bb->value_inst(0, inst->bitsize - 1);
+      Inst *new_inst = create_inst(Op::CONCAT, zero, arg1);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -1358,13 +1335,13 @@ Instruction *simplify_ite(Instruction *inst)
   // ite a, 0, 1 -> concat 0, (not a)
   if (is_value_one(arg3) && is_value_zero(arg2))
     {
-      Instruction *cond = create_inst(Op::NOT, arg1);
+      Inst *cond = create_inst(Op::NOT, arg1);
       cond->insert_before(inst);
       cond = simplify_inst(cond);
       if (inst->bitsize == 1)
 	return cond;
-      Instruction *zero = inst->bb->value_inst(0, inst->bitsize - 1);
-      Instruction *new_inst = create_inst(Op::CONCAT, zero, cond);
+      Inst *zero = inst->bb->value_inst(0, inst->bitsize - 1);
+      Inst *new_inst = create_inst(Op::CONCAT, zero, cond);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -1374,8 +1351,8 @@ Instruction *simplify_ite(Instruction *inst)
     {
       if (inst->bitsize == 1)
 	return arg1;
-      Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
-      Instruction *new_inst = create_inst(Op::SEXT, arg1, bs);
+      Inst *bs = inst->bb->value_inst(inst->bitsize, 32);
+      Inst *new_inst = create_inst(Op::SEXT, arg1, bs);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -1383,22 +1360,22 @@ Instruction *simplify_ite(Instruction *inst)
   // ite a, 0, -1 -> sext (not a)
   if (is_value_m1(arg3) && is_value_zero(arg2))
     {
-      Instruction *cond = create_inst(Op::NOT, arg1);
+      Inst *cond = create_inst(Op::NOT, arg1);
       cond->insert_before(inst);
       cond = simplify_inst(cond);
       if (inst->bitsize == 1)
 	return cond;
-      Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
-      Instruction *new_inst = create_inst(Op::SEXT, cond, bs);
+      Inst *bs = inst->bb->value_inst(inst->bitsize, 32);
+      Inst *new_inst = create_inst(Op::SEXT, cond, bs);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // ite (not c), a, b -> ite c, b, a
-  if (arg1->opcode == Op::NOT)
+  if (arg1->op == Op::NOT)
     {
-      Instruction *new_cond = arg1->arguments[0];
-      Instruction *new_inst = create_inst(Op::ITE, new_cond, arg3, arg2);
+      Inst *new_cond = arg1->args[0];
+      Inst *new_inst = create_inst(Op::ITE, new_cond, arg3, arg2);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -1406,10 +1383,10 @@ Instruction *simplify_ite(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_uge(Instruction *inst)
+Inst *simplify_uge(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // uge x, x -> true
   if (arg1 == arg2)
@@ -1418,10 +1395,10 @@ Instruction *simplify_uge(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_ugt(Instruction *inst)
+Inst *simplify_ugt(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // ugt 0, x -> false
   if (is_value_zero(arg1))
@@ -1434,17 +1411,17 @@ Instruction *simplify_ugt(Instruction *inst)
   // For Boolean x: ugt (concat 0, x), c -> false if c is a constant > 0.
   // This is rather common in UB checks of range information where a Boolean
   // has been extended to an integer.
-  if (arg1->opcode == Op::CONCAT
-      && arg1->arguments[1]->bitsize == 1
-      && is_value_zero(arg1->arguments[0])
-      && arg2->opcode == Op::VALUE
+  if (arg1->op == Op::CONCAT
+      && arg1->args[1]->bitsize == 1
+      && is_value_zero(arg1->args[0])
+      && arg2->op == Op::VALUE
       && arg2->value() > 0)
     return inst->bb->value_inst(0, 1);
 
   // ugt (and x, y), x -> false
   // ugt (and x, y), y -> false
-  if (arg1->opcode == Op::AND
-      && (arg1->arguments[0] == arg2 || arg1->arguments[1] == arg2))
+  if (arg1->op == Op::AND
+      && (arg1->args[0] == arg2 || arg1->args[1] == arg2))
     return inst->bb->value_inst(0, 1);
 
   // ugt x, x -> false
@@ -1454,10 +1431,10 @@ Instruction *simplify_ugt(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_ule(Instruction *inst)
+Inst *simplify_ule(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // ule x, x -> true
   if (arg1 == arg2)
@@ -1466,10 +1443,10 @@ Instruction *simplify_ule(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_ult(Instruction *inst)
+Inst *simplify_ult(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // ult x, x -> false
   if (arg1 == arg2)
@@ -1478,31 +1455,31 @@ Instruction *simplify_ult(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_shl(Instruction *inst)
+Inst *simplify_shl(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // shl x, 0 -> x
   if (is_value_zero(arg2))
-    return inst->arguments[0];
+    return inst->args[0];
 
   // shl x, c -> 0 if c >= bitsize
-  if (arg2->opcode == Op::VALUE && arg2->value() >= inst->bitsize)
+  if (arg2->op == Op::VALUE && arg2->value() >= inst->bitsize)
     return inst->bb->value_inst(0, inst->bitsize);
 
   // shl x, c -> concat (extract x), 0
-  if (arg2->opcode == Op::VALUE)
+  if (arg2->op == Op::VALUE)
     {
       uint64_t c = arg2->value();
       assert(c > 0 && c < arg1->bitsize);
-      Instruction *high = inst->bb->value_inst(arg1->bitsize - 1 - c, 32);
-      Instruction *low = inst->bb->value_inst(0, 32);
-      Instruction *new_inst1 = create_inst(Op::EXTRACT, arg1, high, low);
+      Inst *high = inst->bb->value_inst(arg1->bitsize - 1 - c, 32);
+      Inst *low = inst->bb->value_inst(0, 32);
+      Inst *new_inst1 = create_inst(Op::EXTRACT, arg1, high, low);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
-      Instruction *zero = inst->bb->value_inst(0, c);
-      Instruction *new_inst2 = create_inst(Op::CONCAT, new_inst1, zero);
+      Inst *zero = inst->bb->value_inst(0, c);
+      Inst *new_inst2 = create_inst(Op::CONCAT, new_inst1, zero);
       new_inst2->insert_before(inst);
       return new_inst2;
     }
@@ -1510,19 +1487,19 @@ Instruction *simplify_shl(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_memory(Instruction *inst)
+Inst *simplify_memory(Inst *inst)
 {
-  uint64_t id = inst->arguments[0]->value();
+  uint64_t id = inst->args[0]->value();
   uint64_t addr = id << inst->bb->func->module->ptr_id_low;
   return inst->bb->value_inst(addr, inst->bb->func->module->ptr_bits);
 }
 
-Instruction *simplify_phi(Instruction *phi)
+Inst *simplify_phi(Inst *phi)
 {
   // If phi only references itself or one other value it can be replaced by
   // that value, e.g. %2 = phi [ %1, .1] [ %2, .2] [%1, .3]
 
-  Instruction *inst = nullptr;
+  Inst *inst = nullptr;
   for (auto phi_arg : phi->phi_args)
     {
       if (phi_arg.inst != phi)
@@ -1537,11 +1514,11 @@ Instruction *simplify_phi(Instruction *phi)
   return inst;
 }
 
-Instruction *simplify_extract(Instruction *inst)
+Inst *simplify_extract(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
-  Instruction *const arg3 = inst->arguments[2];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+  Inst *const arg3 = inst->args[2];
 
   const uint32_t high_val = arg2->value();
   const uint32_t low_val = arg3->value();
@@ -1551,13 +1528,12 @@ Instruction *simplify_extract(Instruction *inst)
     return arg1;
 
   // "extract (extract x)" is changed to "extract x".
-  if (arg1->opcode == Op::EXTRACT)
+  if (arg1->op == Op::EXTRACT)
     {
-      uint32_t arg_low_val = arg1->arguments[2]->value();
-      Instruction *high = inst->bb->value_inst(high_val + arg_low_val, 32);
-      Instruction *low = inst->bb->value_inst(low_val + arg_low_val, 32);
-      Instruction *new_inst =
-	create_inst(Op::EXTRACT, arg1->arguments[0], high, low);
+      uint32_t arg_low_val = arg1->args[2]->value();
+      Inst *high = inst->bb->value_inst(high_val + arg_low_val, 32);
+      Inst *low = inst->bb->value_inst(low_val + arg_low_val, 32);
+      Inst *new_inst = create_inst(Op::EXTRACT, arg1->args[0], high, low);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -1569,28 +1545,28 @@ Instruction *simplify_extract(Instruction *inst)
   //  * If it is truncating the value, but still using bits from both x and
   //    the extended bits, then it is changed to "sext x" with a smaller
   //    bitwidth.
-  if (arg1->opcode == Op::SEXT)
+  if (arg1->op == Op::SEXT)
     {
-      Instruction *ext_arg = arg1->arguments[0];
+      Inst *ext_arg = arg1->args[0];
       if (low_val == 0 && high_val == ext_arg->bitsize - 1)
 	return ext_arg;
       if (high_val < ext_arg->bitsize)
 	{
-	  Instruction *high = arg2;
-	  Instruction *low = arg3;
-	  Instruction *new_inst = create_inst(Op::EXTRACT, ext_arg, high, low);
+	  Inst *high = arg2;
+	  Inst *low = arg3;
+	  Inst *new_inst = create_inst(Op::EXTRACT, ext_arg, high, low);
 	  new_inst->insert_before(inst);
 	  return new_inst;
 	}
       if (low_val >= ext_arg->bitsize)
 	{
-	  Instruction *idx = inst->bb->value_inst(ext_arg->bitsize - 1, 32);
-	  Instruction *new_inst = create_inst(Op::EXTRACT, ext_arg, idx, idx);
+	  Inst *idx = inst->bb->value_inst(ext_arg->bitsize - 1, 32);
+	  Inst *new_inst = create_inst(Op::EXTRACT, ext_arg, idx, idx);
 	  new_inst->insert_before(inst);
 	  new_inst = simplify_inst(new_inst);
 	  if (new_inst->bitsize < inst->bitsize)
 	    {
-	      Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
+	      Inst *bs = inst->bb->value_inst(inst->bitsize, 32);
 	      new_inst = create_inst(Op::SEXT, new_inst, bs);
 	      new_inst->insert_before(inst);
 	    }
@@ -1599,8 +1575,8 @@ Instruction *simplify_extract(Instruction *inst)
       if (low_val == 0)
 	{
 	  assert(high_val >= ext_arg->bitsize);
-	  Instruction *bs = arg1->bb->value_inst(high_val + 1, 32);
-	  Instruction *new_inst = create_inst(Op::SEXT, ext_arg, bs);
+	  Inst *bs = arg1->bb->value_inst(high_val + 1, 32);
+	  Inst *new_inst = create_inst(Op::SEXT, ext_arg, bs);
 	  new_inst->insert_before(inst);
 	  return new_inst;
 	}
@@ -1610,30 +1586,30 @@ Instruction *simplify_extract(Instruction *inst)
   //  * If it is only extracting from x, it is changed to "extract x".
   //  * If it is only extracting from the extended bits, it is changed
   //    to a sext of the most significant bit of x.
-  if (arg1->opcode == Op::ASHR && arg1->arguments[1]->opcode == Op::VALUE)
+  if (arg1->op == Op::ASHR && arg1->args[1]->op == Op::VALUE)
     {
-      Instruction *x = arg1->arguments[0];
-      uint64_t c = arg1->arguments[1]->value();
+      Inst *x = arg1->args[0];
+      uint64_t c = arg1->args[1]->value();
       assert(c > 0 && c < x->bitsize);
       uint32_t hi_val = high_val + c;
       uint32_t lo_val = low_val + c;
       if (hi_val < x->bitsize)
 	{
-	  Instruction *high = inst->bb->value_inst(hi_val, 32);
-	  Instruction *low = inst->bb->value_inst(lo_val, 32);
-	  Instruction *new_inst = create_inst(Op::EXTRACT, x, high, low);
+	  Inst *high = inst->bb->value_inst(hi_val, 32);
+	  Inst *low = inst->bb->value_inst(lo_val, 32);
+	  Inst *new_inst = create_inst(Op::EXTRACT, x, high, low);
 	  new_inst->insert_before(inst);
 	  return new_inst;
 	}
       else if (lo_val >= x->bitsize)
 	{
-	  Instruction *idx = inst->bb->value_inst(x->bitsize - 1, 32);
-	  Instruction *new_inst = create_inst(Op::EXTRACT, x, idx, idx);
+	  Inst *idx = inst->bb->value_inst(x->bitsize - 1, 32);
+	  Inst *new_inst = create_inst(Op::EXTRACT, x, idx, idx);
 	  new_inst->insert_before(inst);
 	  new_inst = simplify_inst(new_inst);
 	  if (new_inst->bitsize < inst->bitsize)
 	    {
-	      Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
+	      Inst *bs = inst->bb->value_inst(inst->bitsize, 32);
 	      new_inst = create_inst(Op::SEXT, new_inst, bs);
 	      new_inst->insert_before(inst);
 	    }
@@ -1643,24 +1619,24 @@ Instruction *simplify_extract(Instruction *inst)
 
   // "extract (concat x, y)" is changed to "extract x" or "extract y" if the
   // range only accesses bits from one of the arguments.
-  if (arg1->opcode == Op::CONCAT)
+  if (arg1->op == Op::CONCAT)
     {
       // We often have chains of concat for loads and vectors, so we iterate
       // to find the final element instead of needing to recursively simplify
       // the new instruction.
-      Instruction *arg = arg1;
+      Inst *arg = arg1;
       uint32_t hi_val = high_val;
       uint32_t lo_val = low_val;
-      while (arg->opcode == Op::CONCAT)
+      while (arg->op == Op::CONCAT)
 	{
-	  uint32_t low_bitsize = arg->arguments[1]->bitsize;
+	  uint32_t low_bitsize = arg->args[1]->bitsize;
 	  if (hi_val < low_bitsize)
-	    arg = arg->arguments[1];
+	    arg = arg->args[1];
 	  else if (lo_val >= low_bitsize)
 	    {
 	      hi_val -= low_bitsize;
 	      lo_val -= low_bitsize;
-	      arg = arg->arguments[0];
+	      arg = arg->args[0];
 	    }
 	  else
 	    break;
@@ -1669,9 +1645,9 @@ Instruction *simplify_extract(Instruction *inst)
 	{
 	  if (low_val == 0 && high_val == arg->bitsize - 1)
 	    return arg;
-	  Instruction *high = inst->bb->value_inst(hi_val, 32);
-	  Instruction *low = inst->bb->value_inst(lo_val, 32);
-	  Instruction *new_inst = create_inst(Op::EXTRACT, arg, high, low);
+	  Inst *high = inst->bb->value_inst(hi_val, 32);
+	  Inst *low = inst->bb->value_inst(lo_val, 32);
+	  Inst *new_inst = create_inst(Op::EXTRACT, arg, high, low);
 	  new_inst->insert_before(inst);
 	  return new_inst;
 	}
@@ -1680,9 +1656,9 @@ Instruction *simplify_extract(Instruction *inst)
   // We often have chains of concat (for vectors, structures, etc.), and
   // the extract only needs a few elements in the middle, which are not
   // handled by the previous "extract (concat x, y)" optimization.
-  if (arg1->opcode == Op::CONCAT)
+  if (arg1->op == Op::CONCAT)
     {
-      std::vector<Instruction *> elems;
+      std::vector<Inst *> elems;
       flatten(arg1, elems);
 
       if (low_val >= elems[0]->bitsize
@@ -1697,7 +1673,7 @@ Instruction *simplify_extract(Instruction *inst)
 	      hi_val -= elems[i]->bitsize;
 	      lo_val -= elems[i]->bitsize;
 	    }
-	  Instruction *arg = elems[i++];
+	  Inst *arg = elems[i++];
 	  for (; hi_val >= arg->bitsize; i++)
 	    {
 	      arg = create_inst(Op::CONCAT, elems[i], arg);
@@ -1707,53 +1683,51 @@ Instruction *simplify_extract(Instruction *inst)
 
 	  if (lo_val == 0 && hi_val == arg->bitsize - 1)
 	    return arg;
-	  Instruction *high = inst->bb->value_inst(hi_val, 32);
-	  Instruction *low = inst->bb->value_inst(lo_val, 32);
-	  Instruction *new_inst = create_inst(Op::EXTRACT, arg, high, low);
+	  Inst *high = inst->bb->value_inst(hi_val, 32);
+	  Inst *low = inst->bb->value_inst(lo_val, 32);
+	  Inst *new_inst = create_inst(Op::EXTRACT, arg, high, low);
 	  new_inst->insert_before(inst);
 	  return new_inst;
 	}
     }
 
   // Create a smaller concat where we have extracted the elements.
-  if (arg1->opcode == Op::CONCAT)
+  if (arg1->op == Op::CONCAT)
     {
-      Instruction *low_elem = arg1->arguments[1];
-      Instruction *high_elem = arg1->arguments[0];
+      Inst *low_elem = arg1->args[1];
+      Inst *high_elem = arg1->args[0];
       assert(low_val < low_elem->bitsize);
       assert(high_val >= low_elem->bitsize);
       if (high_val != arg1->bitsize - 1)
 	{
-	  Instruction *hi =
-	    inst->bb->value_inst(high_val - low_elem->bitsize, 32);
-	  Instruction *lo = inst->bb->value_inst(0, 32);
+	  Inst *hi = inst->bb->value_inst(high_val - low_elem->bitsize, 32);
+	  Inst *lo = inst->bb->value_inst(0, 32);
 	  high_elem = create_inst(Op::EXTRACT, high_elem, hi, lo);
 	  high_elem->insert_before(inst);
 	  high_elem = simplify_inst(high_elem);
 	}
       if (low_val != 0)
 	{
-	  Instruction *hi = inst->bb->value_inst(low_elem->bitsize - 1, 32);
-	  Instruction *lo = arg3;
+	  Inst *hi = inst->bb->value_inst(low_elem->bitsize - 1, 32);
+	  Inst *lo = arg3;
 	  low_elem = create_inst(Op::EXTRACT, low_elem, hi, lo);
 	  low_elem->insert_before(inst);
 	  low_elem = simplify_inst(low_elem);
 	}
-      Instruction *new_inst = create_inst(Op::CONCAT, high_elem, low_elem);
+      Inst *new_inst = create_inst(Op::CONCAT, high_elem, low_elem);
       new_inst->insert_before(inst);
       return new_inst;
     }
 
   // extract (add x, c) -> extract x if the high_val least significant bits
   // of c are 0.
-  if (arg1->opcode == Op::ADD
-      && arg1->arguments[1]->opcode == Op::VALUE
-      && (arg1->arguments[1]->value() << (127 - high_val)) == 0)
+  if (arg1->op == Op::ADD
+      && arg1->args[1]->op == Op::VALUE
+      && (arg1->args[1]->value() << (127 - high_val)) == 0)
     {
-      Instruction *high = arg2;
-      Instruction *low = arg3;
-      Instruction *new_inst =
-	create_inst(Op::EXTRACT, arg1->arguments[0], high, low);
+      Inst *high = arg2;
+      Inst *low = arg3;
+      Inst *new_inst = create_inst(Op::EXTRACT, arg1->args[0], high, low);
       new_inst->insert_before(inst);
       return new_inst;
     }
@@ -1761,20 +1735,20 @@ Instruction *simplify_extract(Instruction *inst)
   return inst;
 }
 
-Instruction *simplify_is_const_mem(Instruction *inst, const std::map<uint64_t,Instruction *>& id2mem_inst, bool has_const_mem)
+Inst *simplify_is_const_mem(Inst *inst, const std::map<uint64_t,Inst *>& id2mem_inst, bool has_const_mem)
 {
   // We know the memory is not const if the function does not have any const
   // memory.
   if (!has_const_mem)
     return inst->bb->value_inst(0, 1);
 
-  if (inst->arguments[0]->opcode == Op::VALUE)
+  if (inst->args[0]->op == Op::VALUE)
     {
-      uint64_t id = inst->arguments[0]->value();
+      uint64_t id = inst->args[0]->value();
       if (id2mem_inst.contains(id))
 	{
-	  Instruction *mem_inst = id2mem_inst.at(id);
-	  uint32_t flags = mem_inst->arguments[2]->value();
+	  Inst *mem_inst = id2mem_inst.at(id);
+	  uint32_t flags = mem_inst->args[2]->value();
 	  bool is_const_mem = (flags & MEM_CONST) != 0;
 	  return inst->bb->value_inst(is_const_mem, 1);
 	}
@@ -1782,10 +1756,10 @@ Instruction *simplify_is_const_mem(Instruction *inst, const std::map<uint64_t,In
   return inst;
 }
 
-void destroy(Instruction *inst)
+void destroy(Inst *inst)
 {
   // Memory removal is done in memory-specific passes.
-  if (inst->opcode == Op::MEMORY)
+  if (inst->op == Op::MEMORY)
     return;
 
   destroy_instruction(inst);
@@ -1793,9 +1767,9 @@ void destroy(Instruction *inst)
 
 } // end anonymous namespace
 
-Instruction *simplify_inst(Instruction *inst)
+Inst *simplify_inst(Inst *inst)
 {
-  Instruction *original_inst = inst;
+  Inst *original_inst = inst;
 
   inst = constant_fold_inst(inst);
   if (inst != original_inst)
@@ -1805,11 +1779,11 @@ Instruction *simplify_inst(Instruction *inst)
   // This is enforced when the instruction is created, but this may change
   // when optimization passes modify the instructions.
   if (inst->is_commutative()
-      && inst->arguments[0]->opcode == Op::VALUE
-      && inst->arguments[1]->opcode != Op::VALUE)
-    std::swap(inst->arguments[0], inst->arguments[1]);
+      && inst->args[0]->op == Op::VALUE
+      && inst->args[1]->op != Op::VALUE)
+    std::swap(inst->args[0], inst->args[1]);
 
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::ADD:
       inst = simplify_add(inst);
@@ -1911,18 +1885,18 @@ void simplify_insts(Function *func)
     {
       for (auto phi : bb->phis)
 	{
-	  Instruction *res = simplify_phi(phi);
+	  Inst *res = simplify_phi(phi);
 	  if (res != phi)
 	    phi->replace_all_uses_with(res);
 	}
-      for (Instruction *inst = bb->first_inst; inst;)
+      for (Inst *inst = bb->first_inst; inst;)
 	{
-	  Instruction *next_inst = inst->next;
+	  Inst *next_inst = inst->next;
 	  if (inst->has_lhs())
 	    {
 	      if (!inst->used_by.empty())
 		{
-		  Instruction *res = simplify_inst(inst);
+		  Inst *res = simplify_inst(inst);
 		  if (res != inst)
 		    {
 		      inst->replace_all_uses_with(res);
@@ -1945,16 +1919,16 @@ void simplify_insts(Module *module)
 
 void simplify_mem(Function *func)
 {
-  std::map<uint64_t,Instruction *> id2mem_inst;
+  std::map<uint64_t,Inst *> id2mem_inst;
   std::map<uint64_t,uint64_t> id2size;
   bool has_const_mem = false;
-  for (Instruction *inst = func->bbs[0]->first_inst; inst; inst = inst->next)
+  for (Inst *inst = func->bbs[0]->first_inst; inst; inst = inst->next)
     {
-      if (inst->opcode == Op::MEMORY)
+      if (inst->op == Op::MEMORY)
 	{
-	  uint64_t id = inst->arguments[0]->value();
-	  uint64_t size = inst->arguments[1]->value();
-	  uint32_t flags = inst->arguments[2]->value();
+	  uint64_t id = inst->args[0]->value();
+	  uint64_t size = inst->args[1]->value();
+	  uint32_t flags = inst->args[2]->value();
 	  assert(!id2mem_inst.contains(id));
 	  id2mem_inst[id] = inst;
 	  id2size[id] = size;
@@ -1967,13 +1941,13 @@ void simplify_mem(Function *func)
     {
       for (auto phi : bb->phis)
 	{
-	  Instruction *res = simplify_phi(phi);
+	  Inst *res = simplify_phi(phi);
 	  if (res != phi)
 	    phi->replace_all_uses_with(res);
 	}
-      for (Instruction *inst = bb->first_inst; inst;)
+      for (Inst *inst = bb->first_inst; inst;)
 	{
-	  Instruction *next_inst = inst->next;
+	  Inst *next_inst = inst->next;
 
 	  if (inst->has_lhs() && inst->used_by.empty())
 	    {
@@ -1982,8 +1956,8 @@ void simplify_mem(Function *func)
 	      continue;
 	    }
 
-	  Instruction *res;
-	  switch (inst->opcode)
+	  Inst *res;
+	  switch (inst->op)
 	    {
 	    case Op::IS_CONST_MEM:
 	      res = simplify_is_const_mem(inst, id2mem_inst, has_const_mem);
@@ -1998,9 +1972,9 @@ void simplify_mem(Function *func)
 	      // Note: We must remove the value (i.e. not update it) as
 	      // some future blocks may use the old value if they are later
 	      // in the iteration order, but not dominated by this BB.
-	      if (inst->arguments[0]->opcode == Op::VALUE)
+	      if (inst->args[0]->op == Op::VALUE)
 		{
-		  uint64_t id = inst->arguments[0]->value();
+		  uint64_t id = inst->args[0]->value();
 		  id2size.erase(id);
 		}
 	      else

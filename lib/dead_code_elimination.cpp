@@ -8,20 +8,20 @@ namespace smtgcc {
 
 namespace {
 
-bool is_false(Instruction *inst)
+bool is_false(Inst *inst)
 {
-  return inst->opcode == Op::VALUE && inst->value() == 0;
+  return inst->op == Op::VALUE && inst->value() == 0;
 }
 
-bool is_true(Instruction *inst)
+bool is_true(Inst *inst)
 {
-  return inst->opcode == Op::VALUE && inst->value() == 1;
+  return inst->op == Op::VALUE && inst->value() == 1;
 }
 
-void destroy(Instruction *inst)
+void destroy(Inst *inst)
 {
   // Memory instructions must be kept until the memory optimization passes.
-  if (inst->opcode == Op::MEMORY)
+  if (inst->op == Op::MEMORY)
     return;
 
   destroy_instruction(inst);
@@ -32,19 +32,19 @@ void destroy(Instruction *inst)
 void clear_ub_bb(Basic_block *bb, bool is_loopfree)
 {
   if (is_loopfree
-      && bb->last_inst->opcode == Op::BR && bb->last_inst->nof_args == 1)
+      && bb->last_inst->op == Op::BR && bb->last_inst->nof_args == 1)
     {
       // Change the conditional branch to an unconditional branch. It does
       // not matter which branch we take since the execution is UB anyway.
-      Instruction *cond = bb->last_inst->arguments[0];
+      Inst *cond = bb->last_inst->args[0];
       cond->replace_use_with(bb->last_inst, bb->value_inst(1, 1));
     }
 
-  Instruction *found_ub = nullptr;
-  for (Instruction *inst = bb->last_inst->prev; inst;)
+  Inst *found_ub = nullptr;
+  for (Inst *inst = bb->last_inst->prev; inst;)
     {
-      Instruction *next_inst = inst->prev;
-      if (inst->opcode == Op::UB && is_true(inst->arguments[0]))
+      Inst *next_inst = inst->prev;
+      if (inst->op == Op::UB && is_true(inst->args[0]))
 	{
 	  if (found_ub)
 	    destroy(inst);
@@ -67,7 +67,7 @@ void clear_ub_bb(Basic_block *bb, bool is_loopfree)
 
   while (!bb->phis.empty())
     {
-      Instruction *inst = bb->phis.back();
+      Inst *inst = bb->phis.back();
       if (!inst->used_by.empty())
 	inst->replace_all_uses_with(bb->value_inst(0, inst->bitsize));
       destroy(inst);
@@ -90,41 +90,41 @@ void dead_code_elimination(Function *func)
       // all its successors are always UB).
       if (bb != func->bbs[0]
 	  && !bb->succs.empty()
-	  && (bb->first_inst->opcode != Op::UB
-	      || !is_true(bb->first_inst->arguments[0])))
+	  && (bb->first_inst->op != Op::UB
+	      || !is_true(bb->first_inst->args[0])))
 	{
 	  bool succs_are_ub = true;
 	  for (auto succ : bb->succs)
 	    {
 	      succs_are_ub =
-		succs_are_ub && succ->first_inst->opcode == Op::UB
-		&& is_true(succ->first_inst->arguments[0]);
+		succs_are_ub && succ->first_inst->op == Op::UB
+		&& is_true(succ->first_inst->args[0]);
 	    }
 	  if (succs_are_ub)
 	    bb->build_inst(Op::UB, bb->value_inst(1, 1));
 	}
 
       // Remove dead instructions.
-      for (Instruction *inst = bb->last_inst; inst;)
+      for (Inst *inst = bb->last_inst; inst;)
 	{
-	  Instruction *next_inst = inst->prev;
+	  Inst *next_inst = inst->prev;
 	  if (inst->has_lhs() && inst->used_by.empty())
 	    destroy(inst);
 	  else if (bb != func->bbs[0]
-		   && inst->opcode == Op::UB && is_true(inst->arguments[0]))
+		   && inst->op == Op::UB && is_true(inst->args[0]))
 	    {
 	      clear_ub_bb(bb, is_loopfree);
 	      break;
 	    }
-	  else if (inst->opcode == Op::UB && is_false(inst->arguments[0]))
+	  else if (inst->op == Op::UB && is_false(inst->args[0]))
 	    destroy(inst);
-	  else if (inst->opcode == Op::ASSERT && is_true(inst->arguments[0]))
+	  else if (inst->op == Op::ASSERT && is_true(inst->args[0]))
 	    destroy(inst);
 	  inst = next_inst;
 	}
 
       // Remove dead phi-nodes.
-      std::vector<Instruction *> dead_phis;
+      std::vector<Inst *> dead_phis;
       for (auto phi : bb->phis)
 	{
 	  if (phi->used_by.empty())
@@ -142,15 +142,15 @@ void dead_code_elimination(Function *func)
       // all its predecessors are always UB).
       if (bb != func->bbs.back()
 	  && !bb->preds.empty()
-	  && (bb->first_inst->opcode != Op::UB
-	      || !is_true(bb->first_inst->arguments[0])))
+	  && (bb->first_inst->op != Op::UB
+	      || !is_true(bb->first_inst->args[0])))
 	{
 	  bool preds_are_ub = true;
 	  for (auto pred : bb->preds)
 	    {
 	      preds_are_ub =
-		preds_are_ub && pred->first_inst->opcode == Op::UB
-		&& is_true(pred->first_inst->arguments[0]);
+		preds_are_ub && pred->first_inst->op == Op::UB
+		&& is_true(pred->first_inst->args[0]);
 	    }
 	  if (preds_are_ub)
 	    {

@@ -43,7 +43,7 @@ void remove_dead_bbs(std::vector<Basic_block *>& dead_bbs)
 
   for (auto bb : dead_bbs)
     {
-      for (Instruction *phi : bb->phis)
+      for (Inst *phi : bb->phis)
 	{
 	  phi->remove_phi_args();
 	}
@@ -58,9 +58,9 @@ void remove_dead_bbs(std::vector<Basic_block *>& dead_bbs)
       for (int i = dead_bbs.size() - 1; i >= 0; i--)
 	{
 	  Basic_block *bb = dead_bbs[i];
-	  for (Instruction *inst = bb->last_inst; inst;)
+	  for (Inst *inst = bb->last_inst; inst;)
 	    {
-	      Instruction *next_inst = inst->prev;
+	      Inst *next_inst = inst->prev;
 	      if (inst->used_by.empty())
 		destroy_instruction(inst);
 	      inst = next_inst;
@@ -81,7 +81,7 @@ void update_phi(Basic_block *dest_bb, Basic_block *orig_src_bb, Basic_block *new
 {
   for (auto phi : dest_bb->phis)
     {
-      Instruction *inst = phi->get_phi_arg(orig_src_bb);
+      Inst *inst = phi->get_phi_arg(orig_src_bb);
       phi->add_phi_arg(inst, new_src_bb);
     }
 }
@@ -197,7 +197,7 @@ void reverse_post_order(Function *func)
 {
   auto it = std::find_if(func->bbs.begin(), func->bbs.end(),
 			 [](const Basic_block *bb) {
-			   return bb->last_inst->opcode == Op::RET;
+			   return bb->last_inst->op == Op::RET;
 			 });
   assert(it != func->bbs.end());
   Basic_block *exit_bb = *it;
@@ -250,12 +250,12 @@ void simplify_cfg(Function *func)
     {
       // br 0, .1, .2  ->  br .2
       // br 1, .1, .2  ->  br .1
-      if (bb->last_inst->opcode == Op::BR
+      if (bb->last_inst->op == Op::BR
 	  && bb->last_inst->nof_args == 1)
 	{
-	  Instruction *branch = bb->last_inst;
-	  Instruction *cond = bb->last_inst->arguments[0];
-	  if (cond->opcode == Op::VALUE)
+	  Inst *branch = bb->last_inst;
+	  Inst *cond = bb->last_inst->args[0];
+	  if (cond->op == Op::VALUE)
 	    {
 	      Basic_block *taken_bb =
 		cond->value() ? branch->u.br3.true_bb : branch->u.br3.false_bb;
@@ -280,8 +280,8 @@ void simplify_cfg(Function *func)
 	  && bb->succs.size() == 1
 	  && bb->phis.size() == 0)
 	{
-	  Instruction *last_inst = bb->preds[0]->last_inst;
-	  while (bb->first_inst->opcode != Op::BR)
+	  Inst *last_inst = bb->preds[0]->last_inst;
+	  while (bb->first_inst->op != Op::BR)
 	    {
 	      bb->first_inst->move_before(last_inst);
 	    }
@@ -289,7 +289,7 @@ void simplify_cfg(Function *func)
 
       // Remove empty BBs ending in unconditional branch by letting the
       // predecessors call the successor.
-      if (bb->first_inst->opcode == Op::BR
+      if (bb->first_inst->op == Op::BR
 	  && bb->first_inst->nof_args == 0
 	  && bb->phis.size() == 0
 	  && bb->succs[0]->phis.size() == 0)
@@ -298,7 +298,7 @@ void simplify_cfg(Function *func)
 	  std::vector<Basic_block *> preds = bb->preds;
 	  for (auto pred : preds)
 	    {
-	      assert(pred->last_inst->opcode == Op::BR);
+	      assert(pred->last_inst->op == Op::BR);
 	      if (pred->last_inst->nof_args == 0)
 		{
 		  destroy_instruction(pred->last_inst);
@@ -307,7 +307,7 @@ void simplify_cfg(Function *func)
 		}
 	      else
 		{
-		  Instruction *cond = pred->last_inst->arguments[0];
+		  Inst *cond = pred->last_inst->args[0];
 		  Basic_block *true_bb = pred->last_inst->u.br3.true_bb;
 		  Basic_block *false_bb = pred->last_inst->u.br3.false_bb;
 		  if (true_bb == bb)

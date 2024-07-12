@@ -43,19 +43,19 @@ class Unroller
 {
   Loop& loop;
   Function *func;
-  std::map<Instruction *, Instruction *> curr_inst;
+  std::map<Inst *, Inst *> curr_inst;
   std::map<Basic_block *, Basic_block *> curr_bb;
   Basic_block *next_loop_header = nullptr;
 
   void build_new_loop_exit();
   void update_loop_exit(Basic_block *orig_loop_bb,
 			Basic_block *current_iter_bb, Basic_block *exit_bb);
-  void duplicate(Instruction *inst, Basic_block *bb);
-  Instruction *translate(Instruction *inst);
+  void duplicate(Inst *inst, Basic_block *bb);
+  Inst *translate(Inst *inst);
   Basic_block *translate(Basic_block *bb);
-  Instruction *get_phi(std::map<Basic_block*, Instruction*>& bb2phi,
-		       Basic_block *bb, Instruction *inst);
-  void ensure_lcssa(Instruction *inst);
+  Inst *get_phi(std::map<Basic_block*, Inst *>& bb2phi,
+		       Basic_block *bb, Inst *inst);
+  void ensure_lcssa(Inst *inst);
   void create_lcssa();
   void unroll_one_iteration();
 
@@ -82,13 +82,13 @@ Unroller::Unroller(Loop& loop) : loop{loop}
   func = loop.bbs.back()->func;
 }
 
-Instruction *Unroller::get_phi(std::map<Basic_block*, Instruction*>& bb2phi, Basic_block *bb, Instruction *inst)
+Inst *Unroller::get_phi(std::map<Basic_block*, Inst *>& bb2phi, Basic_block *bb, Inst *inst)
 {
   if (bb2phi.contains(bb))
     return bb2phi[bb];
   assert(!contains(loop.exit_blocks, bb));
 
-  Instruction *phi = bb->build_phi_inst(inst->bitsize);
+  Inst *phi = bb->build_phi_inst(inst->bitsize);
   bb2phi.insert({bb, phi});
   assert(bb->preds.size() > 0);
   for (auto pred : bb->preds)
@@ -102,9 +102,9 @@ Instruction *Unroller::get_phi(std::map<Basic_block*, Instruction*>& bb2phi, Bas
 // Check that the instruction is used in LCSSA-safe way (i.e., all uses are
 // either in the loop, or in a phi-node at a loop exit). If not, insert a new
 // phi-node and make all loop-external uses use that.
-void Unroller::ensure_lcssa(Instruction *inst)
+void Unroller::ensure_lcssa(Inst *inst)
 {
-  std::vector<Instruction *> invalid_use;
+  std::vector<Inst *> invalid_use;
   for (auto use : inst->used_by)
     {
       if (!contains(loop.bbs, use->bb))
@@ -114,26 +114,26 @@ void Unroller::ensure_lcssa(Instruction *inst)
   if (invalid_use.empty())
     return;
 
-  std::map<Basic_block*, Instruction*> bb2phi;
+  std::map<Basic_block*, Inst *> bb2phi;
   for (auto exit_block : loop.exit_blocks)
     {
-      Instruction *phi = exit_block->build_phi_inst(inst->bitsize);
+      Inst *phi = exit_block->build_phi_inst(inst->bitsize);
       bb2phi.insert({exit_block, phi});
       for (auto pred : exit_block->preds)
 	phi->add_phi_arg(inst, pred);
     }
   while (!invalid_use.empty())
     {
-      Instruction *use = invalid_use.back();
+      Inst *use = invalid_use.back();
       invalid_use.pop_back();
-      if (use->opcode == Op::PHI)
+      if (use->op == Op::PHI)
 	{
 	  for (auto phi_arg : use->phi_args)
 	    {
 	      if (phi_arg.inst == inst
 		  && !contains(loop.bbs, phi_arg.bb))
 		{
-		  Instruction *arg_inst = get_phi(bb2phi, phi_arg.bb, inst);
+		  Inst *arg_inst = get_phi(bb2phi, phi_arg.bb, inst);
 		  use->update_phi_arg(arg_inst, phi_arg.bb);
 		}
 	    }
@@ -154,7 +154,7 @@ void Unroller::create_lcssa()
 	{
 	  ensure_lcssa(phi);
 	}
-      for (Instruction *inst = bb->first_inst; inst; inst = inst->next)
+      for (Inst *inst = bb->first_inst; inst; inst = inst->next)
 	{
 	  ensure_lcssa(inst);
 	}
@@ -312,7 +312,7 @@ std::optional<Loop> find_loop(Function *func)
 
 // Get the SSA variable (i.e., instruction) corresponding to the input SSA
 // variable for use in this iteration.
-Instruction *Unroller::translate(Instruction *inst)
+Inst *Unroller::translate(Inst *inst)
 {
   auto I = curr_inst.find(inst);
   if (I != curr_inst.end())
@@ -338,10 +338,10 @@ void Unroller::build_new_loop_exit()
       Basic_block *orig_exit_block = loop.exit_blocks[i];
       Basic_block *exit_block = func->build_bb();
       exit_block->build_br_inst(orig_exit_block);
-      std::map<Instruction *, Instruction *> phi_map;
+      std::map<Inst *, Inst *> phi_map;
       for (auto phi : orig_exit_block->phis)
 	{
-	  Instruction *new_phi = exit_block->build_phi_inst(phi->bitsize);
+	  Inst *new_phi = exit_block->build_phi_inst(phi->bitsize);
 	  phi_map.insert({phi, new_phi});
 	  phi->add_phi_arg(new_phi, exit_block);
 	}
@@ -350,7 +350,7 @@ void Unroller::build_new_loop_exit()
       // Update the branches within the loop to use the new loop exit.
       for (auto bb : loop.bbs)
 	{
-	  assert(bb->last_inst->opcode == Op::BR);
+	  assert(bb->last_inst->op == Op::BR);
 	  bool updated = false;
 	  if (bb->last_inst->nof_args == 0)
 	    {
@@ -364,7 +364,7 @@ void Unroller::build_new_loop_exit()
 	    }
 	  else
 	    {
-	      Instruction *arg = bb->last_inst->arguments[0];
+	      Inst *arg = bb->last_inst->args[0];
 	      Basic_block *true_bb = bb->last_inst->u.br3.true_bb;
 	      Basic_block *false_bb = bb->last_inst->u.br3.false_bb;
 	      if (true_bb == orig_exit_block || false_bb == orig_exit_block)
@@ -382,7 +382,7 @@ void Unroller::build_new_loop_exit()
 	    {
 	      for (auto phi : orig_exit_block->phis)
 		{
-		  Instruction *phi_arg = phi->get_phi_arg(bb);
+		  Inst *phi_arg = phi->get_phi_arg(bb);
 		  phi->remove_phi_arg(bb);
 		  phi_map.at(phi)->add_phi_arg(phi_arg, bb);
 		}
@@ -397,22 +397,22 @@ void Unroller::update_loop_exit(Basic_block *orig_loop_bb, Basic_block *current_
 {
   for (auto phi : exit_bb->phis)
     {
-      Instruction *inst = phi->get_phi_arg(orig_loop_bb);
+      Inst *inst = phi->get_phi_arg(orig_loop_bb);
       phi->add_phi_arg(translate(inst), current_iter_bb);
     }
 }
 
-void Unroller::duplicate(Instruction *inst, Basic_block *bb)
+void Unroller::duplicate(Inst *inst, Basic_block *bb)
 {
-  Instruction *new_inst = nullptr;
+  Inst *new_inst = nullptr;
   Inst_class iclass = inst->iclass();
   switch (iclass)
     {
     case Inst_class::iunary:
     case Inst_class::funary:
       {
-	Instruction *arg = translate(inst->arguments[0]);
-	new_inst = bb->build_inst(inst->opcode, arg);
+	Inst *arg = translate(inst->args[0]);
+	new_inst = bb->build_inst(inst->op, arg);
       }
       break;
     case Inst_class::icomparison:
@@ -421,21 +421,21 @@ void Unroller::duplicate(Instruction *inst, Basic_block *bb)
     case Inst_class::fbinary:
     case Inst_class::conv:
       {
-	Instruction *arg1 = translate(inst->arguments[0]);
-	Instruction *arg2 = translate(inst->arguments[1]);
-	new_inst = bb->build_inst(inst->opcode, arg1, arg2);
+	Inst *arg1 = translate(inst->args[0]);
+	Inst *arg2 = translate(inst->args[1]);
+	new_inst = bb->build_inst(inst->op, arg1, arg2);
       }
       break;
     case Inst_class::ternary:
       {
-	Instruction *arg1 = translate(inst->arguments[0]);
-	Instruction *arg2 = translate(inst->arguments[1]);
-	Instruction *arg3 = translate(inst->arguments[2]);
-	new_inst = bb->build_inst(inst->opcode, arg1, arg2, arg3);
+	Inst *arg1 = translate(inst->args[0]);
+	Inst *arg2 = translate(inst->args[1]);
+	Inst *arg3 = translate(inst->args[2]);
+	new_inst = bb->build_inst(inst->op, arg1, arg2, arg3);
       }
       break;
     default:
-      if (inst->opcode == Op::BR)
+      if (inst->op == Op::BR)
 	{
 	  if (inst->nof_args == 0)
 	    {
@@ -446,7 +446,7 @@ void Unroller::duplicate(Instruction *inst, Basic_block *bb)
 	    }
 	  else
 	    {
-	      Instruction *arg = translate(inst->arguments[0]);
+	      Inst *arg = translate(inst->args[0]);
 	      Basic_block *true_bb = translate(inst->u.br3.true_bb);
 	      Basic_block *false_bb = translate(inst->u.br3.false_bb);
 	      bb->build_br_inst(arg, true_bb, false_bb);
@@ -457,7 +457,7 @@ void Unroller::duplicate(Instruction *inst, Basic_block *bb)
 	    }
 	  return;
 	}
-      else if (inst->opcode == Op::PHI)
+      else if (inst->op == Op::PHI)
 	{
 	  new_inst = bb->build_phi_inst(inst->bitsize);
 	  for (auto [arg_inst, arg_bb] : inst->phi_args)
@@ -488,10 +488,10 @@ void Unroller::unroll_one_iteration()
     // where phi %12 uses the value of phi %10 from the previous iteration.
     // So we must translate all phi nodes before writing the new phi nodes
     // to the translation table.
-    std::map<Instruction *, Instruction *> tmp_curr_inst;
+    std::map<Inst *, Inst *> tmp_curr_inst;
     for (auto src_phi : src_bb->phis)
       {
-	Instruction *dst_phi = dst_bb->build_phi_inst(src_phi->bitsize);
+	Inst *dst_phi = dst_bb->build_phi_inst(src_phi->bitsize);
 	tmp_curr_inst.insert({src_phi, dst_phi});
 	for (auto [arg_inst, arg_bb] : src_phi->phi_args)
 	  {
@@ -504,7 +504,7 @@ void Unroller::unroll_one_iteration()
 	curr_inst[phi] = translated_phi;
       }
 
-    for (Instruction *inst = src_bb->first_inst;
+    for (Inst *inst = src_bb->first_inst;
 	 inst != src_bb->last_inst;
 	 inst = inst->next)
       {
@@ -528,7 +528,7 @@ void Unroller::unroll_one_iteration()
 	{
 	  duplicate(phi, dst_bb);
 	}
-      for (Instruction *inst = src_bb->first_inst;
+      for (Inst *inst = src_bb->first_inst;
 	   inst != src_bb->last_inst;
 	   inst = inst->next)
 	{
@@ -583,7 +583,7 @@ void Unroller::unroll()
   std::vector<Basic_block *> deleted_branches;
   for (auto bb : loop.bbs)
     {
-      assert(bb->last_inst->opcode == Op::BR);
+      assert(bb->last_inst->op == Op::BR);
       if (bb->last_inst->nof_args == 0)
 	{
 	  Basic_block *dest_bb = bb->last_inst->u.br1.dest_bb;
@@ -606,7 +606,7 @@ void Unroller::unroll()
 		true_bb = first_unrolled;
 	      if (false_bb == loop_header)
 		false_bb = first_unrolled;
-	      Instruction *cond = bb->last_inst->arguments[0];
+	      Inst *cond = bb->last_inst->args[0];
 	      destroy_instruction(bb->last_inst);
 	      bb->build_br_inst(cond, true_bb, false_bb);
 	    }

@@ -174,36 +174,36 @@ enum class Inst_class : uint8_t {
   special
 };
 
-struct Instruction_info {
+struct Inst_info {
   const char *name;
-  Op opcode;
+  Op op;
   Inst_class iclass;
   bool has_lhs;
   bool is_commutative;
 };
 
-extern const std::array<Instruction_info, 100> inst_info;
+extern const std::array<Inst_info, 100> inst_info;
 
 struct Module;
 struct Function;
 struct Basic_block;
-struct Instruction;
+struct Inst;
 
 struct Phi_arg {
-  Instruction *inst;
+  Inst *inst;
   Basic_block *bb;
 };
 
-struct Instruction {
+struct Inst {
   uint32_t bitsize = 0;
-  Op opcode;
+  Op op;
   uint16_t nof_args = 0;
-  Instruction *arguments[3];
+  Inst *args[3];
   Basic_block *bb = nullptr;
-  Instruction *prev = nullptr;
-  Instruction *next = nullptr;
+  Inst *prev = nullptr;
+  Inst *next = nullptr;
   uint32_t id;
-  std::set<Instruction *> used_by;
+  std::set<Inst *> used_by;
   std::vector<Phi_arg> phi_args;
 
   union {
@@ -221,69 +221,67 @@ struct Instruction {
 
   Inst_class iclass() const
   {
-    return inst_info[(int)opcode].iclass;
+    return inst_info[(int)op].iclass;
   }
   const char *name() const
   {
-    return inst_info[(int)opcode].name;
+    return inst_info[(int)op].name;
   }
   bool has_lhs() const
   {
-    return inst_info[(int)opcode].has_lhs;
+    return inst_info[(int)op].has_lhs;
   }
   bool is_commutative() const
   {
-    return inst_info[(int)opcode].is_commutative;
+    return inst_info[(int)op].is_commutative;
   }
   unsigned __int128 value() const;
   __int128 signed_value() const;
-  void insert_after(Instruction *inst);
-  void insert_before(Instruction *inst);
-  void move_after(Instruction *inst);
-  void move_before(Instruction *inst);
-  void replace_use_with(Instruction *use, Instruction *new_inst);
-  void replace_all_uses_with(Instruction *inst);
+  void insert_after(Inst *inst);
+  void insert_before(Inst *inst);
+  void move_after(Inst *inst);
+  void move_before(Inst *inst);
+  void replace_use_with(Inst *use, Inst *new_inst);
+  void replace_all_uses_with(Inst *inst);
   void update_uses();
-  Instruction *get_phi_arg(Basic_block *bb);
-  void update_phi_arg(Instruction *inst, Basic_block *bb);
-  void add_phi_arg(Instruction *inst, Basic_block *bb);
+  Inst *get_phi_arg(Basic_block *bb);
+  void update_phi_arg(Inst *inst, Basic_block *bb);
+  void add_phi_arg(Inst *inst, Basic_block *bb);
   void remove_phi_arg(Basic_block *bb);
   void remove_phi_args();
   void print(FILE *stream) const;
 
-  Instruction();
+  Inst();
 };
 
 struct Basic_block {
-  std::vector<Instruction *> phis;
+  std::vector<Inst *> phis;
   std::vector<Basic_block *> preds;
   std::vector<Basic_block *> succs;
 
-  Instruction *first_inst = nullptr;
-  Instruction *last_inst = nullptr;
+  Inst *first_inst = nullptr;
+  Inst *last_inst = nullptr;
   Function *func;
   int id;
 
-  void insert_last(Instruction *inst);
-  void insert_phi(Instruction *inst);
-  Instruction *build_inst(Op opcode);
-  Instruction *build_inst(Op opcode, Instruction *arg);
-  Instruction *build_inst(Op opcode, Instruction *arg1, Instruction *arg2);
-  Instruction *build_inst(Op opcode, Instruction *arg1, Instruction *arg2,
-			  Instruction *arg3);
-  Instruction *build_phi_inst(int bitsize);
-  Instruction *build_ret_inst();
-  Instruction *build_ret_inst(Instruction *arg);
-  Instruction *build_ret_inst(Instruction *arg1, Instruction *arg2);
-  Instruction *build_br_inst(Basic_block *dest_bb);
-  Instruction *build_br_inst(Instruction *cond, Basic_block *true_bb,
-			     Basic_block *false_bb);
-  Instruction *build_extract_id(Instruction *arg);
-  Instruction *build_extract_offset(Instruction *arg);
-  Instruction *build_extract_bit(Instruction *arg, uint32_t bit_idx);
-  Instruction *build_trunc(Instruction *arg, uint32_t nof_bits);
-  Instruction *value_inst(unsigned __int128 value, uint32_t bitsize);
-  Instruction *value_m1_inst(uint32_t bitsize);
+  void insert_last(Inst *inst);
+  void insert_phi(Inst *inst);
+  Inst *build_inst(Op op);
+  Inst *build_inst(Op op, Inst *arg);
+  Inst *build_inst(Op op, Inst *arg1, Inst *arg2);
+  Inst *build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3);
+  Inst *build_phi_inst(int bitsize);
+  Inst *build_ret_inst();
+  Inst *build_ret_inst(Inst *arg);
+  Inst *build_ret_inst(Inst *arg1, Inst *arg2);
+  Inst *build_br_inst(Basic_block *dest_bb);
+  Inst *build_br_inst(Inst *cond, Basic_block *true_bb, Basic_block *false_bb);
+  Inst *build_extract_id(Inst *arg);
+  Inst *build_extract_offset(Inst *arg);
+  Inst *build_extract_bit(Inst *arg, uint32_t bit_idx);
+  Inst *build_trunc(Inst *arg, uint32_t nof_bits);
+  Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
+  Inst *value_m1_inst(uint32_t bitsize);
   void print(FILE *stream) const;
 };
 
@@ -291,8 +289,8 @@ struct Function {
 public:
   std::string name;
   std::vector<Basic_block *> bbs;
-  std::map<std::pair<uint32_t, unsigned __int128>, Instruction *> values;
-  Instruction *last_value_inst = nullptr;
+  std::map<std::pair<uint32_t, unsigned __int128>, Inst *> values;
+  Inst *last_value_inst = nullptr;
 
   // Data for dominance calculations.
   bool has_dominance = false;
@@ -300,7 +298,7 @@ public:
   std::map<const Basic_block *, Basic_block *> nearest_postdom;
 
   Basic_block *build_bb();
-  Instruction *value_inst(unsigned __int128 value, uint32_t bitsize);
+  Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   void rename(const std::string& str);
   void canonicalize();
   void reset_ir_id();
@@ -353,20 +351,18 @@ Module *create_module(uint32_t ptr_bits, uint32_t id_bits, uint32_t offset_bits)
 void destroy_module(Module *);
 void destroy_function(Function *);
 void destroy_basic_block(Basic_block *);
-void destroy_instruction(Instruction *);
+void destroy_instruction(Inst *);
 
-Instruction *create_inst(Op opcode);
-Instruction *create_inst(Op opcode, Instruction *arg);
-Instruction *create_inst(Op opcode, Instruction *arg1, Instruction *arg2);
-Instruction *create_inst(Op opcode, Instruction *arg1, Instruction *arg2,
-			 Instruction *arg3);
-Instruction *create_phi_inst(int bitsize);
-Instruction *create_ret_inst();
-Instruction *create_ret_inst(Instruction *arg);
-Instruction *create_ret_inst(Instruction *arg1, Instruction *arg2);
-Instruction *create_br_inst(Basic_block *dest_bb);
-Instruction *create_br_inst(Instruction *cond, Basic_block *true_bb,
-			    Basic_block *false_bb);
+Inst *create_inst(Op op);
+Inst *create_inst(Op op, Inst *arg);
+Inst *create_inst(Op op, Inst *arg1, Inst *arg2);
+Inst *create_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3);
+Inst *create_phi_inst(int bitsize);
+Inst *create_ret_inst();
+Inst *create_ret_inst(Inst *arg);
+Inst *create_ret_inst(Inst *arg1, Inst *arg2);
+Inst *create_br_inst(Basic_block *dest_bb);
+Inst *create_br_inst(Inst *cond, Basic_block *true_bb, Basic_block *false_bb);
 
 /* Opt level runs all optimization <= the level:
  *  0: Dead code elimination
@@ -424,11 +420,11 @@ struct MemoryObject {
 
 // read_riscv.cpp
 struct riscv_state {
-  std::vector<Instruction *> registers;
-  std::vector<Instruction *> fregisters;
+  std::vector<Inst *> registers;
+  std::vector<Inst *> fregisters;
 
   // The memory instruction corresponding to each symbol.
-  std::map<std::string, Instruction *> sym_name2mem;
+  std::map<std::string, Inst *> sym_name2mem;
 
   std::string func_name;
   Module *module;
@@ -441,7 +437,7 @@ struct riscv_state {
 Function *parse_riscv(std::string const& file_name, riscv_state *state);
 
 // simplify_insts.cpp
-Instruction *simplify_inst(Instruction *inst);
+Inst *simplify_inst(Inst *inst);
 void simplify_insts(Function *func);
 void simplify_insts(Module *module);
 void simplify_mem(Function *func);

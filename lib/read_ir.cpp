@@ -29,11 +29,11 @@ struct parser {
   std::vector<token> tokens;
 
   struct br_inst {
-    std::vector<Instruction *> args;
+    std::vector<Inst *> args;
     std::vector<std::string> labels;
   };
 
-  std::map<std::string, Instruction_info> name2info;
+  std::map<std::string, Inst_info> name2info;
 
   parser()
   {
@@ -66,9 +66,9 @@ private:
   Basic_block *current_bb = nullptr;
   std::map<uint32_t, Basic_block *> id2bb;
   std::map<Basic_block *, uint32_t> bb2id;
-  std::map<uint32_t, Instruction *> id2inst;
+  std::map<uint32_t, Inst *> id2inst;
   std::map<Basic_block *, br_inst> bb2br_args;
-  std::map<Instruction *, std::vector<std::pair<uint32_t, std::string>>> phi2phi_args;
+  std::map<Inst *, std::vector<std::pair<uint32_t, std::string>>> phi2phi_args;
 
   void lex_line(void);
   void lex_label_or_label_def(void);
@@ -86,7 +86,7 @@ private:
 
   uint32_t get_uint32(unsigned idx);
   unsigned __int128 get_hex_or_integer(unsigned idx);
-  Instruction *get_arg(unsigned idx);
+  Inst *get_arg(unsigned idx);
   uint32_t get_arg_id(unsigned idx);
   std::string get_bb_string(unsigned idx);
   Basic_block *get_bb_from_string(std::string str);
@@ -268,7 +268,7 @@ unsigned __int128 parser::get_hex_or_integer(unsigned idx)
     return get_hex(&buf[tokens[idx].pos]);
 }
 
-Instruction *parser::get_arg(unsigned idx)
+Inst *parser::get_arg(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
@@ -429,7 +429,7 @@ Op parser::parse_instruction()
   auto I = name2info.find(name);
   if (I == name2info.end())
     throw Parse_error("invalid instruction name", line_number);
-  const Instruction_info& info = I->second;
+  const Inst_info& info = I->second;
   if (info.has_lhs && name_idx == 0)
     throw Parse_error("instruction return value is ignored", line_number);
   if (!info.has_lhs && name_idx != 0)
@@ -446,15 +446,15 @@ Op parser::parse_instruction()
 	{
 	  get_end_of_line(4);
 
-	  id2inst[lhs_id] = current_bb->build_inst(info.opcode);
+	  id2inst[lhs_id] = current_bb->build_inst(info.op);
 	}
       else if (info.iclass == Inst_class::iunary
 	       || info.iclass == Inst_class::funary)
 	{
-	  Instruction *arg1 = get_arg(3);
+	  Inst *arg1 = get_arg(3);
 	  get_end_of_line(4);
 
-	  id2inst[lhs_id] = current_bb->build_inst(info.opcode, arg1);
+	  id2inst[lhs_id] = current_bb->build_inst(info.op, arg1);
 	}
       else if (info.iclass == Inst_class::ibinary
 	       || info.iclass == Inst_class::fbinary
@@ -462,26 +462,26 @@ Op parser::parse_instruction()
 	       || info.iclass == Inst_class::fcomparison
 	       || info.iclass == Inst_class::conv)
 	{
-	  Instruction *arg1 = get_arg(3);
+	  Inst *arg1 = get_arg(3);
 	  get_comma(4);
-	  Instruction *arg2 = get_arg(5);
+	  Inst *arg2 = get_arg(5);
 	  get_end_of_line(6);
 
-	  id2inst[lhs_id] = current_bb->build_inst(info.opcode, arg1, arg2);
+	  id2inst[lhs_id] = current_bb->build_inst(info.op, arg1, arg2);
 	}
       else if (info.iclass == Inst_class::ternary)
 	{
-	  Instruction *arg1 = get_arg(3);
+	  Inst *arg1 = get_arg(3);
 	  get_comma(4);
-	  Instruction *arg2 = get_arg(5);
+	  Inst *arg2 = get_arg(5);
 	  get_comma(6);
-	  Instruction *arg3 = get_arg(7);
+	  Inst *arg3 = get_arg(7);
 	  get_end_of_line(8);
 
 	  id2inst[lhs_id] =
-	    current_bb->build_inst(info.opcode, arg1, arg2, arg3);
+	    current_bb->build_inst(info.op, arg1, arg2, arg3);
 	}
-      else if (info.opcode == Op::PHI)
+      else if (info.op == Op::PHI)
 	{
 	  std::vector<std::pair<uint32_t, std::string>> phi_args;
 
@@ -512,11 +512,11 @@ Op parser::parse_instruction()
 	    }
 	  assert(bitsize != 0);
 
-	  Instruction *phi = current_bb->build_phi_inst(bitsize);
+	  Inst *phi = current_bb->build_phi_inst(bitsize);
 	  id2inst[lhs_id] = phi;
 	  phi2phi_args[phi] = phi_args;
 	}
-      else if (info.opcode == Op::VALUE)
+      else if (info.op == Op::VALUE)
 	{
 	  unsigned __int128 value = get_hex_or_integer(3);
 	  get_comma(4);
@@ -533,24 +533,24 @@ Op parser::parse_instruction()
       if (info.iclass == Inst_class::iunary ||
 	  info.iclass == Inst_class::funary)
 	{
-	  Instruction *arg1 = get_arg(1);
+	  Inst *arg1 = get_arg(1);
 	  get_end_of_line(2);
 
-	  current_bb->build_inst(info.opcode, arg1);
+	  current_bb->build_inst(info.op, arg1);
 	}
       else if (info.iclass == Inst_class::ibinary
 	       || info.iclass == Inst_class::fbinary
 	       || info.iclass == Inst_class::icomparison
 	       || info.iclass == Inst_class::fcomparison)
 	{
-	  Instruction *arg1 = get_arg(1);
+	  Inst *arg1 = get_arg(1);
 	  get_comma(2);
-	  Instruction *arg2 = get_arg(3);
+	  Inst *arg2 = get_arg(3);
 	  get_end_of_line(4);
 
-	  current_bb->build_inst(info.opcode, arg1, arg2);
+	  current_bb->build_inst(info.op, arg1, arg2);
 	}
-      else if (info.opcode == Op::BR)
+      else if (info.op == Op::BR)
 	{
 	  br_inst br_args;
 	  if (tokens.size() > 2)
@@ -569,7 +569,7 @@ Op parser::parse_instruction()
 	    }
 	  bb2br_args[current_bb] = br_args;
 	}
-      else if (info.opcode == Op::RET)
+      else if (info.op == Op::RET)
 	{
 	  if (tokens.size() == 1)
 	    {
@@ -578,15 +578,15 @@ Op parser::parse_instruction()
 	    }
 	  else if (tokens.size() == 2)
 	    {
-	      Instruction *arg = get_arg(1);
+	      Inst *arg = get_arg(1);
 	      get_end_of_line(2);
 	      current_bb->build_ret_inst(arg);
 	    }
 	  else
 	    {
-	      Instruction *arg1 = get_arg(1);
+	      Inst *arg1 = get_arg(1);
 	      get_comma(2);
-	      Instruction *arg2 = get_arg(3);
+	      Inst *arg2 = get_arg(3);
 	      get_end_of_line(4);
 	      current_bb->build_ret_inst(arg1, arg2);
 	    }
@@ -595,7 +595,7 @@ Op parser::parse_instruction()
 	throw Not_implemented("parse_instruction: " + name);
     }
 
-  return info.opcode;
+  return info.op;
 }
 
 void parser::lex_line(void)
@@ -677,8 +677,8 @@ void parser::parse(std::string const& file_name)
       }
     else if (parser_state == state::instruction)
       {
-	Op opcode = parse_instruction();
-	if (opcode == Op::RET)
+	Op op = parse_instruction();
+	if (op == Op::RET)
 	  {
 	    // We have completed the functions. That is, all basic blocks
 	    // have been created, so we can add the branches and phi node
@@ -689,7 +689,7 @@ void parser::parse(std::string const& file_name)
 		  {
 		    for (auto [id, bb_string] : phi2phi_args.at(phi))
 		      {
-			Instruction *arg_inst = id2inst.at(id);
+			Inst *arg_inst = id2inst.at(id);
 			Basic_block *arg_bb = get_bb_from_string(bb_string);
 			phi->add_phi_arg(arg_inst, arg_bb);
 		      }
@@ -709,7 +709,7 @@ void parser::parse(std::string const& file_name)
 		      {
 			assert(br_args.args.size() == 1);
 			assert(br_args.labels.size() == 2);
-			Instruction *cond = br_args.args[0];
+			Inst *cond = br_args.args[0];
 			Basic_block *true_bb =
 			  get_bb_from_string(br_args.labels[0]);
 			Basic_block *false_bb =
@@ -725,7 +725,7 @@ void parser::parse(std::string const& file_name)
 	    id2inst.clear();
 	    parser_state = state::function;
 	  }
-	else if (opcode == Op::BR)
+	else if (op == Op::BR)
 	  {
 	    current_bb = nullptr;
 	    parser_state = state::basic_block;

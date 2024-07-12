@@ -11,19 +11,19 @@ namespace smtgcc {
 
 namespace {
 
-void validate(Instruction *inst)
+void validate(Inst *inst)
 {
   // Some instructions are required to be placed in the entry block.
-  if (inst->opcode == Op::PARAM
-      || inst->opcode == Op::MEMORY
-      || inst->opcode == Op::VALUE)
+  if (inst->op == Op::PARAM
+      || inst->op == Op::MEMORY
+      || inst->op == Op::VALUE)
     {
       assert(inst->bb == inst->bb->func->bbs[0]);
     }
 
   // RET and BR must be the last instruction in the basic block.
   // All other instructions must have a next instruction.
-  if (inst->opcode == Op::RET || inst->opcode == Op::BR)
+  if (inst->op == Op::RET || inst->op == Op::BR)
     {
       assert(inst == inst->bb->last_inst);
       assert(!inst->next);
@@ -66,24 +66,24 @@ void validate(Basic_block *bb)
   assert(bb->succs.size() < 3);
   if (bb->succs.size() == 0)
     {
-      assert(bb->last_inst->opcode == Op::RET);
+      assert(bb->last_inst->op == Op::RET);
     }
   else if (bb->succs.size() == 1)
     {
-      assert(bb->last_inst->opcode == Op::BR);
+      assert(bb->last_inst->op == Op::BR);
       assert(bb->last_inst->u.br1.dest_bb == bb->succs[0]);
     }
   else
     {
       assert(bb->succs.size() == 2);
-      assert(bb->last_inst->opcode == Op::BR);
+      assert(bb->last_inst->op == Op::BR);
       Basic_block *true_bb = bb->last_inst->u.br3.true_bb;
       Basic_block *false_bb = bb->last_inst->u.br3.false_bb;
       assert(bb->succs[0] == true_bb && bb->succs[1] == false_bb);
     }
 
   // Phi nodes must have one argument for each predecessor.
-  for (Instruction *phi : bb->phis)
+  for (Inst *phi : bb->phis)
     {
       assert(phi->phi_args.size() == bb->preds.size());
       for (auto [arg_inst, arg_bb] : phi->phi_args)
@@ -94,7 +94,7 @@ void validate(Basic_block *bb)
     }
 
   // TODO: For each inst, check that its used_by is correct.
-  for (Instruction *inst = bb->first_inst; inst; inst = inst->next)
+  for (Inst *inst = bb->first_inst; inst; inst = inst->next)
     {
       assert(inst->bb == bb);
       validate(inst);
@@ -112,20 +112,20 @@ void validate(Function *func)
     }
 
   // Check that each instruction has been defined before use.
-  std::set<Instruction *> defined;
+  std::set<Inst *> defined;
   for (Basic_block *bb : func->bbs)
     {
-      for (Instruction *phi : bb->phis)
+      for (Inst *phi : bb->phis)
 	{
 	  assert(!defined.contains(phi));
 	  defined.insert(phi);
 	}
-      for (Instruction *inst = bb->first_inst; inst; inst = inst->next)
+      for (Inst *inst = bb->first_inst; inst; inst = inst->next)
 	{
 	  assert(!defined.contains(inst));
 	  for (unsigned i = 0 ; i < inst->nof_args; i++)
 	    {
-	      assert(defined.contains(inst->arguments[i]));
+	      assert(defined.contains(inst->args[i]));
 	    }
 	  defined.insert(inst);
 	}

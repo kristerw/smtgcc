@@ -40,28 +40,28 @@ struct tv_pass : gimple_opt_pass
 
 struct Regs
 {
-  Instruction *regs[2] = {nullptr, nullptr};
-  Instruction *fregs[2] = {nullptr, nullptr};
+  Inst *regs[2] = {nullptr, nullptr};
+  Inst *fregs[2] = {nullptr, nullptr};
 };
 
-static Instruction *pad_to_freg_size(riscv_state *rstate, Instruction *inst)
+static Inst *pad_to_freg_size(riscv_state *rstate, Inst *inst)
 {
   assert(inst->bitsize <= rstate->freg_bitsize);
   if (inst->bitsize < rstate->freg_bitsize)
     {
       uint32_t padding_bitsize = rstate->freg_bitsize - inst->bitsize;
-      Instruction *m1 = inst->bb->value_m1_inst(padding_bitsize);
+      Inst *m1 = inst->bb->value_m1_inst(padding_bitsize);
       inst = inst->bb->build_inst(Op::CONCAT, m1, inst);
     }
   return inst;
 }
 
-static Instruction *pad_to_reg_size(riscv_state *rstate, Instruction *inst, tree type)
+static Inst *pad_to_reg_size(riscv_state *rstate, Inst *inst, tree type)
 {
   assert(inst->bitsize <= rstate->reg_bitsize);
   if (inst->bitsize < rstate->reg_bitsize)
     {
-      Instruction *bs_inst = inst->bb->value_inst(rstate->reg_bitsize, 32);
+      Inst *bs_inst = inst->bb->value_inst(rstate->reg_bitsize, 32);
       if (INTEGRAL_TYPE_P(type) && TYPE_UNSIGNED(type))
 	inst = inst->bb->build_inst(Op::ZEXT, inst, bs_inst);
       else
@@ -120,7 +120,7 @@ static bool flatten_struct(riscv_state *rstate, tree struct_type, std::vector<tr
 // Determines if the structure can be handled by the hardware floating-point
 // calling convention, and in that case, splits the structure into
 // instructions for each register the structure will be passed in.
-static std::optional<Regs> regs_for_fp_struct(riscv_state *rstate, Instruction *value, tree struct_type)
+static std::optional<Regs> regs_for_fp_struct(riscv_state *rstate, Inst *value, tree struct_type)
 {
   std::vector<tree> elems;
   int nof_r = 0;
@@ -139,9 +139,9 @@ static std::optional<Regs> regs_for_fp_struct(riscv_state *rstate, Instruction *
       uint64_t bit_offset = get_int_cst_val(DECL_FIELD_BIT_OFFSET(fld));
       uint64_t low_val = 8 * offset + bit_offset;
       uint64_t high_val = low_val + bitsize_for_type(type) - 1;
-      Instruction *high = bb->value_inst(high_val, 32);
-      Instruction *low = bb->value_inst(low_val, 32);
-      Instruction *inst = bb->build_inst(Op::EXTRACT, value, high, low);
+      Inst *high = bb->value_inst(high_val, 32);
+      Inst *low = bb->value_inst(low_val, 32);
+      Inst *inst = bb->build_inst(Op::EXTRACT, value, high, low);
       if (SCALAR_FLOAT_TYPE_P(type))
 	{
 	  assert(freg_nbr < 2);
@@ -152,10 +152,10 @@ static std::optional<Regs> regs_for_fp_struct(riscv_state *rstate, Instruction *
 	  assert(freg_nbr == 0);
 	  uint64_t elt_bitsize = value->bitsize / 2;
 	  assert(elt_bitsize == 16 || elt_bitsize == 32 || elt_bitsize == 64);
-	  Instruction *reg_value = bb->build_trunc(value, elt_bitsize);
+	  Inst *reg_value = bb->build_trunc(value, elt_bitsize);
 	  regs.fregs[freg_nbr++] = pad_to_freg_size(rstate, reg_value);
-	  Instruction *high = bb->value_inst(value->bitsize - 1, 32);
-	  Instruction *low = bb->value_inst(elt_bitsize, 32);
+	  Inst *high = bb->value_inst(value->bitsize - 1, 32);
+	  Inst *low = bb->value_inst(elt_bitsize, 32);
 	  reg_value = bb->build_inst(Op::EXTRACT, value, high, low);
 	  regs.fregs[freg_nbr++] = pad_to_freg_size(rstate, reg_value);
 	}
@@ -174,7 +174,7 @@ static std::optional<Regs> regs_for_fp_struct(riscv_state *rstate, Instruction *
 // Determines if the value can be passed in registers, and in that case,
 // splits the structure into instructions for each register the structure
 // will be passed in.
-static std::optional<Regs> regs_for_value(riscv_state *rstate, Instruction *value, tree type)
+static std::optional<Regs> regs_for_value(riscv_state *rstate, Inst *value, tree type)
 {
   Basic_block *bb = value->bb;
 
@@ -184,10 +184,10 @@ static std::optional<Regs> regs_for_value(riscv_state *rstate, Instruction *valu
       Regs regs;
       uint64_t elt_bitsize = value->bitsize / 2;
       assert(elt_bitsize == 16 || elt_bitsize == 32 || elt_bitsize == 64);
-      Instruction *reg_value = bb->build_trunc(value, elt_bitsize);
+      Inst *reg_value = bb->build_trunc(value, elt_bitsize);
       regs.fregs[0] = pad_to_freg_size(rstate, reg_value);
-      Instruction *high = bb->value_inst(value->bitsize - 1, 32);
-      Instruction *low = bb->value_inst(elt_bitsize, 32);
+      Inst *high = bb->value_inst(value->bitsize - 1, 32);
+      Inst *low = bb->value_inst(elt_bitsize, 32);
       reg_value = bb->build_inst(Op::EXTRACT, value, high, low);
       regs.fregs[1] = pad_to_freg_size(rstate, reg_value);
       return regs;
@@ -213,7 +213,7 @@ static std::optional<Regs> regs_for_value(riscv_state *rstate, Instruction *valu
       if (value->bitsize < rstate->reg_bitsize * num_regs)
 	{
 	  bool is_unsigned = INTEGRAL_TYPE_P(type) && TYPE_UNSIGNED(type);
-	  Instruction *bs_inst =
+	  Inst *bs_inst =
 	    bb->value_inst(rstate->reg_bitsize * num_regs, 32);
 	  if (is_unsigned && value->bitsize != 32)
 	    value = bb->build_inst(Op::ZEXT, value, bs_inst);
@@ -225,8 +225,8 @@ static std::optional<Regs> regs_for_value(riscv_state *rstate, Instruction *valu
       regs.regs[0] = bb->build_trunc(value, rstate->reg_bitsize);
       if (num_regs > 1)
 	{
-	  Instruction *high = bb->value_inst(value->bitsize - 1, 32);
-	  Instruction *low = bb->value_inst(rstate->reg_bitsize, 32);
+	  Inst *high = bb->value_inst(value->bitsize - 1, 32);
+	  Inst *low = bb->value_inst(rstate->reg_bitsize, 32);
 	  regs.regs[1] = bb->build_inst(Op::EXTRACT, value, high, low);
 	}
       return regs;
@@ -242,10 +242,10 @@ static void build_return(riscv_state *rstate, Function *src_func, function *fun,
   tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
 
   Basic_block *src_last_bb = src_func->bbs.back();
-  assert(src_last_bb->last_inst->opcode == Op::RET);
+  assert(src_last_bb->last_inst->op == Op::RET);
   uint64_t ret_bitsize = 0;
   if (src_last_bb->last_inst->nof_args > 0)
-    ret_bitsize = src_last_bb->last_inst->arguments[0]->bitsize;
+    ret_bitsize = src_last_bb->last_inst->args[0]->bitsize;
   if (ret_bitsize == 0)
     {
       bb->build_ret_inst();
@@ -261,12 +261,12 @@ static void build_return(riscv_state *rstate, Function *src_func, function *fun,
     {
       uint32_t reg_nbr = 10;
       uint32_t freg_nbr = 10;
-      Instruction *retval = nullptr;
+      Inst *retval = nullptr;
       for (tree fld : elems)
 	{
 	  tree type = TREE_TYPE(fld);
 	  uint64_t type_bitsize = bitsize_for_type(type);
-	  Instruction *value = nullptr;
+	  Inst *value = nullptr;
 	  if (SCALAR_FLOAT_TYPE_P(type))
 	    value = bb->build_inst(Op::READ, rstate->fregisters[freg_nbr++]);
 	  else if (INTEGRAL_TYPE_P(type))
@@ -278,10 +278,10 @@ static void build_return(riscv_state *rstate, Function *src_func, function *fun,
 	      assert(elt_bitsize == 16
 		     || elt_bitsize == 32
 		     || elt_bitsize == 64);
-	      Instruction *real =
+	      Inst *real =
 		bb->build_inst(Op::READ, rstate->fregisters[10]);
 	      real = bb->build_trunc(real, elt_bitsize);
-	      Instruction *imag =
+	      Inst *imag =
 		bb->build_inst(Op::READ, rstate->fregisters[11]);
 	      imag = bb->build_trunc(imag, elt_bitsize);
 	      value =
@@ -294,7 +294,7 @@ static void build_return(riscv_state *rstate, Function *src_func, function *fun,
 	  if (low_val > 0 && (!retval || retval->bitsize < low_val))
 	    {
 	      uint64_t nof_pad = retval ? low_val - retval->bitsize : low_val;
-	      Instruction *pad = bb->value_inst(0, nof_pad);
+	      Inst *pad = bb->value_inst(0, nof_pad);
 	      if (retval)
 		retval = bb->build_inst(Op::CONCAT, pad, retval);
 	      else
@@ -308,7 +308,7 @@ static void build_return(riscv_state *rstate, Function *src_func, function *fun,
 	}
       if (retval->bitsize != ret_bitsize)
 	{
-	  Instruction *pad = bb->value_inst(0, ret_bitsize - retval->bitsize);
+	  Inst *pad = bb->value_inst(0, ret_bitsize - retval->bitsize);
 	  retval = bb->build_inst(Op::CONCAT, pad, retval);
 	}
       bb->build_ret_inst(retval);
@@ -319,16 +319,16 @@ static void build_return(riscv_state *rstate, Function *src_func, function *fun,
     {
       uint64_t elt_bitsize = ret_bitsize / 2;
       assert(elt_bitsize == 16 || elt_bitsize == 32 || elt_bitsize == 64);
-      Instruction *real = bb->build_inst(Op::READ, rstate->fregisters[10]);
+      Inst *real = bb->build_inst(Op::READ, rstate->fregisters[10]);
       real = bb->build_trunc(real, elt_bitsize);
-      Instruction *imag = bb->build_inst(Op::READ, rstate->fregisters[11]);
+      Inst *imag = bb->build_inst(Op::READ, rstate->fregisters[11]);
       imag = bb->build_trunc(imag, elt_bitsize);
       bb->build_ret_inst(bb->build_inst(Op::CONCAT, imag, real));
       return;
     }
   if (SCALAR_FLOAT_TYPE_P(ret_type) && ret_bitsize <= rstate->freg_bitsize)
     {
-      Instruction *retval =
+      Inst *retval =
 	bb->build_inst(Op::READ, rstate->fregisters[10]);
       if (ret_bitsize < retval->bitsize)
 	retval = bb->build_trunc(retval, ret_bitsize);
@@ -339,11 +339,11 @@ static void build_return(riscv_state *rstate, Function *src_func, function *fun,
   // Handle the integer calling convention.
   if (ret_bitsize <= 2 * rstate->reg_bitsize)
     {
-      Instruction *retval =
+      Inst *retval =
 	bb->build_inst(Op::READ, rstate->registers[10]);
       if (retval->bitsize < ret_bitsize)
 	{
-	  Instruction *inst =
+	  Inst *inst =
 	    bb->build_inst(Op::READ, rstate->registers[11]);
 	  retval = bb->build_inst(Op::CONCAT, inst, retval);
 	}
@@ -356,25 +356,25 @@ static void build_return(riscv_state *rstate, Function *src_func, function *fun,
       // Return of values wider than 2*reg_bitsize are passed in memory,
       // where the address is specified by an implicit first parameter.
       assert((ret_bitsize & 7) == 0);
-      Instruction *id = tgt->value_inst(-127, tgt->module->ptr_id_bits);
-      Instruction *mem_size =
+      Inst *id = tgt->value_inst(-127, tgt->module->ptr_id_bits);
+      Inst *mem_size =
 	tgt->value_inst(ret_bitsize / 8, tgt->module->ptr_offset_bits);
-      Instruction *flags = tgt->value_inst(0, 32);
+      Inst *flags = tgt->value_inst(0, 32);
 
       Basic_block *entry_bb = rstate->entry_bb;
-      Instruction *ret_mem =
+      Inst *ret_mem =
 	entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
-      Instruction *reg = rstate->registers[(*reg_nbr)++];
+      Inst *reg = rstate->registers[(*reg_nbr)++];
       entry_bb->build_inst(Op::WRITE, reg, ret_mem);
 
       // Generate the return value from the value returned in memory.
       uint64_t size = ret_bitsize / 8;
-      Instruction *retval = 0;
+      Inst *retval = 0;
       for (uint64_t i = 0; i < size; i++)
 	{
-	  Instruction *offset = bb->value_inst(i, ret_mem->bitsize);
-	  Instruction *ptr = bb->build_inst(Op::ADD, ret_mem, offset);
-	  Instruction *data_byte = bb->build_inst(Op::LOAD, ptr);
+	  Inst *offset = bb->value_inst(i, ret_mem->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, ret_mem, offset);
+	  Inst *data_byte = bb->build_inst(Op::LOAD, ptr);
 	  if (retval)
 	    retval = bb->build_inst(Op::CONCAT, data_byte, retval);
 	  else
@@ -392,16 +392,16 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
   // Registers x0-x31.
   for (int i = 0; i < 32; i++)
     {
-      Instruction *bitsize = entry_bb->value_inst(rstate->reg_bitsize, 32);
-      Instruction *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
+      Inst *bitsize = entry_bb->value_inst(rstate->reg_bitsize, 32);
+      Inst *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
       rstate->registers.push_back(reg);
     }
 
   // Registers f0-f31.
   for (int i = 0; i < 32; i++)
     {
-      Instruction *bitsize = entry_bb->value_inst(rstate->freg_bitsize, 32);
-      Instruction *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
+      Inst *bitsize = entry_bb->value_inst(rstate->freg_bitsize, 32);
+      Inst *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
       rstate->fregisters.push_back(reg);
     }
 
@@ -409,12 +409,11 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
   // GIMPLE IR.
   for (const auto& mem_obj : rstate->memory_objects)
     {
-      Instruction *id =
-	entry_bb->value_inst(mem_obj.id, rstate->module->ptr_id_bits);
-      Instruction *size =
+      Inst *id = entry_bb->value_inst(mem_obj.id, rstate->module->ptr_id_bits);
+      Inst *size =
 	entry_bb->value_inst(mem_obj.size, rstate->module->ptr_offset_bits);
-      Instruction *flags = entry_bb->value_inst(mem_obj.flags, 32);
-      Instruction *mem = entry_bb->build_inst(Op::MEMORY, id, size, flags);
+      Inst *flags = entry_bb->value_inst(mem_obj.flags, 32);
+      Inst *mem = entry_bb->build_inst(Op::MEMORY, id, size, flags);
       rstate->sym_name2mem.insert({mem_obj.sym_name, mem});
     }
 
@@ -432,10 +431,9 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
       if (bitsize <= 0)
 	throw Not_implemented("Parameter size == 0");
 
-      Instruction *param_nbr = entry_bb->value_inst(param_number, 32);
-      Instruction *param_bitsize = entry_bb->value_inst(bitsize, 32);
-      Instruction *param =
-	entry_bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
+      Inst *param_nbr = entry_bb->value_inst(param_number, 32);
+      Inst *param_bitsize = entry_bb->value_inst(bitsize, 32);
+      Inst *param = entry_bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
 
       tree type = TREE_TYPE(decl);
       if (param_number == 0
@@ -457,7 +455,7 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
 	      if (reg_nbr > 17)
 		throw Not_implemented("riscv: too many arguments");
 
-	      Instruction *reg = rstate->registers[reg_nbr++];
+	      Inst *reg = rstate->registers[reg_nbr++];
 	      entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).regs[0]);
 	    }
 	  if ((*arg_regs).regs[1])
@@ -467,7 +465,7 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
 	      if (reg_nbr > 17)
 		throw Not_implemented("riscv: too many arguments");
 
-	      Instruction *reg = rstate->registers[reg_nbr++];
+	      Inst *reg = rstate->registers[reg_nbr++];
 	      entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).regs[1]);
 	    }
 	  if ((*arg_regs).fregs[0])
@@ -477,7 +475,7 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
 	      if (freg_nbr > 17)
 		throw Not_implemented("riscv: too many arguments");
 
-	      Instruction *reg = rstate->fregisters[freg_nbr++];
+	      Inst *reg = rstate->fregisters[freg_nbr++];
 	      entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[0]);
 	    }
 	  if ((*arg_regs).fregs[1])
@@ -487,7 +485,7 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
 	      if (freg_nbr > 17)
 		throw Not_implemented("riscv: too many arguments");
 
-	      Instruction *reg = rstate->fregisters[freg_nbr++];
+	      Inst *reg = rstate->fregisters[freg_nbr++];
 	      entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[1]);
 	    }
 	}
@@ -540,18 +538,18 @@ unsigned int tv_pass::execute(function *fun)
 // Note: This assumes that we do not have any loops.
 static void eliminate_registers(Function *func)
 {
-  std::map<Basic_block *, std::map<Instruction *, Instruction *>> bb2reg_values;
+  std::map<Basic_block *, std::map<Inst *, Inst *>> bb2reg_values;
 
   // Collect all registers. This is not completely necessary, but we want
   // to iterate over the registers in a consisten order when we create
   // phi-nodes etc. and iterating over the maps could change order between
   // different runs.
-  std::vector<Instruction*> registers;
-  for (Instruction *inst = func->bbs[0]->first_inst;
+  std::vector<Inst *> registers;
+  for (Inst *inst = func->bbs[0]->first_inst;
        inst;
        inst = inst->next)
     {
-      if (inst->opcode == Op::REGISTER)
+      if (inst->op == Op::REGISTER)
 	{
 	  Basic_block *bb = func->bbs[0];
 	  registers.push_back(inst);
@@ -562,7 +560,7 @@ static void eliminate_registers(Function *func)
 
   for (Basic_block *bb : func->bbs)
     {
-      std::map<Instruction *, Instruction *>& reg_values =
+      std::map<Inst *, Inst *>& reg_values =
 	bb2reg_values[bb];
       if (bb->preds.size() == 1)
 	{
@@ -572,32 +570,32 @@ static void eliminate_registers(Function *func)
 	{
 	  for (auto reg : registers)
 	    {
-	      Instruction *phi = bb->build_phi_inst(reg->bitsize);
+	      Inst *phi = bb->build_phi_inst(reg->bitsize);
 	      reg_values[reg] = phi;
 	      for (auto pred_bb : bb->preds)
 		{
 		  if (!bb2reg_values.at(pred_bb).contains(reg))
 		    throw Not_implemented("eliminate_registers: Read of uninit register");
-		  Instruction *arg = bb2reg_values.at(pred_bb).at(reg);
+		  Inst *arg = bb2reg_values.at(pred_bb).at(reg);
 		  phi->add_phi_arg(arg, pred_bb);
 		}
 	    }
 	}
 
-      Instruction *inst = bb->first_inst;
+      Inst *inst = bb->first_inst;
       while (inst)
 	{
-	  Instruction *next_inst = inst->next;
-	  if (inst->opcode == Op::READ)
+	  Inst *next_inst = inst->next;
+	  if (inst->op == Op::READ)
 	    {
-	      if (!reg_values.contains(inst->arguments[0]))
+	      if (!reg_values.contains(inst->args[0]))
 		throw Not_implemented("eliminate_registers: Read of uninit register");
-	      inst->replace_all_uses_with(reg_values.at(inst->arguments[0]));
+	      inst->replace_all_uses_with(reg_values.at(inst->args[0]));
 	      destroy_instruction(inst);
 	    }
-	  else if (inst->opcode == Op::WRITE)
+	  else if (inst->op == Op::WRITE)
 	    {
-	      reg_values[inst->arguments[0]] = inst->arguments[1];
+	      reg_values[inst->args[0]] = inst->args[1];
 	      destroy_instruction(inst);
 	    }
 	  inst = next_inst;

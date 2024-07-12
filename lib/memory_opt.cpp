@@ -8,12 +8,12 @@ namespace smtgcc {
 namespace {
 
 // Return a vector containing all the function's memory instructions.
-std::vector<Instruction *> collect_mem(Function *func)
+std::vector<Inst *> collect_mem(Function *func)
 {
-  std::vector<Instruction *> mem;
-  for (Instruction *inst = func->bbs[0]->first_inst; inst; inst = inst->next)
+  std::vector<Inst *> mem;
+  for (Inst *inst = func->bbs[0]->first_inst; inst; inst = inst->next)
     {
-      if (inst->opcode == Op::MEMORY)
+      if (inst->op == Op::MEMORY)
 	mem.push_back(inst);
     }
   return mem;
@@ -21,14 +21,14 @@ std::vector<Instruction *> collect_mem(Function *func)
 
 // Ensure the memory instructions in the IR come in the same order as in the
 // mem vector.
-void reorder_mem(std::vector<Instruction *>& mem)
+void reorder_mem(std::vector<Inst *>& mem)
 {
   if (mem.empty())
     return;
 
   Basic_block *bb = mem[0]->bb;
-  Instruction *curr_inst = bb->first_inst;
-  while (curr_inst->opcode == Op::VALUE)
+  Inst *curr_inst = bb->first_inst;
+  while (curr_inst->op == Op::VALUE)
     curr_inst = curr_inst->next;
   if (curr_inst != mem[0])
     {
@@ -44,19 +44,19 @@ void reorder_mem(std::vector<Instruction *>& mem)
 }
 
 // Make a copy of inst in the first BB of the function func.
-Instruction *clone_inst(Instruction *inst, Function *func)
+Inst *clone_inst(Inst *inst, Function *func)
 {
   Basic_block *bb = func->bbs[0];
-  if (inst->opcode == Op::VALUE)
+  if (inst->op == Op::VALUE)
     {
       return bb->value_inst(inst->value(), inst->bitsize);
     }
 
-  if (inst->opcode == Op::MEMORY)
+  if (inst->op == Op::MEMORY)
     {
-      Instruction *arg1 = clone_inst(inst->arguments[0], func);
-      Instruction *arg2 = clone_inst(inst->arguments[1], func);
-      Instruction *arg3 = clone_inst(inst->arguments[2], func);
+      Inst *arg1 = clone_inst(inst->args[0], func);
+      Inst *arg2 = clone_inst(inst->args[1], func);
+      Inst *arg3 = clone_inst(inst->args[2], func);
       return bb->build_inst(Op::MEMORY, arg1, arg2, arg3);
     }
 
@@ -67,9 +67,9 @@ Instruction *clone_inst(Instruction *inst, Function *func)
 // Usage in the entry BB is not counted -- those are only used for
 // initialization and are therefore not relevant for the function if
 // the memory does not have any other use.
-bool is_unused_memory(Instruction *memory_inst)
+bool is_unused_memory(Inst *memory_inst)
 {
-  if (memory_inst->opcode != Op::MEMORY)
+  if (memory_inst->op != Op::MEMORY)
     return false;
   Basic_block *entry_bb = memory_inst->bb->func->bbs[0];
   assert(memory_inst->bb == entry_bb);
@@ -78,14 +78,14 @@ bool is_unused_memory(Instruction *memory_inst)
 
   // Check that all uses (and uses of uses) are in the entry block.
   // If not, then the memory_inst is not unused.
-  std::set<Instruction *> visited;
-  std::vector<Instruction *> sinks;
-  std::vector<Instruction *> worklist;
+  std::set<Inst *> visited;
+  std::vector<Inst *> sinks;
+  std::vector<Inst *> worklist;
   worklist.insert(std::end(worklist), std::begin(memory_inst->used_by),
 		  std::end(memory_inst->used_by));
   while (!worklist.empty())
     {
-      Instruction *inst = worklist.back();
+      Inst *inst = worklist.back();
       worklist.pop_back();
       if (inst->bb != entry_bb)
 	return false;
@@ -95,8 +95,8 @@ bool is_unused_memory(Instruction *memory_inst)
       visited.insert(inst);
       for (auto used_by : inst->used_by)
 	{
-	  if (used_by->opcode == Op::SET_MEM_UNDEF
-	      || used_by->opcode == Op::STORE)
+	  if (used_by->op == Op::SET_MEM_UNDEF
+	      || used_by->op == Op::STORE)
 	    sinks.push_back(used_by);
 	  else
 	    worklist.push_back(used_by);
@@ -117,19 +117,19 @@ bool is_unused_memory(Instruction *memory_inst)
     {
       assert(worklist.empty());
 
-      worklist.push_back(sink_inst->arguments[0]);
+      worklist.push_back(sink_inst->args[0]);
       while (!worklist.empty())
 	{
-	  Instruction *inst = worklist.back();
+	  Inst *inst = worklist.back();
 	  worklist.pop_back();
 	  if (visited.contains(inst))
 	    continue;
 	  visited.insert(inst);
-	  if (inst->opcode == Op::VALUE)
+	  if (inst->op == Op::VALUE)
 	    {
 	      // A constant is always a valid starting point. Nothing to do.
 	    }
-	  else if (inst->opcode == Op::MEMORY)
+	  else if (inst->op == Op::MEMORY)
 	    {
 	      if (inst != memory_inst)
 		{
@@ -142,7 +142,7 @@ bool is_unused_memory(Instruction *memory_inst)
 	    {
 	      assert(inst->nof_args > 0);
 	      for (uint64_t i = 0; i < inst->nof_args; i++)
-		worklist.push_back(inst->arguments[i]);
+		worklist.push_back(inst->args[i]);
 	    }
 	}
     }
@@ -150,17 +150,17 @@ bool is_unused_memory(Instruction *memory_inst)
   return true;
 }
 
-void remove_unused_memory(Instruction *memory_inst)
+void remove_unused_memory(Inst *memory_inst)
 {
   Basic_block *entry_bb = memory_inst->bb->func->bbs[0];
-  assert(memory_inst->opcode == Op::MEMORY);
+  assert(memory_inst->op == Op::MEMORY);
   assert(memory_inst->bb == entry_bb);
 
-  std::vector<Instruction *> worklist;
+  std::vector<Inst *> worklist;
   worklist.push_back(memory_inst);
   while (!worklist.empty())
     {
-      Instruction *inst = worklist.back();
+      Inst *inst = worklist.back();
       assert(inst->bb == entry_bb);
       if (inst->used_by.empty())
 	{
@@ -169,7 +169,7 @@ void remove_unused_memory(Instruction *memory_inst)
 	}
       else
 	{
-	  Instruction *used_by = *inst->used_by.begin();
+	  Inst *used_by = *inst->used_by.begin();
 	  worklist.push_back(used_by);
 	}
     }
@@ -177,15 +177,15 @@ void remove_unused_memory(Instruction *memory_inst)
 
 void store_load_forwarding(Function *func)
 {
-  std::map<Basic_block *, std::map<uint64_t, Instruction *>> bb2mem_undef;
-  std::map<Basic_block *, std::map<uint64_t, Instruction *>> bb2mem_flag;
-  std::map<Basic_block *, std::map<uint64_t, Instruction *>> bb2stores;
+  std::map<Basic_block *, std::map<uint64_t, Inst *>> bb2mem_undef;
+  std::map<Basic_block *, std::map<uint64_t, Inst *>> bb2mem_flag;
+  std::map<Basic_block *, std::map<uint64_t, Inst *>> bb2stores;
 
   for (auto bb : func->bbs)
     {
-      std::map<uint64_t, Instruction *> mem_undef;
-      std::map<uint64_t, Instruction *> mem_flag;
-      std::map<uint64_t, Instruction *> stores;
+      std::map<uint64_t, Inst *> mem_undef;
+      std::map<uint64_t, Inst *> mem_flag;
+      std::map<uint64_t, Inst *> stores;
 
       if (bb->preds.size() == 1)
 	{
@@ -203,19 +203,19 @@ void store_load_forwarding(Function *func)
 	    stores = bb2stores.at(bb->preds[0]);
 	}
 
-      for (Instruction *inst = bb->first_inst; inst;)
+      for (Inst *inst = bb->first_inst; inst;)
 	{
-	  Instruction *next_inst = inst->next;
+	  Inst *next_inst = inst->next;
 
-	  switch (inst->opcode)
+	  switch (inst->op)
 	    {
 	    case Op::MEMORY:
 	      {
-		uint64_t id = inst->arguments[0]->value();
-		uint64_t size = inst->arguments[1]->value();
-		uint32_t flags = inst->arguments[2]->value();
+		uint64_t id = inst->args[0]->value();
+		uint64_t size = inst->args[1]->value();
+		uint32_t flags = inst->args[2]->value();
 		uint64_t addr = id << inst->bb->func->module->ptr_id_low;
-		Instruction *undef;
+		Inst *undef;
 		if (flags & MEM_UNINIT)
 		  undef = bb->value_inst(255, 8);
 		else
@@ -228,8 +228,8 @@ void store_load_forwarding(Function *func)
 	      break;
 	    case Op::SET_MEM_UNDEF:
 	      {
-		Instruction *ptr = inst->arguments[0];
-		if (ptr->opcode == Op::VALUE)
+		Inst *ptr = inst->args[0];
+		if (ptr->op == Op::VALUE)
 		  mem_undef[ptr->value()] = inst;
 		else
 		  mem_undef.clear();
@@ -237,17 +237,17 @@ void store_load_forwarding(Function *func)
 	      break;
 	    case Op::GET_MEM_UNDEF:
 	      {
-		Instruction *ptr = inst->arguments[0];
-		if (ptr->opcode == Op::VALUE)
+		Inst *ptr = inst->args[0];
+		if (ptr->op == Op::VALUE)
 		  {
 		    uint64_t ptr_val = ptr->value();
 		    if (mem_undef.contains(ptr_val))
 		      {
-			Instruction *value = mem_undef.at(ptr_val);
-			if (value->opcode == Op::SET_MEM_UNDEF)
-			  value = value->arguments[1];
+			Inst *value = mem_undef.at(ptr_val);
+			if (value->op == Op::SET_MEM_UNDEF)
+			  value = value->args[1];
 			else
-			  assert(value->opcode == Op::VALUE);
+			  assert(value->op == Op::VALUE);
 			inst->replace_all_uses_with(value);
 			destroy_instruction(inst);
 		      }
@@ -256,8 +256,8 @@ void store_load_forwarding(Function *func)
 	      break;
 	    case Op::SET_MEM_FLAG:
 	      {
-		Instruction *ptr = inst->arguments[0];
-		if (ptr->opcode == Op::VALUE)
+		Inst *ptr = inst->args[0];
+		if (ptr->op == Op::VALUE)
 		  mem_flag[ptr->value()] = inst;
 		else
 		  mem_flag.clear();
@@ -265,14 +265,14 @@ void store_load_forwarding(Function *func)
 	      break;
 	    case Op::GET_MEM_FLAG:
 	      {
-		Instruction *ptr = inst->arguments[0];
-		if (ptr->opcode == Op::VALUE)
+		Inst *ptr = inst->args[0];
+		if (ptr->op == Op::VALUE)
 		  {
 		    uint64_t ptr_val = ptr->value();
 		    if (mem_flag.contains(ptr_val))
 		      {
-			Instruction *set_mem_flag = mem_flag.at(ptr_val);
-			Instruction *value = set_mem_flag->arguments[1];
+			Inst *set_mem_flag = mem_flag.at(ptr_val);
+			Inst *value = set_mem_flag->args[1];
 			inst->replace_all_uses_with(value);
 			destroy_instruction(inst);
 		      }
@@ -281,8 +281,8 @@ void store_load_forwarding(Function *func)
 	      break;
 	    case Op::STORE:
 	      {
-		Instruction *ptr = inst->arguments[0];
-		if (ptr->opcode == Op::VALUE)
+		Inst *ptr = inst->args[0];
+		if (ptr->op == Op::VALUE)
 		  stores[ptr->value()] = inst;
 		else
 		  stores.clear();
@@ -290,14 +290,14 @@ void store_load_forwarding(Function *func)
 	      break;
 	    case Op::LOAD:
 	      {
-		Instruction *ptr = inst->arguments[0];
-		if (ptr->opcode == Op::VALUE)
+		Inst *ptr = inst->args[0];
+		if (ptr->op == Op::VALUE)
 		  {
 		    uint64_t ptr_val = ptr->value();
 		    if (stores.contains(ptr_val))
 		      {
-			Instruction *store = stores.at(ptr_val);
-			Instruction *value = store->arguments[1];
+			Inst *store = stores.at(ptr_val);
+			Inst *value = store->args[1];
 			inst->replace_all_uses_with(value);
 			destroy_instruction(inst);
 		      }
@@ -319,9 +319,9 @@ void store_load_forwarding(Function *func)
 
 void dead_store_elim(Function *func)
 {
-  std::map<uint64_t, Instruction *> mem_undef;
-  std::map<uint64_t, Instruction *> mem_flag;
-  std::map<uint64_t, Instruction *> stores;
+  std::map<uint64_t, Inst *> mem_undef;
+  std::map<uint64_t, Inst *> mem_flag;
+  std::map<uint64_t, Inst *> stores;
   Basic_block *prev_bb = nullptr;
   for (int i = func->bbs.size() - 1; i >= 0; i--)
     {
@@ -333,16 +333,16 @@ void dead_store_elim(Function *func)
 	  stores.clear();
 	}
 
-      for (Instruction *inst = bb->last_inst; inst;)
+      for (Inst *inst = bb->last_inst; inst;)
 	{
-	  Instruction *next_inst = inst->prev;
+	  Inst *next_inst = inst->prev;
 
-	  switch (inst->opcode)
+	  switch (inst->op)
 	    {
 	    case Op::SET_MEM_UNDEF:
 	      {
-		Instruction *ptr = inst->arguments[0];
-		if (ptr->opcode == Op::VALUE)
+		Inst *ptr = inst->args[0];
+		if (ptr->op == Op::VALUE)
 		  {
 		    uint64_t ptr_val = ptr->value();
 		    if (mem_undef.contains(ptr_val))
@@ -354,8 +354,8 @@ void dead_store_elim(Function *func)
 	      break;
 	    case Op::GET_MEM_UNDEF:
 	      {
-		Instruction *ptr = inst->arguments[0];
-		if (ptr->opcode == Op::VALUE)
+		Inst *ptr = inst->args[0];
+		if (ptr->op == Op::VALUE)
 		  mem_undef.erase(ptr->value());
 		else
 		  mem_undef.clear();
@@ -363,8 +363,8 @@ void dead_store_elim(Function *func)
 	      break;
 	    case Op::SET_MEM_FLAG:
 	      {
-		Instruction *ptr = inst->arguments[0];
-		if (ptr->opcode == Op::VALUE)
+		Inst *ptr = inst->args[0];
+		if (ptr->op == Op::VALUE)
 		  {
 		    uint64_t ptr_val = ptr->value();
 		    if (mem_flag.contains(ptr_val))
@@ -376,8 +376,8 @@ void dead_store_elim(Function *func)
 	      break;
 	    case Op::GET_MEM_FLAG:
 	      {
-		Instruction *ptr = inst->arguments[0];
-		if (ptr->opcode == Op::VALUE)
+		Inst *ptr = inst->args[0];
+		if (ptr->op == Op::VALUE)
 		  mem_flag.erase(ptr->value());
 		else
 		  mem_flag.clear();
@@ -385,8 +385,8 @@ void dead_store_elim(Function *func)
 	      break;
 	    case Op::STORE:
 	      {
-		Instruction *ptr = inst->arguments[0];
-		if (ptr->opcode == Op::VALUE)
+		Inst *ptr = inst->args[0];
+		if (ptr->op == Op::VALUE)
 		  {
 		    uint64_t ptr_val = ptr->value();
 		    if (stores.contains(ptr_val))
@@ -398,8 +398,8 @@ void dead_store_elim(Function *func)
 	      break;
 	    case Op::LOAD:
 	      {
-		Instruction *ptr = inst->arguments[0];
-		if (ptr->opcode == Op::VALUE)
+		Inst *ptr = inst->args[0];
+		if (ptr->op == Op::VALUE)
 		  stores.erase(ptr->value());
 		else
 		  stores.clear();
@@ -430,19 +430,19 @@ void canonicalize_memory(Module *module)
     std::swap(src, tgt);
 
   struct {
-    bool operator()(const Instruction *a, const Instruction *b) const {
-      return a->arguments[0]->value() < b->arguments[0]->value();
+    bool operator()(const Inst *a, const Inst *b) const {
+      return a->args[0]->value() < b->args[0]->value();
     }
   } comp;
 
-  std::vector<Instruction *> src_mem = collect_mem(src);
-  std::vector<Instruction *> tgt_mem = collect_mem(tgt);
+  std::vector<Inst *> src_mem = collect_mem(src);
+  std::vector<Inst *> tgt_mem = collect_mem(tgt);
   std::sort(src_mem.begin(), src_mem.end(), comp);
   std::sort(tgt_mem.begin(), tgt_mem.end(), comp);
 
   // Add missing memory instructions.
-  std::vector<Instruction *> missing_src;
-  std::vector<Instruction *> missing_tgt;
+  std::vector<Inst *> missing_src;
+  std::vector<Inst *> missing_tgt;
   std::set_difference(tgt_mem.begin(), tgt_mem.end(),
 		      src_mem.begin(), src_mem.end(),
 		      std::back_inserter(missing_src), comp);
@@ -469,12 +469,12 @@ void canonicalize_memory(Module *module)
   bool removed_mem = false;
   for (size_t i = 0; i < src_mem.size(); i++)
     {
-      __int128 src_arg1 = src_mem[i]->arguments[0]->value();
-      __int128 src_arg2 = src_mem[i]->arguments[1]->value();
-      __int128 src_arg3 = src_mem[i]->arguments[2]->value();
-      __int128 tgt_arg1 = tgt_mem[i]->arguments[0]->value();
-      __int128 tgt_arg2 = tgt_mem[i]->arguments[1]->value();
-      __int128 tgt_arg3 = tgt_mem[i]->arguments[2]->value();
+      __int128 src_arg1 = src_mem[i]->args[0]->value();
+      __int128 src_arg2 = src_mem[i]->args[1]->value();
+      __int128 src_arg3 = src_mem[i]->args[2]->value();
+      __int128 tgt_arg1 = tgt_mem[i]->args[0]->value();
+      __int128 tgt_arg2 = tgt_mem[i]->args[1]->value();
+      __int128 tgt_arg3 = tgt_mem[i]->args[2]->value();
       if (!(src_arg3 & MEM_KEEP)
 	  && src_arg1 == tgt_arg1
 	  && src_arg2 == tgt_arg2

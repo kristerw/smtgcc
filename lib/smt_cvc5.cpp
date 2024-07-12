@@ -14,24 +14,24 @@ namespace smtgcc {
 namespace {
 
 class Converter {
-  std::map<const Instruction *, cvc5::Term> inst2array;
-  std::map<const Instruction *, cvc5::Term> inst2bv;
-  std::map<const Instruction *, cvc5::Term> inst2fp;
-  std::map<const Instruction *, cvc5::Term> inst2bool;
+  std::map<const Inst *, cvc5::Term> inst2array;
+  std::map<const Inst *, cvc5::Term> inst2bv;
+  std::map<const Inst *, cvc5::Term> inst2fp;
+  std::map<const Inst *, cvc5::Term> inst2bool;
 
   cvc5::Term ite(cvc5::Term c, cvc5::Term a, cvc5::Term b);
   cvc5::Op fp_sort(cvc5::Kind kind, uint32_t bitsize);
-  void build_bv_comparison_smt(const Instruction *inst);
-  void build_fp_comparison_smt(const Instruction *inst);
-  void build_nullary_smt(const Instruction *inst);
-  void build_bv_unary_smt(const Instruction *inst);
-  void build_fp_unary_smt(const Instruction *inst);
-  void build_bv_binary_smt(const Instruction *inst);
-  void build_fp_binary_smt(const Instruction *inst);
-  void build_ternary_smt(const Instruction *inst);
-  void build_conversion_smt(const Instruction *inst);
-  void build_special_smt(const Instruction *inst);
-  void build_smt(const Instruction *inst);
+  void build_bv_comparison_smt(const Inst *inst);
+  void build_fp_comparison_smt(const Inst *inst);
+  void build_nullary_smt(const Inst *inst);
+  void build_bv_unary_smt(const Inst *inst);
+  void build_fp_unary_smt(const Inst *inst);
+  void build_bv_binary_smt(const Inst *inst);
+  void build_fp_binary_smt(const Inst *inst);
+  void build_ternary_smt(const Inst *inst);
+  void build_conversion_smt(const Inst *inst);
+  void build_special_smt(const Inst *inst);
+  void build_smt(const Inst *inst);
   void convert_function();
 
   cvc5::Solver& solver;
@@ -44,30 +44,30 @@ public:
   {
     convert_function();
   }
-  cvc5::Term inst_as_array(const Instruction *inst);
-  cvc5::Term inst_as_bv(const Instruction *inst);
-  cvc5::Term inst_as_fp(const Instruction *inst);
-  cvc5::Term inst_as_bool(const Instruction *inst);
+  cvc5::Term inst_as_array(const Inst *inst);
+  cvc5::Term inst_as_bv(const Inst *inst);
+  cvc5::Term inst_as_fp(const Inst *inst);
+  cvc5::Term inst_as_bool(const Inst *inst);
 
-  std::vector<const Instruction *> print;
+  std::vector<const Inst *> print;
 
-  Instruction *src_assert = nullptr;
-  Instruction *src_memory = nullptr;
-  Instruction *src_memory_size = nullptr;
-  Instruction *src_memory_undef = nullptr;
-  Instruction *src_retval = nullptr;
-  Instruction *src_retval_undef = nullptr;
-  Instruction *src_unique_ub = nullptr;
-  Instruction *src_common_ub = nullptr;
+  Inst *src_assert = nullptr;
+  Inst *src_memory = nullptr;
+  Inst *src_memory_size = nullptr;
+  Inst *src_memory_undef = nullptr;
+  Inst *src_retval = nullptr;
+  Inst *src_retval_undef = nullptr;
+  Inst *src_unique_ub = nullptr;
+  Inst *src_common_ub = nullptr;
 
-  Instruction *tgt_assert = nullptr;
-  Instruction *tgt_memory = nullptr;
-  Instruction *tgt_memory_size = nullptr;
-  Instruction *tgt_memory_undef = nullptr;
-  Instruction *tgt_retval = nullptr;
-  Instruction *tgt_retval_undef = nullptr;
-  Instruction *tgt_unique_ub = nullptr;
-  Instruction *tgt_common_ub = nullptr;
+  Inst *tgt_assert = nullptr;
+  Inst *tgt_memory = nullptr;
+  Inst *tgt_memory_size = nullptr;
+  Inst *tgt_memory_undef = nullptr;
+  Inst *tgt_retval = nullptr;
+  Inst *tgt_retval_undef = nullptr;
+  Inst *tgt_unique_ub = nullptr;
+  Inst *tgt_common_ub = nullptr;
 };
 
 cvc5::Term Converter::ite(cvc5::Term c, cvc5::Term a, cvc5::Term b)
@@ -77,12 +77,12 @@ cvc5::Term Converter::ite(cvc5::Term c, cvc5::Term a, cvc5::Term b)
   return solver.mkTerm(cvc5::ITE, {c, a, b});
 }
 
-cvc5::Term Converter::inst_as_array(const Instruction *inst)
+cvc5::Term Converter::inst_as_array(const Inst *inst)
 {
   return inst2array.at(inst);
 }
 
-cvc5::Term Converter::inst_as_bv(const Instruction *inst)
+cvc5::Term Converter::inst_as_bv(const Inst *inst)
 {
   auto I = inst2bv.find(inst);
   if (I != inst2bv.end())
@@ -107,7 +107,7 @@ cvc5::Term Converter::inst_as_bv(const Instruction *inst)
     }
 }
 
-cvc5::Term Converter::inst_as_bool(const Instruction *inst)
+cvc5::Term Converter::inst_as_bool(const Inst *inst)
 {
   assert(inst->bitsize == 1);
   auto I = inst2bool.find(inst);
@@ -122,7 +122,7 @@ cvc5::Term Converter::inst_as_bool(const Instruction *inst)
   return term;
 }
 
-cvc5::Term Converter::inst_as_fp(const Instruction *inst)
+cvc5::Term Converter::inst_as_fp(const Inst *inst)
 {
   auto I = inst2fp.find(inst);
   if (I != inst2fp.end())
@@ -134,28 +134,28 @@ cvc5::Term Converter::inst_as_fp(const Instruction *inst)
   throw Not_implemented("inst_as_fp: bitvector to fp");
 }
 
-void Converter::build_bv_comparison_smt(const Instruction *inst)
+void Converter::build_bv_comparison_smt(const Inst *inst)
 {
   assert(inst->nof_args == 2);
 
-  if (inst->arguments[0]->bitsize == 1
-      && (inst->opcode == Op::EQ || inst->opcode == Op::NE)
-      && (inst2bool.contains(inst->arguments[0])
-	  && inst2bool.contains(inst->arguments[1])))
+  if (inst->args[0]->bitsize == 1
+      && (inst->op == Op::EQ || inst->op == Op::NE)
+      && (inst2bool.contains(inst->args[0])
+	  && inst2bool.contains(inst->args[1])))
     {
-      cvc5::Term arg1 = inst_as_bool(inst->arguments[0]);
-      cvc5::Term arg2 = inst_as_bool(inst->arguments[1]);
+      cvc5::Term arg1 = inst_as_bool(inst->args[0]);
+      cvc5::Term arg2 = inst_as_bool(inst->args[1]);
 
-      if (inst->opcode == Op::EQ)
+      if (inst->op == Op::EQ)
 	inst2bool.insert({inst, solver.mkTerm(cvc5::EQUAL, {arg1, arg2})});
       else
 	inst2bool.insert({inst, solver.mkTerm(cvc5::DISTINCT, {arg1, arg2})});
       return;
     }
 
-  cvc5::Term arg1 = inst_as_bv(inst->arguments[0]);
-  cvc5::Term arg2 = inst_as_bv(inst->arguments[1]);
-  switch (inst->opcode)
+  cvc5::Term arg1 = inst_as_bv(inst->args[0]);
+  cvc5::Term arg2 = inst_as_bv(inst->args[1]);
+  switch (inst->op)
     {
     case Op::EQ:
       inst2bool.insert({inst, solver.mkTerm(cvc5::EQUAL, {arg1, arg2})});
@@ -206,13 +206,13 @@ cvc5::Op Converter::fp_sort(cvc5::Kind kind, uint32_t bitsize)
     }
 }
 
-void Converter::build_fp_comparison_smt(const Instruction *inst)
+void Converter::build_fp_comparison_smt(const Inst *inst)
 {
   assert(inst->nof_args == 2);
-  cvc5::Term arg1 = inst_as_fp(inst->arguments[0]);
-  cvc5::Term arg2 = inst_as_fp(inst->arguments[1]);
+  cvc5::Term arg1 = inst_as_fp(inst->args[0]);
+  cvc5::Term arg2 = inst_as_fp(inst->args[1]);
 
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::FEQ:
       {
@@ -255,9 +255,9 @@ void Converter::build_fp_comparison_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_nullary_smt(const Instruction *inst)
+void Converter::build_nullary_smt(const Inst *inst)
 {
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::MEM_ARRAY:
       {
@@ -309,12 +309,12 @@ void Converter::build_nullary_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_bv_unary_smt(const Instruction *inst)
+void Converter::build_bv_unary_smt(const Inst *inst)
 {
   assert(inst->nof_args == 1);
 
-  cvc5::Term arg1 = inst_as_bv(inst->arguments[0]);
-  switch (inst->opcode)
+  cvc5::Term arg1 = inst_as_bv(inst->args[0]);
+  switch (inst->op)
     {
     case Op::IS_NAN:
       // TODO: Implement Op::IS_NAN
@@ -333,21 +333,21 @@ void Converter::build_bv_unary_smt(const Instruction *inst)
       break;
     case Op::SRC_ASSERT:
       assert(!src_assert);
-      src_assert = inst->arguments[0];
+      src_assert = inst->args[0];
       break;
     case Op::TGT_ASSERT:
       assert(!tgt_assert);
-      tgt_assert = inst->arguments[0];
+      tgt_assert = inst->args[0];
       break;
     default:
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
     }
 }
 
-void Converter::build_fp_unary_smt(const Instruction *inst)
+void Converter::build_fp_unary_smt(const Inst *inst)
 {
-  cvc5::Term arg1 = inst_as_fp(inst->arguments[0]);
-  switch (inst->opcode)
+  cvc5::Term arg1 = inst_as_fp(inst->args[0]);
+  switch (inst->op)
     {
     case Op::FABS:
       inst2fp.insert({inst, solver.mkTerm(cvc5::FLOATINGPOINT_ABS, {arg1})});
@@ -363,51 +363,51 @@ void Converter::build_fp_unary_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_bv_binary_smt(const Instruction *inst)
+void Converter::build_bv_binary_smt(const Inst *inst)
 {
   assert(inst->nof_args == 2);
 
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::ARRAY_GET_FLAG:
     case Op::ARRAY_GET_SIZE:
     case Op::ARRAY_GET_UNDEF:
     case Op::ARRAY_LOAD:
       {
-	cvc5::Term arg1 = inst_as_array(inst->arguments[0]);
-	cvc5::Term arg2 = inst_as_bv(inst->arguments[1]);
+	cvc5::Term arg1 = inst_as_array(inst->args[0]);
+	cvc5::Term arg2 = inst_as_bv(inst->args[1]);
 	inst2bv.insert({inst, solver.mkTerm(cvc5::SELECT, {arg1, arg2})});
       }
       return;
     case Op::SRC_RETVAL:
       assert(!src_retval);
       assert(!src_retval_undef);
-      src_retval = inst->arguments[0];
-      src_retval_undef = inst->arguments[1];
+      src_retval = inst->args[0];
+      src_retval_undef = inst->args[1];
       return;
     case Op::TGT_RETVAL:
       assert(!tgt_retval);
       assert(!tgt_retval_undef);
-      tgt_retval = inst->arguments[0];
-      tgt_retval_undef = inst->arguments[1];
+      tgt_retval = inst->args[0];
+      tgt_retval_undef = inst->args[1];
       return;
     case Op::SRC_UB:
       assert(!src_unique_ub && !src_common_ub);
-      src_common_ub = inst->arguments[0];
-      src_unique_ub = inst->arguments[1];
+      src_common_ub = inst->args[0];
+      src_unique_ub = inst->args[1];
       return;
     case Op::TGT_UB:
       assert(!tgt_unique_ub && !tgt_common_ub);
-      tgt_common_ub = inst->arguments[0];
-      tgt_unique_ub = inst->arguments[1];
+      tgt_common_ub = inst->args[0];
+      tgt_unique_ub = inst->args[1];
       return;
     default:
       break;
     }
 
-  cvc5::Term arg1 = inst_as_bv(inst->arguments[0]);
-  cvc5::Term arg2 = inst_as_bv(inst->arguments[1]);
-  switch (inst->opcode)
+  cvc5::Term arg1 = inst_as_bv(inst->args[0]);
+  cvc5::Term arg2 = inst_as_bv(inst->args[1]);
+  switch (inst->op)
     {
     case Op::ADD:
       inst2bv.insert({inst, solver.mkTerm(cvc5::BITVECTOR_ADD, {arg1, arg2})});
@@ -420,7 +420,7 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
       break;
     case Op::PARAM:
       {
-	uint32_t index = inst->arguments[0]->value();
+	uint32_t index = inst->args[0]->value();
 	char name[100];
 	sprintf(name, ".param%" PRIu32, index);
 	cvc5::Sort sort = solver.mkBitVectorSort(inst->bitsize);
@@ -433,7 +433,7 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
       break;
     case Op::SYMBOLIC:
       {
-	uint32_t index = inst->arguments[0]->value();
+	uint32_t index = inst->args[0]->value();
 	char name[100];
 	sprintf(name, ".symbolic%" PRIu32, index);
 	cvc5::Sort sort = solver.mkBitVectorSort(inst->bitsize);
@@ -515,13 +515,13 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_fp_binary_smt(const Instruction *inst)
+void Converter::build_fp_binary_smt(const Inst *inst)
 {
   assert(inst->nof_args == 2);
-  cvc5::Term arg1 = inst_as_fp(inst->arguments[0]);
-  cvc5::Term arg2 = inst_as_fp(inst->arguments[1]);
+  cvc5::Term arg1 = inst_as_fp(inst->args[0]);
+  cvc5::Term arg2 = inst_as_fp(inst->args[1]);
   cvc5::Term rm = solver.mkRoundingMode(cvc5::ROUND_NEAREST_TIES_TO_EVEN);
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::FADD:
       {
@@ -556,92 +556,92 @@ void Converter::build_fp_binary_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_ternary_smt(const Instruction *inst)
+void Converter::build_ternary_smt(const Inst *inst)
 {
   assert(inst->nof_args == 3);
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::ARRAY_SET_FLAG:
     case Op::ARRAY_SET_SIZE:
     case Op::ARRAY_SET_UNDEF:
     case Op::ARRAY_STORE:
       {
-	cvc5::Term arg1 = inst_as_array(inst->arguments[0]);
-	cvc5::Term arg2 = inst_as_bv(inst->arguments[1]);
-	cvc5::Term arg3 = inst_as_bv(inst->arguments[2]);
+	cvc5::Term arg1 = inst_as_array(inst->args[0]);
+	cvc5::Term arg2 = inst_as_bv(inst->args[1]);
+	cvc5::Term arg3 = inst_as_bv(inst->args[2]);
 	cvc5::Term array = solver.mkTerm(cvc5::STORE, {arg1, arg2, arg3});
 	inst2array.insert({inst, array});
       }
       break;
     case Op::EXTRACT:
       {
-	cvc5::Term arg = inst_as_bv(inst->arguments[0]);
-	uint32_t high = inst->arguments[1]->value();
-	uint32_t low = inst->arguments[2]->value();
+	cvc5::Term arg = inst_as_bv(inst->args[0]);
+	uint32_t high = inst->args[1]->value();
+	uint32_t low = inst->args[2]->value();
 	cvc5::Op extract = solver.mkOp(cvc5::BITVECTOR_EXTRACT, {high, low});
 	inst2bv.insert({inst, solver.mkTerm(extract, {arg})});
       }
       break;
     case Op::ITE:
-      if (inst2array.contains(inst->arguments[1]))
+      if (inst2array.contains(inst->args[1]))
 	{
-	  cvc5::Term arg1 = inst_as_bool(inst->arguments[0]);
-	  cvc5::Term arg2 = inst_as_array(inst->arguments[1]);
-	  cvc5::Term arg3 = inst_as_array(inst->arguments[2]);
+	  cvc5::Term arg1 = inst_as_bool(inst->args[0]);
+	  cvc5::Term arg2 = inst_as_array(inst->args[1]);
+	  cvc5::Term arg3 = inst_as_array(inst->args[2]);
 	  inst2array.insert({inst, ite(arg1, arg2, arg3)});
 	}
       else
 	{
-	  cvc5::Term arg1 = inst_as_bool(inst->arguments[0]);
-	  cvc5::Term arg2 = inst_as_bv(inst->arguments[1]);
-	  cvc5::Term arg3 = inst_as_bv(inst->arguments[2]);
+	  cvc5::Term arg1 = inst_as_bool(inst->args[0]);
+	  cvc5::Term arg2 = inst_as_bv(inst->args[1]);
+	  cvc5::Term arg3 = inst_as_bv(inst->args[2]);
 	  inst2bv.insert({inst, ite(arg1, arg2, arg3)});
 	}
       break;
     case Op::SRC_MEM:
       assert(!src_memory);
       assert(!src_memory_size);
-      src_memory = inst->arguments[0];
-      src_memory_size = inst->arguments[1];
-      src_memory_undef = inst->arguments[2];
+      src_memory = inst->args[0];
+      src_memory_size = inst->args[1];
+      src_memory_undef = inst->args[2];
       return;
     case Op::TGT_MEM:
       assert(!tgt_memory);
       assert(!tgt_memory_size);
-      tgt_memory = inst->arguments[0];
-      tgt_memory_size = inst->arguments[1];
-      tgt_memory_undef = inst->arguments[2];
+      tgt_memory = inst->args[0];
+      tgt_memory_size = inst->args[1];
+      tgt_memory_undef = inst->args[2];
       return;
     default:
       throw Not_implemented("build_ternary_smt: "s + inst->name());
     }
 }
 
-void Converter::build_conversion_smt(const Instruction *inst)
+void Converter::build_conversion_smt(const Inst *inst)
 {
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::SEXT:
       {
-	cvc5::Term arg = inst_as_bv(inst->arguments[0]);
-	assert(inst->arguments[0]->bitsize < inst->bitsize);
-	unsigned bits =  inst->bitsize - inst->arguments[0]->bitsize;
+	cvc5::Term arg = inst_as_bv(inst->args[0]);
+	assert(inst->args[0]->bitsize < inst->bitsize);
+	unsigned bits =  inst->bitsize - inst->args[0]->bitsize;
 	cvc5::Op op = solver.mkOp(cvc5::BITVECTOR_SIGN_EXTEND, {bits});
 	inst2bv.insert({inst, solver.mkTerm(op, {arg})});
       }
       break;
     case Op::ZEXT:
       {
-	cvc5::Term arg = inst_as_bv(inst->arguments[0]);
-	assert(inst->arguments[0]->bitsize < inst->bitsize);
-	unsigned bits =  inst->bitsize - inst->arguments[0]->bitsize;
+	cvc5::Term arg = inst_as_bv(inst->args[0]);
+	assert(inst->args[0]->bitsize < inst->bitsize);
+	unsigned bits =  inst->bitsize - inst->args[0]->bitsize;
 	cvc5::Op op = solver.mkOp(cvc5::BITVECTOR_ZERO_EXTEND, {bits});
 	inst2bv.insert({inst, solver.mkTerm(op, {arg})});
       }
       break;
     case Op::F2U:
       {
-	cvc5::Term arg = inst_as_fp(inst->arguments[0]);
+	cvc5::Term arg = inst_as_fp(inst->args[0]);
 	cvc5::Term rtz = solver.mkRoundingMode(cvc5::ROUND_TOWARD_ZERO);
 	cvc5::Op op = solver.mkOp(cvc5::FLOATINGPOINT_TO_UBV, {inst->bitsize});
 	inst2bv.insert({inst, solver.mkTerm(op, {rtz, arg})});
@@ -649,7 +649,7 @@ void Converter::build_conversion_smt(const Instruction *inst)
       break;
     case Op::F2S:
       {
-	cvc5::Term arg = inst_as_fp(inst->arguments[0]);
+	cvc5::Term arg = inst_as_fp(inst->args[0]);
 	cvc5::Term rtz = solver.mkRoundingMode(cvc5::ROUND_TOWARD_ZERO);
 	cvc5::Op op = solver.mkOp(cvc5::FLOATINGPOINT_TO_SBV, {inst->bitsize});
 	inst2bv.insert({inst, solver.mkTerm(op, {rtz, arg})});
@@ -657,7 +657,7 @@ void Converter::build_conversion_smt(const Instruction *inst)
       break;
     case Op::S2F:
       {
-	cvc5::Term arg = inst_as_bv(inst->arguments[0]);
+	cvc5::Term arg = inst_as_bv(inst->args[0]);
 	cvc5::Term rm = solver.mkRoundingMode(cvc5::ROUND_NEAREST_TIES_TO_EVEN);
 	cvc5::Op op =
 	  fp_sort(cvc5::FLOATINGPOINT_TO_FP_FROM_SBV, inst->bitsize);
@@ -666,7 +666,7 @@ void Converter::build_conversion_smt(const Instruction *inst)
       break;
     case Op::U2F:
       {
-	cvc5::Term arg = inst_as_bv(inst->arguments[0]);
+	cvc5::Term arg = inst_as_bv(inst->args[0]);
 	cvc5::Term rm = solver.mkRoundingMode(cvc5::ROUND_NEAREST_TIES_TO_EVEN);
 	cvc5::Op op =
 	  fp_sort(cvc5::FLOATINGPOINT_TO_FP_FROM_UBV, inst->bitsize);
@@ -681,9 +681,9 @@ void Converter::build_conversion_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_special_smt(const Instruction *inst)
+void Converter::build_special_smt(const Inst *inst)
 {
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::RET:
       assert(inst->nof_args == 0);
@@ -709,7 +709,7 @@ void Converter::build_special_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_smt(const Instruction *inst)
+void Converter::build_smt(const Inst *inst)
 {
   switch (inst->iclass())
     {
@@ -753,7 +753,7 @@ void Converter::convert_function()
   for (auto bb : func->bbs)
     {
       assert(bb->phis.empty());
-      for (Instruction *inst = bb->first_inst; inst; inst = inst->next)
+      for (Inst *inst = bb->first_inst; inst; inst = inst->next)
 	{
 	  build_smt(inst);
 	}
@@ -763,7 +763,7 @@ void Converter::convert_function()
   // retval_undef.
   if (src_retval_undef
       && src_retval_undef == tgt_retval_undef
-      && src_retval_undef->opcode == Op::VALUE
+      && src_retval_undef->op == Op::VALUE
       && !src_retval_undef->value())
     {
       src_retval_undef = nullptr;
@@ -828,7 +828,7 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
   // Check that tgt does not have UB that is not in src.
   assert(conv.src_common_ub == conv.tgt_common_ub);
   if (conv.src_unique_ub != conv.tgt_unique_ub
-      && !(conv.tgt_unique_ub->opcode == Op::VALUE
+      && !(conv.tgt_unique_ub->op == Op::VALUE
 	   && conv.tgt_unique_ub->value() == 0))
   {
     solver.push();

@@ -14,24 +14,24 @@ namespace smtgcc {
 namespace {
 
 class Converter {
-  std::map<const Instruction *, z3::expr> inst2array;
-  std::map<const Instruction *, z3::expr> inst2bv;
-  std::map<const Instruction *, z3::expr> inst2fp;
-  std::map<const Instruction *, z3::expr> inst2bool;
+  std::map<const Inst *, z3::expr> inst2array;
+  std::map<const Inst *, z3::expr> inst2bv;
+  std::map<const Inst *, z3::expr> inst2fp;
+  std::map<const Inst *, z3::expr> inst2bool;
 
   z3::expr ite(z3::expr c, z3::expr a, z3::expr b);
   Z3_sort fp_sort(uint32_t bitsize);
-  void build_bv_comparison_smt(const Instruction *inst);
-  void build_fp_comparison_smt(const Instruction *inst);
-  void build_nullary_smt(const Instruction *inst);
-  void build_bv_unary_smt(const Instruction *inst);
-  void build_fp_unary_smt(const Instruction *inst);
-  void build_bv_binary_smt(const Instruction *inst);
-  void build_fp_binary_smt(const Instruction *inst);
-  void build_ternary_smt(const Instruction *inst);
-  void build_conversion_smt(const Instruction *inst);
-  void build_special_smt(const Instruction *inst);
-  void build_smt(const Instruction *inst);
+  void build_bv_comparison_smt(const Inst *inst);
+  void build_fp_comparison_smt(const Inst *inst);
+  void build_nullary_smt(const Inst *inst);
+  void build_bv_unary_smt(const Inst *inst);
+  void build_fp_unary_smt(const Inst *inst);
+  void build_bv_binary_smt(const Inst *inst);
+  void build_fp_binary_smt(const Inst *inst);
+  void build_ternary_smt(const Inst *inst);
+  void build_conversion_smt(const Inst *inst);
+  void build_special_smt(const Inst *inst);
+  void build_smt(const Inst *inst);
   void convert_function();
 
   z3::context& ctx;
@@ -44,30 +44,30 @@ public:
   {
     convert_function();
   }
-  z3::expr inst_as_array(const Instruction *inst);
-  z3::expr inst_as_bv(const Instruction *inst);
-  z3::expr inst_as_fp(const Instruction *inst);
-  z3::expr inst_as_bool(const Instruction *inst);
+  z3::expr inst_as_array(const Inst *inst);
+  z3::expr inst_as_bv(const Inst *inst);
+  z3::expr inst_as_fp(const Inst *inst);
+  z3::expr inst_as_bool(const Inst *inst);
 
-  std::vector<const Instruction *> print;
+  std::vector<const Inst *> print;
 
-  Instruction *src_assert = nullptr;
-  Instruction *src_memory = nullptr;
-  Instruction *src_memory_size = nullptr;
-  Instruction *src_memory_undef = nullptr;
-  Instruction *src_retval = nullptr;
-  Instruction *src_retval_undef = nullptr;
-  Instruction *src_unique_ub = nullptr;
-  Instruction *src_common_ub = nullptr;
+  Inst *src_assert = nullptr;
+  Inst *src_memory = nullptr;
+  Inst *src_memory_size = nullptr;
+  Inst *src_memory_undef = nullptr;
+  Inst *src_retval = nullptr;
+  Inst *src_retval_undef = nullptr;
+  Inst *src_unique_ub = nullptr;
+  Inst *src_common_ub = nullptr;
 
-  Instruction *tgt_assert = nullptr;
-  Instruction *tgt_memory = nullptr;
-  Instruction *tgt_memory_size = nullptr;
-  Instruction *tgt_memory_undef = nullptr;
-  Instruction *tgt_retval = nullptr;
-  Instruction *tgt_retval_undef = nullptr;
-  Instruction *tgt_unique_ub = nullptr;
-  Instruction *tgt_common_ub = nullptr;
+  Inst *tgt_assert = nullptr;
+  Inst *tgt_memory = nullptr;
+  Inst *tgt_memory_size = nullptr;
+  Inst *tgt_memory_undef = nullptr;
+  Inst *tgt_retval = nullptr;
+  Inst *tgt_retval_undef = nullptr;
+  Inst *tgt_unique_ub = nullptr;
+  Inst *tgt_common_ub = nullptr;
 };
 
 z3::expr Converter::ite(z3::expr c, z3::expr a, z3::expr b)
@@ -77,12 +77,12 @@ z3::expr Converter::ite(z3::expr c, z3::expr a, z3::expr b)
   return z3::ite(c, a, b);
 }
 
-z3::expr Converter::inst_as_array(const Instruction *inst)
+z3::expr Converter::inst_as_array(const Inst *inst)
 {
   return inst2array.at(inst);
 }
 
-z3::expr Converter::inst_as_bv(const Instruction *inst)
+z3::expr Converter::inst_as_bv(const Inst *inst)
 {
   auto I = inst2bv.find(inst);
   if (I != inst2bv.end())
@@ -109,7 +109,7 @@ z3::expr Converter::inst_as_bv(const Instruction *inst)
     }
 }
 
-z3::expr Converter::inst_as_bool(const Instruction *inst)
+z3::expr Converter::inst_as_bool(const Inst *inst)
 {
   assert(inst->bitsize == 1);
   auto I = inst2bool.find(inst);
@@ -127,7 +127,7 @@ z3::expr Converter::inst_as_bool(const Instruction *inst)
   return expr;
 }
 
-z3::expr Converter::inst_as_fp(const Instruction *inst)
+z3::expr Converter::inst_as_fp(const Inst *inst)
 {
   auto I = inst2fp.find(inst);
   if (I != inst2fp.end())
@@ -153,28 +153,28 @@ z3::expr Converter::inst_as_fp(const Instruction *inst)
   return expr;
 }
 
-void Converter::build_bv_comparison_smt(const Instruction *inst)
+void Converter::build_bv_comparison_smt(const Inst *inst)
 {
   assert(inst->nof_args == 2);
 
-  if (inst->arguments[0]->bitsize == 1
-      && (inst->opcode == Op::EQ || inst->opcode == Op::NE)
-      && (inst2bool.contains(inst->arguments[0])
-	  && inst2bool.contains(inst->arguments[1])))
+  if (inst->args[0]->bitsize == 1
+      && (inst->op == Op::EQ || inst->op == Op::NE)
+      && (inst2bool.contains(inst->args[0])
+	  && inst2bool.contains(inst->args[1])))
     {
-      z3::expr arg1 = inst_as_bool(inst->arguments[0]);
-      z3::expr arg2 = inst_as_bool(inst->arguments[1]);
+      z3::expr arg1 = inst_as_bool(inst->args[0]);
+      z3::expr arg2 = inst_as_bool(inst->args[1]);
 
-      if (inst->opcode == Op::EQ)
+      if (inst->op == Op::EQ)
 	inst2bool.insert({inst, arg1 == arg2});
       else
 	inst2bool.insert({inst, arg1 != arg2});
       return;
     }
 
-  z3::expr arg1 = inst_as_bv(inst->arguments[0]);
-  z3::expr arg2 = inst_as_bv(inst->arguments[1]);
-  switch (inst->opcode)
+  z3::expr arg1 = inst_as_bv(inst->args[0]);
+  z3::expr arg2 = inst_as_bv(inst->args[1]);
+  switch (inst->op)
     {
     case Op::EQ:
       inst2bool.insert({inst, arg1 == arg2});
@@ -228,13 +228,13 @@ Z3_sort Converter::fp_sort(uint32_t bitsize)
     }
 }
 
-void Converter::build_fp_comparison_smt(const Instruction *inst)
+void Converter::build_fp_comparison_smt(const Inst *inst)
 {
   assert(inst->nof_args == 2);
-  z3::expr arg1 = inst_as_fp(inst->arguments[0]);
-  z3::expr arg2 = inst_as_fp(inst->arguments[1]);
+  z3::expr arg1 = inst_as_fp(inst->args[0]);
+  z3::expr arg2 = inst_as_fp(inst->args[1]);
 
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::FEQ:
       inst2bool.insert({inst, z3::fp_eq(arg1, arg2)});
@@ -259,9 +259,9 @@ void Converter::build_fp_comparison_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_nullary_smt(const Instruction *inst)
+void Converter::build_nullary_smt(const Inst *inst)
 {
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::MEM_ARRAY:
       {
@@ -302,7 +302,7 @@ void Converter::build_nullary_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_bv_unary_smt(const Instruction *inst)
+void Converter::build_bv_unary_smt(const Inst *inst)
 {
   assert(inst->nof_args == 1);
 
@@ -310,29 +310,29 @@ void Converter::build_bv_unary_smt(const Instruction *inst)
   // avoids multiple conversions between bitvector and Boolean for the
   // typical case where 1-bit values are used in logical expressions.
   if (inst->bitsize == 1
-      && inst->opcode == Op::NOT
-      && inst2bool.contains(inst->arguments[0]))
+      && inst->op == Op::NOT
+      && inst2bool.contains(inst->args[0]))
     {
-      z3::expr arg1 = inst_as_bool(inst->arguments[0]);
+      z3::expr arg1 = inst_as_bool(inst->args[0]);
       inst2bool.insert({inst, !arg1});
       return;
     }
 
-  z3::expr arg1 = inst_as_bv(inst->arguments[0]);
-  switch (inst->opcode)
+  z3::expr arg1 = inst_as_bv(inst->args[0]);
+  switch (inst->op)
     {
     case Op::IS_NAN:
       {
-	z3::expr farg1 = inst_as_fp(inst->arguments[0]);
+	z3::expr farg1 = inst_as_fp(inst->args[0]);
 	z3::expr is_nan = z3::expr(ctx, Z3_mk_fpa_is_nan(ctx, farg1));
 	inst2bool.insert({inst, is_nan});
       }
       break;
     case Op::IS_NONCANONICAL_NAN:
       {
-	z3::expr farg1 = inst_as_fp(inst->arguments[0]);
+	z3::expr farg1 = inst_as_fp(inst->args[0]);
 	z3::expr is_nan = z3::expr(ctx, Z3_mk_fpa_is_nan(ctx, farg1));
-	Z3_sort sort = fp_sort(inst->arguments[0]->bitsize);
+	Z3_sort sort = fp_sort(inst->args[0]->bitsize);
 	z3::expr nan = z3::expr(ctx, Z3_mk_fpa_nan(ctx, sort));
 	z3::expr nan_bv = z3::expr(ctx, Z3_mk_fpa_to_ieee_bv(ctx, nan));
 	inst2bool.insert({inst, is_nan && (nan_bv != arg1)});
@@ -349,21 +349,21 @@ void Converter::build_bv_unary_smt(const Instruction *inst)
       break;
     case Op::SRC_ASSERT:
       assert(!src_assert);
-      src_assert = inst->arguments[0];
+      src_assert = inst->args[0];
       break;
     case Op::TGT_ASSERT:
       assert(!tgt_assert);
-      tgt_assert = inst->arguments[0];
+      tgt_assert = inst->args[0];
       break;
     default:
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
     }
 }
 
-void Converter::build_fp_unary_smt(const Instruction *inst)
+void Converter::build_fp_unary_smt(const Inst *inst)
 {
-  z3::expr arg1 = inst_as_fp(inst->arguments[0]);
-  switch (inst->opcode)
+  z3::expr arg1 = inst_as_fp(inst->args[0]);
+  switch (inst->op)
     {
     case Op::FABS:
       inst2fp.insert({inst, z3::abs(arg1)});
@@ -373,7 +373,7 @@ void Converter::build_fp_unary_smt(const Instruction *inst)
       break;
     case Op::NAN:
       {
-	Z3_sort sort = fp_sort(inst->arguments[0]->value());
+	Z3_sort sort = fp_sort(inst->args[0]->value());
 	inst2fp.insert({inst, z3::expr(ctx, Z3_mk_fpa_nan(ctx, sort))});
       }
       break;
@@ -382,43 +382,43 @@ void Converter::build_fp_unary_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_bv_binary_smt(const Instruction *inst)
+void Converter::build_bv_binary_smt(const Inst *inst)
 {
   assert(inst->nof_args == 2);
 
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::ARRAY_GET_FLAG:
     case Op::ARRAY_GET_SIZE:
     case Op::ARRAY_GET_UNDEF:
     case Op::ARRAY_LOAD:
       {
-	z3::expr arg1 = inst_as_array(inst->arguments[0]);
-	z3::expr arg2 = inst_as_bv(inst->arguments[1]);
+	z3::expr arg1 = inst_as_array(inst->args[0]);
+	z3::expr arg2 = inst_as_bv(inst->args[1]);
 	inst2bv.insert({inst, z3::select(arg1, arg2)});
       }
       return;
     case Op::SRC_RETVAL:
       assert(!src_retval);
       assert(!src_retval_undef);
-      src_retval = inst->arguments[0];
-      src_retval_undef = inst->arguments[1];
+      src_retval = inst->args[0];
+      src_retval_undef = inst->args[1];
       return;
     case Op::TGT_RETVAL:
       assert(!tgt_retval);
       assert(!tgt_retval_undef);
-      tgt_retval = inst->arguments[0];
-      tgt_retval_undef = inst->arguments[1];
+      tgt_retval = inst->args[0];
+      tgt_retval_undef = inst->args[1];
       return;
     case Op::SRC_UB:
       assert(!src_unique_ub && !src_common_ub);
-      src_common_ub = inst->arguments[0];
-      src_unique_ub = inst->arguments[1];
+      src_common_ub = inst->args[0];
+      src_unique_ub = inst->args[1];
       return;
     case Op::TGT_UB:
       assert(!tgt_unique_ub && !tgt_common_ub);
-      tgt_common_ub = inst->arguments[0];
-      tgt_unique_ub = inst->arguments[1];
+      tgt_common_ub = inst->args[0];
+      tgt_unique_ub = inst->args[1];
       return;
     default:
       break;
@@ -429,26 +429,26 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
   // bitvector and Boolean for the typical case where 1-bit values
   // are used in logical expressions.
   if (inst->bitsize == 1 &&
-      (inst->opcode == Op::AND
-       || inst->opcode == Op::OR
-       || inst->opcode == Op::XOR)
-      && (inst2bool.contains(inst->arguments[0])
-	  || inst2bool.contains(inst->arguments[1])))
+      (inst->op == Op::AND
+       || inst->op == Op::OR
+       || inst->op == Op::XOR)
+      && (inst2bool.contains(inst->args[0])
+	  || inst2bool.contains(inst->args[1])))
     {
-      z3::expr arg1 = inst_as_bool(inst->arguments[0]);
-      z3::expr arg2 = inst_as_bool(inst->arguments[1]);
-      if (inst->opcode == Op::AND)
+      z3::expr arg1 = inst_as_bool(inst->args[0]);
+      z3::expr arg2 = inst_as_bool(inst->args[1]);
+      if (inst->op == Op::AND)
 	inst2bool.insert({inst, arg1 && arg2});
-      else if (inst->opcode == Op::OR)
+      else if (inst->op == Op::OR)
 	inst2bool.insert({inst, arg1 || arg2});
       else
 	inst2bool.insert({inst, arg1 ^ arg2});
       return;
     }
 
-  z3::expr arg1 = inst_as_bv(inst->arguments[0]);
-  z3::expr arg2 = inst_as_bv(inst->arguments[1]);
-  switch (inst->opcode)
+  z3::expr arg1 = inst_as_bv(inst->args[0]);
+  z3::expr arg2 = inst_as_bv(inst->args[1]);
+  switch (inst->op)
     {
     case Op::ADD:
       inst2bv.insert({inst, arg1 + arg2});
@@ -461,7 +461,7 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
       break;
     case Op::PARAM:
       {
-	uint32_t index = inst->arguments[0]->value();
+	uint32_t index = inst->args[0]->value();
 	char name[100];
 	sprintf(name, ".param%" PRIu32, index);
 	z3::expr param = ctx.bv_const(name, inst->bitsize);
@@ -473,7 +473,7 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
       break;
     case Op::SYMBOLIC:
       {
-	uint32_t index = inst->arguments[0]->value();
+	uint32_t index = inst->args[0]->value();
 	char name[100];
 	sprintf(name, ".symbolic%" PRIu32, index);
 	z3::expr symbolic = ctx.bv_const(name, inst->bitsize);
@@ -509,10 +509,10 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
       break;
     case Op::SMUL_WRAPS:
       {
-	z3::expr earg1 = z3::sext(arg1, inst->arguments[0]->bitsize);
-	z3::expr earg2 = z3::sext(arg2, inst->arguments[0]->bitsize);
+	z3::expr earg1 = z3::sext(arg1, inst->args[0]->bitsize);
+	z3::expr earg2 = z3::sext(arg2, inst->args[0]->bitsize);
 	z3::expr emul = earg1 * earg2;
-	z3::expr eres = z3::sext(arg1 * arg2, inst->arguments[0]->bitsize);
+	z3::expr eres = z3::sext(arg1 * arg2, inst->args[0]->bitsize);
 	inst2bool.insert({inst, emul != eres});
       }
       break;
@@ -566,12 +566,12 @@ void Converter::build_bv_binary_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_fp_binary_smt(const Instruction *inst)
+void Converter::build_fp_binary_smt(const Inst *inst)
 {
   assert(inst->nof_args == 2);
-  z3::expr arg1 = inst_as_fp(inst->arguments[0]);
-  z3::expr arg2 = inst_as_fp(inst->arguments[1]);
-  switch (inst->opcode)
+  z3::expr arg1 = inst_as_fp(inst->args[0]);
+  z3::expr arg2 = inst_as_fp(inst->args[1]);
+  switch (inst->op)
     {
     case Op::FADD:
       inst2fp.insert({inst, arg1 + arg2});
@@ -590,109 +590,109 @@ void Converter::build_fp_binary_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_ternary_smt(const Instruction *inst)
+void Converter::build_ternary_smt(const Inst *inst)
 {
   assert(inst->nof_args == 3);
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::ARRAY_SET_FLAG:
     case Op::ARRAY_SET_SIZE:
     case Op::ARRAY_SET_UNDEF:
     case Op::ARRAY_STORE:
       {
-	z3::expr arg1 = inst_as_array(inst->arguments[0]);
-	z3::expr arg2 = inst_as_bv(inst->arguments[1]);
-	z3::expr arg3 = inst_as_bv(inst->arguments[2]);
+	z3::expr arg1 = inst_as_array(inst->args[0]);
+	z3::expr arg2 = inst_as_bv(inst->args[1]);
+	z3::expr arg3 = inst_as_bv(inst->args[2]);
 	inst2array.insert({inst, z3::store(arg1, arg2, arg3)});
       }
       break;
     case Op::EXTRACT:
       {
-	z3::expr arg = inst_as_bv(inst->arguments[0]);
-	uint32_t high = inst->arguments[1]->value();
-	uint32_t low = inst->arguments[2]->value();
+	z3::expr arg = inst_as_bv(inst->args[0]);
+	uint32_t high = inst->args[1]->value();
+	uint32_t low = inst->args[2]->value();
 	inst2bv.insert({inst, arg.extract(high, low)});
       }
       break;
     case Op::ITE:
-      if (inst2array.contains(inst->arguments[1]))
+      if (inst2array.contains(inst->args[1]))
 	{
-	  z3::expr arg1 = inst_as_bool(inst->arguments[0]);
-	  z3::expr arg2 = inst_as_array(inst->arguments[1]);
-	  z3::expr arg3 = inst_as_array(inst->arguments[2]);
+	  z3::expr arg1 = inst_as_bool(inst->args[0]);
+	  z3::expr arg2 = inst_as_array(inst->args[1]);
+	  z3::expr arg3 = inst_as_array(inst->args[2]);
 	  inst2array.insert({inst, ite(arg1, arg2, arg3)});
 	}
       else if (inst->bitsize == 1 &&
-	  (inst2bool.contains(inst->arguments[1])
-	   && inst2bool.contains(inst->arguments[2])))
+	  (inst2bool.contains(inst->args[1])
+	   && inst2bool.contains(inst->args[2])))
 	{
-	  z3::expr arg1 = inst_as_bool(inst->arguments[0]);
-	  z3::expr arg2 = inst_as_bool(inst->arguments[1]);
-	  z3::expr arg3 = inst_as_bool(inst->arguments[2]);
+	  z3::expr arg1 = inst_as_bool(inst->args[0]);
+	  z3::expr arg2 = inst_as_bool(inst->args[1]);
+	  z3::expr arg3 = inst_as_bool(inst->args[2]);
 	  inst2bool.insert({inst, ite(arg1, arg2, arg3)});
 	}
-      else if ((inst2fp.contains(inst->arguments[1])
-		&& inst2fp.contains(inst->arguments[2]))
-	       || (inst2fp.contains(inst->arguments[1])
-		   && inst->arguments[2]->opcode == Op::VALUE)
-	       || (inst2fp.contains(inst->arguments[2])
-		   && inst->arguments[1]->opcode == Op::VALUE))
+      else if ((inst2fp.contains(inst->args[1])
+		&& inst2fp.contains(inst->args[2]))
+	       || (inst2fp.contains(inst->args[1])
+		   && inst->args[2]->op == Op::VALUE)
+	       || (inst2fp.contains(inst->args[2])
+		   && inst->args[1]->op == Op::VALUE))
 	{
-	  z3::expr arg1 = inst_as_bool(inst->arguments[0]);
-	  z3::expr arg2 = inst_as_fp(inst->arguments[1]);
-	  z3::expr arg3 = inst_as_fp(inst->arguments[2]);
+	  z3::expr arg1 = inst_as_bool(inst->args[0]);
+	  z3::expr arg2 = inst_as_fp(inst->args[1]);
+	  z3::expr arg3 = inst_as_fp(inst->args[2]);
 	  inst2fp.insert({inst, ite(arg1, arg2, arg3)});
 	}
       else
 	{
-	  z3::expr arg1 = inst_as_bool(inst->arguments[0]);
-	  z3::expr arg2 = inst_as_bv(inst->arguments[1]);
-	  z3::expr arg3 = inst_as_bv(inst->arguments[2]);
+	  z3::expr arg1 = inst_as_bool(inst->args[0]);
+	  z3::expr arg2 = inst_as_bv(inst->args[1]);
+	  z3::expr arg3 = inst_as_bv(inst->args[2]);
 	  inst2bv.insert({inst, ite(arg1, arg2, arg3)});
 	}
       break;
     case Op::SRC_MEM:
       assert(!src_memory);
       assert(!src_memory_size);
-      src_memory = inst->arguments[0];
-      src_memory_size = inst->arguments[1];
-      src_memory_undef = inst->arguments[2];
+      src_memory = inst->args[0];
+      src_memory_size = inst->args[1];
+      src_memory_undef = inst->args[2];
       return;
     case Op::TGT_MEM:
       assert(!tgt_memory);
       assert(!tgt_memory_size);
-      tgt_memory = inst->arguments[0];
-      tgt_memory_size = inst->arguments[1];
-      tgt_memory_undef = inst->arguments[2];
+      tgt_memory = inst->args[0];
+      tgt_memory_size = inst->args[1];
+      tgt_memory_undef = inst->args[2];
       return;
     default:
       throw Not_implemented("build_ternary_smt: "s + inst->name());
     }
 }
 
-void Converter::build_conversion_smt(const Instruction *inst)
+void Converter::build_conversion_smt(const Inst *inst)
 {
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::SEXT:
       {
-	z3::expr arg = inst_as_bv(inst->arguments[0]);
-	uint32_t arg_bitsize = inst->arguments[0]->bitsize;
+	z3::expr arg = inst_as_bv(inst->args[0]);
+	uint32_t arg_bitsize = inst->args[0]->bitsize;
 	assert(arg_bitsize < inst->bitsize);
 	inst2bv.insert({inst, z3::sext(arg, inst->bitsize - arg_bitsize)});
       }
       break;
     case Op::ZEXT:
       {
-	z3::expr arg = inst_as_bv(inst->arguments[0]);
-	uint32_t arg_bitsize = inst->arguments[0]->bitsize;
+	z3::expr arg = inst_as_bv(inst->args[0]);
+	uint32_t arg_bitsize = inst->args[0]->bitsize;
 	assert(arg_bitsize < inst->bitsize);
 	inst2bv.insert({inst, z3::zext(arg, inst->bitsize - arg_bitsize)});
       }
       break;
     case Op::F2U:
       {
-	z3::expr arg = inst_as_fp(inst->arguments[0]);
+	z3::expr arg = inst_as_fp(inst->args[0]);
 	z3::expr rtz = to_expr(ctx, Z3_mk_fpa_rtz(ctx));
 	Z3_ast r = Z3_mk_fpa_to_ubv(ctx, rtz, arg, inst->bitsize);
 	inst2bv.insert({inst, z3::expr(ctx, r)});
@@ -700,7 +700,7 @@ void Converter::build_conversion_smt(const Instruction *inst)
       break;
     case Op::F2S:
       {
-	z3::expr arg = inst_as_fp(inst->arguments[0]);
+	z3::expr arg = inst_as_fp(inst->args[0]);
 	z3::expr rtz = to_expr(ctx, Z3_mk_fpa_rtz(ctx));
 	Z3_ast r = Z3_mk_fpa_to_sbv(ctx, rtz, arg, inst->bitsize);
 	inst2bv.insert({inst, z3::expr(ctx, r)});
@@ -708,7 +708,7 @@ void Converter::build_conversion_smt(const Instruction *inst)
       break;
     case Op::S2F:
       {
-	z3::expr arg = inst_as_bv(inst->arguments[0]);
+	z3::expr arg = inst_as_bv(inst->args[0]);
 	z3::expr rne = to_expr(ctx, Z3_mk_fpa_rne(ctx));
 	Z3_sort sort = fp_sort(inst->bitsize);
 	Z3_ast r = Z3_mk_fpa_to_fp_signed(ctx, rne, arg, sort);
@@ -717,7 +717,7 @@ void Converter::build_conversion_smt(const Instruction *inst)
       break;
     case Op::U2F:
       {
-	z3::expr arg = inst_as_bv(inst->arguments[0]);
+	z3::expr arg = inst_as_bv(inst->args[0]);
 	z3::expr rne = to_expr(ctx, Z3_mk_fpa_rne(ctx));
 	Z3_sort sort = fp_sort(inst->bitsize);
 	Z3_ast r = Z3_mk_fpa_to_fp_unsigned(ctx, rne, arg, sort);
@@ -726,7 +726,7 @@ void Converter::build_conversion_smt(const Instruction *inst)
       break;
     case Op::FCHPREC:
       {
-	z3::expr arg = inst_as_fp(inst->arguments[0]);
+	z3::expr arg = inst_as_fp(inst->args[0]);
 	z3::expr rne = to_expr(ctx, Z3_mk_fpa_rne(ctx));
 	Z3_sort sort = fp_sort(inst->bitsize);
 	Z3_ast r = Z3_mk_fpa_to_fp_float(ctx, rne, arg, sort);
@@ -738,9 +738,9 @@ void Converter::build_conversion_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_special_smt(const Instruction *inst)
+void Converter::build_special_smt(const Inst *inst)
 {
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::RET:
       assert(inst->nof_args == 0);
@@ -768,7 +768,7 @@ void Converter::build_special_smt(const Instruction *inst)
     }
 }
 
-void Converter::build_smt(const Instruction *inst)
+void Converter::build_smt(const Inst *inst)
 {
   switch (inst->iclass())
     {
@@ -812,7 +812,7 @@ void Converter::convert_function()
   for (auto bb : func->bbs)
     {
       assert(bb->phis.empty());
-      for (Instruction *inst = bb->first_inst; inst; inst = inst->next)
+      for (Inst *inst = bb->first_inst; inst; inst = inst->next)
 	{
 	  build_smt(inst);
 	}
@@ -822,7 +822,7 @@ void Converter::convert_function()
   // retval_undef.
   if (src_retval_undef
       && src_retval_undef == tgt_retval_undef
-      && src_retval_undef->opcode == Op::VALUE
+      && src_retval_undef->op == Op::VALUE
       && !src_retval_undef->value())
     {
       src_retval_undef = nullptr;
@@ -877,8 +877,8 @@ void add_print(std::string& msg, Converter& conv, z3::solver& solver)
   z3::model model = solver.get_model();
   for (auto inst : conv.print)
     {
-      z3::expr id = conv.inst_as_bv(inst->arguments[0]);
-      z3::expr value = conv.inst_as_bv(inst->arguments[1]);
+      z3::expr id = conv.inst_as_bv(inst->args[0]);
+      z3::expr value = conv.inst_as_bv(inst->args[1]);
       msg += "print " + model.eval(id).to_string() + ": ";
       msg += model.eval(value).to_string() + "\n";
     }
@@ -904,7 +904,7 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
   // Check that tgt does not have UB that is not in src.
   assert(conv.src_common_ub == conv.tgt_common_ub);
   if (conv.src_unique_ub != conv.tgt_unique_ub
-      && !(conv.tgt_unique_ub->opcode == Op::VALUE
+      && !(conv.tgt_unique_ub->op == Op::VALUE
 	   && conv.tgt_unique_ub->value() == 0))
   {
     z3::solver solver(ctx);

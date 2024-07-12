@@ -25,25 +25,25 @@ const int max_store_traversal = 100;
 
 struct Cse_key
 {
-  Op opcode;
-  Instruction *arg1 = nullptr;
-  Instruction *arg2 = nullptr;
-  Instruction *arg3 = nullptr;
+  Op op;
+  Inst *arg1 = nullptr;
+  Inst *arg2 = nullptr;
+  Inst *arg3 = nullptr;
 
-  Cse_key(Op opcode)
-    : opcode{opcode}
+  Cse_key(Op op)
+    : op{op}
   {}
-  Cse_key(Op opcode, Instruction *arg1)
-    : opcode{opcode}
+  Cse_key(Op op, Inst *arg1)
+    : op{op}
     , arg1{arg1}
   {}
-  Cse_key(Op opcode, Instruction *arg1, Instruction *arg2)
-    : opcode{opcode}
+  Cse_key(Op op, Inst *arg1, Inst *arg2)
+    : op{op}
     , arg1{arg1}
     , arg2{arg2}
   {}
-  Cse_key(Op opcode, Instruction *arg1, Instruction *arg2, Instruction *arg3)
-    : opcode{opcode}
+  Cse_key(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
+    : op{op}
     , arg1{arg1}
     , arg2{arg2}
     , arg3{arg3}
@@ -51,8 +51,8 @@ struct Cse_key
 
   friend bool operator<(const Cse_key& lhs, const Cse_key& rhs)
   {
-    if (lhs.opcode < rhs.opcode) return true;
-    if (lhs.opcode > rhs.opcode) return false;
+    if (lhs.op < rhs.op) return true;
+    if (lhs.op > rhs.op) return false;
 
     if (lhs.arg1 < rhs.arg1) return true;
     if (lhs.arg1 > rhs.arg1) return false;
@@ -69,7 +69,7 @@ enum class Function_role {
 };
 
 struct Inst_comp {
-  bool operator()(const Instruction *a, const Instruction *b) const {
+  bool operator()(const Inst *a, const Inst *b) const {
     return a->id < b->id;
   }
 };
@@ -82,86 +82,85 @@ class Converter {
   bool run_simplify_inst;
 
   // Maps basic blocks to an expression telling if it is executed.
-  std::map<Basic_block *, Instruction *> bb2cond;
+  std::map<Basic_block *, Inst *> bb2cond;
 
   // Maps basic blocks to the expressions determining if it contain UB.
-  std::map<Basic_block *, std::vector<Instruction *>> bb2ub;
+  std::map<Basic_block *, std::vector<Inst *>> bb2ub;
 
   // Maps basic blocks to an expression determining if it contain an
   // assertion failure.
-  std::map<Basic_block *, Instruction *> bb2not_assert;
+  std::map<Basic_block *, Inst *> bb2not_assert;
 
   // Maps basic blocks to the memory state at the end of the basic block.
-  std::map<Basic_block *, Instruction *> bb2memory;
-  std::map<Basic_block *, Instruction *> bb2memory_size;
-  std::map<Basic_block *, Instruction *> bb2memory_flag;
-  std::map<Basic_block *, Instruction *> bb2memory_undef;
+  std::map<Basic_block *, Inst *> bb2memory;
+  std::map<Basic_block *, Inst *> bb2memory_size;
+  std::map<Basic_block *, Inst *> bb2memory_flag;
+  std::map<Basic_block *, Inst *> bb2memory_undef;
 
   // List of the mem_id for the constant memory blocks.
-  std::vector<Instruction *> const_ids;
+  std::vector<Inst *> const_ids;
 
   // Table for mapping original instructions to the corresponding new
   // instruction in destination function.
-  std::map<Instruction*, Instruction*> translate;
+  std::map<Inst *, Inst *> translate;
 
-  std::map<Cse_key, Instruction*> key2inst;
+  std::map<Cse_key, Inst *> key2inst;
 
-  std::map<Instruction *, std::vector<Instruction *>, Inst_comp> src_bbcond2ub;
-  std::map<Instruction *, std::vector<Instruction *>, Inst_comp> tgt_bbcond2ub;
+  std::map<Inst *, std::vector<Inst *>, Inst_comp> src_bbcond2ub;
+  std::map<Inst *, std::vector<Inst *>, Inst_comp> tgt_bbcond2ub;
   bool has_tgt = false;
 
   // The memory state before src and tgt. This is used to have identical
   // start state for both src and tgt.
-  Instruction *memory;
-  Instruction *memory_flag;
-  Instruction *memory_size;
-  Instruction *memory_undef;
+  Inst *memory;
+  Inst *memory_flag;
+  Inst *memory_size;
+  Inst *memory_undef;
 
   Basic_block *dest_bb;
 
-  Instruction *src_memory = nullptr;
-  Instruction *src_memory_size = nullptr;
-  Instruction *src_memory_undef = nullptr;
-  Instruction *src_retval = nullptr;
-  Instruction *src_retval_undef = nullptr;
-  Instruction *src_unique_ub = nullptr;
-  Instruction *src_common_ub = nullptr;
-  Instruction *tgt_memory = nullptr;
-  Instruction *tgt_memory_size = nullptr;
-  Instruction *tgt_memory_undef = nullptr;
-  Instruction *tgt_retval = nullptr;
-  Instruction *tgt_retval_undef = nullptr;
-  Instruction *tgt_unique_ub = nullptr;
-  Instruction *tgt_common_ub = nullptr;
+  Inst *src_memory = nullptr;
+  Inst *src_memory_size = nullptr;
+  Inst *src_memory_undef = nullptr;
+  Inst *src_retval = nullptr;
+  Inst *src_retval_undef = nullptr;
+  Inst *src_unique_ub = nullptr;
+  Inst *src_common_ub = nullptr;
+  Inst *tgt_memory = nullptr;
+  Inst *tgt_memory_size = nullptr;
+  Inst *tgt_memory_undef = nullptr;
+  Inst *tgt_retval = nullptr;
+  Inst *tgt_retval_undef = nullptr;
+  Inst *tgt_unique_ub = nullptr;
+  Inst *tgt_common_ub = nullptr;
 
-  Instruction *ite(Instruction *c, Instruction *a, Instruction *b);
-  Instruction *bool_or(Instruction *a, Instruction *b);
-  Instruction *bool_and(Instruction *a, Instruction *b);
-  Instruction *bool_not(Instruction *a);
-  void add_ub(Basic_block *bb, Instruction *cond);
-  void add_assert(Basic_block *bb, Instruction *cond);
-  std::map<Instruction *, std::vector<Instruction *>, Inst_comp> prepare_ub(Function *func);
+  Inst *ite(Inst *c, Inst *a, Inst *b);
+  Inst *bool_or(Inst *a, Inst *b);
+  Inst *bool_and(Inst *a, Inst *b);
+  Inst *bool_not(Inst *a);
+  void add_ub(Basic_block *bb, Inst *cond);
+  void add_assert(Basic_block *bb, Inst *cond);
+  std::map<Inst *, std::vector<Inst *>, Inst_comp> prepare_ub(Function *func);
   void generate_ub();
-  Instruction *generate_assert(Function *func);
-  Instruction *get_full_edge_cond(Basic_block *src, Basic_block *dest);
-  void build_mem_state(Basic_block *bb, std::map<Basic_block*, Instruction*>& map);
+  Inst *generate_assert(Function *func);
+  Inst *get_full_edge_cond(Basic_block *src, Basic_block *dest);
+  void build_mem_state(Basic_block *bb, std::map<Basic_block*, Inst *>& map);
   void generate_bb2cond(Basic_block *bb);
-  std::pair<Instruction *, Instruction *> simplify_array_access(Instruction *array, Instruction *addr, std::map<Instruction *, std::pair<Instruction *, Instruction *>>& cache);
-  Instruction *strip_local_mem(Instruction *array, std::map<Instruction *, Instruction *>& cache);
-  bool may_alias(Instruction *p1, Instruction *p2);
-  void convert(Basic_block *bb, Instruction *inst, Function_role role);
+  std::pair<Inst *, Inst *> simplify_array_access(Inst *array, Inst *addr, std::map<Inst *, std::pair<Inst *, Inst *>>& cache);
+  Inst *strip_local_mem(Inst *array, std::map<Inst *, Inst *>& cache);
+  bool may_alias(Inst *p1, Inst *p2);
+  void convert(Basic_block *bb, Inst *inst, Function_role role);
 
-  Instruction *get_inst(const Cse_key& key, bool may_add_insts = true);
-  Instruction *value_inst(unsigned __int128 value, uint32_t bitsize);
-  Instruction *update_key2inst(Instruction *inst);
-  Instruction *fixup_concat(Instruction *inst);
-  Instruction *fixup(Instruction *inst);
-  Instruction *simplify(Instruction *inst);
-  Instruction *build_inst(Op opcode);
-  Instruction *build_inst(Op opcode, Instruction *arg);
-  Instruction *build_inst(Op opcode, Instruction *arg1, Instruction *arg2);
-  Instruction *build_inst(Op opcode, Instruction *arg1, Instruction *arg2,
-			  Instruction *arg3);
+  Inst *get_inst(const Cse_key& key, bool may_add_insts = true);
+  Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
+  Inst *update_key2inst(Inst *inst);
+  Inst *fixup_concat(Inst *inst);
+  Inst *fixup(Inst *inst);
+  Inst *simplify(Inst *inst);
+  Inst *build_inst(Op op);
+  Inst *build_inst(Op op, Inst *arg);
+  Inst *build_inst(Op op, Inst *arg1, Inst *arg2);
+  Inst *build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3);
 
 public:
   Converter(Module *m, bool run_simplify_inst = true);
@@ -179,13 +178,13 @@ public:
   Function *dest_func = nullptr;
 };
 
-Instruction *Converter::get_inst(const Cse_key& key, bool may_add_insts)
+Inst *Converter::get_inst(const Cse_key& key, bool may_add_insts)
 {
   auto I = key2inst.find(key);
   if (I != key2inst.end())
     return I->second;
 
-  if (inst_info[(int)key.opcode].is_commutative)
+  if (inst_info[(int)key.op].is_commutative)
     {
       Cse_key tmp_key = key;
       std::swap(tmp_key.arg1, tmp_key.arg2);
@@ -193,11 +192,11 @@ Instruction *Converter::get_inst(const Cse_key& key, bool may_add_insts)
       if (I != key2inst.end())
 	return I->second;
     }
-  else if (inst_info[(int)key.opcode].iclass == Inst_class::icomparison
-	   || inst_info[(int)key.opcode].iclass == Inst_class::fcomparison)
+  else if (inst_info[(int)key.op].iclass == Inst_class::icomparison
+	   || inst_info[(int)key.op].iclass == Inst_class::fcomparison)
     {
       Op op;
-      switch (key.opcode)
+      switch (key.op)
 	{
 	case Op::FGE:
 	  op = Op::FLE;
@@ -239,7 +238,7 @@ Instruction *Converter::get_inst(const Cse_key& key, bool may_add_insts)
 	  throw Not_implemented("Converter::get_inst: unknown comparison");
 	}
       Cse_key tmp_key = key;
-      tmp_key.opcode = op;
+      tmp_key.op = op;
       std::swap(tmp_key.arg1, tmp_key.arg2);
       I = key2inst.find(tmp_key);
       if (I != key2inst.end())
@@ -248,10 +247,10 @@ Instruction *Converter::get_inst(const Cse_key& key, bool may_add_insts)
 
   // Check if this is a negation of an existing comparison.
   if (may_add_insts
-      && inst_info[(int)key.opcode].iclass == Inst_class::icomparison)
+      && inst_info[(int)key.op].iclass == Inst_class::icomparison)
     {
       Op op;
-      switch (key.opcode)
+      switch (key.op)
 	{
 	case Op::EQ:
 	  op = Op::NE;
@@ -287,8 +286,8 @@ Instruction *Converter::get_inst(const Cse_key& key, bool may_add_insts)
 	  throw Not_implemented("Converter::get_inst: unknown comparison");
 	}
       Cse_key tmp_key = key;
-      tmp_key.opcode = op;
-      Instruction *inst = get_inst(tmp_key, false);
+      tmp_key.op = op;
+      Inst *inst = get_inst(tmp_key, false);
       if (inst)
 	return bool_not(inst);
     }
@@ -296,7 +295,7 @@ Instruction *Converter::get_inst(const Cse_key& key, bool may_add_insts)
   return nullptr;
 }
 
-Instruction *Converter::value_inst(unsigned __int128 value, uint32_t bitsize)
+Inst *Converter::value_inst(unsigned __int128 value, uint32_t bitsize)
 {
   return dest_bb->value_inst(value, bitsize);
 }
@@ -304,35 +303,35 @@ Instruction *Converter::value_inst(unsigned __int128 value, uint32_t bitsize)
 // Checks if we already have an equivalent instruction. If we do,
 // all uses of 'inst' are changed to use the existing instruction.
 // If not, 'inst' is added to the CSE table.
-Instruction *Converter::update_key2inst(Instruction *inst)
+Inst *Converter::update_key2inst(Inst *inst)
 {
-  Cse_key key(inst->opcode);
+  Cse_key key(inst->op);
   switch (inst->iclass())
     {
     case Inst_class::nullary:
       break;
     case Inst_class::iunary:
     case Inst_class::funary:
-      key.arg1 = inst->arguments[0];
+      key.arg1 = inst->args[0];
       break;
     case Inst_class::icomparison:
     case Inst_class::fcomparison:
     case Inst_class::ibinary:
     case Inst_class::fbinary:
     case Inst_class::conv:
-      key.arg1 = inst->arguments[0];
-      key.arg2 = inst->arguments[1];
+      key.arg1 = inst->args[0];
+      key.arg2 = inst->args[1];
       break;
     case Inst_class::ternary:
-      key.arg1 = inst->arguments[0];
-      key.arg2 = inst->arguments[1];
-      key.arg3 = inst->arguments[2];
+      key.arg1 = inst->args[0];
+      key.arg2 = inst->args[1];
+      key.arg3 = inst->args[2];
       break;
     default:
       return inst;
     }
 
-  Instruction *existing_inst = get_inst(key);
+  Inst *existing_inst = get_inst(key);
   if (existing_inst)
     {
       inst->replace_all_uses_with(existing_inst);
@@ -343,24 +342,24 @@ Instruction *Converter::update_key2inst(Instruction *inst)
   return inst;
 }
 
-Instruction *Converter::fixup_concat(Instruction *inst)
+Inst *Converter::fixup_concat(Inst *inst)
 {
-  Instruction *const arg1 = inst->arguments[0];
-  Instruction *const arg2 = inst->arguments[1];
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
 
   // concat 0, (extract x) -> lshr x, c
   if (inst->bitsize <= 128
       && is_value_zero(arg1)
-      && arg2->opcode == Op::EXTRACT
-      && arg2->arguments[0]->bitsize == inst->bitsize
-      && arg2->arguments[1]->value() == inst->bitsize - 1
-      && arg2->arguments[2]->value() == arg1->bitsize)
+      && arg2->op == Op::EXTRACT
+      && arg2->args[0]->bitsize == inst->bitsize
+      && arg2->args[1]->value() == inst->bitsize - 1
+      && arg2->args[2]->value() == arg1->bitsize)
     {
       bool old_run_simplify_inst = run_simplify_inst;
       run_simplify_inst = false;
 
-      Instruction *c = value_inst(arg1->bitsize, inst->bitsize);
-      inst = build_inst(Op::LSHR, arg2->arguments[0], c);
+      Inst *c = value_inst(arg1->bitsize, inst->bitsize);
+      inst = build_inst(Op::LSHR, arg2->args[0], c);
 
       run_simplify_inst = old_run_simplify_inst;
       return inst;
@@ -369,17 +368,17 @@ Instruction *Converter::fixup_concat(Instruction *inst)
   // concat (extract x), 0 -> and x, c
   if (inst->bitsize <= 128
       && is_value_zero(arg2)
-      && arg1->opcode == Op::EXTRACT
-      && arg1->arguments[0]->bitsize == inst->bitsize
-      && arg1->arguments[1]->value() == inst->bitsize - 1
-      && arg1->arguments[2]->value() == arg2->bitsize)
+      && arg1->op == Op::EXTRACT
+      && arg1->args[0]->bitsize == inst->bitsize
+      && arg1->args[1]->value() == inst->bitsize - 1
+      && arg1->args[2]->value() == arg2->bitsize)
     {
       bool old_run_simplify_inst = run_simplify_inst;
       run_simplify_inst = false;
 
       unsigned __int128 mask = ((unsigned __int128)-1) << arg2->bitsize;
-      Instruction *c = value_inst(mask, inst->bitsize);
-      inst = build_inst(Op::AND, arg1->arguments[0], c);
+      Inst *c = value_inst(mask, inst->bitsize);
+      inst = build_inst(Op::AND, arg1->args[0], c);
 
       run_simplify_inst = old_run_simplify_inst;
       return inst;
@@ -388,15 +387,15 @@ Instruction *Converter::fixup_concat(Instruction *inst)
   // concat (extract x, hi, 0), 0 -> shl x, c
   if (inst->bitsize <= 128
       && is_value_zero(arg2)
-      && arg1->opcode == Op::EXTRACT
-      && arg1->arguments[2]->value() == 0
-      && arg1->arguments[0]->bitsize == inst->bitsize)
+      && arg1->op == Op::EXTRACT
+      && arg1->args[2]->value() == 0
+      && arg1->args[0]->bitsize == inst->bitsize)
     {
       bool old_run_simplify_inst = run_simplify_inst;
       run_simplify_inst = false;
 
-      Instruction *c = value_inst(arg2->bitsize, inst->bitsize);
-      inst = build_inst(Op::SHL, arg1->arguments[0], c);
+      Inst *c = value_inst(arg2->bitsize, inst->bitsize);
+      inst = build_inst(Op::SHL, arg1->args[0], c);
 
       run_simplify_inst = old_run_simplify_inst;
       return inst;
@@ -405,14 +404,14 @@ Instruction *Converter::fixup_concat(Instruction *inst)
   // concat (sext x), 0 -> shl (sext x), c
   if (inst->bitsize <= 128
       && is_value_zero(arg2)
-      && arg1->opcode == Op::SEXT)
+      && arg1->op == Op::SEXT)
     {
       bool old_run_simplify_inst = run_simplify_inst;
       run_simplify_inst = false;
 
-      Instruction *bs = inst->bb->value_inst(inst->bitsize, 32);
-      inst = build_inst(Op::SEXT, arg1->arguments[0], bs);
-      Instruction *c = value_inst(arg2->bitsize, inst->bitsize);
+      Inst *bs = inst->bb->value_inst(inst->bitsize, 32);
+      inst = build_inst(Op::SEXT, arg1->args[0], bs);
+      Inst *c = value_inst(arg2->bitsize, inst->bitsize);
       inst = build_inst(Op::SHL, inst, c);
 
       run_simplify_inst = old_run_simplify_inst;
@@ -424,46 +423,46 @@ Instruction *Converter::fixup_concat(Instruction *inst)
   // and transform this to "mul (shl x, c), y".
   if (inst->bitsize <= 128
       && is_value_zero(arg2)
-      && arg1->opcode == Op::MUL
-      && (arg1->arguments[0]->opcode == Op::EXTRACT
-	  || arg1->arguments[1]->opcode == Op::EXTRACT))
+      && arg1->op == Op::MUL
+      && (arg1->args[0]->op == Op::EXTRACT
+	  || arg1->args[1]->op == Op::EXTRACT))
     {
       bool old_run_simplify_inst = run_simplify_inst;
       run_simplify_inst = false;
 
-      Instruction *x = arg1->arguments[0];
-      Instruction *y = arg1->arguments[1];
+      Inst *x = arg1->args[0];
+      Inst *y = arg1->args[1];
 
-      if (x->opcode == Op::EXTRACT
-	  && x->arguments[2]->value() == 0
-	  && x->arguments[0]->bitsize >= inst->bitsize)
+      if (x->op == Op::EXTRACT
+	  && x->args[2]->value() == 0
+	  && x->args[0]->bitsize >= inst->bitsize)
 	{
-	  if (x->arguments[0]->bitsize == inst->bitsize)
-	    x = x->arguments[0];
+	  if (x->args[0]->bitsize == inst->bitsize)
+	    x = x->args[0];
 	  else
 	    {
-	      Instruction *hi = value_inst(inst->bitsize - 1, 32);
-	      Instruction *lo = x->arguments[2];
-	      x = build_inst(Op::EXTRACT, x->arguments[0], hi, lo);
+	      Inst *hi = value_inst(inst->bitsize - 1, 32);
+	      Inst *lo = x->args[2];
+	      x = build_inst(Op::EXTRACT, x->args[0], hi, lo);
 	    }
 	}
-      if (y->opcode == Op::EXTRACT
-	  && y->arguments[2]->value() == 0
-	  && y->arguments[0]->bitsize >= inst->bitsize)
+      if (y->op == Op::EXTRACT
+	  && y->args[2]->value() == 0
+	  && y->args[0]->bitsize >= inst->bitsize)
 	{
-	  if (y->arguments[0]->bitsize == inst->bitsize)
-	    y = y->arguments[0];
+	  if (y->args[0]->bitsize == inst->bitsize)
+	    y = y->args[0];
 	  else
 	    {
-	      Instruction *hi = value_inst(inst->bitsize - 1, 32);
-	      Instruction *lo = y->arguments[2];
-	      y = build_inst(Op::EXTRACT, y->arguments[0], hi, lo);
+	      Inst *hi = value_inst(inst->bitsize - 1, 32);
+	      Inst *lo = y->args[2];
+	      y = build_inst(Op::EXTRACT, y->args[0], hi, lo);
 	    }
 	}
 
       if (x->bitsize == inst->bitsize && y->bitsize == inst->bitsize)
 	{
-	  Instruction *c = value_inst(arg2->bitsize, inst->bitsize);
+	  Inst *c = value_inst(arg2->bitsize, inst->bitsize);
 	  x = build_inst(Op::SHL, x, c);
 	}
       else if (x->bitsize != inst->bitsize)
@@ -473,7 +472,7 @@ Instruction *Converter::fixup_concat(Instruction *inst)
       if (y->bitsize != inst->bitsize)
 	y = build_inst(Op::CONCAT, arg2, y);
 
-      Instruction *mul = build_inst(Op::MUL, x, y);
+      Inst *mul = build_inst(Op::MUL, x, y);
 
       run_simplify_inst = old_run_simplify_inst;
       return mul;
@@ -484,9 +483,9 @@ Instruction *Converter::fixup_concat(Instruction *inst)
 
 // Our canonical form is not optimal for SMT solvers. This function
 // converts the IR back to what the SMT solver prefers.
-Instruction *Converter::fixup(Instruction *inst)
+Inst *Converter::fixup(Inst *inst)
 {
-  switch (inst->opcode)
+  switch (inst->op)
     {
     case Op::CONCAT:
       inst = fixup_concat(inst);
@@ -497,7 +496,7 @@ Instruction *Converter::fixup(Instruction *inst)
   return inst;
 }
 
-Instruction *Converter::simplify(Instruction *inst)
+Inst *Converter::simplify(Inst *inst)
 {
   if (!run_simplify_inst)
     return inst;
@@ -506,12 +505,11 @@ Instruction *Converter::simplify(Instruction *inst)
   // Op::NOT for the negation of a comparison instead of changing the
   // opcode, so we do not want simplify_inst optimizing this to a plain
   // comparison.
-  if (inst->opcode == Op::NOT
-      && inst->arguments[0]->iclass() == Inst_class::icomparison)
+  if (inst->op == Op::NOT && inst->args[0]->iclass() == Inst_class::icomparison)
     return inst;
 
-  Instruction *orig_inst = inst;
-  Instruction *prev_inst = inst->prev;
+  Inst *orig_inst = inst;
+  Inst *prev_inst = inst->prev;
   inst = simplify_inst(inst);
   if (inst == orig_inst)
     return inst;
@@ -521,7 +519,7 @@ Instruction *Converter::simplify(Instruction *inst)
   // The instructions are always inserted right before the instruction
   // being simplified, so the instructions to examine are between the
   // 'prev_inst' and 'orig_inst'.
-  for (Instruction *i = prev_inst->next; i != orig_inst; i = i->next)
+  for (Inst *i = prev_inst->next; i != orig_inst; i = i->next)
     {
       if (i == inst)
 	inst = update_key2inst(i);
@@ -532,38 +530,38 @@ Instruction *Converter::simplify(Instruction *inst)
   return inst;
 }
 
-Instruction *Converter::build_inst(Op opcode)
+Inst *Converter::build_inst(Op op)
 {
-  const Cse_key key(opcode);
-  Instruction *inst = get_inst(key);
+  const Cse_key key(op);
+  Inst *inst = get_inst(key);
   if (!inst)
     {
-      inst = dest_bb->build_inst(opcode);
+      inst = dest_bb->build_inst(op);
       key2inst.insert({key, inst});
     }
   return inst;
 }
 
-Instruction *Converter::build_inst(Op opcode, Instruction *arg)
+Inst *Converter::build_inst(Op op, Inst *arg)
 {
-  const Cse_key key(opcode, arg);
-  Instruction *inst = get_inst(key);
+  const Cse_key key(op, arg);
+  Inst *inst = get_inst(key);
   if (!inst)
     {
-      inst = dest_bb->build_inst(opcode, arg);
+      inst = dest_bb->build_inst(op, arg);
       inst = simplify(inst);
       key2inst.insert({key, inst});
     }
   return inst;
 }
 
-Instruction *Converter::build_inst(Op opcode, Instruction *arg1, Instruction *arg2)
+Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 {
-  const Cse_key key(opcode, arg1, arg2);
-  Instruction *inst = get_inst(key);
+  const Cse_key key(op, arg1, arg2);
+  Inst *inst = get_inst(key);
   if (!inst)
     {
-      inst = dest_bb->build_inst(opcode, arg1, arg2);
+      inst = dest_bb->build_inst(op, arg1, arg2);
       inst = simplify(inst);
       inst = fixup(inst);
       key2inst.insert({key, inst});
@@ -571,13 +569,13 @@ Instruction *Converter::build_inst(Op opcode, Instruction *arg1, Instruction *ar
   return inst;
 }
 
-Instruction *Converter::build_inst(Op opcode, Instruction *arg1, Instruction *arg2, Instruction *arg3)
+Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
 {
-  const Cse_key key(opcode, arg1, arg2, arg3);
-  Instruction *inst = get_inst(key);
+  const Cse_key key(op, arg1, arg2, arg3);
+  Inst *inst = get_inst(key);
   if (!inst)
     {
-      inst = dest_bb->build_inst(opcode, arg1, arg2, arg3);
+      inst = dest_bb->build_inst(op, arg1, arg2, arg3);
       inst = simplify(inst);
       key2inst.insert({key, inst});
     }
@@ -597,53 +595,53 @@ Converter::Converter(Module *m, bool run_simplify_inst)
   memory_size = build_inst(Op::MEM_SIZE_ARRAY);
 }
 
-Instruction *Converter::ite(Instruction *c, Instruction *a, Instruction *b)
+Inst *Converter::ite(Inst *c, Inst *a, Inst *b)
 {
   if (a == b)
     return a;
-  if (c->opcode == Op::VALUE)
+  if (c->op == Op::VALUE)
     return c->value() ? a : b;
   return build_inst(Op::ITE, c, a, b);
 }
 
-Instruction *Converter::bool_or(Instruction *a, Instruction *b)
+Inst *Converter::bool_or(Inst *a, Inst *b)
 {
-  if (a->opcode == Op::VALUE)
+  if (a->op == Op::VALUE)
     return a->value() ? a : b;
-  if (b->opcode == Op::VALUE)
+  if (b->op == Op::VALUE)
     return b->value() ? b : a;
   if (a == b)
     return a;
-  if (a->opcode == Op::NOT && a->arguments[0] == b)
+  if (a->op == Op::NOT && a->args[0] == b)
     return value_inst(1, 1);
-  if (b->opcode == Op::NOT && b->arguments[0] == a)
+  if (b->op == Op::NOT && b->args[0] == a)
     return value_inst(1, 1);
   return build_inst(Op::OR, a, b);
 }
 
-Instruction *Converter::bool_and(Instruction *a, Instruction *b)
+Inst *Converter::bool_and(Inst *a, Inst *b)
 {
-  if (a->opcode == Op::VALUE)
+  if (a->op == Op::VALUE)
     return a->value() ? b : a;
-  if (b->opcode == Op::VALUE)
+  if (b->op == Op::VALUE)
     return b->value() ? a : b;
   if (a == b)
     return a;
-  if (a->opcode == Op::NOT && a->arguments[0] == b)
+  if (a->op == Op::NOT && a->args[0] == b)
     return value_inst(0, 1);
-  if (b->opcode == Op::NOT && b->arguments[0] == a)
+  if (b->op == Op::NOT && b->args[0] == a)
     return value_inst(0, 1);
   return build_inst(Op::AND, a, b);
 }
 
-Instruction *Converter::bool_not(Instruction *a)
+Inst *Converter::bool_not(Inst *a)
 {
-  if (a->opcode == Op::NOT)
-    return a->arguments[0];
+  if (a->op == Op::NOT)
+    return a->args[0];
   return build_inst(Op::NOT, a);
 }
 
-void Converter::add_ub(Basic_block *bb, Instruction *cond)
+void Converter::add_ub(Basic_block *bb, Inst *cond)
 {
   // It is more effective to split Op::OR into two elements to better handle
   // cases where, for example, one of the arguments is common to both src
@@ -654,16 +652,16 @@ void Converter::add_ub(Basic_block *bb, Instruction *cond)
   //   UB(!uninit & (cond1 | cond2))
   // and the uninit check is not eliminated until the memory array
   // optimizations are performed here in the Converter pass.
-  if (cond->opcode == Op::OR)
+  if (cond->op == Op::OR)
     {
-      add_ub(bb, cond->arguments[0]);
-      add_ub(bb, cond->arguments[1]);
+      add_ub(bb, cond->args[0]);
+      add_ub(bb, cond->args[1]);
     }
   else
     bb2ub[bb].push_back(cond);
 }
 
-void Converter::add_assert(Basic_block *bb, Instruction *cond)
+void Converter::add_assert(Basic_block *bb, Inst *cond)
 {
   cond = build_inst(Op::NOT, cond);
   if (bb2not_assert.contains(bb))
@@ -674,10 +672,10 @@ void Converter::add_assert(Basic_block *bb, Instruction *cond)
   bb2not_assert.insert({bb, cond});
 }
 
-std::map<Instruction *, std::vector<Instruction *>, Inst_comp> Converter::prepare_ub(Function *func)
+std::map<Inst *, std::vector<Inst *>, Inst_comp> Converter::prepare_ub(Function *func)
 {
   Inst_comp comp;
-  std::map<Instruction *, std::vector<Instruction *>, Inst_comp> bbcond2ub;
+  std::map<Inst *, std::vector<Inst *>, Inst_comp> bbcond2ub;
 
   // Merge the UB from the basic blocks having the same condition.
   for (auto bb : func->bbs)
@@ -685,8 +683,8 @@ std::map<Instruction *, std::vector<Instruction *>, Inst_comp> Converter::prepar
       if (!bb2ub.contains(bb))
 	continue;
 
-      const std::vector<Instruction *>& bb_ub = bb2ub[bb];
-      std::vector<Instruction *>& cond_ub = bbcond2ub[bb2cond.at(bb)];
+      const std::vector<Inst *>& bb_ub = bb2ub[bb];
+      std::vector<Inst *>& cond_ub = bbcond2ub[bb2cond.at(bb)];
       cond_ub.insert(cond_ub.end(), bb_ub.begin(), bb_ub.end());
     }
 
@@ -716,8 +714,8 @@ std::map<Instruction *, std::vector<Instruction *>, Inst_comp> Converter::prepar
 // UB that are unique to tgt.
 void Converter::generate_ub()
 {
-  std::vector<Instruction *> src_cond;
-  std::vector<Instruction *> tgt_cond;
+  std::vector<Inst *> src_cond;
+  std::vector<Inst *> tgt_cond;
 
   for (auto [cond, _] : src_bbcond2ub)
     {
@@ -729,9 +727,9 @@ void Converter::generate_ub()
     }
 
   Inst_comp comp;
-  std::vector<Instruction *> cond_common;
-  std::vector<Instruction *> cond_src_unique;
-  std::vector<Instruction *> cond_tgt_unique;
+  std::vector<Inst *> cond_common;
+  std::vector<Inst *> cond_src_unique;
+  std::vector<Inst *> cond_tgt_unique;
   std::set_intersection(src_cond.begin(), src_cond.end(),
 			tgt_cond.begin(), tgt_cond.end(),
 			std::back_inserter(cond_common), comp);
@@ -742,17 +740,17 @@ void Converter::generate_ub()
 		      cond_common.begin(), cond_common.end(),
 		      std::back_inserter(cond_tgt_unique), comp);
 
-  Instruction *src_ub = value_inst(0, 1);
-  Instruction *tgt_ub = value_inst(0, 1);
-  Instruction *common_ub = value_inst(0, 1);
+  Inst *src_ub = value_inst(0, 1);
+  Inst *tgt_ub = value_inst(0, 1);
+  Inst *common_ub = value_inst(0, 1);
   for (auto cond : cond_common)
     {
-      std::vector<Instruction *>& src_ub_vec = src_bbcond2ub.at(cond);
-      std::vector<Instruction *>& tgt_ub_vec = tgt_bbcond2ub.at(cond);
+      std::vector<Inst *>& src_ub_vec = src_bbcond2ub.at(cond);
+      std::vector<Inst *>& tgt_ub_vec = tgt_bbcond2ub.at(cond);
 
-      std::vector<Instruction *> ub_common;
-      std::vector<Instruction *> ub_src_unique;
-      std::vector<Instruction *> ub_tgt_unique;
+      std::vector<Inst *> ub_common;
+      std::vector<Inst *> ub_src_unique;
+      std::vector<Inst *> ub_tgt_unique;
       std::set_intersection(src_ub_vec.begin(), src_ub_vec.end(),
 			    tgt_ub_vec.begin(), tgt_ub_vec.end(),
 			    std::back_inserter(ub_common), comp);
@@ -763,7 +761,7 @@ void Converter::generate_ub()
 			  ub_common.begin(), ub_common.end(),
 			  std::back_inserter(ub_tgt_unique), comp);
 
-      Instruction *bb_ub = value_inst(0, 1);
+      Inst *bb_ub = value_inst(0, 1);
       for (auto inst : ub_common)
 	{
 	  bb_ub = bool_or(bb_ub, inst);
@@ -787,7 +785,7 @@ void Converter::generate_ub()
 
   for (auto cond : cond_src_unique)
     {
-      Instruction *bb_ub = value_inst(0, 1);
+      Inst *bb_ub = value_inst(0, 1);
       for (auto inst : src_bbcond2ub.at(cond))
 	{
 	  bb_ub = bool_or(bb_ub, inst);
@@ -797,7 +795,7 @@ void Converter::generate_ub()
 
   for (auto cond : cond_tgt_unique)
     {
-      Instruction *bb_ub = value_inst(0, 1);
+      Inst *bb_ub = value_inst(0, 1);
       for (auto inst : tgt_bbcond2ub.at(cond))
 	{
 	  bb_ub = bool_or(bb_ub, inst);
@@ -816,9 +814,9 @@ void Converter::generate_ub()
     }
 }
 
-Instruction *Converter::generate_assert(Function *func)
+Inst *Converter::generate_assert(Function *func)
 {
-  Instruction *assrt = value_inst(0, 1);
+  Inst *assrt = value_inst(0, 1);
   for (auto bb : func->bbs)
     {
       if (!bb2not_assert.contains(bb))
@@ -830,23 +828,23 @@ Instruction *Converter::generate_assert(Function *func)
   return assrt;
 }
 
-Instruction *Converter::get_full_edge_cond(Basic_block *src, Basic_block *dest)
+Inst *Converter::get_full_edge_cond(Basic_block *src, Basic_block *dest)
 {
   if (src->succs.size() == 1)
     return bb2cond.at(src);
   assert(src->succs.size() == 2);
-  assert(src->last_inst->opcode == Op::BR);
+  assert(src->last_inst->op == Op::BR);
   assert(src->last_inst->nof_args == 1);
-  Instruction *cond = translate.at(src->last_inst->arguments[0]);
+  Inst *cond = translate.at(src->last_inst->args[0]);
   if (dest != src->succs[0])
     cond = bool_not(cond);
   return bool_and(bb2cond.at(src), cond);
 }
 
-void Converter::build_mem_state(Basic_block *bb, std::map<Basic_block*, Instruction*>& map)
+void Converter::build_mem_state(Basic_block *bb, std::map<Basic_block*, Inst *>& map)
 {
   assert(bb->preds.size() > 0);
-  Instruction *inst = map.at(bb->preds[0]);
+  Inst *inst = map.at(bb->preds[0]);
   for (size_t i = 1; i < bb->preds.size(); i++)
     {
       Basic_block *pred_bb = bb->preds[i];
@@ -867,7 +865,7 @@ void Converter::generate_bb2cond(Basic_block *bb)
   else
     {
       // We must build a new condition that reflect the path(s) to this bb.
-      Instruction *cond = value_inst(0, 1);
+      Inst *cond = value_inst(0, 1);
       for (auto pred_bb : bb->preds)
 	{
 	  cond = bool_or(cond, get_full_edge_cond(pred_bb, bb));
@@ -892,21 +890,21 @@ void Converter::generate_bb2cond(Basic_block *bb)
 //       phi nodes of memory arrays.
 //     - Using fewer arrays for load/get operations appears to benefit
 //       the SMT solver's performance.
-std::pair<Instruction *, Instruction *> Converter::simplify_array_access(Instruction *array, Instruction *addr, std::map<Instruction *, std::pair<Instruction *, Instruction *>>& cache)
+std::pair<Inst *, Inst *> Converter::simplify_array_access(Inst *array, Inst *addr, std::map<Inst *, std::pair<Inst *, Inst *>>& cache)
 {
   auto I = cache.find(array);
   if (I != cache.end())
     return I->second;
 
-  Instruction *orig_array = array;
-  Instruction *value = nullptr;
+  Inst *orig_array = array;
+  Inst *value = nullptr;
   for (;;)
     {
-      if (array->opcode == Op::ITE)
+      if (array->op == Op::ITE)
 	{
-	  Instruction *cond = array->arguments[0];
-	  Instruction *arg2 = array->arguments[1];
-	  Instruction *arg3 = array->arguments[2];
+	  Inst *cond = array->args[0];
+	  Inst *arg2 = array->args[1];
+	  Inst *arg3 = array->args[2];
 	  auto [value2, array2] = simplify_array_access(arg2, addr, cache);
 	  auto [value3, array3] = simplify_array_access(arg3, addr, cache);
 	  if (value2 && value3)
@@ -915,14 +913,14 @@ std::pair<Instruction *, Instruction *> Converter::simplify_array_access(Instruc
 	    array = ite(cond, array2, array3);
 	  break;
 	}
-      else if (array->opcode == Op::ARRAY_STORE
-	       || array->opcode == Op::ARRAY_SET_SIZE
-	       || array->opcode == Op::ARRAY_SET_FLAG
-	       || array->opcode == Op::ARRAY_SET_UNDEF)
+      else if (array->op == Op::ARRAY_STORE
+	       || array->op == Op::ARRAY_SET_SIZE
+	       || array->op == Op::ARRAY_SET_FLAG
+	       || array->op == Op::ARRAY_SET_UNDEF)
 	{
-	  Instruction *store_array = array->arguments[0];
-	  Instruction *store_addr = array->arguments[1];
-	  Instruction *store_value = array->arguments[2];
+	  Inst *store_array = array->args[0];
+	  Inst *store_addr = array->args[1];
+	  Inst *store_value = array->args[2];
 	  if (addr == store_addr)
 	    {
 	      value = store_value;
@@ -939,17 +937,17 @@ std::pair<Instruction *, Instruction *> Converter::simplify_array_access(Instruc
 	  else
 	    break;
 	}
-      else if (array->opcode == Op::MEM_UNDEF_ARRAY)
+      else if (array->op == Op::MEM_UNDEF_ARRAY)
 	{
 	  value = value_inst(0, 8);
 	  break;
 	}
-      else if (array->opcode == Op::MEM_FLAG_ARRAY)
+      else if (array->op == Op::MEM_FLAG_ARRAY)
 	{
 	  value = value_inst(0, 1);
 	  break;
 	}
-      else if (array->opcode == Op::MEM_SIZE_ARRAY)
+      else if (array->op == Op::MEM_SIZE_ARRAY)
 	{
 	  value = value_inst(0, array->bb->func->module->ptr_offset_bits);
 	  break;
@@ -961,33 +959,33 @@ std::pair<Instruction *, Instruction *> Converter::simplify_array_access(Instruc
   return {value, array};
 }
 
-Instruction *Converter::strip_local_mem(Instruction *array, std::map<Instruction *, Instruction *>& cache)
+Inst *Converter::strip_local_mem(Inst *array, std::map<Inst *, Inst *>& cache)
 {
   auto I = cache.find(array);
   if (I != cache.end())
     return I->second;
 
-  Instruction *orig_array = array;
+  Inst *orig_array = array;
   for (;;)
     {
-      if (array->opcode == Op::ITE)
+      if (array->op == Op::ITE)
 	{
-	  Instruction *cond = array->arguments[0];
-	  Instruction *arg2 = array->arguments[1];
-	  Instruction *arg3 = array->arguments[2];
-	  Instruction *array2 = strip_local_mem(arg2, cache);
-	  Instruction *array3 = strip_local_mem(arg3, cache);
+	  Inst *cond = array->args[0];
+	  Inst *arg2 = array->args[1];
+	  Inst *arg3 = array->args[2];
+	  Inst *array2 = strip_local_mem(arg2, cache);
+	  Inst *array3 = strip_local_mem(arg3, cache);
 	  if (array2 != arg2 || array3 != arg3)
 	    array = ite(cond, array2, array3);
 	  break;
 	}
-      else if (array->opcode == Op::ARRAY_STORE
-	       || array->opcode == Op::ARRAY_SET_FLAG
-	       || array->opcode == Op::ARRAY_SET_UNDEF)
+      else if (array->op == Op::ARRAY_STORE
+	       || array->op == Op::ARRAY_SET_FLAG
+	       || array->op == Op::ARRAY_SET_UNDEF)
 	{
-	  Instruction *store_array = array->arguments[0];
-	  Instruction *store_addr = array->arguments[1];
-	  if (store_addr->opcode == Op::VALUE)
+	  Inst *store_array = array->args[0];
+	  Inst *store_addr = array->args[1];
+	  if (store_addr->op == Op::VALUE)
 	    {
 	      uint64_t id = store_addr->value() >> module->ptr_id_low;
 	      bool is_local = (id >> (module->ptr_id_bits - 1)) != 0;
@@ -999,11 +997,11 @@ Instruction *Converter::strip_local_mem(Instruction *array, std::map<Instruction
 	    }
 	  break;
 	}
-      else if (array->opcode == Op::ARRAY_SET_SIZE)
+      else if (array->op == Op::ARRAY_SET_SIZE)
 	{
-	  Instruction *set_size_array = array->arguments[0];
-	  Instruction *set_size_id = array->arguments[1];
-	  if (set_size_id->opcode == Op::VALUE)
+	  Inst *set_size_array = array->args[0];
+	  Inst *set_size_id = array->args[1];
+	  if (set_size_id->op == Op::VALUE)
 	    {
 	      uint64_t id = set_size_id->value();
 	      bool is_local = (id >> (module->ptr_id_bits - 1)) != 0;
@@ -1022,65 +1020,65 @@ Instruction *Converter::strip_local_mem(Instruction *array, std::map<Instruction
   return array;
 }
 
-bool Converter::may_alias(Instruction *p1, Instruction *p2)
+bool Converter::may_alias(Inst *p1, Inst *p2)
 {
-  if (p1 != p2 && p1->opcode == Op::VALUE && p2->opcode == Op::VALUE)
+  if (p1 != p2 && p1->op == Op::VALUE && p2->op == Op::VALUE)
     return false;
 
   // p + const1 cannot alias p + const2 if the constants differ.
-  if (p1->opcode == Op::ADD && p2->opcode == Op::ADD
-      && p1->arguments[0] == p2->arguments[0]
-      && p1->arguments[1]->opcode == Op::VALUE
-      && p2->arguments[1]->opcode == Op::VALUE
-      && p1->arguments[1] != p2->arguments[1])
+  if (p1->op == Op::ADD && p2->op == Op::ADD
+      && p1->args[0] == p2->args[0]
+      && p1->args[1]->op == Op::VALUE
+      && p2->args[1]->op == Op::VALUE
+      && p1->args[1] != p2->args[1])
     return false;
 
   // p cannot alias p + const if const != 0.
-  if (p1->opcode == Op::ADD
-      && p1->arguments[0] == p2
-      && p1->arguments[1]->opcode == Op::VALUE
-      && p1->arguments[1]->value() != 0)
+  if (p1->op == Op::ADD
+      && p1->args[0] == p2
+      && p1->args[1]->op == Op::VALUE
+      && p1->args[1]->value() != 0)
     return false;
-  if (p2->opcode == Op::ADD
-      && p2->arguments[0] == p1
-      && p2->arguments[1]->opcode == Op::VALUE
-      && p2->arguments[1]->value() != 0)
+  if (p2->op == Op::ADD
+      && p2->args[0] == p1
+      && p2->args[1]->op == Op::VALUE
+      && p2->args[1]->value() != 0)
     return false;
 
   return true;
 }
 
-void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
+void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
 {
-  Instruction *new_inst = nullptr;
-  if (inst->opcode == Op::VALUE)
+  Inst *new_inst = nullptr;
+  if (inst->op == Op::VALUE)
     {
       new_inst = value_inst(inst->value(), inst->bitsize);
     }
-  else if (inst->opcode == Op::LOAD)
+  else if (inst->op == Op::LOAD)
     {
-      std::map<Instruction *, std::pair<Instruction *, Instruction *>> cache;
-      Instruction *array = bb2memory.at(bb);
-      Instruction *addr = translate.at(inst->arguments[0]);
+      std::map<Inst *, std::pair<Inst *, Inst *>> cache;
+      Inst *array = bb2memory.at(bb);
+      Inst *addr = translate.at(inst->args[0]);
       std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
       if (!new_inst)
 	new_inst = build_inst(Op::ARRAY_LOAD, array, addr);
     }
-  else if (inst->opcode == Op::STORE)
+  else if (inst->op == Op::STORE)
     {
-      Instruction *array = bb2memory.at(bb);
-      Instruction *addr = translate.at(inst->arguments[0]);
-      Instruction *value = translate.at(inst->arguments[1]);
+      Inst *array = bb2memory.at(bb);
+      Inst *addr = translate.at(inst->args[0]);
+      Inst *value = translate.at(inst->args[1]);
 
       // Traverse the list of previous updates to the array to determine
       // whether the current value is already the same as 'value'.
-      Instruction *tmp_array = array;
+      Inst *tmp_array = array;
       for (int i = 0; i < max_store_traversal; i++)
 	{
-	  if (tmp_array->opcode == Op::ARRAY_STORE)
+	  if (tmp_array->op == Op::ARRAY_STORE)
 	    {
-	      Instruction *tmp_addr = tmp_array->arguments[1];
-	      Instruction *tmp_value = tmp_array->arguments[2];
+	      Inst *tmp_addr = tmp_array->args[1];
+	      Inst *tmp_value = tmp_array->args[2];
 	      if (addr == tmp_addr && value == tmp_value)
 		{
 		  // The array element has the correct value already.
@@ -1088,7 +1086,7 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 		}
 	      else if (!may_alias(addr, tmp_addr))
 		{
-		  tmp_array = tmp_array->arguments[0];
+		  tmp_array = tmp_array->args[0];
 		  continue;
 		}
 	    }
@@ -1099,38 +1097,38 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
       bb2memory[bb] = array;
       return;
     }
-  else if (inst->opcode == Op::UB)
+  else if (inst->op == Op::UB)
     {
-      add_ub(bb, translate.at(inst->arguments[0]));
+      add_ub(bb, translate.at(inst->args[0]));
       return;
     }
-  else if (inst->opcode == Op::ASSERT)
+  else if (inst->op == Op::ASSERT)
     {
-      add_assert(bb, translate.at(inst->arguments[0]));
+      add_assert(bb, translate.at(inst->args[0]));
       return;
     }
-  else if (inst->opcode == Op::SET_MEM_FLAG)
+  else if (inst->op == Op::SET_MEM_FLAG)
     {
-      Instruction *array = bb2memory_flag.at(bb);
-      Instruction *addr = translate.at(inst->arguments[0]);
-      Instruction *value = translate.at(inst->arguments[1]);
+      Inst *array = bb2memory_flag.at(bb);
+      Inst *addr = translate.at(inst->args[0]);
+      Inst *value = translate.at(inst->args[1]);
 
       // Traverse the list of previous updates to the array to determine
       // whether the current value is already the same as 'value'.
-      Instruction *tmp_array = array;
+      Inst *tmp_array = array;
       for (int i = 0; i < max_store_traversal; i++)
 	{
-	  if (tmp_array->opcode == Op::MEM_FLAG_ARRAY
-	      && value->opcode == Op::VALUE
+	  if (tmp_array->op == Op::MEM_FLAG_ARRAY
+	      && value->op == Op::VALUE
 	      && value->value() == 0)
 	    {
 	      // The array element has the correct value already.
 	      return;
 	    }
-	  if (tmp_array->opcode == Op::ARRAY_SET_FLAG)
+	  if (tmp_array->op == Op::ARRAY_SET_FLAG)
 	    {
-	      Instruction *tmp_addr = tmp_array->arguments[1];
-	      Instruction *tmp_value = tmp_array->arguments[2];
+	      Inst *tmp_addr = tmp_array->args[1];
+	      Inst *tmp_value = tmp_array->args[2];
 	      if (addr == tmp_addr && value == tmp_value)
 		{
 		  // The array element has the correct value already.
@@ -1138,7 +1136,7 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 		}
 	      else if (!may_alias(addr, tmp_addr))
 		{
-		  tmp_array = tmp_array->arguments[0];
+		  tmp_array = tmp_array->args[0];
 		  continue;
 		}
 	    }
@@ -1149,28 +1147,28 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
       bb2memory_flag[bb] = array;
       return;
     }
-  else if (inst->opcode == Op::SET_MEM_UNDEF)
+  else if (inst->op == Op::SET_MEM_UNDEF)
     {
-      Instruction *array = bb2memory_undef.at(bb);
-      Instruction *addr = translate.at(inst->arguments[0]);
-      Instruction *value = translate.at(inst->arguments[1]);
+      Inst *array = bb2memory_undef.at(bb);
+      Inst *addr = translate.at(inst->args[0]);
+      Inst *value = translate.at(inst->args[1]);
 
       // Traverse the list of previous updates to the array to determine
       // whether the current value is already the same as 'value'.
-      Instruction *tmp_array = array;
+      Inst *tmp_array = array;
       for (int i = 0; i < max_store_traversal; i++)
 	{
-	  if (tmp_array->opcode == Op::MEM_UNDEF_ARRAY
-	      && value->opcode == Op::VALUE
+	  if (tmp_array->op == Op::MEM_UNDEF_ARRAY
+	      && value->op == Op::VALUE
 	      && value->value() == 0)
 	    {
 	      // The array element has the correct value already.
 	      return;
 	    }
-	  if (tmp_array->opcode == Op::ARRAY_SET_UNDEF)
+	  if (tmp_array->op == Op::ARRAY_SET_UNDEF)
 	    {
-	      Instruction *tmp_addr = tmp_array->arguments[1];
-	      Instruction *tmp_value = tmp_array->arguments[2];
+	      Inst *tmp_addr = tmp_array->args[1];
+	      Inst *tmp_value = tmp_array->args[2];
 	      if (addr == tmp_addr && value == tmp_value)
 		{
 		  // The array element has the correct value already.
@@ -1178,7 +1176,7 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 		}
 	      else if (!may_alias(addr, tmp_addr))
 		{
-		  tmp_array = tmp_array->arguments[0];
+		  tmp_array = tmp_array->args[0];
 		  continue;
 		}
 	    }
@@ -1189,53 +1187,53 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
       bb2memory_undef[bb] = array;
       return;
     }
-  else if (inst->opcode == Op::FREE)
+  else if (inst->op == Op::FREE)
     {
-      Instruction *array = bb2memory_size.at(bb);
-      Instruction *arg1 = translate.at(inst->arguments[0]);
-      Instruction *zero = value_inst(0, module->ptr_offset_bits);
+      Inst *array = bb2memory_size.at(bb);
+      Inst *arg1 = translate.at(inst->args[0]);
+      Inst *zero = value_inst(0, module->ptr_offset_bits);
       array = build_inst(Op::ARRAY_SET_SIZE, array, arg1, zero);
       bb2memory_size[bb] = array;
       return;
     }
-   else if (inst->opcode == Op::GET_MEM_UNDEF)
+   else if (inst->op == Op::GET_MEM_UNDEF)
      {
-       std::map<Instruction *, std::pair<Instruction *, Instruction *>> cache;
-       Instruction *array = bb2memory_undef.at(bb);
-       Instruction *addr = translate.at(inst->arguments[0]);
+       std::map<Inst *, std::pair<Inst *, Inst *>> cache;
+       Inst *array = bb2memory_undef.at(bb);
+       Inst *addr = translate.at(inst->args[0]);
        std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
        if (!new_inst)
 	 new_inst = build_inst(Op::ARRAY_GET_UNDEF, array, addr);
      }
-   else if (inst->opcode == Op::GET_MEM_FLAG)
+   else if (inst->op == Op::GET_MEM_FLAG)
      {
-       std::map<Instruction *, std::pair<Instruction *, Instruction *>> cache;
-       Instruction *array = bb2memory_flag.at(bb);
-       Instruction *addr = translate.at(inst->arguments[0]);
+       std::map<Inst *, std::pair<Inst *, Inst *>> cache;
+       Inst *array = bb2memory_flag.at(bb);
+       Inst *addr = translate.at(inst->args[0]);
        std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
        if (!new_inst)
 	 new_inst = build_inst(Op::ARRAY_GET_FLAG, array, addr);
      }
-   else if (inst->opcode == Op::GET_MEM_SIZE)
+   else if (inst->op == Op::GET_MEM_SIZE)
     {
-       std::map<Instruction *, std::pair<Instruction *, Instruction *>> cache;
-       Instruction *array = bb2memory_size.at(bb);
-       Instruction *addr = translate.at(inst->arguments[0]);
+       std::map<Inst *, std::pair<Inst *, Inst *>> cache;
+       Inst *array = bb2memory_size.at(bb);
+       Inst *addr = translate.at(inst->args[0]);
        std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
        if (!new_inst)
 	 new_inst = build_inst(Op::ARRAY_GET_SIZE, array, addr);
     }
-  else if (inst->opcode == Op::IS_CONST_MEM)
+  else if (inst->op == Op::IS_CONST_MEM)
     {
-      Instruction *arg1 = translate.at(inst->arguments[0]);
-      Instruction *is_const = value_inst(0, 1);
-      for (Instruction *id : const_ids)
+      Inst *arg1 = translate.at(inst->args[0]);
+      Inst *is_const = value_inst(0, 1);
+      for (Inst *id : const_ids)
 	{
 	  is_const = bool_or(is_const, build_inst(Op::EQ, arg1, id));
 	}
       new_inst = is_const;
     }
-  else if (inst->opcode == Op::MEMORY)
+  else if (inst->op == Op::MEMORY)
     {
       // All uses of MEMORY should have been changed to constants.
       assert(inst->used_by.empty());
@@ -1243,26 +1241,26 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
       uint32_t ptr_bits = module->ptr_bits;
       uint32_t ptr_offset_bits = module->ptr_offset_bits;
       uint32_t ptr_id_bits = module->ptr_id_bits;
-      uint64_t id = inst->arguments[0]->value();
+      uint64_t id = inst->args[0]->value();
       uint64_t ptr_val = id << module->ptr_id_low;
-      uint64_t size_val = inst->arguments[1]->value();
-      Instruction *mem_id = value_inst(id, ptr_id_bits);
-      Instruction *size = value_inst(size_val, ptr_offset_bits);
-      Instruction *size_array = bb2memory_size.at(bb);
+      uint64_t size_val = inst->args[1]->value();
+      Inst *mem_id = value_inst(id, ptr_id_bits);
+      Inst *size = value_inst(size_val, ptr_offset_bits);
+      Inst *size_array = bb2memory_size.at(bb);
       size_array = build_inst(Op::ARRAY_SET_SIZE, size_array, mem_id, size);
       bb2memory_size[bb] = size_array;
 
-      uint32_t flags = inst->arguments[2]->value();
+      uint32_t flags = inst->args[2]->value();
       if (flags & MEM_CONST)
-	const_ids.push_back(translate.at(inst->arguments[0]));
+	const_ids.push_back(translate.at(inst->args[0]));
 
       if (flags & MEM_UNINIT)
 	{
-	  Instruction *undef_array = bb2memory_undef.at(bb);
-	  Instruction *byte = value_inst(255, 8);
+	  Inst *undef_array = bb2memory_undef.at(bb);
+	  Inst *byte = value_inst(255, 8);
 	  for (uint64_t i = 0; i < size_val; i++)
 	    {
-	      Instruction *ptr = value_inst(ptr_val + i, ptr_bits);
+	      Inst *ptr = value_inst(ptr_val + i, ptr_bits);
 	      undef_array = build_inst(Op::ARRAY_SET_UNDEF,
 				       undef_array, ptr, byte);
 	    }
@@ -1271,20 +1269,20 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 
       return;
     }
-  else if (inst->opcode == Op::BR)
+  else if (inst->op == Op::BR)
     {
       return;
     }
-  else if (inst->opcode == Op::RET)
+  else if (inst->op == Op::RET)
     {
       if (inst->nof_args > 0)
 	{
-	  Instruction *arg1 = translate.at(inst->arguments[0]);
-	  Instruction *arg2;
+	  Inst *arg1 = translate.at(inst->args[0]);
+	  Inst *arg2;
 	  if (inst->nof_args > 1)
-	    arg2 = translate.at(inst->arguments[1]);
+	    arg2 = translate.at(inst->args[1]);
 	  else
-	    arg2 = value_inst(0, inst->arguments[0]->bitsize);
+	    arg2 = value_inst(0, inst->args[0]->bitsize);
 	  Op op = role == Function_role::src ? Op::SRC_RETVAL : Op::TGT_RETVAL;
 	  build_inst(op, arg1, arg2);
 	  if (role == Function_role::src)
@@ -1300,41 +1298,41 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 	}
       return;
     }
-  else if (inst->opcode == Op::ITE)
+  else if (inst->op == Op::ITE)
     {
-      Instruction *arg1 = translate.at(inst->arguments[0]);
-      Instruction *arg2 = translate.at(inst->arguments[1]);
-      Instruction *arg3 = translate.at(inst->arguments[2]);
+      Inst *arg1 = translate.at(inst->args[0]);
+      Inst *arg2 = translate.at(inst->args[1]);
+      Inst *arg3 = translate.at(inst->args[2]);
       new_inst = ite(arg1, arg2, arg3);
     }
-  else if (inst->opcode == Op::AND && inst->bitsize == 1)
+  else if (inst->op == Op::AND && inst->bitsize == 1)
     {
-      Instruction *arg1 = translate.at(inst->arguments[0]);
-      Instruction *arg2 = translate.at(inst->arguments[1]);
+      Inst *arg1 = translate.at(inst->args[0]);
+      Inst *arg2 = translate.at(inst->args[1]);
       new_inst = bool_and(arg1, arg2);
     }
-  else if (inst->opcode == Op::OR && inst->bitsize == 1)
+  else if (inst->op == Op::OR && inst->bitsize == 1)
     {
-      Instruction *arg1 = translate.at(inst->arguments[0]);
-      Instruction *arg2 = translate.at(inst->arguments[1]);
+      Inst *arg1 = translate.at(inst->args[0]);
+      Inst *arg2 = translate.at(inst->args[1]);
       new_inst = bool_or(arg1, arg2);
     }
-  else if (inst->opcode == Op::NOT && inst->bitsize == 1)
-    new_inst = bool_not(translate.at(inst->arguments[0]));
+  else if (inst->op == Op::NOT && inst->bitsize == 1)
+    new_inst = bool_not(translate.at(inst->args[0]));
   else
     {
-      assert(inst->opcode == Op::PRINT || inst->has_lhs());
+      assert(inst->op == Op::PRINT || inst->has_lhs());
       Inst_class iclass = inst->iclass();
       switch (iclass)
 	{
 	case Inst_class::nullary:
-	  new_inst = build_inst(inst->opcode);
+	  new_inst = build_inst(inst->op);
 	  break;
 	case Inst_class::iunary:
 	case Inst_class::funary:
 	  {
-	    Instruction *arg = translate.at(inst->arguments[0]);
-	    new_inst = build_inst(inst->opcode, arg);
+	    Inst *arg = translate.at(inst->args[0]);
+	    new_inst = build_inst(inst->op, arg);
 	  }
 	  break;
 	case Inst_class::icomparison:
@@ -1343,17 +1341,17 @@ void Converter::convert(Basic_block *bb, Instruction *inst, Function_role role)
 	case Inst_class::fbinary:
 	case Inst_class::conv:
 	  {
-	    Instruction *arg1 = translate.at(inst->arguments[0]);
-	    Instruction *arg2 = translate.at(inst->arguments[1]);
-	    new_inst = build_inst(inst->opcode, arg1, arg2);
+	    Inst *arg1 = translate.at(inst->args[0]);
+	    Inst *arg2 = translate.at(inst->args[1]);
+	    new_inst = build_inst(inst->op, arg1, arg2);
 	  }
 	  break;
 	case Inst_class::ternary:
 	  {
-	    Instruction *arg1 = translate.at(inst->arguments[0]);
-	    Instruction *arg2 = translate.at(inst->arguments[1]);
-	    Instruction *arg3 = translate.at(inst->arguments[2]);
-	    new_inst = build_inst(inst->opcode, arg1, arg2, arg3);
+	    Inst *arg1 = translate.at(inst->args[0]);
+	    Inst *arg2 = translate.at(inst->args[1]);
+	    Inst *arg3 = translate.at(inst->args[2]);
+	    new_inst = build_inst(inst->op, arg1, arg2, arg3);
 	  }
 	  break;
 	default:
@@ -1389,26 +1387,26 @@ void Converter::convert_function(Function *func, Function_role role)
 
       for (auto phi : bb->phis)
 	{
-	  Instruction *phi_inst = translate.at(phi->phi_args[0].inst);
+	  Inst *phi_inst = translate.at(phi->phi_args[0].inst);
 	  assert(phi->phi_args.size() == bb->preds.size());
 	  if (phi->phi_args.size() > 1)
 	    {
 	      Basic_block *pred_bb = phi->phi_args[0].bb;
-	      Instruction *cond = get_full_edge_cond(pred_bb, bb);
-	      Instruction *inst = translate.at(phi->phi_args[1].inst);
+	      Inst *cond = get_full_edge_cond(pred_bb, bb);
+	      Inst *inst = translate.at(phi->phi_args[1].inst);
 	      phi_inst = ite(cond, phi_inst, inst);
 	    }
 	  for (unsigned i = 2; i < phi->phi_args.size(); i++)
 	    {
 	      Basic_block *pred_bb = phi->phi_args[i].bb;
-	      Instruction *cond = get_full_edge_cond(pred_bb, bb);
-	      Instruction *inst = translate.at(phi->phi_args[i].inst);
+	      Inst *cond = get_full_edge_cond(pred_bb, bb);
+	      Inst *inst = translate.at(phi->phi_args[i].inst);
 	      phi_inst = ite(cond, inst, phi_inst);
 	    }
 	  translate.insert({phi, phi_inst});
 	}
 
-      for (Instruction *inst = bb->first_inst; inst; inst = inst->next)
+      for (Inst *inst = bb->first_inst; inst; inst = inst->next)
 	{
 	  convert(bb, inst, role);
 	}
@@ -1427,19 +1425,19 @@ void Converter::convert_function(Function *func, Function_role role)
 
   Basic_block *exit_block = func->bbs.back();
   Op mem_op = role == Function_role::src ? Op::SRC_MEM : Op::TGT_MEM;
-  Instruction *memory = bb2memory.at(exit_block);
-  Instruction *memory_size = bb2memory_size.at(exit_block);
-  Instruction *memory_undef = bb2memory_undef.at(exit_block);
+  Inst *memory = bb2memory.at(exit_block);
+  Inst *memory_size = bb2memory_size.at(exit_block);
+  Inst *memory_undef = bb2memory_undef.at(exit_block);
   {
-    std::map<Instruction *, Instruction *> cache;
+    std::map<Inst *, Inst *> cache;
     memory = strip_local_mem(memory, cache);
   }
   {
-    std::map<Instruction *, Instruction *> cache;
+    std::map<Inst *, Inst *> cache;
     memory_size = strip_local_mem(memory_size, cache);
   }
   {
-    std::map<Instruction *, Instruction *> cache;
+    std::map<Inst *, Inst *> cache;
     memory_undef = strip_local_mem(memory_undef, cache);
   }
   build_inst(mem_op, memory, memory_size, memory_undef);
@@ -1486,8 +1484,8 @@ void Converter::finalize()
 
 bool Converter::need_checking()
 {
-  if ((src_common_ub->opcode == Op::VALUE && src_common_ub->value() != 0)
-      || (src_unique_ub->opcode == Op::VALUE && src_unique_ub->value() != 0))
+  if ((src_common_ub->op == Op::VALUE && src_common_ub->value() != 0)
+      || (src_unique_ub->op == Op::VALUE && src_unique_ub->value() != 0))
     return false;
 
   if (src_retval != tgt_retval
@@ -1501,16 +1499,15 @@ bool Converter::need_checking()
 
   assert(src_common_ub == tgt_common_ub);
   if (src_unique_ub != tgt_unique_ub
-      && !(tgt_unique_ub->opcode == Op::VALUE
-	   && tgt_unique_ub->value() == 0))
+      && !(tgt_unique_ub->op == Op::VALUE && tgt_unique_ub->value() == 0))
     return true;
 
   return false;
 }
 
-bool identical(Instruction *inst1, Instruction *inst2)
+bool identical(Inst *inst1, Inst *inst2)
 {
-  if (inst1->opcode != inst2->opcode)
+  if (inst1->op != inst2->op)
     return false;
   if (inst1->bitsize != inst2->bitsize)
     return false;
@@ -1520,10 +1517,10 @@ bool identical(Instruction *inst1, Instruction *inst2)
     {
       // Some passes, like ccp, may perform pointless argument swaps.
       assert(inst1->nof_args == 2);
-      int nbr1_0 = inst1->arguments[0]->id;
-      int nbr1_1 = inst1->arguments[1]->id;
-      int nbr2_0 = inst2->arguments[0]->id;
-      int nbr2_1 = inst2->arguments[1]->id;
+      int nbr1_0 = inst1->args[0]->id;
+      int nbr1_1 = inst1->args[1]->id;
+      int nbr2_0 = inst2->args[0]->id;
+      int nbr2_1 = inst2->args[1]->id;
       if (!((nbr1_0 == nbr2_0 && nbr1_1 == nbr2_1)
 	    || (nbr1_0 == nbr2_1 && nbr1_1 == nbr2_0)))
 	return false;
@@ -1531,13 +1528,13 @@ bool identical(Instruction *inst1, Instruction *inst2)
   else
     for (size_t i = 0; i < inst1->nof_args; i++)
       {
-	if (inst1->arguments[i]->id != inst2->arguments[i]->id)
+	if (inst1->args[i]->id != inst2->args[i]->id)
 	  return false;
       }
 
   // The normal instructions are fully checked by the preceding code,
   // but instructions of class "special" require additional checks.
-  switch (inst1->opcode)
+  switch (inst1->op)
     {
     case Op::BR:
       if (inst1->nof_args == 0)
@@ -1598,13 +1595,13 @@ bool identical(Function *func1, Function *func2)
 	return false;
       for (size_t j = 0; j < bb1->phis.size(); j++)
 	{
-	  Instruction *phi1 = bb1->phis[j];
-	  Instruction *phi2 = bb2->phis[j];
+	  Inst *phi1 = bb1->phis[j];
+	  Inst *phi2 = bb2->phis[j];
 	  if (!identical(phi1, phi2))
 	    return false;
 	}
-      Instruction *inst1 = bb1->first_inst;
-      Instruction *inst2 = bb2->first_inst;
+      Inst *inst1 = bb1->first_inst;
+      Inst *inst2 = bb2->first_inst;
       while (inst1 && inst2)
 	{
 	  if (!identical(inst1, inst2))
