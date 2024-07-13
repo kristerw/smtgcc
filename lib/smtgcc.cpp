@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <limits>
 #include <set>
-#include <sys/time.h>
+#include <time.h>
 
 #include "smtgcc.h"
 
@@ -1363,9 +1363,9 @@ void destroy_instruction(Inst *inst)
 
 uint64_t get_time()
 {
-  struct timeval tv;
-  gettimeofday(&tv, 0);
-  return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
 } // end namespace smtgcc
