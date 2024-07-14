@@ -7,6 +7,9 @@ namespace smtgcc {
 
 namespace {
 
+// Maximum number of bytes we track in an object.
+uint64_t max_mem_unroll_limit = 10000;
+
 // Return a vector containing all the function's memory instructions.
 std::vector<Inst *> collect_mem(Function *func)
 {
@@ -220,6 +223,7 @@ void store_load_forwarding(Function *func)
 		  undef = bb->value_inst(255, 8);
 		else
 		  undef = bb->value_inst(0, 8);
+		size = std::min(size, max_mem_unroll_limit);
 		for (uint64_t i = 0; i < size; i++)
 		  {
 		    mem_undef[addr + i] = undef;
