@@ -1099,6 +1099,27 @@ Inst *simplify_mul(Inst *inst)
   return inst;
 }
 
+Inst *simplify_neg(Inst *inst)
+{
+  Inst *const arg1 = inst->args[0];
+
+  // neg (concat 0, x) -> sext (not x)
+  if (arg1->op == Op::CONCAT
+      && is_value_zero(arg1->args[0])
+      && arg1->args[1]->bitsize == 1)
+    {
+      Inst *new_inst1 = create_inst(Op::NEG, arg1->args[1]);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *bs = inst->bb->value_inst(inst->bitsize, 32);
+      Inst *new_inst2 = create_inst(Op::SEXT, new_inst1, bs);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  return inst;
+}
+
 Inst *simplify_not(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
@@ -1814,6 +1835,9 @@ Inst *simplify_inst(Inst *inst)
       break;
     case Op::MUL:
       inst = simplify_mul(inst);
+      break;
+    case Op::NEG:
+      inst = simplify_neg(inst);
       break;
     case Op::NOT:
       inst = simplify_not(inst);
