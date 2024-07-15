@@ -217,7 +217,7 @@ void store_load_forwarding(Function *func)
 		uint64_t id = inst->args[0]->value();
 		uint64_t size = inst->args[1]->value();
 		uint32_t flags = inst->args[2]->value();
-		uint64_t addr = id << inst->bb->func->module->ptr_id_low;
+		uint64_t addr = id << func->module->ptr_id_low;
 		Inst *undef;
 		if (flags & MEM_UNINIT)
 		  undef = bb->value_inst(255, 8);
@@ -323,14 +323,38 @@ void store_load_forwarding(Function *func)
 
 void dead_store_elim(Function *func)
 {
-  std::map<uint64_t, Inst *> mem_undef;
-  std::map<uint64_t, Inst *> mem_flag;
-  std::map<uint64_t, Inst *> stores;
+  std::set<uint64_t> mem_undef;
+  std::set<uint64_t> mem_flag;
+  std::set<uint64_t> stores;
+
+  // Seed the sets with the addresses of local memory, which will mark
+  // earlier stores as dead if they are not read.
+  for (Inst *inst = func->bbs[0]->first_inst; inst; inst = inst->next)
+    {
+      if (inst->op != Op::MEMORY)
+	continue;
+      uint64_t id = inst->args[0]->value();
+      if ((id >> (func->module->ptr_id_bits - 1)) == 0)
+	continue;
+
+      uint64_t mem_addr = id << func->module->ptr_id_low;
+      uint64_t size = inst->args[1]->value();
+      size = std::min(max_mem_unroll_limit, size);
+      for (uint64_t i = 0; i < size; i++)
+	{
+	  uint64_t addr = mem_addr + i;
+	  mem_undef.insert(addr);
+	  mem_flag.insert(addr);
+	  stores.insert(addr);
+	}
+    }
+
   Basic_block *prev_bb = nullptr;
   for (int i = func->bbs.size() - 1; i >= 0; i--)
     {
       Basic_block *bb = func->bbs[i];
-      if (bb->succs.size() != 1 || bb->succs[0] != prev_bb)
+      if (bb->succs.size() > 1
+	  || (bb->succs.size() == 1 && bb->succs[0] != prev_bb))
 	{
 	  mem_undef.clear();
 	  mem_flag.clear();
@@ -339,7 +363,7 @@ void dead_store_elim(Function *func)
 
       for (Inst *inst = bb->last_inst; inst;)
 	{
-	  Inst *next_inst = inst->prev;
+	  Inst *prev_inst = inst->prev;
 
 	  switch (inst->op)
 	    {
@@ -352,7 +376,7 @@ void dead_store_elim(Function *func)
 		    if (mem_undef.contains(ptr_val))
 		      destroy_instruction(inst);
 		    else
-		      mem_undef[ptr_val] = inst;
+		      mem_undef.insert(ptr_val);
 		  }
 	      }
 	      break;
@@ -374,7 +398,7 @@ void dead_store_elim(Function *func)
 		    if (mem_flag.contains(ptr_val))
 		      destroy_instruction(inst);
 		    else
-		      mem_flag[ptr_val] = inst;
+		      mem_flag.insert(ptr_val);
 		  }
 	      }
 	      break;
@@ -396,7 +420,7 @@ void dead_store_elim(Function *func)
 		    if (stores.contains(ptr_val))
 		      destroy_instruction(inst);
 		    else
-		      stores[ptr_val] = inst;
+		      stores.insert(ptr_val);
 		  }
 	      }
 	      break;
@@ -413,7 +437,7 @@ void dead_store_elim(Function *func)
 	      break;
 	    }
 
-	  inst = next_inst;
+	  inst = prev_inst;
 	}
       prev_bb = bb;
     }
