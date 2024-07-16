@@ -570,6 +570,33 @@ Inst *simplify_concat(Inst *inst)
       return new_inst;
     }
 
+  // concat (sext (extract x, x->bitsize-1, x->bitsize-1)), x -> sext x
+  if (arg1->op == Op::SEXT
+      && arg1->args[0]->op == Op::EXTRACT
+      && arg1->args[0]->args[0] == arg2
+      && arg1->args[0]->args[1] == arg1->args[0]->args[2]
+      && arg1->args[0]->args[1]->value() == arg2->bitsize - 1)
+    {
+      Inst *bs = inst->bb->value_inst(inst->bitsize, 32);
+      Inst *new_inst1 = create_inst(Op::SEXT, arg2, bs);
+      new_inst1->insert_before(inst);
+      return new_inst1;
+    }
+
+  // concat (sext (extract x, x->bitsize-1, x->bitsize-1)), (sext x) -> sext x
+  if (arg1->op == Op::SEXT
+      && arg2->op == Op::SEXT
+      && arg1->args[0]->op == Op::EXTRACT
+      && arg1->args[0]->args[0] == arg2->args[0]
+      && arg1->args[0]->args[1] == arg1->args[0]->args[2]
+      && arg1->args[0]->args[1]->value() == arg2->args[0]->bitsize - 1)
+    {
+      Inst *bs = inst->bb->value_inst(inst->bitsize, 32);
+      Inst *new_inst1 = create_inst(Op::SEXT, arg2->args[0], bs);
+      new_inst1->insert_before(inst);
+      return new_inst1;
+    }
+
   return inst;
 }
 
