@@ -2742,15 +2742,19 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       {
 	if ((arg1_prov || arg2_prov) && arg1_prov != arg2_prov)
 	  throw Not_implemented("two different provenance in MAX_EXPR");
-	Op op = is_unsigned ? Op::UMAX : Op::SMAX;
-	return {bb->build_inst(op, arg1, arg2), res_undef, arg1_prov};
+	Op op = is_unsigned ? Op::UGE : Op::SGE;
+	Inst *cond = bb->build_inst(op, arg1, arg2);
+	Inst *res = bb->build_inst(Op::ITE, cond, arg1, arg2);
+	return {res, res_undef, arg1_prov};
       }
     case MIN_EXPR:
       {
 	if ((arg1_prov || arg2_prov) && arg1_prov != arg2_prov)
 	  throw Not_implemented("two different provenance in MIN_EXPR");
-	Op op = is_unsigned ? Op::UMIN : Op::SMIN;
-	return {bb->build_inst(op, arg1, arg2), res_undef, arg1_prov};
+	Op op = is_unsigned ? Op::ULT : Op::SLT;
+	Inst *cond = bb->build_inst(op, arg1, arg2);
+	Inst *res = bb->build_inst(Op::ITE, cond, arg1, arg2);
+	return {res, res_undef, arg1_prov};
       }
     case POINTER_PLUS_EXPR:
       {

@@ -100,8 +100,6 @@ enum class Op : uint8_t {
   SET_MEM_FLAG,
   SET_MEM_UNDEF,
   SHL,
-  SMAX,
-  SMIN,
   SMUL_WRAPS,
   SRC_RETVAL,
   SRC_UB,
@@ -113,8 +111,6 @@ enum class Op : uint8_t {
   TGT_RETVAL,
   TGT_UB,
   UDIV,
-  UMAX,
-  UMIN,
   UREM,
   WRITE,
   XOR,
@@ -182,7 +178,7 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 100> inst_info;
+extern const std::array<Inst_info, 96> inst_info;
 
 struct Module;
 struct Function;

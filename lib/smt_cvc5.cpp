@@ -447,32 +447,8 @@ void Converter::build_bv_binary_smt(const Inst *inst)
     case Op::UDIV:
       inst2bv.insert({inst, solver.mkTerm(cvc5::BITVECTOR_UDIV, {arg1, arg2})});
       break;
-    case Op::UMAX:
-      {
-	cvc5::Term cond = solver.mkTerm(cvc5::BITVECTOR_UGE, {arg1, arg2});
-	inst2bv.insert({inst, ite(cond, arg1, arg2)});
-      }
-      break;
-    case Op::UMIN:
-      {
-	cvc5::Term cond = solver.mkTerm(cvc5::BITVECTOR_ULT, {arg1, arg2});
-	inst2bv.insert({inst, ite(cond, arg1, arg2)});
-      }
-      break;
     case Op::SADD_WRAPS:
       inst2bool.insert({inst, solver.mkTerm(cvc5::BITVECTOR_SADDO, {arg1, arg2})});
-      break;
-    case Op::SMAX:
-      {
-	cvc5::Term cond = solver.mkTerm(cvc5::BITVECTOR_SGE, {arg1, arg2});
-	inst2bv.insert({inst, ite(cond, arg1, arg2)});
-      }
-      break;
-    case Op::SMIN:
-      {
-	cvc5::Term cond = solver.mkTerm(cvc5::BITVECTOR_SLT, {arg1, arg2});
-	inst2bv.insert({inst, ite(cond, arg1, arg2)});
-      }
       break;
     case Op::SMUL_WRAPS:
       inst2bool.insert({inst, solver.mkTerm(cvc5::BITVECTOR_SMULO, {arg1, arg2})});

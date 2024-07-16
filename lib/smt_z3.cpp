@@ -486,12 +486,6 @@ void Converter::build_bv_binary_smt(const Inst *inst)
     case Op::UDIV:
       inst2bv.insert({inst, z3::udiv(arg1, arg2)});
       break;
-    case Op::UMAX:
-      inst2bv.insert({inst, ite(z3::uge(arg1, arg2), arg1, arg2)});
-      break;
-    case Op::UMIN:
-      inst2bv.insert({inst, ite(z3::ult(arg1, arg2), arg1, arg2)});
-      break;
     case Op::SADD_WRAPS:
       {
 	z3::expr earg1 = z3::sext(arg1, 1);
@@ -500,12 +494,6 @@ void Converter::build_bv_binary_smt(const Inst *inst)
 	z3::expr eres = z3::sext(arg1 + arg2, 1);
 	inst2bool.insert({inst, eadd != eres});
       }
-      break;
-    case Op::SMAX:
-      inst2bv.insert({inst, ite(z3::sge(arg1, arg2), arg1, arg2)});
-      break;
-    case Op::SMIN:
-      inst2bv.insert({inst, ite(z3::slt(arg1, arg2), arg1, arg2)});
       break;
     case Op::SMUL_WRAPS:
       {

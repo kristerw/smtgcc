@@ -12,7 +12,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 100> inst_info{{
+const std::array<Inst_info, 96> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -82,8 +82,6 @@ const std::array<Inst_info, 100> inst_info{{
   {"set_mem_flag", Op::SET_MEM_FLAG, Inst_class::ibinary, false, false},
   {"set_mem_undef", Op::SET_MEM_UNDEF, Inst_class::ibinary, false, false},
   {"shl", Op::SHL, Inst_class::ibinary, true, false},
-  {"smax", Op::SMAX, Inst_class::ibinary, true, true},
-  {"smin", Op::SMIN, Inst_class::ibinary, true, true},
   {"smul_wraps", Op::SMUL_WRAPS, Inst_class::ibinary, true, true},
   {"src_retval", Op::SRC_RETVAL, Inst_class::ibinary, false, false},
   {"src_ub", Op::SRC_UB, Inst_class::ibinary, false, false},
@@ -95,8 +93,6 @@ const std::array<Inst_info, 100> inst_info{{
   {"tgt_retval", Op::TGT_RETVAL, Inst_class::ibinary, false, false},
   {"tgt_ub", Op::TGT_UB, Inst_class::ibinary, false, false},
   {"udiv", Op::UDIV, Inst_class::ibinary, true, false},
-  {"umax", Op::UMAX, Inst_class::ibinary, true, true},
-  {"umin", Op::UMIN, Inst_class::ibinary, true, true},
   {"urem", Op::UREM, Inst_class::ibinary, true, false},
   {"write", Op::WRITE, Inst_class::ibinary, false, false},
   {"xor", Op::XOR, Inst_class::ibinary, true, true},
