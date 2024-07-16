@@ -247,7 +247,9 @@ Inst *Converter::get_inst(const Cse_key& key, bool may_add_insts)
 
   // Check if this is a negation of an existing comparison.
   if (may_add_insts
-      && inst_info[(int)key.op].iclass == Inst_class::icomparison)
+      && (inst_info[(int)key.op].iclass == Inst_class::icomparison
+	  || key.op == Op::FEQ
+	  || key.op == Op::FNE))
     {
       Op op;
       switch (key.op)
@@ -281,6 +283,12 @@ Inst *Converter::get_inst(const Cse_key& key, bool may_add_insts)
 	  break;
 	case Op::ULT:
 	  op = Op::UGE;
+	  break;
+	case Op::FEQ:
+	  op = Op::FNE;
+	  break;
+	case Op::FNE:
+	  op = Op::FEQ;
 	  break;
 	default:
 	  throw Not_implemented("Converter::get_inst: unknown comparison");
