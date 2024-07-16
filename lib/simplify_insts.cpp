@@ -20,6 +20,58 @@ bool is_boolean_sext(Inst *inst)
   return inst->op == Op::SEXT && inst->args[0]->bitsize == 1;
 }
 
+bool is_ite_min(Inst *inst)
+{
+  if (inst->op != Op::ITE)
+    return false;
+
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+  Inst *const arg3 = inst->args[2];
+  if ((arg1->op == Op::SLT
+       || arg1->op == Op::SLE
+       || arg1->op == Op::ULT
+       || arg1->op == Op::ULE)
+      && arg1->args[0] == arg2
+      && arg1->args[1] == arg3)
+    return true;
+  if ((arg1->op == Op::SGT
+       || arg1->op == Op::SGE
+       || arg1->op == Op::UGT
+       || arg1->op == Op::UGE)
+      && arg1->args[0] == arg3
+      && arg1->args[1] == arg2)
+    return true;
+
+  return false;
+}
+
+bool is_ite_max(Inst *inst)
+{
+  if (inst->op != Op::ITE)
+    return false;
+
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+  Inst *const arg3 = inst->args[2];
+  if ((arg1->op == Op::SGT
+       || arg1->op == Op::SGE
+       || arg1->op == Op::UGT
+       || arg1->op == Op::UGE)
+      && arg1->args[0] == arg2
+      && arg1->args[1] == arg3)
+    return true;
+  if ((arg1->op == Op::SLT
+       || arg1->op == Op::SLE
+       || arg1->op == Op::ULT
+       || arg1->op == Op::ULE)
+      && arg1->args[0] == arg3
+      && arg1->args[1] == arg2)
+    return true;
+
+  return false;
+}
+
 void flatten(Inst *inst, std::vector<Inst *>& elems)
 {
   Op op = inst->op;
@@ -1399,6 +1451,89 @@ Inst *simplify_ite(Inst *inst)
       Inst *new_inst = create_inst(Op::ITE, new_cond, arg3, arg2);
       new_inst->insert_before(inst);
       return new_inst;
+    }
+
+  // Canonicalize ite doing min/max as
+  //   ite (x <= y) ? x : y   ; min
+  //   ite (x <= y) ? y : x   ; max
+  if (is_ite_min(inst) && arg1->op != Op::SLE && arg1->op != Op::ULE)
+    {
+      Op op = arg1->op;
+      Inst *x = arg1->args[0];
+      Inst *y = arg1->args[1];
+      switch (op)
+	{
+	case Op::SLT:
+	  op = Op::SLE;
+	  break;
+	case Op::ULT:
+	  op = Op::ULE;
+	  break;
+	case Op::SGT:
+	case Op::SGE:
+	  op = Op::SLE;
+	  std::swap(x, y);
+	  break;
+	case Op::UGT:
+	case Op::UGE:
+	  op = Op::ULE;
+	  std::swap(x, y);
+	  break;
+	default:
+	  assert(0);
+	  break;
+	}
+      Inst *new_inst1 = create_inst(op, x, y);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::ITE, new_inst1, x, y);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+  if (is_ite_max(inst) && arg1->op != Op::SLE && arg1->op != Op::ULE)
+    {
+      Op op = arg1->op;
+      Inst *x = arg1->args[0];
+      Inst *y = arg1->args[1];
+      switch (op)
+	{
+	case Op::SLT:
+	case Op::SLE:
+	  op = Op::SLE;
+	  break;
+	case Op::ULT:
+	case Op::ULE:
+	  op = Op::ULE;
+	  break;
+	case Op::FLT:
+	case Op::FLE:
+	  op = Op::FLE;
+	  break;
+	case Op::SGT:
+	case Op::SGE:
+	  op = Op::SLE;
+	  std::swap(x, y);
+	  break;
+	case Op::UGT:
+	case Op::UGE:
+	  op = Op::ULE;
+	  std::swap(x, y);
+	  break;
+	case Op::FGT:
+	case Op::FGE:
+	  op = Op::FLE;
+	  std::swap(x, y);
+	  break;
+	default:
+	  assert(0);
+	  break;
+	}
+      Inst *new_inst1 = create_inst(op, x, y);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::ITE, new_inst1, y, x);
+      new_inst2->insert_before(inst);
+      return new_inst2;
     }
 
   return inst;
