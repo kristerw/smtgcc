@@ -1289,6 +1289,27 @@ Inst *simplify_sgt(Inst *inst)
       && is_value_zero(arg2->args[0]))
     return inst->bb->value_inst(0, 1);
 
+  // sgt c, (sext x) -> false if c <= the minimal possible value of x
+  if (arg1->op == Op::VALUE && arg2->op == Op::SEXT)
+    {
+      __int128 min_val = 1;
+      min_val = min_val << 127;
+      min_val = min_val >> (128 - arg2->args[0]->bitsize);
+      if (arg1->signed_value() <= min_val)
+	return inst->bb->value_inst(0, 1);
+    }
+
+  // sgt (sext x), c -> false if c >= the maximal possible value of x
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::SEXT
+      && arg1->args[0]->bitsize > 1)
+    {
+      unsigned __int128 max_val = -1;
+      max_val = max_val >> (129 - arg1->args[0]->bitsize);
+      if (arg2->signed_value() >= (__int128)max_val)
+	return inst->bb->value_inst(0, 1);
+    }
+
   // sgt 0, (concat 0, x) -> false
   if (is_value_zero(arg1)
       && arg2->op == Op::CONCAT
@@ -1591,15 +1612,16 @@ Inst *simplify_ugt(Inst *inst)
   if (is_value_m1(arg2))
     return inst->bb->value_inst(0, 1);
 
-  // For Boolean x: ugt (concat 0, x), c -> false if c is a constant > 0.
-  // This is rather common in UB checks of range information where a Boolean
-  // has been extended to an integer.
+  // ugt (concat 0, x), c -> false if c >= the maximal possible value of x
   if (arg1->op == Op::CONCAT
-      && arg1->args[1]->bitsize == 1
       && is_value_zero(arg1->args[0])
-      && arg2->op == Op::VALUE
-      && arg2->value() > 0)
-    return inst->bb->value_inst(0, 1);
+      && arg2->op == Op::VALUE)
+    {
+      unsigned __int128 max_val = -1;
+      max_val = max_val >> (128 - arg1->args[1]->bitsize);
+      if (arg2->value() >= max_val)
+	return inst->bb->value_inst(0, 1);
+    }
 
   // ugt (and x, y), x -> false
   // ugt (and x, y), y -> false
