@@ -21,6 +21,7 @@ Options:
   -simplify_inst     Run instruction simplification optimization.
   -simplify_cfg      Run control flow graph simplification optimization.
   -dce               Run dead code elimination optimization.
+  -vrp               Run value range propagation optimization.
   -loop_unroll       Run loop unrolling optimization.
   -convert           Run the conversion transformation pass.
 
@@ -100,6 +101,7 @@ int main(int argc, char **argv)
       else if (!strcmp(arg, "-simplify_inst")
 	       || !strcmp(arg, "-simplify_cfg")
 	       || !strcmp(arg, "-dce")
+	       || !strcmp(arg, "-vrp")
 	       || !strcmp(arg, "-loop_unroll")
 	       || !strcmp(arg, "-convert"))
 	opts.push_back(arg);
@@ -136,6 +138,8 @@ int main(int argc, char **argv)
 	  simplify_cfg(module);
 	else if (opt == "-dce")
 	  dead_code_elimination(module);
+	else if (opt == "-vrp")
+	  vrp(module);
 	else if (opt == "-loop_unroll")
 	  loop_unroll(module);
 	else if (opt == "-convert")

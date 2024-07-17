@@ -15,7 +15,6 @@
 #include <cinttypes>
 
 #include "smtgcc.h"
-#include "util.h"
 
 using namespace std::string_literals;
 namespace smtgcc {

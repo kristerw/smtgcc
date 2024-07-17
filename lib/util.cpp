@@ -1,12 +1,10 @@
-#include <cstdint>
-
-#include "util.h"
+#include "smtgcc.h"
 
 namespace smtgcc {
 
-int popcount(unsigned __int128 x)
+uint32_t popcount(unsigned __int128 x)
 {
-  int result = 0;
+  uint32_t result = 0;
   for (int i = 0; i < 4; i++)
     {
       uint32_t t = x >> (i* 32);
@@ -15,9 +13,9 @@ int popcount(unsigned __int128 x)
   return result;
 }
 
-int clz(unsigned __int128 x)
+uint32_t clz(unsigned __int128 x)
 {
-  int result = 0;
+  uint32_t result = 0;
   for (int i = 0; i < 4; i++)
     {
       uint32_t t = x >> ((3 - i) * 32);
@@ -28,9 +26,9 @@ int clz(unsigned __int128 x)
   return result;
 }
 
-int ctz(unsigned __int128 x)
+uint32_t ctz(unsigned __int128 x)
 {
-  int result = 0;
+  uint32_t result = 0;
   for (int i = 0; i < 4; i++)
     {
       uint32_t t = x >> (i * 32);

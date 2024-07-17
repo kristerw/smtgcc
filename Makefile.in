@@ -30,7 +30,9 @@ lib_sources = \
 	lib/smt_z3.cpp \
 	lib/smtgcc.cpp \
 	lib/util.cpp \
-	lib/validate_ir.cpp
+	lib/validate_ir.cpp \
+	lib/vrp.cpp
+
 lib_objects = $(lib_sources:.cpp=.o)
 
 tools_sources = \

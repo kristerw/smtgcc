@@ -449,9 +449,24 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *func);
 std::pair<SStats, Solver_result> check_assert_z3(Function *func);
 std::pair<SStats, Solver_result> check_ub_z3(Function *func);
 
+// util.cpp
+uint32_t popcount(unsigned __int128 x);
+uint32_t clz(unsigned __int128 x);
+uint32_t ctz(unsigned __int128 x);
+bool is_value_zero(Inst *inst);
+bool is_value_one(Inst *inst);
+bool is_value_signed_min(Inst *inst);
+bool is_value_signed_max(Inst *inst);
+bool is_value_m1(Inst *inst);
+bool is_value_pow2(Inst *inst);
+
 // validate_ir.cpp
 void validate(Module *module);
 void validate(Function *func);
+
+// vrp.cpp
+void vrp(Function *func);
+void vrp(Module *module);
 
 } // end namespace smtgcc
 

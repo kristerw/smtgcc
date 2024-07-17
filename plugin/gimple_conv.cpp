@@ -25,7 +25,6 @@
 #include "attribs.h"
 
 #include "smtgcc.h"
-#include "util.h"
 #include "gimple_conv.h"
 
 static_assert(sizeof(HOST_WIDE_INT) == 8);
@@ -5927,6 +5926,8 @@ void unroll_and_optimize(Function *func)
       dead_code_elimination(func);
       simplify_cfg(func);
     }
+  vrp(func);
+  simplify_insts(func);
   dead_code_elimination(func);
   validate(func);
 }

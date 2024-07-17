@@ -9,7 +9,6 @@
 #include <cassert>
 
 #include "smtgcc.h"
-#include "util.h"
 
 namespace smtgcc {
 
