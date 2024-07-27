@@ -82,6 +82,7 @@ void clear_ub_bb(Basic_block *bb, bool is_loopfree)
 void dead_code_elimination(Function *func)
 {
   bool is_loopfree = !has_loops(func);
+  uint32_t nof_inst = 0;
   for (int i = func->bbs.size() - 1; i >= 0; i--)
     {
       Basic_block *bb = func->bbs[i];
@@ -120,6 +121,8 @@ void dead_code_elimination(Function *func)
 	    destroy(inst);
 	  else if (inst->op == Op::ASSERT && is_true(inst->args[0]))
 	    destroy(inst);
+	  else
+	    nof_inst++;
 	  inst = next_inst;
 	}
 
@@ -135,6 +138,9 @@ void dead_code_elimination(Function *func)
 	  destroy(phi);
 	}
     }
+
+  if (nof_inst > max_nof_inst)
+    throw Not_implemented("too many instructions");
 
   for (auto bb : func->bbs)
     {

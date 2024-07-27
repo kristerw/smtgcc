@@ -17,6 +17,9 @@ namespace smtgcc {
 
 const int unroll_limit = 12;
 
+const uint32_t max_nof_bb = 50000;
+const uint32_t max_nof_inst = 1000000;
+
 struct Not_implemented
 {
   Not_implemented(const std::string& msg) : msg{msg} {}

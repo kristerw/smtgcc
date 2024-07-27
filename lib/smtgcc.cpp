@@ -865,6 +865,9 @@ void Basic_block::print(FILE *stream) const
 
 Basic_block *Function::build_bb()
 {
+  if (bbs.size() > max_nof_bb)
+    throw Not_implemented("too many basic blocks");
+
   Basic_block *bb = new Basic_block;
   bb->func = this;
   bb->id = next_bb_id++;
