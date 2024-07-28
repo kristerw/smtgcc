@@ -390,6 +390,10 @@ Inst *simplify_and(Inst *inst)
   if (is_value_m1(arg2))
     return arg1;
 
+  // and x, x -> x
+  if (arg1 == arg2)
+    return arg1;
+
   // and (and, x, c2), c1 -> and x, (c1 & c2)
   if (arg2->op == Op::VALUE &&
       arg1->op == Op::AND &&
@@ -873,6 +877,10 @@ Inst *simplify_or(Inst *inst)
   // or x, -1 -> -1
   if (is_value_m1(arg2))
     return arg2;
+
+  // or x, x -> x
+  if (arg1 == arg2)
+    return arg1;
 
   // For Boolean x, y: or (sext x) (sext y) -> sext (or x, y)
   if (is_boolean_sext(arg1) && is_boolean_sext(arg2))
