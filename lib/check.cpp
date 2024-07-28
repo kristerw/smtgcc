@@ -157,7 +157,7 @@ class Converter {
   Inst *fixup(Inst *inst);
   Inst *simplify(Inst *inst);
   Inst *build_inst(Op op);
-  Inst *build_inst(Op op, Inst *arg);
+  Inst *build_inst(Op op, Inst *arg, bool insert_after = false);
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2);
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3);
 
@@ -549,13 +549,15 @@ Inst *Converter::build_inst(Op op)
   return inst;
 }
 
-Inst *Converter::build_inst(Op op, Inst *arg)
+Inst *Converter::build_inst(Op op, Inst *arg, bool insert_after)
 {
   const Cse_key key(op, arg);
   Inst *inst = get_inst(key);
   if (!inst)
     {
       inst = dest_bb->build_inst(op, arg);
+      if (insert_after)
+	inst->move_after(arg);
       inst = simplify(inst);
       key2inst.insert({key, inst});
     }
@@ -645,7 +647,7 @@ Inst *Converter::bool_not(Inst *a)
 {
   if (a->op == Op::NOT)
     return a->args[0];
-  return build_inst(Op::NOT, a);
+  return build_inst(Op::NOT, a, true);
 }
 
 void Converter::add_ub(Basic_block *bb, Inst *cond)
