@@ -62,7 +62,7 @@ bool check_loop_vectorized = false;
 struct Addr {
   Inst *ptr;
   uint64_t bitoffset;
-  Inst *provenance;
+  Inst *prov;
 };
 
 struct Converter {
@@ -88,7 +88,7 @@ struct Converter {
   std::map<Basic_block *, std::pair<Inst *, Inst *> > bb2retval;
   std::map<tree, Inst *> tree2instruction;
   std::map<tree, Inst *> tree2undef;
-  std::map<tree, Inst *> tree2provenance;
+  std::map<tree, Inst *> tree2prov;
   std::map<tree, Inst *> decl2instruction;
   std::map<Inst *, Inst *> inst2memory_flagsx;
   Inst *retval = nullptr;
@@ -106,7 +106,7 @@ struct Converter {
   uint8_t padding_at_offset(tree type, uint64_t offset);
   Inst *build_memory_inst(uint64_t id, uint64_t size, uint32_t flags);
   void constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *undef=nullptr);
-  void mem_access_ub_check(Basic_block *bb, Inst *ptr, Inst *provenance, uint64_t size);
+  void mem_access_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size);
   bool is_extracting_from_value(tree expr);
   std::tuple<Inst *, Inst *, Inst *> extract_component_ref(Basic_block *bb, tree expr);
   std::tuple<Inst *, Inst *, Inst *> tree2inst_undef_prov(Basic_block *bb, tree expr);
@@ -126,7 +126,7 @@ struct Converter {
   void process_store(tree addr_expr, tree value_expr, Basic_block *bb);
   std::tuple<Inst *, Inst *, Inst *> load_value(Basic_block *bb, Inst *ptr, uint64_t size);
   void store_value(Basic_block *bb, Inst *ptr, Inst *value, Inst *undef = nullptr);
-  std::tuple<Inst *, Inst *, Inst *> type_convert(Inst *inst, Inst *undef, Inst *provenance, tree src_type, tree dest_type, Basic_block *bb);
+  std::tuple<Inst *, Inst *, Inst *> type_convert(Inst *inst, Inst *undef, Inst *prov, tree src_type, tree dest_type, Basic_block *bb);
   Inst *type_convert(Inst *inst, tree src_type, tree dest_type, Basic_block *bb);
   std::pair<Inst *, Inst *> process_unary_bool(enum tree_code code, Inst *arg1, Inst *arg1_undef, tree lhs_type, tree arg1_type, Basic_block *bb);
   std::tuple<Inst *, Inst *, Inst *> process_unary_int(enum tree_code code, Inst *arg1, Inst *arg1_undef, Inst *arg1_prov, tree lhs_type, tree arg1_type, Basic_block *bb);
@@ -584,42 +584,42 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *un
   bb->build_inst(Op::UB, is_ub2);
 }
 
-void Converter::mem_access_ub_check(Basic_block *bb, Inst *ptr, Inst *provenance, uint64_t size)
+void Converter::mem_access_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size)
 {
   assert(size < (uint64_t(1) << module->ptr_offset_bits));
 
   // It is UB if the pointer provenance does not correspond to the address.
   Inst *ptr_mem_id = bb->build_extract_id(ptr);
-  Inst *is_ub = bb->build_inst(Op::NE, provenance, ptr_mem_id);
+  Inst *is_ub = bb->build_inst(Op::NE, prov, ptr_mem_id);
   bb->build_inst(Op::UB, is_ub);
 
   // It is UB if the size overflows the offset field.
   Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
   Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
   Inst *end_mem_id = bb->build_extract_id(end);
-  Inst *overflow = bb->build_inst(Op::NE, provenance, end_mem_id);
+  Inst *overflow = bb->build_inst(Op::NE, prov, end_mem_id);
   bb->build_inst(Op::UB, overflow);
 
   // It is UB if the end is outside the memory object.
   // Note: ptr is within the memory object; otherwise, the provenance check
   // or the offset overflow check would have failed.
-  Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
+  Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
   Inst *offset = bb->build_extract_offset(end);
   Inst *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
   bb->build_inst(Op::UB, out_of_bound);
 }
 
-void store_ub_check(Basic_block *bb, Inst *ptr, Inst *provenance, uint64_t size, Inst *cond = nullptr)
+void store_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr)
 {
   // It is UB to write to constant memory.
-  Inst *is_const = bb->build_inst(Op::IS_CONST_MEM, provenance);
+  Inst *is_const = bb->build_inst(Op::IS_CONST_MEM, prov);
   if (cond)
     is_const = bb->build_inst(Op::AND, is_const, cond);
   bb->build_inst(Op::UB, is_const);
 
   // It is UB if the pointer provenance does not correspond to the address.
   Inst *ptr_mem_id = bb->build_extract_id(ptr);
-  Inst *is_ub = bb->build_inst(Op::NE, provenance, ptr_mem_id);
+  Inst *is_ub = bb->build_inst(Op::NE, prov, ptr_mem_id);
   if (cond)
     is_ub = bb->build_inst(Op::AND, is_ub, cond);
   bb->build_inst(Op::UB, is_ub);
@@ -631,7 +631,7 @@ void store_ub_check(Basic_block *bb, Inst *ptr, Inst *provenance, uint64_t size,
       Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
       Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
       Inst *end_mem_id = bb->build_extract_id(end);
-      Inst *overflow = bb->build_inst(Op::NE, provenance, end_mem_id);
+      Inst *overflow = bb->build_inst(Op::NE, prov, end_mem_id);
       if (cond)
 	overflow = bb->build_inst(Op::AND, overflow, cond);
       bb->build_inst(Op::UB, overflow);
@@ -639,7 +639,7 @@ void store_ub_check(Basic_block *bb, Inst *ptr, Inst *provenance, uint64_t size,
       // It is UB if the end is outside the memory object.
       // Note: ptr is within the memory object; otherwise, the provenance check
       // or the offset overflow check would have failed.
-      Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
+      Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
       Inst *offset = bb->build_extract_offset(end);
       Inst *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
       if (cond)
@@ -651,7 +651,7 @@ void store_ub_check(Basic_block *bb, Inst *ptr, Inst *provenance, uint64_t size,
       // The pointer must point to valid memory, or be one position past
       // valid memory.
       // TODO: Handle zero-sized memory blocks (such as malloc(0)).
-      Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
+      Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
       Inst *offset = bb->build_extract_offset(ptr);
       Inst *out_of_bound = bb->build_inst(Op::UGT, offset, mem_size);
       if (cond)
@@ -660,11 +660,11 @@ void store_ub_check(Basic_block *bb, Inst *ptr, Inst *provenance, uint64_t size,
     }
 }
 
-void load_ub_check(Basic_block *bb, Inst *ptr, Inst *provenance, uint64_t size, Inst *cond = nullptr)
+void load_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr)
 {
   // It is UB if the pointer provenance does not correspond to the address.
   Inst *ptr_mem_id = bb->build_extract_id(ptr);
-  Inst *is_ub = bb->build_inst(Op::NE, provenance, ptr_mem_id);
+  Inst *is_ub = bb->build_inst(Op::NE, prov, ptr_mem_id);
   if (cond)
     is_ub = bb->build_inst(Op::AND, is_ub, cond);
   bb->build_inst(Op::UB, is_ub);
@@ -675,7 +675,7 @@ void load_ub_check(Basic_block *bb, Inst *ptr, Inst *provenance, uint64_t size, 
       Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
       Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
       Inst *end_mem_id = bb->build_extract_id(end);
-      Inst *overflow = bb->build_inst(Op::NE, provenance, end_mem_id);
+      Inst *overflow = bb->build_inst(Op::NE, prov, end_mem_id);
       if (cond)
 	overflow = bb->build_inst(Op::AND, overflow, cond);
       bb->build_inst(Op::UB, overflow);
@@ -683,7 +683,7 @@ void load_ub_check(Basic_block *bb, Inst *ptr, Inst *provenance, uint64_t size, 
       // It is UB if the end is outside the memory object.
       // Note: ptr is within the memory object; otherwise, the provenance check
       // or the offset overflow check would have failed.
-      Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
+      Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
       Inst *offset = bb->build_extract_offset(end);
       Inst *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
       if (cond)
@@ -695,7 +695,7 @@ void load_ub_check(Basic_block *bb, Inst *ptr, Inst *provenance, uint64_t size, 
       // The pointer must point to valid memory, or be one position past
       // valid memory.
       // TODO: Handle zero-sized memory blocks (such as malloc(0)).
-      Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, provenance);
+      Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
       Inst *offset = bb->build_extract_offset(ptr);
       Inst *out_of_bound = bb->build_inst(Op::UGT, offset, mem_size);
       if (cond)
@@ -932,14 +932,14 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_undef_prov(Basic_block *
 	  undef = it2->second;
 	  assert(undef);
 	}
-      Inst *provenance = nullptr;
-      auto it3 = tree2provenance.find(expr);
-      if (it3 != tree2provenance.end())
+      Inst *prov = nullptr;
+      auto it3 = tree2prov.find(expr);
+      if (it3 != tree2prov.end())
 	{
-	  provenance = it3->second;
-	  assert(provenance);
+	  prov = it3->second;
+	  assert(prov);
 	}
-      return {inst, undef, provenance};
+      return {inst, undef, prov};
     }
 
   switch (TREE_CODE(expr))
@@ -963,12 +963,12 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_undef_prov(Basic_block *
 		constrain_range(func->bbs[0], expr, inst);
 
 		assert(!POINTER_TYPE_P(TREE_TYPE(expr))
-		       || tree2provenance.contains(var));
-		Inst *provenance = nullptr;
-		if (tree2provenance.contains(var))
-		  provenance = tree2provenance.at(var);
+		       || tree2prov.contains(var));
+		Inst *prov = nullptr;
+		if (tree2prov.contains(var))
+		  prov = tree2prov.at(var);
 
-		return {inst, nullptr, provenance};
+		return {inst, nullptr, prov};
 	      }
 	  }
 	if (var && TREE_CODE(var) == VAR_DECL)
@@ -976,10 +976,10 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_undef_prov(Basic_block *
 	    uint64_t bitsize = bitsize_for_type(TREE_TYPE(expr));
 	    Inst *inst = bb->value_inst(0, bitsize);
 	    Inst *undef = bb->value_m1_inst(bitsize);
-	    Inst *provenance = nullptr;
+	    Inst *prov = nullptr;
 	    if (POINTER_TYPE_P(TREE_TYPE(expr)))
-	      provenance = bb->build_extract_id(inst);
-	    return {inst, undef, provenance};
+	      prov = bb->build_extract_id(inst);
+	    return {inst, undef, prov};
 	  }
 	throw Not_implemented("tree2inst: unhandled ssa_name");
       }
@@ -999,15 +999,15 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_undef_prov(Basic_block *
 	uint32_t precision = bitsize_for_type(TREE_TYPE(expr));
 	unsigned __int128 value = get_int_cst_val(expr);
 	Inst *inst = bb->value_inst(value, precision);
-	Inst *provenance = nullptr;
+	Inst *prov = nullptr;
 	if (POINTER_TYPE_P(TREE_TYPE(expr)))
 	  {
 	    uint32_t ptr_id_bits = module->ptr_id_bits;
 	    uint32_t ptr_id_low = module->ptr_id_low;
 	    uint64_t id = (value >> ptr_id_low) & ((1 << ptr_id_bits) - 1);
-	    provenance = bb->value_inst(id, ptr_id_bits);
+	    prov = bb->value_inst(id, ptr_id_bits);
 	  }
-	return {inst, nullptr, provenance};
+	return {inst, nullptr, prov};
       }
     case REAL_CST:
       {
@@ -1075,7 +1075,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_undef_prov(Basic_block *
       }
     case VIEW_CONVERT_EXPR:
       {
-	auto [arg, undef, provenance] =
+	auto [arg, undef, prov] =
 	  tree2inst_undef_prov(bb, TREE_OPERAND(expr, 0));
 	tree src_type = TREE_TYPE(TREE_OPERAND(expr, 0));
 	tree dest_type = TREE_TYPE(expr);
@@ -1084,22 +1084,22 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_undef_prov(Basic_block *
 	constrain_src_value(bb, arg, dest_type);
 	if (POINTER_TYPE_P(dest_type))
 	  {
-	    assert(!POINTER_TYPE_P(src_type) || provenance);
-	    if (!provenance)
-	      provenance = bb->build_extract_id(arg);
+	    assert(!POINTER_TYPE_P(src_type) || prov);
+	    if (!prov)
+	      prov = bb->build_extract_id(arg);
 	  }
-	return {arg, undef, provenance};
+	return {arg, undef, prov};
       }
     case ADDR_EXPR:
       {
 	Addr addr = process_address(bb, TREE_OPERAND(expr, 0), false);
 	assert(addr.bitoffset == 0);
-	return {addr.ptr, nullptr, addr.provenance};
+	return {addr.ptr, nullptr, addr.prov};
       }
     case BIT_FIELD_REF:
       {
 	tree arg = TREE_OPERAND(expr, 0);
-	auto [value, undef, provenance] = tree2inst_undef_prov(bb, arg);
+	auto [value, undef, prov] = tree2inst_undef_prov(bb, arg);
 	uint64_t bitsize = get_int_cst_val(TREE_OPERAND(expr, 1));
 	uint64_t bit_offset = get_int_cst_val(TREE_OPERAND(expr, 2));
 	Inst *high = bb->value_inst(bitsize + bit_offset - 1, 32);
@@ -1110,9 +1110,9 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_undef_prov(Basic_block *
 	  undef = bb->build_inst(Op::EXTRACT, undef, high, low);
 	std::tie(value, undef) =
 	  from_mem_repr(bb, value, undef, TREE_TYPE(expr));
-	if (POINTER_TYPE_P(TREE_TYPE(expr)) && !provenance)
-	  provenance = bb->build_extract_id(value);
-	return {value, undef, provenance};
+	if (POINTER_TYPE_P(TREE_TYPE(expr)) && !prov)
+	  prov = bb->build_extract_id(value);
+	return {value, undef, prov};
       }
     case ARRAY_REF:
       {
@@ -1144,10 +1144,10 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_undef_prov(Basic_block *
 
 std::pair<Inst *, Inst *> Converter::tree2inst_prov(Basic_block *bb, tree expr)
 {
-  auto [inst, undef, provenance] = tree2inst_undef_prov(bb, expr);
+  auto [inst, undef, prov] = tree2inst_undef_prov(bb, expr);
   if (undef)
     build_ub_if_not_zero(bb, undef);
-  return {inst, provenance};
+  return {inst, prov};
 }
 
 std::pair<Inst *, Inst *> Converter::tree2inst_undef(Basic_block *bb, tree expr)
@@ -1357,9 +1357,9 @@ Addr Converter::process_array_ref(Basic_block *bb, tree expr, bool is_mem_access
       Inst *cond = bb->build_inst(Op::UGE, eoffset, emax_offset);
       bb->build_inst(Op::UB, cond);
       if (is_mem_access)
-	mem_access_ub_check(bb, ptr, addr.provenance, elem_size);
+	mem_access_ub_check(bb, ptr, addr.prov, elem_size);
     }
-  return {ptr, 0, addr.provenance};
+  return {ptr, 0, addr.prov};
 }
 
 Addr Converter::process_component_ref(Basic_block *bb, tree expr, bool is_mem_access)
@@ -1382,7 +1382,7 @@ Addr Converter::process_component_ref(Basic_block *bb, tree expr, bool is_mem_ac
   Inst *off = bb->value_inst(offset, addr.ptr->bitsize);
   Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, off);
 
-  return {ptr, bit_offset, addr.provenance};
+  return {ptr, bit_offset, addr.prov};
 }
 
 Addr Converter::process_bit_field_ref(Basic_block *bb, tree expr, bool is_mem_access)
@@ -1399,7 +1399,7 @@ Addr Converter::process_bit_field_ref(Basic_block *bb, tree expr, bool is_mem_ac
       ptr = bb->build_inst(Op::ADD, ptr, off);
       bit_offset &= 7;
     }
-  return {ptr, bit_offset, addr.provenance};
+  return {ptr, bit_offset, addr.prov};
 }
 
 void alignment_check(Basic_block *bb, tree expr, Inst *ptr)
@@ -1518,13 +1518,13 @@ Addr Converter::process_address(Basic_block *bb, tree expr, bool is_mem_access)
       uint64_t offset_val = bytesize_for_type(TREE_TYPE(expr));
       Inst *offset = bb->value_inst(offset_val, addr.ptr->bitsize);
       Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
-      return {ptr, 0, addr.provenance};
+      return {ptr, 0, addr.prov};
     }
   if (code == INTEGER_CST)
     {
       Inst *ptr = tree2inst(bb, expr);
-      Inst *provenance = bb->build_extract_id(ptr);
-      return {ptr, 0, provenance};
+      Inst *prov = bb->build_extract_id(ptr);
+      return {ptr, 0, prov};
     }
   if (code == RESULT_DECL)
     {
@@ -1672,11 +1672,11 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(Basic_block *bb, tree
       inst2memory_flagsx.insert({value, mem_flags2});
     }
 
-  Inst *provenance = nullptr;
+  Inst *prov = nullptr;
   if (POINTER_TYPE_P(type))
-    provenance = bb->build_extract_id(value);
+    prov = bb->build_extract_id(value);
 
-  return {value, undef, provenance};
+  return {value, undef, prov};
 }
 
 // Read value/undef from memory. No UB checks etc. are done.
@@ -1747,7 +1747,7 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
       if (size > MAX_MEMORY_UNROLL_LIMIT)
 	throw Not_implemented("process_store: too large string");
 
-      store_ub_check(bb, addr.ptr, addr.provenance, size);
+      store_ub_check(bb, addr.ptr, addr.prov, size);
       for (uint64_t i = 0; i < size; i++)
 	{
 	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
@@ -1766,7 +1766,7 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
   Addr addr = process_address(bb, addr_expr, true);
   assert(is_bitfield || addr.bitoffset == 0);
   assert(addr.bitoffset < 8);
-  auto [value, undef, provenance] = tree2inst_undef_prov(bb, value_expr);
+  auto [value, undef, prov] = tree2inst_undef_prov(bb, value_expr);
   if (!undef)
     undef = bb->value_inst(0, value->bitsize);
 
@@ -1795,9 +1795,9 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
   // TODO: Implement provenance tracking through memory.
   if (POINTER_TYPE_P(value_type))
     {
-      assert(provenance);
+      assert(prov);
       Inst *value_mem_id = bb->build_extract_id(value);
-      Inst *is_ub = bb->build_inst(Op::NE, provenance, value_mem_id);
+      Inst *is_ub = bb->build_inst(Op::NE, prov, value_mem_id);
       bb->build_inst(Op::UB, is_ub);
     }
 
@@ -1881,12 +1881,12 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
     }
 
   // It is UB to write to constant memory.
-  Inst *is_const = bb->build_inst(Op::IS_CONST_MEM, addr.provenance);
+  Inst *is_const = bb->build_inst(Op::IS_CONST_MEM, addr.prov);
   bb->build_inst(Op::UB, is_const);
 }
 
 // Convert a scalar value of src_type to dest_type.
-std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *undef, Inst *provenance, tree src_type, tree dest_type, Basic_block *bb)
+std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *undef, Inst *prov, tree src_type, tree dest_type, Basic_block *bb)
 {
   Inst *res_undef = get_res_undef(undef, dest_type, bb);
 
@@ -1911,15 +1911,15 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *und
 	      Op op = TYPE_UNSIGNED(src_type) ? Op::ZEXT : Op::SEXT;
 	      Inst *dest_prec_inst = bb->value_inst(dest_prec, 32);
 	      inst =  bb->build_inst(op, inst, dest_prec_inst);
-	      provenance = nullptr;
+	      prov = nullptr;
 	    }
 	  if (POINTER_TYPE_P(dest_type))
 	    {
-	      assert(!POINTER_TYPE_P(src_type) || provenance);
-	      if (!provenance)
-		provenance = bb->build_extract_id(inst);
+	      assert(!POINTER_TYPE_P(src_type) || prov);
+	      if (!prov)
+		prov = bb->build_extract_id(inst);
 	    }
-	  return {inst, res_undef, provenance};
+	  return {inst, res_undef, prov};
 	}
       if (FLOAT_TYPE_P(dest_type))
 	{
@@ -2184,7 +2184,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_scalar(enum tree_cod
 {
   Inst *inst;
   Inst *undef = nullptr;
-  Inst *provenance = nullptr;
+  Inst *prov = nullptr;
   if (TREE_CODE(lhs_type) == BOOLEAN_TYPE)
     {
       std::tie(inst, undef) =
@@ -2197,11 +2197,11 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_scalar(enum tree_cod
     }
   else
     {
-      std::tie(inst, undef, provenance) =
+      std::tie(inst, undef, prov) =
 	process_unary_int(code, arg1, arg1_undef, arg1_prov, lhs_type,
 			  arg1_type, bb);
     }
-  return {inst, undef, provenance};
+  return {inst, undef, prov};
 }
 
 std::pair<Inst *, Inst *> Converter::process_unary_vec(enum tree_code code, Inst *arg1, Inst *arg1_undef, tree lhs_elem_type, tree arg1_elem_type, Basic_block *bb)
@@ -3327,7 +3327,7 @@ void Converter::process_constructor(tree lhs, tree rhs, Basic_block *bb)
   uint64_t size = bytesize_for_type(TREE_TYPE(rhs));
   if (size > MAX_MEMORY_UNROLL_LIMIT)
     throw Not_implemented("process_constructor: too large constructor");
-  store_ub_check(bb, addr.ptr, addr.provenance, size);
+  store_ub_check(bb, addr.ptr, addr.prov, size);
 
   if (TREE_CLOBBER_P(rhs))
     make_uninit(bb, addr.ptr, size);
@@ -3371,7 +3371,7 @@ void Converter::process_gimple_assign(gimple *stmt, Basic_block *bb)
   check_type(TREE_TYPE(rhs1));
   Inst *inst;
   Inst *undef = nullptr;
-  Inst *provenance = nullptr;
+  Inst *prov = nullptr;
   switch (get_gimple_rhs_class(code))
     {
     case GIMPLE_TERNARY_RHS:
@@ -3428,7 +3428,7 @@ void Converter::process_gimple_assign(gimple *stmt, Basic_block *bb)
 		  bb->build_inst(Op::ITE, arg1, arg2_undef, arg3_undef);
 	      }
 	    if (arg2_prov && arg3_prov)
-	      provenance = bb->build_inst(Op::ITE, arg1, arg2_prov, arg3_prov);
+	      prov = bb->build_inst(Op::ITE, arg1, arg2_prov, arg3_prov);
 	    inst = bb->build_inst(Op::ITE, arg1, arg2, arg3);
 	  }
 	else if (code == BIT_INSERT_EXPR)
@@ -3535,7 +3535,7 @@ void Converter::process_gimple_assign(gimple *stmt, Basic_block *bb)
 		  tree2inst_undef_prov(bb, rhs1);
 		auto [arg2, arg2_undef, arg2_prov] =
 		  tree2inst_undef_prov(bb, rhs2);
-		std::tie(inst, undef, provenance) =
+		std::tie(inst, undef, prov) =
 		  process_binary_scalar(code, arg1, arg1_undef, arg1_prov,
 					arg2, arg2_undef, arg2_prov, lhs_type,
 					arg1_type, arg2_type, bb);
@@ -3566,14 +3566,14 @@ void Converter::process_gimple_assign(gimple *stmt, Basic_block *bb)
 	else
 	  {
 	    auto [arg1, arg1_undef, arg1_prov] = tree2inst_undef_prov(bb, rhs1);
-	    std::tie(inst, undef, provenance) =
+	    std::tie(inst, undef, prov) =
 	      process_unary_scalar(code, arg1, arg1_undef, arg1_prov, lhs_type,
 				   arg1_type, bb);
 	  }
       }
       break;
     case GIMPLE_SINGLE_RHS:
-      std::tie(inst, undef, provenance) =
+      std::tie(inst, undef, prov) =
 	tree2inst_undef_prov(bb, gimple_assign_rhs1(stmt));
       break;
     default:
@@ -3586,8 +3586,8 @@ void Converter::process_gimple_assign(gimple *stmt, Basic_block *bb)
   tree2instruction.insert({lhs, inst});
   if (undef)
     tree2undef.insert({lhs, undef});
-  if (provenance)
-    tree2provenance.insert({lhs, provenance});
+  if (prov)
+    tree2prov.insert({lhs, prov});
 }
 
 void Converter::process_gimple_asm(gimple *stmt)
@@ -3680,7 +3680,7 @@ void Converter::process_cfn_assume_aligned(gimple *stmt, Basic_block *bb)
     {
       constrain_range(bb, lhs, arg1);
       tree2instruction.insert({lhs, arg1});
-      tree2provenance.insert({lhs, arg1_prov});
+      tree2prov.insert({lhs, arg1_prov});
     }
 }
 
@@ -3715,7 +3715,7 @@ void Converter::process_cfn_bswap(gimple *stmt, Basic_block *bb)
   if (inst_undef)
     tree2undef.insert({lhs, inst_undef});
   if (arg_prov)
-    tree2provenance.insert({lhs, arg_prov});
+    tree2prov.insert({lhs, arg_prov});
 }
 
 void Converter::process_cfn_clrsb(gimple *stmt, Basic_block *bb)
@@ -4158,7 +4158,7 @@ void Converter::process_cfn_mask_load(gimple *stmt, Basic_block *bb)
   tree2instruction.insert({lhs, inst});
   tree2undef.insert({lhs, undef});
   if (POINTER_TYPE_P(lhs_type))
-    tree2provenance.insert({lhs, bb->build_extract_id(inst)});
+    tree2prov.insert({lhs, bb->build_extract_id(inst)});
 }
 
 void Converter::process_cfn_mask_store(gimple *stmt, Basic_block *bb)
@@ -4246,7 +4246,7 @@ void Converter::process_cfn_memcpy(gimple *stmt, Basic_block *bb)
     {
       constrain_range(bb, lhs, orig_dest_ptr);
       tree2instruction.insert({lhs, orig_dest_ptr});
-      tree2provenance.insert({lhs, dest_prov});
+      tree2prov.insert({lhs, dest_prov});
     }
 
   for (size_t i = 0; i < size; i++)
@@ -4283,7 +4283,7 @@ void Converter::process_cfn_memset(gimple *stmt, Basic_block *bb)
     {
       constrain_range(bb, lhs, orig_ptr);
       tree2instruction.insert({lhs, orig_ptr});
-      tree2provenance.insert({lhs, ptr_prov});
+      tree2prov.insert({lhs, ptr_prov});
     }
 
   assert(value->bitsize >= 8);
@@ -4526,7 +4526,7 @@ void Converter::process_cfn_reduc(gimple *stmt, Basic_block *bb)
       if (undef)
 	tree2undef.insert({lhs, undef});
       if (prov)
-	tree2provenance.insert({lhs, prov});
+	tree2prov.insert({lhs, prov});
     }
 }
 
@@ -5580,7 +5580,7 @@ void Converter::process_func_args()
 	  uint64_t size = bytesize_for_type(TREE_TYPE(TREE_TYPE(decl)));
 
 	  Inst *param_inst = build_memory_inst(id, size, flags);
-	  tree2provenance.insert({decl, param_inst->args[0]});
+	  tree2prov.insert({decl, param_inst->args[0]});
 	  tree2instruction.insert({decl, param_inst});
 	}
       else
@@ -5645,7 +5645,7 @@ void Converter::process_func_args()
 	{
 	  Inst *param_inst = tree2instruction.at(decl);
 	  Inst *id = bb->build_extract_id(param_inst);
-	  tree2provenance.insert({decl, id});
+	  tree2prov.insert({decl, id});
 	}
 
       param_number++;
@@ -5662,7 +5662,7 @@ bool Converter::need_prov_phi(gimple *phi)
   for (unsigned i = 0; i < gimple_phi_num_args(phi); i++)
     {
       tree arg = gimple_phi_arg_def(phi, i);
-      if (tree2provenance.contains(arg))
+      if (tree2prov.contains(arg))
 	return true;
     }
 
@@ -5695,7 +5695,7 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	  if (need_prov_phi(phi))
 	    {
 	      Inst *phi_prov = bb->build_phi_inst(module->ptr_id_bits);
-	      tree2provenance.insert({phi_result, phi_prov});
+	      tree2prov.insert({phi_result, phi_prov});
 	    }
 	  tree2instruction.insert({phi_result, phi_inst});
 	  tree2undef.insert({phi_result, phi_undef});
@@ -5821,8 +5821,8 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	  Inst *phi_inst = tree2instruction.at(phi_result);
 	  Inst *phi_undef = tree2undef.at(phi_result);
 	  Inst *phi_prov = nullptr;
-	  if (tree2provenance.contains(phi_result))
-	    phi_prov = tree2provenance.at(phi_result);
+	  if (tree2prov.contains(phi_result))
+	    phi_prov = tree2prov.at(phi_result);
 	  for (unsigned i = 0; i < gimple_phi_num_args(phi); i++)
 	    {
 	      Basic_block *arg_bb = get_phi_arg_bb(phi, i);
