@@ -91,12 +91,14 @@ struct Converter {
   std::map<tree, Inst *> tree2prov;
   std::map<tree, Inst *> decl2instruction;
   std::map<Inst *, Inst *> inst2memory_flagsx;
+  std::map<Inst *, Inst *> inst2id;
   Inst *retval = nullptr;
   int retval_bitsize;
   tree retval_type;
 
   bool is_tgt_func;
 
+  Inst *extract_id(Basic_block *bb, Inst *inst);
   uint64_t bytesize_for_type(tree type);
   std::pair<Inst *, Inst *> to_mem_repr(Basic_block *bb, Inst *inst, Inst *undef, tree type);
   Inst *to_mem_repr(Basic_block *bb, Inst *inst, tree type);
@@ -107,6 +109,8 @@ struct Converter {
   Inst *build_memory_inst(uint64_t id, uint64_t size, uint32_t flags);
   void constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *undef=nullptr);
   void mem_access_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size);
+  void store_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr);
+  void load_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr);
   bool is_extracting_from_value(tree expr);
   std::tuple<Inst *, Inst *, Inst *> extract_component_ref(Basic_block *bb, tree expr);
   std::tuple<Inst *, Inst *, Inst *> tree2inst_undef_prov(Basic_block *bb, tree expr);
@@ -300,6 +304,17 @@ void check_type(tree type)
     }
 }
 
+Inst *Converter::extract_id(Basic_block *bb, Inst *inst)
+{
+  if (auto it = inst2id.find(inst); it != inst2id.end())
+    return it->second;
+
+  Inst *id = bb->build_extract_id(inst);
+  id->move_after(inst);
+  inst2id.insert({inst, id});
+  return id;
+}
+
 // The size of the GCC type when stored in memory etc.
 uint64_t Converter::bytesize_for_type(tree type)
 {
@@ -395,12 +410,12 @@ void Converter::constrain_src_value(Basic_block *bb, Inst *inst, tree type, Inst
   // TODO: mem_flags is not correct name -- it is only one flag.
   if (POINTER_TYPE_P(type))
     {
-      Inst *id = bb->build_extract_id(inst);
+      Inst *id = extract_id(bb, inst);
       Inst *zero = bb->value_inst(0, id->bitsize);
       Inst *cond = bb->build_inst(Op::SLT, id, zero);
       if (mem_flags)
 	{
-	  Inst *not_written = bb->build_extract_id(mem_flags);
+	  Inst *not_written = extract_id(bb, mem_flags);
 	  not_written = bb->build_inst(Op::EQ, not_written, zero);
 	  cond = bb->build_inst(Op::AND, cond, not_written);
 	}
@@ -589,14 +604,14 @@ void Converter::mem_access_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint
   assert(size < (uint64_t(1) << module->ptr_offset_bits));
 
   // It is UB if the pointer provenance does not correspond to the address.
-  Inst *ptr_mem_id = bb->build_extract_id(ptr);
+  Inst *ptr_mem_id = extract_id(bb, ptr);
   Inst *is_ub = bb->build_inst(Op::NE, prov, ptr_mem_id);
   bb->build_inst(Op::UB, is_ub);
 
   // It is UB if the size overflows the offset field.
   Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
   Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
-  Inst *end_mem_id = bb->build_extract_id(end);
+  Inst *end_mem_id = extract_id(bb, end);
   Inst *overflow = bb->build_inst(Op::NE, prov, end_mem_id);
   bb->build_inst(Op::UB, overflow);
 
@@ -609,7 +624,7 @@ void Converter::mem_access_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint
   bb->build_inst(Op::UB, out_of_bound);
 }
 
-void store_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr)
+void Converter::store_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size, Inst *cond)
 {
   // It is UB to write to constant memory.
   Inst *is_const = bb->build_inst(Op::IS_CONST_MEM, prov);
@@ -618,7 +633,7 @@ void store_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size, Inst 
   bb->build_inst(Op::UB, is_const);
 
   // It is UB if the pointer provenance does not correspond to the address.
-  Inst *ptr_mem_id = bb->build_extract_id(ptr);
+  Inst *ptr_mem_id = extract_id(bb, ptr);
   Inst *is_ub = bb->build_inst(Op::NE, prov, ptr_mem_id);
   if (cond)
     is_ub = bb->build_inst(Op::AND, is_ub, cond);
@@ -630,7 +645,7 @@ void store_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size, Inst 
       assert(size != 0);
       Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
       Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
-      Inst *end_mem_id = bb->build_extract_id(end);
+      Inst *end_mem_id = extract_id(bb, end);
       Inst *overflow = bb->build_inst(Op::NE, prov, end_mem_id);
       if (cond)
 	overflow = bb->build_inst(Op::AND, overflow, cond);
@@ -660,10 +675,10 @@ void store_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size, Inst 
     }
 }
 
-void load_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr)
+void Converter::load_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size, Inst *cond)
 {
   // It is UB if the pointer provenance does not correspond to the address.
-  Inst *ptr_mem_id = bb->build_extract_id(ptr);
+  Inst *ptr_mem_id = extract_id(bb, ptr);
   Inst *is_ub = bb->build_inst(Op::NE, prov, ptr_mem_id);
   if (cond)
     is_ub = bb->build_inst(Op::AND, is_ub, cond);
@@ -674,7 +689,7 @@ void load_ub_check(Basic_block *bb, Inst *ptr, Inst *prov, uint64_t size, Inst *
       // It is UB if the size overflows the offset field.
       Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
       Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
-      Inst *end_mem_id = bb->build_extract_id(end);
+      Inst *end_mem_id = extract_id(bb, end);
       Inst *overflow = bb->build_inst(Op::NE, prov, end_mem_id);
       if (cond)
 	overflow = bb->build_inst(Op::AND, overflow, cond);
@@ -913,7 +928,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::extract_component_ref(Basic_block 
   if (undef)
     undef = bb->build_inst(Op::EXTRACT, undef, high, low);
   if (!prov && POINTER_TYPE_P(TREE_TYPE(expr)))
-    prov = bb->build_extract_id(inst);
+    prov = extract_id(bb, inst);
   return {inst, undef, prov};
 }
 
@@ -978,7 +993,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_undef_prov(Basic_block *
 	    Inst *undef = bb->value_m1_inst(bitsize);
 	    Inst *prov = nullptr;
 	    if (POINTER_TYPE_P(TREE_TYPE(expr)))
-	      prov = bb->build_extract_id(inst);
+	      prov = extract_id(bb, inst);
 	    return {inst, undef, prov};
 	  }
 	throw Not_implemented("tree2inst: unhandled ssa_name");
@@ -1086,7 +1101,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_undef_prov(Basic_block *
 	  {
 	    assert(!POINTER_TYPE_P(src_type) || prov);
 	    if (!prov)
-	      prov = bb->build_extract_id(arg);
+	      prov = extract_id(bb, arg);
 	  }
 	return {arg, undef, prov};
       }
@@ -1111,7 +1126,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_undef_prov(Basic_block *
 	std::tie(value, undef) =
 	  from_mem_repr(bb, value, undef, TREE_TYPE(expr));
 	if (POINTER_TYPE_P(TREE_TYPE(expr)) && !prov)
-	  prov = bb->build_extract_id(value);
+	  prov = extract_id(bb, value);
 	return {value, undef, prov};
       }
     case ARRAY_REF:
@@ -1491,7 +1506,7 @@ Addr Converter::process_address(Basic_block *bb, tree expr, bool is_mem_access)
 
       Inst *ptr = decl2instruction.at(expr);
       assert(ptr->op == Op::MEMORY);
-      Inst *id = bb->build_extract_id(ptr);
+      Inst *id = extract_id(bb, ptr);
       if (is_mem_access)
 	{
 	  // This reads/writes a variable, so we know the access is in range.
@@ -1523,7 +1538,7 @@ Addr Converter::process_address(Basic_block *bb, tree expr, bool is_mem_access)
   if (code == INTEGER_CST)
     {
       Inst *ptr = tree2inst(bb, expr);
-      Inst *prov = bb->build_extract_id(ptr);
+      Inst *prov = extract_id(bb, ptr);
       return {ptr, 0, prov};
     }
   if (code == RESULT_DECL)
@@ -1674,7 +1689,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(Basic_block *bb, tree
 
   Inst *prov = nullptr;
   if (POINTER_TYPE_P(type))
-    prov = bb->build_extract_id(value);
+    prov = extract_id(bb, value);
 
   return {value, undef, prov};
 }
@@ -1796,7 +1811,7 @@ void Converter::process_store(tree addr_expr, tree value_expr, Basic_block *bb)
   if (POINTER_TYPE_P(value_type))
     {
       assert(prov);
-      Inst *value_mem_id = bb->build_extract_id(value);
+      Inst *value_mem_id = extract_id(bb, value);
       Inst *is_ub = bb->build_inst(Op::NE, prov, value_mem_id);
       bb->build_inst(Op::UB, is_ub);
     }
@@ -1917,7 +1932,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *und
 	    {
 	      assert(!POINTER_TYPE_P(src_type) || prov);
 	      if (!prov)
-		prov = bb->build_extract_id(inst);
+		prov = extract_id(bb, inst);
 	    }
 	  return {inst, res_undef, prov};
 	}
@@ -3319,7 +3334,7 @@ void Converter::process_constructor(tree lhs, tree rhs, Basic_block *bb)
 
   if (TREE_CLOBBER_P(rhs) && CLOBBER_KIND(rhs) == CLOBBER_STORAGE_END)
     {
-      bb->build_inst(Op::FREE, bb->build_extract_id(addr.ptr));
+      bb->build_inst(Op::FREE, extract_id(bb, addr.ptr));
       return;
     }
 
@@ -4158,7 +4173,7 @@ void Converter::process_cfn_mask_load(gimple *stmt, Basic_block *bb)
   tree2instruction.insert({lhs, inst});
   tree2undef.insert({lhs, undef});
   if (POINTER_TYPE_P(lhs_type))
-    tree2prov.insert({lhs, bb->build_extract_id(inst)});
+    tree2prov.insert({lhs, extract_id(bb, inst)});
 }
 
 void Converter::process_cfn_mask_store(gimple *stmt, Basic_block *bb)
@@ -5209,7 +5224,7 @@ void Converter::generate_return_inst(Basic_block *bb)
   // GCC treats it as UB to return the address of a local variable.
   if (POINTER_TYPE_P(retval_type))
     {
-      Inst *mem_id = bb->build_extract_id(retval);
+      Inst *mem_id = extract_id(bb, retval);
       Inst *zero = bb->value_inst(0, module->ptr_id_bits);
       Inst *cond = bb->build_inst(Op::SLT, mem_id, zero);
       if (retval_undef)
@@ -5596,7 +5611,7 @@ void Converter::process_func_args()
 	  // TODO: Update all pointer UB checks for this.
 	  if (POINTER_TYPE_P(TREE_TYPE(decl)))
 	    {
-	      Inst *id = bb->build_extract_id(param_inst);
+	      Inst *id = extract_id(bb, param_inst);
 	      Inst *zero = bb->value_inst(0, module->ptr_id_bits);
 	      Inst *one = bb->value_inst(1, module->ptr_id_bits);
 	      bb->build_inst(Op::UB, bb->build_inst(Op::SLT, id, zero));
@@ -5644,7 +5659,7 @@ void Converter::process_func_args()
       if (POINTER_TYPE_P(TREE_TYPE(decl)))
 	{
 	  Inst *param_inst = tree2instruction.at(decl);
-	  Inst *id = bb->build_extract_id(param_inst);
+	  Inst *id = extract_id(bb, param_inst);
 	  tree2prov.insert({decl, id});
 	}
 

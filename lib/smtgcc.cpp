@@ -531,6 +531,16 @@ void Inst::insert_after(Inst *inst)
   assert(!bb);
   assert(!prev);
   assert(!next);
+
+  if (inst->op == Op::PHI)
+    {
+      if (inst->bb->first_inst)
+	insert_before(inst->bb->first_inst);
+      else
+	inst->bb->insert_last(this);
+      return;
+    }
+
   bb = inst->bb;
   update_uses();
   if (inst->next)
@@ -563,7 +573,6 @@ void Inst::move_after(Inst *inst)
 {
   assert(bb);
   assert(op != Op::PHI);
-  assert(inst->op != Op::PHI);
 
   // Unlink the instruction from the BB.
   if (this == bb->first_inst)
