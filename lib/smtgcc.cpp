@@ -37,14 +37,14 @@ const std::array<Inst_info, 96> inst_info{{
   {"mem_array", Op::MEM_ARRAY, Inst_class::nullary, true, false},
   {"mem_flag_array", Op::MEM_FLAG_ARRAY, Inst_class::nullary, true, false},
   {"mem_size_array", Op::MEM_SIZE_ARRAY, Inst_class::nullary, true, false},
-  {"mem_undef_array", Op::MEM_UNDEF_ARRAY, Inst_class::nullary, true, false},
+  {"mem_indef_array", Op::MEM_INDEF_ARRAY, Inst_class::nullary, true, false},
 
   // Integer unary
   {"assert", Op::ASSERT, Inst_class::iunary, false, false},
   {"free", Op::FREE, Inst_class::iunary, false, false},
   {"get_mem_flag", Op::GET_MEM_FLAG, Inst_class::iunary, true, false},
   {"get_mem_size", Op::GET_MEM_SIZE, Inst_class::iunary, true, false},
-  {"get_mem_undef", Op::GET_MEM_UNDEF, Inst_class::iunary, true, false},
+  {"get_mem_indef", Op::GET_MEM_INDEF, Inst_class::iunary, true, false},
   {"is_const_mem", Op::IS_CONST_MEM, Inst_class::iunary, true, false},
   {"is_nan", Op::IS_NAN, Inst_class::iunary, true, false},
   {"is_noncanonical_nan", Op::IS_NONCANONICAL_NAN, Inst_class::iunary, true, false},
@@ -68,7 +68,7 @@ const std::array<Inst_info, 96> inst_info{{
   {"and", Op::AND, Inst_class::ibinary, true, true},
   {"array_get_flag", Op::ARRAY_GET_FLAG, Inst_class::ibinary, true, false},
   {"array_get_size", Op::ARRAY_GET_SIZE, Inst_class::ibinary, true, false},
-  {"array_get_undef", Op::ARRAY_GET_UNDEF, Inst_class::ibinary, true, false},
+  {"array_get_indef", Op::ARRAY_GET_INDEF, Inst_class::ibinary, true, false},
   {"array_load", Op::ARRAY_LOAD, Inst_class::ibinary, true, false},
   {"ashr", Op::ASHR, Inst_class::ibinary, true, false},
   {"concat", Op::CONCAT, Inst_class::ibinary, true, false},
@@ -80,7 +80,7 @@ const std::array<Inst_info, 96> inst_info{{
   {"sadd_wraps", Op::SADD_WRAPS, Inst_class::ibinary, true, true},
   {"sdiv", Op::SDIV, Inst_class::ibinary, true, false},
   {"set_mem_flag", Op::SET_MEM_FLAG, Inst_class::ibinary, false, false},
-  {"set_mem_undef", Op::SET_MEM_UNDEF, Inst_class::ibinary, false, false},
+  {"set_mem_indef", Op::SET_MEM_INDEF, Inst_class::ibinary, false, false},
   {"shl", Op::SHL, Inst_class::ibinary, true, false},
   {"smul_wraps", Op::SMUL_WRAPS, Inst_class::ibinary, true, true},
   {"src_retval", Op::SRC_RETVAL, Inst_class::ibinary, false, false},
@@ -106,7 +106,7 @@ const std::array<Inst_info, 96> inst_info{{
   // Ternary
   {"array_set_flag", Op::ARRAY_SET_FLAG, Inst_class::ternary, true, false},
   {"array_set_size", Op::ARRAY_SET_SIZE, Inst_class::ternary, true, false},
-  {"array_set_undef", Op::ARRAY_SET_UNDEF, Inst_class::ternary, true, false},
+  {"array_set_indef", Op::ARRAY_SET_INDEF, Inst_class::ternary, true, false},
   {"array_store", Op::ARRAY_STORE, Inst_class::ternary, true, false},
   {"extract", Op::EXTRACT, Inst_class::ternary, true, false},
   {"ite", Op::ITE, Inst_class::ternary, true, false},
@@ -186,7 +186,7 @@ Inst *create_inst(Op op, Inst *arg)
       || op == Op::IS_NONCANONICAL_NAN
       || op == Op::GET_MEM_FLAG)
     inst->bitsize = 1;
-  else if (op == Op::GET_MEM_UNDEF || op == Op::LOAD)
+  else if (op == Op::GET_MEM_INDEF || op == Op::LOAD)
     inst->bitsize = 8;
   else if (op == Op::GET_MEM_SIZE)
     inst->bitsize = arg->bb->func->module->ptr_offset_bits;
@@ -246,13 +246,13 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2)
       assert(arg2->op == Op::VALUE);
       inst->bitsize = arg2->value();
     }
-  else if (op == Op::ARRAY_LOAD || op == Op::ARRAY_GET_UNDEF)
+  else if (op == Op::ARRAY_LOAD || op == Op::ARRAY_GET_INDEF)
     inst->bitsize = 8;
   else if (op == Op::ARRAY_GET_FLAG)
     inst->bitsize = 1;
   else if (op == Op::ARRAY_GET_SIZE)
     inst->bitsize = arg2->bb->func->module->ptr_offset_bits;
-  else if (op == Op::STORE || op == Op::SET_MEM_UNDEF)
+  else if (op == Op::STORE || op == Op::SET_MEM_INDEF)
     {
       assert(arg1->bitsize == arg1->bb->func->module->ptr_bits);
       assert(arg2->bitsize == 8);
@@ -300,7 +300,7 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
     }
   else if (op == Op::ARRAY_SET_FLAG
 	   || op == Op::ARRAY_SET_SIZE
-	   || op == Op::ARRAY_SET_UNDEF
+	   || op == Op::ARRAY_SET_INDEF
 	   || op == Op::ARRAY_STORE
 	   || op == Op::SRC_MEM
 	   || op == Op::TGT_MEM)

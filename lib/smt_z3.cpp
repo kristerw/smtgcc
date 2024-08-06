@@ -54,18 +54,18 @@ public:
   Inst *src_assert = nullptr;
   Inst *src_memory = nullptr;
   Inst *src_memory_size = nullptr;
-  Inst *src_memory_undef = nullptr;
+  Inst *src_memory_indef = nullptr;
   Inst *src_retval = nullptr;
-  Inst *src_retval_undef = nullptr;
+  Inst *src_retval_indef = nullptr;
   Inst *src_unique_ub = nullptr;
   Inst *src_common_ub = nullptr;
 
   Inst *tgt_assert = nullptr;
   Inst *tgt_memory = nullptr;
   Inst *tgt_memory_size = nullptr;
-  Inst *tgt_memory_undef = nullptr;
+  Inst *tgt_memory_indef = nullptr;
   Inst *tgt_retval = nullptr;
-  Inst *tgt_retval_undef = nullptr;
+  Inst *tgt_retval_indef = nullptr;
   Inst *tgt_unique_ub = nullptr;
   Inst *tgt_common_ub = nullptr;
 };
@@ -289,12 +289,12 @@ void Converter::build_nullary_smt(const Inst *inst)
 	inst2array.insert({inst, memory_size});
       }
       break;
-    case Op::MEM_UNDEF_ARRAY:
+    case Op::MEM_INDEF_ARRAY:
       {
 	z3::sort address_sort = ctx.bv_sort(func->module->ptr_bits);
-	z3::expr memory_undef =
+	z3::expr memory_indef =
 	  z3::expr(ctx, Z3_mk_const_array(ctx, address_sort, ctx.bv_val(0, 8)));
-	inst2array.insert({inst, memory_undef});
+	inst2array.insert({inst, memory_indef});
       }
       break;
     default:
@@ -390,7 +390,7 @@ void Converter::build_bv_binary_smt(const Inst *inst)
     {
     case Op::ARRAY_GET_FLAG:
     case Op::ARRAY_GET_SIZE:
-    case Op::ARRAY_GET_UNDEF:
+    case Op::ARRAY_GET_INDEF:
     case Op::ARRAY_LOAD:
       {
 	z3::expr arg1 = inst_as_array(inst->args[0]);
@@ -400,15 +400,15 @@ void Converter::build_bv_binary_smt(const Inst *inst)
       return;
     case Op::SRC_RETVAL:
       assert(!src_retval);
-      assert(!src_retval_undef);
+      assert(!src_retval_indef);
       src_retval = inst->args[0];
-      src_retval_undef = inst->args[1];
+      src_retval_indef = inst->args[1];
       return;
     case Op::TGT_RETVAL:
       assert(!tgt_retval);
-      assert(!tgt_retval_undef);
+      assert(!tgt_retval_indef);
       tgt_retval = inst->args[0];
-      tgt_retval_undef = inst->args[1];
+      tgt_retval_indef = inst->args[1];
       return;
     case Op::SRC_UB:
       assert(!src_unique_ub && !src_common_ub);
@@ -585,7 +585,7 @@ void Converter::build_ternary_smt(const Inst *inst)
     {
     case Op::ARRAY_SET_FLAG:
     case Op::ARRAY_SET_SIZE:
-    case Op::ARRAY_SET_UNDEF:
+    case Op::ARRAY_SET_INDEF:
     case Op::ARRAY_STORE:
       {
 	z3::expr arg1 = inst_as_array(inst->args[0]);
@@ -644,14 +644,14 @@ void Converter::build_ternary_smt(const Inst *inst)
       assert(!src_memory_size);
       src_memory = inst->args[0];
       src_memory_size = inst->args[1];
-      src_memory_undef = inst->args[2];
+      src_memory_indef = inst->args[2];
       return;
     case Op::TGT_MEM:
       assert(!tgt_memory);
       assert(!tgt_memory_size);
       tgt_memory = inst->args[0];
       tgt_memory_size = inst->args[1];
-      tgt_memory_undef = inst->args[2];
+      tgt_memory_indef = inst->args[2];
       return;
     default:
       throw Not_implemented("build_ternary_smt: "s + inst->name());
@@ -806,15 +806,15 @@ void Converter::convert_function()
 	}
     }
 
-  // If both src and tgt retval_undef is 0, then it is the same as no
-  // retval_undef.
-  if (src_retval_undef
-      && src_retval_undef == tgt_retval_undef
-      && src_retval_undef->op == Op::VALUE
-      && !src_retval_undef->value())
+  // If both src and tgt retval_indef is 0, then it is the same as no
+  // retval_indef.
+  if (src_retval_indef
+      && src_retval_indef == tgt_retval_indef
+      && src_retval_indef->op == Op::VALUE
+      && !src_retval_indef->value())
     {
-      src_retval_undef = nullptr;
-      tgt_retval_undef = nullptr;
+      src_retval_indef = nullptr;
+      tgt_retval_indef = nullptr;
     }
 }
 
@@ -919,37 +919,37 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 
   // Check that the returned value (if any) is the same for src and tgt.
   if (conv.src_retval != conv.tgt_retval
-      || conv.src_retval_undef != conv.tgt_retval_undef)
+      || conv.src_retval_indef != conv.tgt_retval_indef)
     {
       assert(conv.src_retval && conv.tgt_retval);
       z3::expr src_expr = conv.inst_as_bv(conv.src_retval);
       z3::expr tgt_expr = conv.inst_as_bv(conv.tgt_retval);
 
-      z3::expr is_more_undef = ctx.bool_val(false);
-      if (conv.src_retval_undef)
+      z3::expr is_more_indef = ctx.bool_val(false);
+      if (conv.src_retval_indef)
 	{
-	  z3::expr src_undef = conv.inst_as_bv(conv.src_retval_undef);
-	  z3::expr tgt_undef = conv.inst_as_bv(conv.tgt_retval_undef);
-	  z3::expr src_mask = ~src_undef;
+	  z3::expr src_indef = conv.inst_as_bv(conv.src_retval_indef);
+	  z3::expr tgt_indef = conv.inst_as_bv(conv.tgt_retval_indef);
+	  z3::expr src_mask = ~src_indef;
 	  z3::expr new_src_expr = src_expr & src_mask;
 	  src_expr = new_src_expr;
 	  z3::expr new_tgt_expr = tgt_expr & src_mask;
 	  tgt_expr = new_tgt_expr;
 
-	  // Check that tgt is not more undef than src.
-	  if (conv.tgt_retval_undef != conv.src_retval_undef)
+	  // Check that tgt is not more indef than src.
+	  if (conv.tgt_retval_indef != conv.src_retval_indef)
 	    {
-	      z3::expr new_tgt_undef = conv.inst_as_bv(conv.tgt_retval_undef);
-	      tgt_undef = new_tgt_undef;
-	      z3::expr new_is_more_undef = (src_mask & tgt_undef) != 0;
-	      is_more_undef = new_is_more_undef;
+	      z3::expr new_tgt_indef = conv.inst_as_bv(conv.tgt_retval_indef);
+	      tgt_indef = new_tgt_indef;
+	      z3::expr new_is_more_indef = (src_mask & tgt_indef) != 0;
+	      is_more_indef = new_is_more_indef;
 	    }
 	}
 
       z3::solver solver(ctx);
       solver.add(!src_common_ub_expr);
       solver.add(!src_unique_ub_expr);
-      solver.add((src_expr != tgt_expr) || is_more_undef);
+      solver.add((src_expr != tgt_expr) || is_more_indef);
       uint64_t start_time = get_time();
       Solver_result solver_result = run_solver(solver, "retval");
       stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
@@ -960,12 +960,12 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 	  std::string msg = *solver_result.message;
 	  msg = msg + "src retval: " + model.eval(src_expr).to_string() + "\n";
 	  msg = msg + "tgt retval: " + model.eval(tgt_expr).to_string() + "\n";
-	  if (conv.src_retval_undef)
+	  if (conv.src_retval_indef)
 	    {
-	      z3::expr src_undef = conv.inst_as_bv(conv.src_retval_undef);
-	      z3::expr tgt_undef = conv.inst_as_bv(conv.tgt_retval_undef);
-	      msg = msg + "src undef: " + model.eval(src_undef).to_string() + "\n";
-	      msg = msg +  "tgt undef: " + model.eval(tgt_undef).to_string() + "\n";
+	      z3::expr src_indef = conv.inst_as_bv(conv.src_retval_indef);
+	      z3::expr tgt_indef = conv.inst_as_bv(conv.tgt_retval_indef);
+	      msg = msg + "src indef: " + model.eval(src_indef).to_string() + "\n";
+	      msg = msg +  "tgt indef: " + model.eval(tgt_indef).to_string() + "\n";
 	    }
 	  add_print(msg, conv, solver);
 	  Solver_result result = {Result_status::incorrect, msg};
@@ -981,14 +981,14 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
   // Check that the global memory is consistent for src and tgt.
   if (conv.src_memory != conv.tgt_memory
       || conv.src_memory_size != conv.tgt_memory_size
-      || conv.src_memory_undef != conv.tgt_memory_undef)
+      || conv.src_memory_indef != conv.tgt_memory_indef)
   {
     z3::expr src_mem = conv.inst_as_array(conv.src_memory);
     z3::expr src_mem_size = conv.inst_as_array(conv.src_memory_size);
-    z3::expr src_mem_undef = conv.inst_as_array(conv.src_memory_undef);
+    z3::expr src_mem_indef = conv.inst_as_array(conv.src_memory_indef);
 
     z3::expr tgt_mem = conv.inst_as_array(conv.tgt_memory);
-    z3::expr tgt_mem_undef = conv.inst_as_array(conv.tgt_memory_undef);
+    z3::expr tgt_mem_indef = conv.inst_as_array(conv.tgt_memory_indef);
 
     z3::expr ptr = ctx.bv_const(".ptr", func->module->ptr_bits);
     uint32_t ptr_id_high = func->module->ptr_id_high;
@@ -1009,12 +1009,12 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
     solver.add(z3::ult(offset, z3::select(src_mem_size, id)));
 
     // Check that src and tgt are the same for the bits where src is defined
-    // and that tgt is not more undefined than src.
-    z3::expr src_mask = ~z3::select(src_mem_undef, ptr);
+    // and that tgt is not more indefinite than src.
+    z3::expr src_mask = ~z3::select(src_mem_indef, ptr);
     z3::expr src_value = z3::select(src_mem, ptr) & src_mask;
     z3::expr tgt_value = z3::select(tgt_mem, ptr) & src_mask;
-    z3::expr tgt_more_undef = (z3::select(tgt_mem_undef, ptr) & src_mask) != 0;
-    solver.add(src_value != tgt_value || tgt_more_undef);
+    z3::expr tgt_more_indef = (z3::select(tgt_mem_indef, ptr) & src_mask) != 0;
+    solver.add(src_value != tgt_value || tgt_more_indef);
 
     uint64_t start_time = get_time();
     Solver_result solver_result = run_solver(solver, "Memory");
@@ -1025,14 +1025,14 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 	z3::model model = solver.get_model();
 	z3::expr src_byte = model.eval(z3::select(src_mem, ptr));
 	z3::expr tgt_byte = model.eval(z3::select(tgt_mem, ptr));
-	z3::expr src_undef = model.eval(z3::select(src_mem_undef, ptr));
-	z3::expr tgt_undef = model.eval(z3::select(tgt_mem_undef, ptr));
+	z3::expr src_indef = model.eval(z3::select(src_mem_indef, ptr));
+	z3::expr tgt_indef = model.eval(z3::select(tgt_mem_indef, ptr));
 	std::string msg = *solver_result.message;
 	msg = msg + "\n.ptr = " + model.eval(ptr).to_string() + "\n";
 	msg = msg + "src *.ptr: " + src_byte.to_string() + "\n";
 	msg = msg + "tgt *.ptr: " + tgt_byte.to_string() + "\n";
-	msg = msg + "src undef: " + src_undef.to_string() + "\n";
-	msg = msg + "tgt undef: " + tgt_undef.to_string() + "\n";
+	msg = msg + "src indef: " + src_indef.to_string() + "\n";
+	msg = msg + "tgt indef: " + tgt_indef.to_string() + "\n";
 	add_print(msg, conv, solver);
 	Solver_result result = {Result_status::incorrect, msg};
 	return std::pair<SStats, Solver_result>(stats, result);

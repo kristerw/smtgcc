@@ -54,18 +54,18 @@ public:
   Inst *src_assert = nullptr;
   Inst *src_memory = nullptr;
   Inst *src_memory_size = nullptr;
-  Inst *src_memory_undef = nullptr;
+  Inst *src_memory_indef = nullptr;
   Inst *src_retval = nullptr;
-  Inst *src_retval_undef = nullptr;
+  Inst *src_retval_indef = nullptr;
   Inst *src_unique_ub = nullptr;
   Inst *src_common_ub = nullptr;
 
   Inst *tgt_assert = nullptr;
   Inst *tgt_memory = nullptr;
   Inst *tgt_memory_size = nullptr;
-  Inst *tgt_memory_undef = nullptr;
+  Inst *tgt_memory_indef = nullptr;
   Inst *tgt_retval = nullptr;
-  Inst *tgt_retval_undef = nullptr;
+  Inst *tgt_retval_indef = nullptr;
   Inst *tgt_unique_ub = nullptr;
   Inst *tgt_common_ub = nullptr;
 };
@@ -293,15 +293,15 @@ void Converter::build_nullary_smt(const Inst *inst)
 	inst2array.insert({inst, memory_size});
       }
       break;
-    case Op::MEM_UNDEF_ARRAY:
+    case Op::MEM_INDEF_ARRAY:
       {
 	cvc5::Sort address_sort =
 	  solver.mkBitVectorSort(func->module->ptr_bits);
 	cvc5::Sort byte_sort = solver.mkBitVectorSort(8);
 	cvc5::Sort array_sort = solver.mkArraySort(address_sort, byte_sort);
-	cvc5::Term memory_undef =
+	cvc5::Term memory_indef =
 	  solver.mkConstArray(array_sort, solver.mkBitVector(8, 0));
-	inst2array.insert({inst, memory_undef});
+	inst2array.insert({inst, memory_indef});
       }
       break;
     default:
@@ -371,7 +371,7 @@ void Converter::build_bv_binary_smt(const Inst *inst)
     {
     case Op::ARRAY_GET_FLAG:
     case Op::ARRAY_GET_SIZE:
-    case Op::ARRAY_GET_UNDEF:
+    case Op::ARRAY_GET_INDEF:
     case Op::ARRAY_LOAD:
       {
 	cvc5::Term arg1 = inst_as_array(inst->args[0]);
@@ -381,15 +381,15 @@ void Converter::build_bv_binary_smt(const Inst *inst)
       return;
     case Op::SRC_RETVAL:
       assert(!src_retval);
-      assert(!src_retval_undef);
+      assert(!src_retval_indef);
       src_retval = inst->args[0];
-      src_retval_undef = inst->args[1];
+      src_retval_indef = inst->args[1];
       return;
     case Op::TGT_RETVAL:
       assert(!tgt_retval);
-      assert(!tgt_retval_undef);
+      assert(!tgt_retval_indef);
       tgt_retval = inst->args[0];
-      tgt_retval_undef = inst->args[1];
+      tgt_retval_indef = inst->args[1];
       return;
     case Op::SRC_UB:
       assert(!src_unique_ub && !src_common_ub);
@@ -539,7 +539,7 @@ void Converter::build_ternary_smt(const Inst *inst)
     {
     case Op::ARRAY_SET_FLAG:
     case Op::ARRAY_SET_SIZE:
-    case Op::ARRAY_SET_UNDEF:
+    case Op::ARRAY_SET_INDEF:
     case Op::ARRAY_STORE:
       {
 	cvc5::Term arg1 = inst_as_array(inst->args[0]);
@@ -579,14 +579,14 @@ void Converter::build_ternary_smt(const Inst *inst)
       assert(!src_memory_size);
       src_memory = inst->args[0];
       src_memory_size = inst->args[1];
-      src_memory_undef = inst->args[2];
+      src_memory_indef = inst->args[2];
       return;
     case Op::TGT_MEM:
       assert(!tgt_memory);
       assert(!tgt_memory_size);
       tgt_memory = inst->args[0];
       tgt_memory_size = inst->args[1];
-      tgt_memory_undef = inst->args[2];
+      tgt_memory_indef = inst->args[2];
       return;
     default:
       throw Not_implemented("build_ternary_smt: "s + inst->name());
@@ -735,15 +735,15 @@ void Converter::convert_function()
 	}
     }
 
-  // If both src and tgt retval_undef is 0, then it is the same as no
-  // retval_undef.
-  if (src_retval_undef
-      && src_retval_undef == tgt_retval_undef
-      && src_retval_undef->op == Op::VALUE
-      && !src_retval_undef->value())
+  // If both src and tgt retval_indef is 0, then it is the same as no
+  // retval_indef.
+  if (src_retval_indef
+      && src_retval_indef == tgt_retval_indef
+      && src_retval_indef->op == Op::VALUE
+      && !src_retval_indef->value())
     {
-      src_retval_undef = nullptr;
-      tgt_retval_undef = nullptr;
+      src_retval_indef = nullptr;
+      tgt_retval_indef = nullptr;
     }
 }
 
@@ -826,37 +826,37 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 
   // Check that the returned value (if any) is the same for src and tgt.
   if (conv.src_retval != conv.tgt_retval
-      || conv.src_retval_undef != conv.tgt_retval_undef)
+      || conv.src_retval_indef != conv.tgt_retval_indef)
     {
       solver.push();
       assert(conv.src_retval && conv.tgt_retval);
       cvc5::Term src_term = conv.inst_as_bv(conv.src_retval);
       cvc5::Term tgt_term = conv.inst_as_bv(conv.tgt_retval);
 
-      cvc5::Term is_more_undef = solver.mkBoolean(false);
-      if (conv.src_retval_undef)
+      cvc5::Term is_more_indef = solver.mkBoolean(false);
+      if (conv.src_retval_indef)
 	{
-	  cvc5::Term src_undef = conv.inst_as_bv(conv.src_retval_undef);
-	  cvc5::Term src_mask = solver.mkTerm(cvc5::BITVECTOR_NOT, {src_undef});
+	  cvc5::Term src_indef = conv.inst_as_bv(conv.src_retval_indef);
+	  cvc5::Term src_mask = solver.mkTerm(cvc5::BITVECTOR_NOT, {src_indef});
 	  src_term = solver.mkTerm(cvc5::BITVECTOR_AND, {src_term, src_mask});
 	  tgt_term = solver.mkTerm(cvc5::BITVECTOR_AND, {tgt_term, src_mask});
 
-	  // Check that tgt is not more undef than src.
-	  if (conv.tgt_retval_undef != conv.src_retval_undef)
+	  // Check that tgt is not more indef than src.
+	  if (conv.tgt_retval_indef != conv.src_retval_indef)
 	    {
-	      cvc5::Term tgt_undef = conv.inst_as_bv(conv.tgt_retval_undef);
-	      cvc5::Term undef_result =
-		solver.mkTerm(cvc5::BITVECTOR_AND, {tgt_undef, src_mask});
+	      cvc5::Term tgt_indef = conv.inst_as_bv(conv.tgt_retval_indef);
+	      cvc5::Term indef_result =
+		solver.mkTerm(cvc5::BITVECTOR_AND, {tgt_indef, src_mask});
 	      cvc5::Term zero = solver.mkBitVector(conv.tgt_retval->bitsize, 0);
-	      is_more_undef =
-		solver.mkTerm(cvc5::DISTINCT, {undef_result, zero});
+	      is_more_indef =
+		solver.mkTerm(cvc5::DISTINCT, {indef_result, zero});
 	    }
 	}
 
       solver.assertFormula(not_src_common_ub_term);
       solver.assertFormula(not_src_unique_ub_term);
       cvc5::Term res1 = solver.mkTerm(cvc5::DISTINCT, {src_term, tgt_term});
-      cvc5::Term res2 = solver.mkTerm(cvc5::OR, {res1, is_more_undef});
+      cvc5::Term res2 = solver.mkTerm(cvc5::OR, {res1, is_more_indef});
       solver.assertFormula(res2);
       uint64_t start_time = get_time();
       Solver_result solver_result = run_solver(solver, "retval");
@@ -869,14 +869,14 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	  std::string msg = *solver_result.message;
 	  msg = msg + "src retval: " + src_val.getBitVectorValue(16) + "\n";
 	  msg = msg + "tgt retval: " + tgt_val.getBitVectorValue(16) + "\n";
-	  if (conv.src_retval_undef)
+	  if (conv.src_retval_indef)
 	    {
-	      cvc5::Term src_undef = conv.inst_as_bv(conv.src_retval_undef);
-	      cvc5::Term tgt_undef = conv.inst_as_bv(conv.tgt_retval_undef);
-	      cvc5::Term src_undef_val = solver.getValue(src_undef);
-	      cvc5::Term tgt_undef_val = solver.getValue(tgt_undef);
-	      msg = msg + "src undef: " + src_undef_val.getBitVectorValue(16) + "\n";
-	      msg = msg + "tgt undef: " + tgt_undef_val.getBitVectorValue(16) + "\n";
+	      cvc5::Term src_indef = conv.inst_as_bv(conv.src_retval_indef);
+	      cvc5::Term tgt_indef = conv.inst_as_bv(conv.tgt_retval_indef);
+	      cvc5::Term src_indef_val = solver.getValue(src_indef);
+	      cvc5::Term tgt_indef_val = solver.getValue(tgt_indef);
+	      msg = msg + "src indef: " + src_indef_val.getBitVectorValue(16) + "\n";
+	      msg = msg + "tgt indef: " + tgt_indef_val.getBitVectorValue(16) + "\n";
 	    }
 	  Solver_result result = {Result_status::incorrect, msg};
 	  return std::pair<SStats, Solver_result>(stats, result);
@@ -892,17 +892,17 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
   // Check that the global memory is consistent for src and tgt.
   if (conv.src_memory != conv.tgt_memory
       || conv.src_memory_size != conv.tgt_memory_size
-      || conv.src_memory_undef != conv.tgt_memory_undef)
+      || conv.src_memory_indef != conv.tgt_memory_indef)
   {
     solver.push();
     solver.assertFormula(not_src_common_ub_term);
     solver.assertFormula(not_src_unique_ub_term);
     cvc5::Term src_mem = conv.inst_as_array(conv.src_memory);
     cvc5::Term src_mem_size = conv.inst_as_array(conv.src_memory_size);
-    cvc5::Term src_mem_undef = conv.inst_as_array(conv.src_memory_undef);
+    cvc5::Term src_mem_indef = conv.inst_as_array(conv.src_memory_indef);
 
     cvc5::Term tgt_mem = conv.inst_as_array(conv.tgt_memory);
-    cvc5::Term tgt_mem_undef = conv.inst_as_array(conv.tgt_memory_undef);
+    cvc5::Term tgt_mem_indef = conv.inst_as_array(conv.tgt_memory_indef);
 
     cvc5::Sort ptr_sort = solver.mkBitVectorSort(func->module->ptr_bits);
     cvc5::Term ptr = solver.mkConst(ptr_sort, ".ptr");
@@ -928,19 +928,19 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
     solver.assertFormula(cond2);
 
     // Check that src and tgt are the same for the bits where src is defined
-    // and that tgt is not more undefined than src.
-    cvc5::Term src_undef = solver.mkTerm(cvc5::SELECT, {src_mem_undef, ptr});
-    cvc5::Term src_mask = solver.mkTerm(cvc5::BITVECTOR_NOT, {src_undef});
+    // and that tgt is not more indefinite than src.
+    cvc5::Term src_indef = solver.mkTerm(cvc5::SELECT, {src_mem_indef, ptr});
+    cvc5::Term src_mask = solver.mkTerm(cvc5::BITVECTOR_NOT, {src_indef});
     cvc5::Term src_byte = solver.mkTerm(cvc5::SELECT, {src_mem, ptr});
     src_byte = solver.mkTerm(cvc5::BITVECTOR_AND, {src_byte, src_mask});
     cvc5::Term tgt_byte = solver.mkTerm(cvc5::SELECT, {tgt_mem, ptr});
     tgt_byte = solver.mkTerm(cvc5::BITVECTOR_AND, {tgt_byte, src_mask});
     cvc5::Term cond3 = solver.mkTerm(cvc5::DISTINCT, {src_byte, tgt_byte});
-    cvc5::Term tgt_undef = solver.mkTerm(cvc5::SELECT, {tgt_mem_undef, ptr});
-    cvc5::Term tgt_more_undef =
-      solver.mkTerm(cvc5::BITVECTOR_AND, {tgt_undef, src_mask});
+    cvc5::Term tgt_indef = solver.mkTerm(cvc5::SELECT, {tgt_mem_indef, ptr});
+    cvc5::Term tgt_more_indef =
+      solver.mkTerm(cvc5::BITVECTOR_AND, {tgt_indef, src_mask});
     cvc5::Term zero_byte = solver.mkBitVector(8, 0);
-    cvc5::Term cond4 = solver.mkTerm(cvc5::DISTINCT, {tgt_more_undef, zero_byte});
+    cvc5::Term cond4 = solver.mkTerm(cvc5::DISTINCT, {tgt_more_indef, zero_byte});
     solver.assertFormula(solver.mkTerm(cvc5::OR, {cond3, cond4}));
 
     // TODO: Should make a better getBitVectorValue that prints values as
@@ -954,14 +954,14 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	cvc5::Term ptr_val = solver.getValue(ptr);
 	cvc5::Term src_byte_val = solver.getValue(src_byte);
 	cvc5::Term tgt_byte_val = solver.getValue(tgt_byte);
-	cvc5::Term src_undef_val = solver.getValue(src_undef);
-	cvc5::Term tgt_undef_val = solver.getValue(tgt_undef);
+	cvc5::Term src_indef_val = solver.getValue(src_indef);
+	cvc5::Term tgt_indef_val = solver.getValue(tgt_indef);
 	std::string msg = *solver_result.message;
 	msg = msg + "\n.ptr = " + ptr_val.getBitVectorValue(16) + "\n";
 	msg = msg + "src *.ptr: " + src_byte_val.getBitVectorValue(16) + "\n";
 	msg = msg + "tgt *.ptr: " + tgt_byte_val.getBitVectorValue(16) + "\n";
-	msg = msg + "src undef: " + src_undef_val.getBitVectorValue(16) + "\n";
-	msg = msg + "tgt undef: " + tgt_undef_val.getBitVectorValue(16) + "\n";
+	msg = msg + "src indef: " + src_indef_val.getBitVectorValue(16) + "\n";
+	msg = msg + "tgt indef: " + tgt_indef_val.getBitVectorValue(16) + "\n";
 	Solver_result result = {Result_status::incorrect, msg};
 	return std::pair<SStats, Solver_result>(stats, result);
       }

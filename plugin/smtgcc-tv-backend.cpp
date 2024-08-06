@@ -553,7 +553,8 @@ static void eliminate_registers(Function *func)
 	{
 	  Basic_block *bb = func->bbs[0];
 	  registers.push_back(inst);
-	  // TODO: Should be undef instead of 0.
+	  // TODO: Should be an arbitrary value (i.e., a symbolic value)
+	  // instead of 0.
 	  bb2reg_values[bb][inst] = bb->value_inst(0, inst->bitsize);
 	}
     }

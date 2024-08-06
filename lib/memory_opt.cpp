@@ -98,7 +98,7 @@ bool is_unused_memory(Inst *memory_inst)
       visited.insert(inst);
       for (auto used_by : inst->used_by)
 	{
-	  if (used_by->op == Op::SET_MEM_UNDEF
+	  if (used_by->op == Op::SET_MEM_INDEF
 	      || used_by->op == Op::STORE)
 	    sinks.push_back(used_by);
 	  else
@@ -180,26 +180,26 @@ void remove_unused_memory(Inst *memory_inst)
 
 void store_load_forwarding(Function *func)
 {
-  std::map<Basic_block *, std::map<uint64_t, Inst *>> bb2mem_undef;
+  std::map<Basic_block *, std::map<uint64_t, Inst *>> bb2mem_indef;
   std::map<Basic_block *, std::map<uint64_t, Inst *>> bb2mem_flag;
   std::map<Basic_block *, std::map<uint64_t, Inst *>> bb2stores;
 
   for (auto bb : func->bbs)
     {
-      std::map<uint64_t, Inst *> mem_undef;
+      std::map<uint64_t, Inst *> mem_indef;
       std::map<uint64_t, Inst *> mem_flag;
       std::map<uint64_t, Inst *> stores;
 
       if (bb->preds.size() == 1)
 	{
-	  mem_undef = bb2mem_undef.at(bb->preds[0]);
+	  mem_indef = bb2mem_indef.at(bb->preds[0]);
 	  mem_flag = bb2mem_flag.at(bb->preds[0]);
 	  stores = bb2stores.at(bb->preds[0]);
 	}
       else if (bb->preds.size() == 2)
 	{
-	  if (bb2mem_undef.at(bb->preds[0]) == bb2mem_undef.at(bb->preds[1]))
-	    mem_undef = bb2mem_undef.at(bb->preds[0]);
+	  if (bb2mem_indef.at(bb->preds[0]) == bb2mem_indef.at(bb->preds[1]))
+	    mem_indef = bb2mem_indef.at(bb->preds[0]);
 	  if (bb2mem_flag.at(bb->preds[0]) == bb2mem_flag.at(bb->preds[1]))
 	    mem_flag = bb2mem_flag.at(bb->preds[0]);
 	  if (bb2stores.at(bb->preds[0]) == bb2stores.at(bb->preds[1]))
@@ -218,37 +218,37 @@ void store_load_forwarding(Function *func)
 		uint64_t size = inst->args[1]->value();
 		uint32_t flags = inst->args[2]->value();
 		uint64_t addr = id << func->module->ptr_id_low;
-		Inst *undef;
+		Inst *indef;
 		if (flags & MEM_UNINIT)
-		  undef = bb->value_inst(255, 8);
+		  indef = bb->value_inst(255, 8);
 		else
-		  undef = bb->value_inst(0, 8);
+		  indef = bb->value_inst(0, 8);
 		size = std::min(size, max_mem_unroll_limit);
 		for (uint64_t i = 0; i < size; i++)
 		  {
-		    mem_undef[addr + i] = undef;
+		    mem_indef[addr + i] = indef;
 		  }
 	      }
 	      break;
-	    case Op::SET_MEM_UNDEF:
+	    case Op::SET_MEM_INDEF:
 	      {
 		Inst *ptr = inst->args[0];
 		if (ptr->op == Op::VALUE)
-		  mem_undef[ptr->value()] = inst;
+		  mem_indef[ptr->value()] = inst;
 		else
-		  mem_undef.clear();
+		  mem_indef.clear();
 	      }
 	      break;
-	    case Op::GET_MEM_UNDEF:
+	    case Op::GET_MEM_INDEF:
 	      {
 		Inst *ptr = inst->args[0];
 		if (ptr->op == Op::VALUE)
 		  {
 		    uint64_t ptr_val = ptr->value();
-		    if (mem_undef.contains(ptr_val))
+		    if (mem_indef.contains(ptr_val))
 		      {
-			Inst *value = mem_undef.at(ptr_val);
-			if (value->op == Op::SET_MEM_UNDEF)
+			Inst *value = mem_indef.at(ptr_val);
+			if (value->op == Op::SET_MEM_INDEF)
 			  value = value->args[1];
 			else
 			  assert(value->op == Op::VALUE);
@@ -315,7 +315,7 @@ void store_load_forwarding(Function *func)
 	  inst = next_inst;
 	}
 
-      bb2mem_undef[bb] = std::move(mem_undef);
+      bb2mem_indef[bb] = std::move(mem_indef);
       bb2mem_flag[bb] = std::move(mem_flag);
       bb2stores[bb] = std::move(stores);
     }
@@ -323,7 +323,7 @@ void store_load_forwarding(Function *func)
 
 void dead_store_elim(Function *func)
 {
-  std::set<uint64_t> mem_undef;
+  std::set<uint64_t> mem_indef;
   std::set<uint64_t> mem_flag;
   std::set<uint64_t> stores;
 
@@ -343,7 +343,7 @@ void dead_store_elim(Function *func)
       for (uint64_t i = 0; i < size; i++)
 	{
 	  uint64_t addr = mem_addr + i;
-	  mem_undef.insert(addr);
+	  mem_indef.insert(addr);
 	  mem_flag.insert(addr);
 	  stores.insert(addr);
 	}
@@ -356,7 +356,7 @@ void dead_store_elim(Function *func)
       if (bb->succs.size() > 1
 	  || (bb->succs.size() == 1 && bb->succs[0] != prev_bb))
 	{
-	  mem_undef.clear();
+	  mem_indef.clear();
 	  mem_flag.clear();
 	  stores.clear();
 	}
@@ -367,26 +367,26 @@ void dead_store_elim(Function *func)
 
 	  switch (inst->op)
 	    {
-	    case Op::SET_MEM_UNDEF:
+	    case Op::SET_MEM_INDEF:
 	      {
 		Inst *ptr = inst->args[0];
 		if (ptr->op == Op::VALUE)
 		  {
 		    uint64_t ptr_val = ptr->value();
-		    if (mem_undef.contains(ptr_val))
+		    if (mem_indef.contains(ptr_val))
 		      destroy_instruction(inst);
 		    else
-		      mem_undef.insert(ptr_val);
+		      mem_indef.insert(ptr_val);
 		  }
 	      }
 	      break;
-	    case Op::GET_MEM_UNDEF:
+	    case Op::GET_MEM_INDEF:
 	      {
 		Inst *ptr = inst->args[0];
 		if (ptr->op == Op::VALUE)
-		  mem_undef.erase(ptr->value());
+		  mem_indef.erase(ptr->value());
 		else
-		  mem_undef.clear();
+		  mem_indef.clear();
 	      }
 	      break;
 	    case Op::SET_MEM_FLAG:

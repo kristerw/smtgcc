@@ -94,7 +94,7 @@ class Converter {
   std::map<Basic_block *, Inst *> bb2memory;
   std::map<Basic_block *, Inst *> bb2memory_size;
   std::map<Basic_block *, Inst *> bb2memory_flag;
-  std::map<Basic_block *, Inst *> bb2memory_undef;
+  std::map<Basic_block *, Inst *> bb2memory_indef;
 
   // List of the mem_id for the constant memory blocks.
   std::vector<Inst *> const_ids;
@@ -114,22 +114,22 @@ class Converter {
   Inst *memory;
   Inst *memory_flag;
   Inst *memory_size;
-  Inst *memory_undef;
+  Inst *memory_indef;
 
   Basic_block *dest_bb;
 
   Inst *src_memory = nullptr;
   Inst *src_memory_size = nullptr;
-  Inst *src_memory_undef = nullptr;
+  Inst *src_memory_indef = nullptr;
   Inst *src_retval = nullptr;
-  Inst *src_retval_undef = nullptr;
+  Inst *src_retval_indef = nullptr;
   Inst *src_unique_ub = nullptr;
   Inst *src_common_ub = nullptr;
   Inst *tgt_memory = nullptr;
   Inst *tgt_memory_size = nullptr;
-  Inst *tgt_memory_undef = nullptr;
+  Inst *tgt_memory_indef = nullptr;
   Inst *tgt_retval = nullptr;
-  Inst *tgt_retval_undef = nullptr;
+  Inst *tgt_retval_indef = nullptr;
   Inst *tgt_unique_ub = nullptr;
   Inst *tgt_common_ub = nullptr;
 
@@ -442,7 +442,7 @@ Converter::Converter(Module *m, bool run_simplify_inst)
   dest_bb = dest_func->build_bb();
 
   memory = build_inst(Op::MEM_ARRAY);
-  memory_undef = build_inst(Op::MEM_UNDEF_ARRAY);
+  memory_indef = build_inst(Op::MEM_INDEF_ARRAY);
   memory_flag = build_inst(Op::MEM_FLAG_ARRAY);
   memory_size = build_inst(Op::MEM_SIZE_ARRAY);
 }
@@ -768,7 +768,7 @@ std::pair<Inst *, Inst *> Converter::simplify_array_access(Inst *array, Inst *ad
       else if (array->op == Op::ARRAY_STORE
 	       || array->op == Op::ARRAY_SET_SIZE
 	       || array->op == Op::ARRAY_SET_FLAG
-	       || array->op == Op::ARRAY_SET_UNDEF)
+	       || array->op == Op::ARRAY_SET_INDEF)
 	{
 	  Inst *store_array = array->args[0];
 	  Inst *store_addr = array->args[1];
@@ -789,7 +789,7 @@ std::pair<Inst *, Inst *> Converter::simplify_array_access(Inst *array, Inst *ad
 	  else
 	    break;
 	}
-      else if (array->op == Op::MEM_UNDEF_ARRAY)
+      else if (array->op == Op::MEM_INDEF_ARRAY)
 	{
 	  value = value_inst(0, 8);
 	  break;
@@ -833,7 +833,7 @@ Inst *Converter::strip_local_mem(Inst *array, std::map<Inst *, Inst *>& cache)
 	}
       else if (array->op == Op::ARRAY_STORE
 	       || array->op == Op::ARRAY_SET_FLAG
-	       || array->op == Op::ARRAY_SET_UNDEF)
+	       || array->op == Op::ARRAY_SET_INDEF)
 	{
 	  Inst *store_array = array->args[0];
 	  Inst *store_addr = array->args[1];
@@ -999,9 +999,9 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       bb2memory_flag[bb] = array;
       return;
     }
-  else if (inst->op == Op::SET_MEM_UNDEF)
+  else if (inst->op == Op::SET_MEM_INDEF)
     {
-      Inst *array = bb2memory_undef.at(bb);
+      Inst *array = bb2memory_indef.at(bb);
       Inst *addr = translate.at(inst->args[0]);
       Inst *value = translate.at(inst->args[1]);
 
@@ -1010,14 +1010,14 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       Inst *tmp_array = array;
       for (int i = 0; i < max_store_traversal; i++)
 	{
-	  if (tmp_array->op == Op::MEM_UNDEF_ARRAY
+	  if (tmp_array->op == Op::MEM_INDEF_ARRAY
 	      && value->op == Op::VALUE
 	      && value->value() == 0)
 	    {
 	      // The array element has the correct value already.
 	      return;
 	    }
-	  if (tmp_array->op == Op::ARRAY_SET_UNDEF)
+	  if (tmp_array->op == Op::ARRAY_SET_INDEF)
 	    {
 	      Inst *tmp_addr = tmp_array->args[1];
 	      Inst *tmp_value = tmp_array->args[2];
@@ -1035,8 +1035,8 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
 	  break;
 	}
 
-      array = build_inst(Op::ARRAY_SET_UNDEF, array, addr, value);
-      bb2memory_undef[bb] = array;
+      array = build_inst(Op::ARRAY_SET_INDEF, array, addr, value);
+      bb2memory_indef[bb] = array;
       return;
     }
   else if (inst->op == Op::FREE)
@@ -1048,14 +1048,14 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       bb2memory_size[bb] = array;
       return;
     }
-   else if (inst->op == Op::GET_MEM_UNDEF)
+   else if (inst->op == Op::GET_MEM_INDEF)
      {
        std::map<Inst *, std::pair<Inst *, Inst *>> cache;
-       Inst *array = bb2memory_undef.at(bb);
+       Inst *array = bb2memory_indef.at(bb);
        Inst *addr = translate.at(inst->args[0]);
        std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
        if (!new_inst)
-	 new_inst = build_inst(Op::ARRAY_GET_UNDEF, array, addr);
+	 new_inst = build_inst(Op::ARRAY_GET_INDEF, array, addr);
      }
    else if (inst->op == Op::GET_MEM_FLAG)
      {
@@ -1108,15 +1108,15 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
 
       if (flags & MEM_UNINIT)
 	{
-	  Inst *undef_array = bb2memory_undef.at(bb);
+	  Inst *indef_array = bb2memory_indef.at(bb);
 	  Inst *byte = value_inst(255, 8);
 	  for (uint64_t i = 0; i < size_val; i++)
 	    {
 	      Inst *ptr = value_inst(ptr_val + i, ptr_bits);
-	      undef_array = build_inst(Op::ARRAY_SET_UNDEF,
-				       undef_array, ptr, byte);
+	      indef_array = build_inst(Op::ARRAY_SET_INDEF,
+				       indef_array, ptr, byte);
 	    }
-	  bb2memory_undef[bb] = undef_array;
+	  bb2memory_indef[bb] = indef_array;
 	}
 
       return;
@@ -1140,12 +1140,12 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
 	  if (role == Function_role::src)
 	    {
 	      src_retval = arg1;
-	      src_retval_undef = arg2;
+	      src_retval_indef = arg2;
 	    }
 	  else
 	    {
 	      tgt_retval = arg1;
-	      tgt_retval_undef = arg2;
+	      tgt_retval_indef = arg2;
 	    }
 	}
       return;
@@ -1226,7 +1226,7 @@ void Converter::convert_function(Function *func, Function_role role)
 	  bb2memory.insert({bb, memory});
 	  bb2memory_size.insert({bb, memory_size});
 	  bb2memory_flag.insert({bb, memory_flag});
-	  bb2memory_undef.insert({bb, memory_undef});
+	  bb2memory_indef.insert({bb, memory_indef});
 	}
       else
 	{
@@ -1234,7 +1234,7 @@ void Converter::convert_function(Function *func, Function_role role)
 	  build_mem_state(bb, bb2memory);
 	  build_mem_state(bb, bb2memory_size);
 	  build_mem_state(bb, bb2memory_flag);
-	  build_mem_state(bb, bb2memory_undef);
+	  build_mem_state(bb, bb2memory_indef);
 	}
 
       for (auto phi : bb->phis)
@@ -1279,7 +1279,7 @@ void Converter::convert_function(Function *func, Function_role role)
   Op mem_op = role == Function_role::src ? Op::SRC_MEM : Op::TGT_MEM;
   Inst *memory = bb2memory.at(exit_block);
   Inst *memory_size = bb2memory_size.at(exit_block);
-  Inst *memory_undef = bb2memory_undef.at(exit_block);
+  Inst *memory_indef = bb2memory_indef.at(exit_block);
   {
     std::map<Inst *, Inst *> cache;
     memory = strip_local_mem(memory, cache);
@@ -1290,20 +1290,20 @@ void Converter::convert_function(Function *func, Function_role role)
   }
   {
     std::map<Inst *, Inst *> cache;
-    memory_undef = strip_local_mem(memory_undef, cache);
+    memory_indef = strip_local_mem(memory_indef, cache);
   }
-  build_inst(mem_op, memory, memory_size, memory_undef);
+  build_inst(mem_op, memory, memory_size, memory_indef);
   if (role == Function_role::src)
     {
       src_memory = memory;
       src_memory_size = memory_size;
-      src_memory_undef = memory_undef;
+      src_memory_indef = memory_indef;
     }
   else
     {
       tgt_memory = memory;
       tgt_memory_size = memory_size;
-      tgt_memory_undef = memory_undef;
+      tgt_memory_indef = memory_indef;
     }
 
   // Dominance information can be extensive for large functions, and it is
@@ -1319,7 +1319,7 @@ void Converter::convert_function(Function *func, Function_role role)
   bb2memory.clear();
   bb2memory_size.clear();
   bb2memory_flag.clear();
-  bb2memory_undef.clear();
+  bb2memory_indef.clear();
   const_ids.clear();
   translate.clear();
 }
@@ -1341,12 +1341,12 @@ bool Converter::need_checking()
     return false;
 
   if (src_retval != tgt_retval
-      || src_retval_undef != tgt_retval_undef)
+      || src_retval_indef != tgt_retval_indef)
     return true;
 
   if (src_memory != tgt_memory
       || src_memory_size != tgt_memory_size
-      || src_memory_undef != tgt_memory_undef)
+      || src_memory_indef != tgt_memory_indef)
     return true;
 
   assert(src_common_ub == tgt_common_ub);
