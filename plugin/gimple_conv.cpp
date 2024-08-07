@@ -1928,6 +1928,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	      Op op = TYPE_UNSIGNED(src_type) ? Op::ZEXT : Op::SEXT;
 	      Inst *dest_prec_inst = bb->value_inst(dest_prec, 32);
 	      inst =  bb->build_inst(op, inst, dest_prec_inst);
+	      if (indef)
+		res_indef =  bb->build_inst(op, indef, dest_prec_inst);
 	      prov = nullptr;
 	    }
 	  if (POINTER_TYPE_P(dest_type))
@@ -2073,10 +2075,21 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_int(enum tree_code c
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
 	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
-	    bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg1, min_int_inst));
 	    if (arg1_indef)
-	      build_ub_if_not_zero(bb, arg1_indef);
-	    res_indef = nullptr;
+	      {
+		// Check if any assignment of values for the indef bits might
+		// give us the min_int value.
+		Inst *mask = bb->build_inst(Op::NOT, arg1_indef);
+		Inst *val = bb->build_inst(Op::AND, min_int_inst, mask);
+		Inst *masked_arg1 = bb->build_inst(Op::AND, arg1, mask);
+		Inst *cond = bb->build_inst(Op::EQ, masked_arg1, val);
+		bb->build_inst(Op::UB, cond);
+	      }
+	    else
+	      {
+		Inst *cond = bb->build_inst(Op::EQ, arg1, min_int_inst);
+		bb->build_inst(Op::UB, cond);
+	      }
 	  }
 	assert(!TYPE_UNSIGNED(arg1_type));
 	Inst *neg = bb->build_inst(Op::NEG, arg1);
@@ -2098,10 +2111,17 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_int(enum tree_code c
       if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	{
 	  Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
-	  bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg1, min_int_inst));
 	  if (arg1_indef)
-	    build_ub_if_not_zero(bb, arg1_indef);
-	  res_indef = nullptr;
+	    {
+	      // Check if any assignment of values for the indef bits might
+	      // give us the min_int value.
+	      Inst *mask = bb->build_inst(Op::NOT, arg1_indef);
+	      Inst *val = bb->build_inst(Op::AND, min_int_inst, mask);
+	      Inst *masked_arg1 = bb->build_inst(Op::AND, arg1, mask);
+	      bb->build_inst(Op::UB, bb->build_inst(Op::EQ, masked_arg1, val));
+	    }
+	  else
+	    bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg1, min_int_inst));
 	}
       return {bb->build_inst(Op::NEG, arg1), res_indef, nullptr};
     default:
