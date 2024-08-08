@@ -3668,8 +3668,17 @@ void Converter::process_cfn_add_overflow(gimple *stmt, Basic_block *bb)
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   auto [arg1, arg1_indef] = tree2inst_indef(bb, arg1_expr);
   auto [arg2, arg2_indef] = tree2inst_indef(bb, arg2_expr);
-  Inst *res_indef =
-    get_res_indef(arg1_indef, arg2_indef, TREE_TYPE(lhs), bb);
+  Inst *res_indef = get_res_indef(arg1_indef, arg2_indef, lhs_elem_type, bb);
+  if (res_indef)
+    {
+      Inst *overflow_indef = bb->build_trunc(res_indef, 1);
+      Inst *bs = bb->value_inst(res_indef->bitsize, 32);
+      overflow_indef = bb->build_inst(Op::ZEXT, overflow_indef, bs);
+      res_indef = to_mem_repr(bb, res_indef, lhs_elem_type);
+      overflow_indef = to_mem_repr(bb, overflow_indef, lhs_elem_type);
+      res_indef = bb->build_inst(Op::CONCAT, overflow_indef, res_indef);
+    }
+
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   unsigned bitsize = 1 + std::max(arg1->bitsize, arg2->bitsize);
   bitsize = 1 + std::max(bitsize, lhs_elem_bitsize);
@@ -4352,7 +4361,16 @@ void Converter::process_cfn_mul_overflow(gimple *stmt, Basic_block *bb)
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   auto [arg1, arg1_indef] = tree2inst_indef(bb, arg1_expr);
   auto [arg2, arg2_indef] = tree2inst_indef(bb, arg2_expr);
-  Inst *res_indef = get_res_indef(arg1_indef, arg2_indef, TREE_TYPE(lhs), bb);
+  Inst *res_indef = get_res_indef(arg1_indef, arg2_indef, lhs_elem_type, bb);
+  if (res_indef)
+    {
+      Inst *overflow_indef = bb->build_trunc(res_indef, 1);
+      Inst *bs = bb->value_inst(res_indef->bitsize, 32);
+      overflow_indef = bb->build_inst(Op::ZEXT, overflow_indef, bs);
+      res_indef = to_mem_repr(bb, res_indef, lhs_elem_type);
+      overflow_indef = to_mem_repr(bb, overflow_indef, lhs_elem_type);
+      res_indef = bb->build_inst(Op::CONCAT, overflow_indef, res_indef);
+    }
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   unsigned bitsize =
     1 + std::max(arg1->bitsize + arg2->bitsize, lhs_elem_bitsize);
@@ -4475,7 +4493,16 @@ void Converter::process_cfn_sub_overflow(gimple *stmt, Basic_block *bb)
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   auto [arg1, arg1_indef] = tree2inst_indef(bb, arg1_expr);
   auto [arg2, arg2_indef] = tree2inst_indef(bb, arg2_expr);
-  Inst *res_indef = get_res_indef(arg1_indef, arg2_indef, TREE_TYPE(lhs), bb);
+  Inst *res_indef = get_res_indef(arg1_indef, arg2_indef, lhs_elem_type, bb);
+  if (res_indef)
+    {
+      Inst *overflow_indef = bb->build_trunc(res_indef, 1);
+      Inst *bs = bb->value_inst(res_indef->bitsize, 32);
+      overflow_indef = bb->build_inst(Op::ZEXT, overflow_indef, bs);
+      res_indef = to_mem_repr(bb, res_indef, lhs_elem_type);
+      overflow_indef = to_mem_repr(bb, overflow_indef, lhs_elem_type);
+      res_indef = bb->build_inst(Op::CONCAT, overflow_indef, res_indef);
+    }
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   unsigned bitsize = 1 + std::max(arg1->bitsize, arg2->bitsize);
   bitsize = 1 + std::max(bitsize, lhs_elem_bitsize);
