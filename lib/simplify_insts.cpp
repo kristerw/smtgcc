@@ -84,6 +84,33 @@ void flatten(Inst *inst, std::vector<Inst *>& elems)
     elems.push_back(inst->args[0]);
 }
 
+Inst *cfold_ashr(Inst *inst)
+{
+  __int128 arg1_val = inst->args[0]->signed_value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
+  if (arg2_val > 127)
+    arg2_val = 127;
+  return inst->bb->value_inst(arg1_val >> arg2_val, inst->bitsize);
+}
+
+Inst *cfold_lshr(Inst *inst)
+{
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
+  if (arg2_val > 127)
+    return inst->bb->value_inst(0, inst->bitsize);
+  return inst->bb->value_inst(arg1_val >> arg2_val, inst->bitsize);
+}
+
+Inst *cfold_shl(Inst *inst)
+{
+  unsigned __int128 arg1_val = inst->args[0]->value();
+  unsigned __int128 arg2_val = inst->args[1]->value();
+  if (arg2_val > 127)
+    return inst->bb->value_inst(0, inst->bitsize);
+  return inst->bb->value_inst(arg1_val << arg2_val, inst->bitsize);
+}
+
 Inst *cfold_add(Inst *inst)
 {
   unsigned __int128 arg1_val = inst->args[0]->value();
@@ -263,6 +290,15 @@ Inst *constant_fold_inst(Inst *inst)
 
   switch (inst->op)
     {
+    case Op::ASHR:
+      inst = cfold_ashr(inst);
+      break;
+    case Op::LSHR:
+      inst = cfold_lshr(inst);
+      break;
+    case Op::SHL:
+      inst = cfold_shl(inst);
+      break;
     case Op::ADD:
       inst = cfold_add(inst);
       break;
