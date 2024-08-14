@@ -479,6 +479,14 @@ Inst *simplify_and(Inst *inst)
   if (arg2->op == Op::NOT && arg2->args[0] == arg1)
     return inst->bb->value_inst(0, inst->bitsize);
 
+  // For Boolean x: and (sext x), 1 -> zext x
+  if (is_boolean_sext(arg1) && is_value_one(arg2))
+    {
+      Inst *new_inst = create_inst(Op::ZEXT, arg1->args[0], arg1->args[1]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   return inst;
 }
 
