@@ -77,13 +77,77 @@ void remove_dead_bbs(std::vector<Basic_block *>& dead_bbs)
     }
 }
 
-void update_phi(Basic_block *dest_bb, Basic_block *orig_src_bb, Basic_block *new_src_bb)
+// Remove empty BBs ending in unconditional branch by letting the
+// predecessors call the successor.
+void remove_empty_bb(Basic_block *bb)
 {
+  if (bb->first_inst->op != Op::BR
+      || bb->first_inst->nof_args != 0
+      || bb->phis.size() != 0)
+    return;
+
+  Basic_block *dest_bb = bb->succs[0];
+  if (bb == dest_bb)
+    return;
+
+  if (!dest_bb->phis.empty())
+    {
+      // We cannot remove this BB if any predecessor already branches to
+      // the destination, as that would result in duplicated entries in
+      // the phi node.
+      for (auto pred : bb->preds)
+	{
+	  auto it = std::find(pred->succs.begin(), pred->succs.end(), dest_bb);
+	  if (it != pred->succs.end())
+	    return;
+	}
+    }
+
   for (auto phi : dest_bb->phis)
     {
-      Inst *inst = phi->get_phi_arg(orig_src_bb);
-      phi->add_phi_arg(inst, new_src_bb);
+      Inst *inst = phi->get_phi_arg(bb);
+      phi->remove_phi_arg(bb);
+      for (auto pred : bb->preds)
+	{
+	  phi->add_phi_arg(inst, pred);
+	}
     }
+
+  while (!bb->preds.empty())
+    {
+      Basic_block *pred = bb->preds.back();
+      assert(pred->last_inst->op == Op::BR);
+      if (pred->last_inst->nof_args == 0)
+	{
+	  destroy_instruction(pred->last_inst);
+	  pred->build_br_inst(dest_bb);
+	}
+      else
+	{
+	  Inst *cond = pred->last_inst->args[0];
+	  Basic_block *true_bb = pred->last_inst->u.br3.true_bb;
+	  Basic_block *false_bb = pred->last_inst->u.br3.false_bb;
+	  if (true_bb == bb)
+	    true_bb = dest_bb;
+	  if (false_bb == bb)
+	    false_bb = dest_bb;
+
+	  if (true_bb == false_bb)
+	    {
+	      assert(dest_bb->phis.empty());
+	      destroy_instruction(pred->last_inst);
+	      pred->build_br_inst(dest_bb);
+	    }
+	  else
+	    {
+	      destroy_instruction(pred->last_inst);
+	      pred->build_br_inst(cond, true_bb, false_bb);
+	    }
+	}
+    }
+
+  destroy_instruction(bb->first_inst);
+  bb->build_br_inst(bb);
 }
 
 } // end anonymous namespace
@@ -289,52 +353,7 @@ void simplify_cfg(Function *func)
 
       // Remove empty BBs ending in unconditional branch by letting the
       // predecessors call the successor.
-      if (bb->first_inst->op == Op::BR
-	  && bb->first_inst->nof_args == 0
-	  && bb->phis.size() == 0
-	  && bb->succs[0]->phis.size() == 0)
-	{
-	  Basic_block *dest_bb = bb->first_inst->u.br1.dest_bb;
-	  std::vector<Basic_block *> preds = bb->preds;
-	  for (auto pred : preds)
-	    {
-	      assert(pred->last_inst->op == Op::BR);
-	      if (pred->last_inst->nof_args == 0)
-		{
-		  destroy_instruction(pred->last_inst);
-		  pred->build_br_inst(dest_bb);
-		  update_phi(dest_bb, bb, pred);
-		}
-	      else
-		{
-		  Inst *cond = pred->last_inst->args[0];
-		  Basic_block *true_bb = pred->last_inst->u.br3.true_bb;
-		  Basic_block *false_bb = pred->last_inst->u.br3.false_bb;
-		  if (true_bb == bb)
-		    true_bb = dest_bb;
-		  if (false_bb == bb)
-		    false_bb = dest_bb;
-
-		  if (true_bb == false_bb)
-		    {
-		      if (dest_bb->phis.size() == 0)
-			{
-			  destroy_instruction(pred->last_inst);
-			  pred->build_br_inst(dest_bb);
-			}
-		    }
-		  else
-		    {
-		      destroy_instruction(pred->last_inst);
-		      pred->build_br_inst(cond, true_bb, false_bb);
-		      update_phi(dest_bb, bb, pred);
-		    }
-		}
-	    }
-
-	  destroy_instruction(bb->first_inst);
-	  bb->build_br_inst(bb);
-	}
+      remove_empty_bb(bb);
     }
 
   reverse_post_order(func);
