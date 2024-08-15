@@ -700,7 +700,8 @@ void Converter::build_mem_state(Basic_block *bb, std::map<Basic_block*, Inst *>&
   for (size_t i = 1; i < bb->preds.size(); i++)
     {
       Basic_block *pred_bb = bb->preds[i];
-      inst = ite(bb2cond.at(pred_bb), map.at(pred_bb), inst);
+      Inst *cond = get_full_edge_cond(pred_bb, bb);
+      inst = ite(cond, map.at(pred_bb), inst);
     }
   map.insert({bb, inst});
 }
