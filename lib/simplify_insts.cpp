@@ -487,6 +487,19 @@ Inst *simplify_and(Inst *inst)
       return new_inst;
     }
 
+  // and x, (-1 << c) -> shl (lshr x, c), c
+  if (arg2->op == Op::VALUE
+      && popcount(arg2->value()) + ctz(arg2->value()) == inst->bitsize)
+    {
+      Inst *c = inst->bb->value_inst(ctz(arg2->value()), inst->bitsize);
+      Inst *new_inst1 = create_inst(Op::LSHR, arg1, c);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::SHL, new_inst1, c);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
   return inst;
 }
 
@@ -1584,6 +1597,19 @@ Inst *simplify_shl(Inst *inst)
   // shl x, c -> 0 if c >= bitsize
   if (arg2->op == Op::VALUE && arg2->value() >= inst->bitsize)
     return inst->bb->value_inst(0, inst->bitsize);
+
+  // shl (ashr x, c), c -> shl (lshr x, c), c
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::ASHR
+      && arg1->args[1] == arg2)
+    {
+      Inst *new_inst1 = create_inst(Op::LSHR, arg1->args[0], arg2);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::SHL, new_inst1, arg2);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
 
   return inst;
 }
