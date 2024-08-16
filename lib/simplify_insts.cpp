@@ -1295,6 +1295,17 @@ Inst *simplify_ssub_wraps(Inst *inst)
   if (is_ext(arg1) && is_ext(arg2))
     return inst->bb->value_inst(0, 1);
 
+  // For Boolean y: ssub_wraps x, (sext y) -> sadd_wraps x, (zext y)
+  if (is_boolean_sext(arg2))
+    {
+      Inst *new_inst1 = create_inst(Op::ZEXT, arg2->args[0], arg2->args[1]);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::SADD_WRAPS, arg1, new_inst1);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
   return inst;
 }
 
@@ -1310,6 +1321,17 @@ Inst *simplify_sub(Inst *inst)
       Inst *new_inst = create_inst(Op::ADD, arg1, val);
       new_inst->insert_before(inst);
       return new_inst;
+    }
+
+  // For Boolean y: sub x, (sext y) -> add x, (zext y)
+  if (is_boolean_sext(arg2))
+    {
+      Inst *new_inst1 = create_inst(Op::ZEXT, arg2->args[0], arg2->args[1]);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::ADD, arg1, new_inst1);
+      new_inst2->insert_before(inst);
+      return new_inst2;
     }
 
   return inst;
