@@ -5919,7 +5919,7 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 
 	  if (VECTOR_TYPE_P(phi_type) || TREE_CODE(phi_type) == COMPLEX_TYPE)
 	    {
-	      uint32_t bs = bitsize_for_type(TREE_TYPE(phi_type));
+	      uint32_t bs = bytesize_for_type(TREE_TYPE(phi_type)) * 8;
 	      tree2instruction[phi_result] = split_phi(phi_inst, bs, cache);
 	      tree2indef[phi_result] = split_phi(phi_indef, bs, cache);
 	    }
