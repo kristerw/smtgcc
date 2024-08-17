@@ -5600,8 +5600,6 @@ void Converter::process_variables()
 	    continue;
 	  }
 
-	assert(!DECL_INITIAL(decl));
-
 	uint64_t size = bytesize_for_type(TREE_TYPE(decl));
 	if (size > MAX_MEMORY_UNROLL_LIMIT)
 	  throw Not_implemented("process_function: too large local variable");
@@ -5621,6 +5619,9 @@ void Converter::process_variables()
 	  flags |= MEM_CONST;
 	Inst *memory_inst = build_memory_inst(id, size, flags);
 	decl2instruction.insert({decl, memory_inst});
+
+	if (DECL_INITIAL(decl))
+	  init_var(decl, memory_inst);
       }
   }
 }
