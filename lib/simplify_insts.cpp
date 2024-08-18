@@ -2018,11 +2018,18 @@ void simplify_insts(Function *func)
 {
   for (Basic_block *bb : func->bbs)
     {
+      std::vector<Inst*> dead_phis;
       for (auto phi : bb->phis)
 	{
 	  Inst *res = simplify_phi(phi);
 	  if (res != phi)
 	    phi->replace_all_uses_with(res);
+	  if (phi->used_by.empty())
+	    dead_phis.push_back(phi);
+	}
+      for (auto phi : dead_phis)
+	{
+	  destroy(phi);
 	}
       for (Inst *inst = bb->first_inst; inst;)
 	{
