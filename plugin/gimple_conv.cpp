@@ -509,9 +509,29 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *in
   if (tree2instruction.contains(expr))
     return;
 
-  tree type = TREE_TYPE(expr);
+  prange pr;
+  if (pr.supports_type_p(TREE_TYPE(expr)))
+    {
+      if (!get_range_query(cfun)->range_of_expr(pr, expr))
+	return;
+      if (pr.undefined_p() || pr.varying_p())
+	return;
+      if (pr.nonzero_p())
+	{
+	  Inst *zero = bb->value_inst(0, inst->bitsize);
+	  Inst *is_ub = bb->build_inst(Op::EQ, inst, zero);
+	  if (indef)
+	    {
+	      Inst *cmp = bb->build_inst(Op::EQ, indef, zero);
+	      is_ub = bb->build_inst(Op::AND, is_ub, cmp);
+	    }
+	  bb->build_inst(Op::UB, is_ub);
+	}
+      return;
+    }
+
   int_range_max r;
-  if (!r.supports_type_p(type))
+  if (!r.supports_type_p(TREE_TYPE(expr)))
     return;
   if (!get_range_query(cfun)->range_of_expr(r, expr))
     return;
@@ -560,7 +580,7 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *in
 	{
 	  Inst *low = bb->value_inst(low_val, inst->bitsize);
 	  Inst *high = bb->value_inst(high_val, inst->bitsize);
-	  Op op = TYPE_UNSIGNED(type) ? Op::UGT : Op::SGT;
+	  Op op = TYPE_UNSIGNED(TREE_TYPE(expr)) ? Op::UGT : Op::SGT;
 	  Inst *cmp_low = bb->build_inst(op, low, inst);
 	  Inst *cmp_high = bb->build_inst(op, inst, high);
 	  is_not_in_range = bb->build_inst(Op::OR, cmp_low, cmp_high);
