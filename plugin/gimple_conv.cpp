@@ -2223,6 +2223,8 @@ Inst *Converter::process_unary_complex(enum tree_code code, Inst *arg1, tree lhs
 	inst_imag = to_mem_repr(inst_imag, elem_type);
 	return bb->build_inst(Op::CONCAT, inst_imag, inst_real);
       }
+    case PAREN_EXPR:
+      return arg1;
     default:
       break;
     }
