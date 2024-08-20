@@ -85,7 +85,8 @@ struct Converter {
   Inst *loop_vect_sym = nullptr;
   std::string pass_name;
   std::map<Basic_block *, std::set<Basic_block *>> switch_bbs;
-  std::map<basic_block, Basic_block *> gccbb2bb;
+  std::map<basic_block, Basic_block *> gccbb_top2bb;
+  std::map<basic_block, Basic_block *> gccbb_bottom2bb;
   std::map<Basic_block *, std::pair<Inst *, Inst *> > bb2retval;
   std::map<tree, Inst *> tree2instruction;
   std::map<tree, Inst *> tree2indef;
@@ -4349,7 +4350,6 @@ void Converter::process_cfn_mask_store(gimple *stmt)
   if (!indef)
     indef = bb->value_inst(0, value->bitsize);
 
-  auto [orig, orig_indef, _] = load_value(ptr, size);
   uint64_t nof_elem = size / elem_size;
   assert((size % elem_size) == 0);
   for (uint64_t i = 0; i < nof_elem; i++)
@@ -4357,16 +4357,21 @@ void Converter::process_cfn_mask_store(gimple *stmt)
       Inst *cond = extract_vec_elem(bb, mask, mask_elem_bitsize, i);
       if (cond->bitsize != 1)
 	cond = bb->build_trunc(cond, 1);
-      Inst *orig_elem = extract_vec_elem(bb, orig, elem_size * 8, i);
+
+      Basic_block *true_bb = func->build_bb();
+      Basic_block *false_bb = func->build_bb();
+      bb->build_br_inst(cond, true_bb, false_bb);
+
+      bb = true_bb;
       Inst *elem = extract_vec_elem(bb, value, elem_size * 8, i);
-      Inst *new_value = bb->build_inst(Op::ITE, cond, elem, orig_elem);
-      orig_elem = extract_vec_elem(bb, orig_indef, elem_size * 8, i);
-      elem = extract_vec_elem(bb, indef, elem_size * 8, i);
-      Inst *new_indef = bb->build_inst(Op::ITE, cond, elem, orig_elem);
+      Inst *elem_indef = extract_vec_elem(bb, indef, elem_size * 8, i);
       Inst *offset = bb->value_inst(i * elem_size, ptr->bitsize);
       Inst *dst_ptr = bb->build_inst(Op::ADD, ptr, offset);
       store_ub_check(dst_ptr, ptr_prov, elem_size, cond);
-      store_value(dst_ptr, new_value, new_indef);
+      store_value(dst_ptr, elem, elem_indef);
+      bb->build_br_inst(false_bb);
+
+      bb = false_bb;
     }
 }
 
@@ -5178,7 +5183,7 @@ void Converter::process_gimple_switch(gimple *stmt, Basic_block *switch_bb)
   if (cases.empty())
     {
       // All cases branch to the default case.
-      bb->build_br_inst(gccbb2bb.at(default_block));
+      bb->build_br_inst(gccbb_top2bb.at(default_block));
       return;
     }
 
@@ -5197,7 +5202,7 @@ void Converter::process_gimple_switch(gimple *stmt, Basic_block *switch_bb)
 	    cond = label_cond;
 	}
 
-      Basic_block *true_bb = gccbb2bb.at(block);
+      Basic_block *true_bb = gccbb_top2bb.at(block);
       Basic_block *false_bb;
       if (i != n - 1)
 	{
@@ -5205,7 +5210,7 @@ void Converter::process_gimple_switch(gimple *stmt, Basic_block *switch_bb)
 	  bbset.insert(false_bb);
 	}
       else
-	false_bb = gccbb2bb.at(default_block);
+	false_bb = gccbb_top2bb.at(default_block);
       bb->build_br_inst(cond, true_bb, false_bb);
       bb = false_bb;
     }
@@ -5215,8 +5220,8 @@ void Converter::process_gimple_switch(gimple *stmt, Basic_block *switch_bb)
 Basic_block *Converter::get_phi_arg_bb(gphi *phi, int i)
 {
   edge e = gimple_phi_arg_edge(phi, i);
-  Basic_block *arg_bb = gccbb2bb.at(e->src);
-  Basic_block *phi_bb = gccbb2bb.at(e->dest);
+  Basic_block *arg_bb = gccbb_bottom2bb.at(e->src);
+  Basic_block *phi_bb = gccbb_top2bb.at(e->dest);
   if (switch_bbs.contains(arg_bb))
     {
       std::set<Basic_block *>& bbset = switch_bbs[arg_bb];
@@ -5844,7 +5849,7 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
     {
       basic_block gcc_bb =
 	(*fun->cfg->x_basic_block_info)[postorder[nof_blocks - 1 - i]];
-      bb = gccbb2bb.at(gcc_bb);
+      bb = gccbb_top2bb.at(gcc_bb);
       gimple *switch_stmt = nullptr;
       gimple *cond_stmt = nullptr;
       gimple_stmt_iterator gsi;
@@ -5908,6 +5913,7 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	      }
 	    }
 	}
+      gccbb_bottom2bb.insert({gcc_bb, bb});
 
       // Check that we do not have any extra, unsupported, edges as that will
       // make the code below fail assertions when adding the branches.
@@ -5932,7 +5938,7 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	      // (I.e., this is a block from an __builting_unreachable() etc.)
 	      // so we must add a branch to the real exit block as the smtgcc
 	      // IR only can have one ret instruction.
-	      bb->build_br_inst(gccbb2bb.at(gcc_exit_block));
+	      bb->build_br_inst(gccbb_top2bb.at(gcc_exit_block));
 	    }
 	  else
 	    generate_return_inst();
@@ -5956,14 +5962,15 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 					 arg1_type, arg2_type);
 	  edge true_edge, false_edge;
 	  extract_true_false_edges_from_block(gcc_bb, &true_edge, &false_edge);
-	  Basic_block *true_bb = gccbb2bb.at(true_edge->dest);
-	  Basic_block *false_bb = gccbb2bb.at(false_edge->dest);
+	  Basic_block *true_bb = gccbb_top2bb.at(true_edge->dest);
+	  Basic_block *false_bb = gccbb_top2bb.at(false_edge->dest);
 	  bb->build_br_inst(cond, true_bb, false_bb);
 	}
       else
 	{
 	  assert(EDGE_COUNT(gcc_bb->succs) == 1);
-	  Basic_block *succ_bb = gccbb2bb.at(single_succ_edge(gcc_bb)->dest);
+	  Basic_block *succ_bb =
+	    gccbb_top2bb.at(single_succ_edge(gcc_bb)->dest);
 	  bb->build_br_inst(succ_bb);
 	}
     }
@@ -6045,7 +6052,7 @@ Function *Converter::process_function()
     for (int i = nof_blocks - 1; i >= 0; --i)
       {
 	basic_block gcc_bb = (*fun->cfg->x_basic_block_info)[postorder[i]];
-	gccbb2bb.insert({gcc_bb, func->build_bb()});
+	gccbb_top2bb.insert({gcc_bb, func->build_bb()});
       }
     bb = func->bbs[0];
 
