@@ -149,7 +149,8 @@ void Vrp::handle_extract(Inst *inst)
   uint32_t lz = leading_zeros(arg1);
   uint32_t tz = trailing_zeros(arg1);
 
-  if (hi < tz || lo > (arg1->bitsize - lz))
+  if (inst->bitsize <= 128
+      && (hi < tz || lo > (arg1->bitsize - lz)))
     {
       Inst *zero = inst->bb->value_inst(0, inst->bitsize);
       handle_inst(zero);
@@ -287,7 +288,9 @@ void Vrp::handle_sadd_wraps(Inst *inst)
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  if (leading_zeros(arg1) > 1 && leading_zeros(arg2) > 1)
+  if (arg1->bitsize <= 128
+      && leading_zeros(arg1) > 1
+      && leading_zeros(arg2) > 1)
     {
       Inst *zero = inst->bb->value_inst(0, 1);
       handle_inst(zero);
@@ -526,6 +529,7 @@ void Vrp::handle_inst(Inst *inst)
   // Replace the value with 0 if the leading/trailing zeros cover the
   // full bitwidth.
   if (inst->op != Op::VALUE
+      && inst->bitsize <= 128
       && leading_zeros(inst) + trailing_zeros(inst) >= inst->bitsize)
     {
       Inst *zero = inst->bb->value_inst(0, inst->bitsize);
