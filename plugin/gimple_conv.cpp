@@ -6081,9 +6081,9 @@ Function *Converter::process_function()
     throw;
   }
 
-  validate(func);
-
   reverse_post_order(func);
+
+  validate(func);
 
   Function *f = func;
   func = nullptr;
