@@ -315,7 +315,10 @@ Inst *Converter::extract_id(Inst *inst)
     return it->second;
 
   Inst *id = bb->build_extract_id(inst);
-  id->move_after(inst);
+  if (inst->op == Op::VALUE)
+    id = constant_fold_inst(id);
+  else
+    id->move_after(inst);
   inst2id.insert({inst, id});
   return id;
 }

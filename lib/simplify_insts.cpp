@@ -277,101 +277,6 @@ Inst *cfold_sext(Inst *inst)
   return inst->bb->value_inst(arg_val, inst->bitsize);
 }
 
-Inst *constant_fold_inst(Inst *inst)
-{
-  if (inst->bitsize > 128)
-    return inst;
-  for (uint64_t i = 0; i < inst->nof_args; i++)
-    {
-      Inst *arg = inst->args[i];
-      if (arg->op != Op::VALUE)
-	return inst;
-    }
-
-  switch (inst->op)
-    {
-    case Op::ASHR:
-      inst = cfold_ashr(inst);
-      break;
-    case Op::LSHR:
-      inst = cfold_lshr(inst);
-      break;
-    case Op::SHL:
-      inst = cfold_shl(inst);
-      break;
-    case Op::ADD:
-      inst = cfold_add(inst);
-      break;
-    case Op::SUB:
-      inst = cfold_sub(inst);
-      break;
-    case Op::AND:
-      inst = cfold_and(inst);
-      break;
-    case Op::OR:
-      inst = cfold_or(inst);
-      break;
-    case Op::XOR:
-      inst = cfold_xor(inst);
-      break;
-    case Op::CONCAT:
-      inst = cfold_concat(inst);
-      break;
-    case Op::EXTRACT:
-      inst = cfold_extract(inst);
-      break;
-    case Op::MUL:
-      inst = cfold_mul(inst);
-      break;
-    case Op::NE:
-      inst = cfold_ne(inst);
-      break;
-    case Op::EQ:
-      inst = cfold_eq(inst);
-      break;
-    case Op::NEG:
-      inst = cfold_neg(inst);
-      break;
-    case Op::NOT:
-      inst = cfold_not(inst);
-      break;
-    case Op::SEXT:
-      inst = cfold_sext(inst);
-      break;
-    case Op::SGE:
-      inst = cfold_sge(inst);
-      break;
-    case Op::SGT:
-      inst = cfold_sgt(inst);
-      break;
-    case Op::SLE:
-      inst = cfold_sle(inst);
-      break;
-    case Op::SLT:
-      inst = cfold_slt(inst);
-      break;
-    case Op::UGE:
-      inst = cfold_uge(inst);
-      break;
-    case Op::UGT:
-      inst = cfold_ugt(inst);
-      break;
-    case Op::ULE:
-      inst = cfold_ule(inst);
-      break;
-    case Op::ULT:
-      inst = cfold_ult(inst);
-      break;
-    case Op::ZEXT:
-      inst = cfold_zext(inst);
-      break;
-    default:
-      break;
-    }
-
-  return inst;
-}
-
 Inst *simplify_mem_size(Inst *inst, const std::map<uint64_t,uint64_t>& id2size)
 {
   if (inst->args[0]->op == Op::VALUE)
@@ -1898,6 +1803,101 @@ void destroy(Inst *inst)
 }
 
 } // end anonymous namespace
+
+Inst *constant_fold_inst(Inst *inst)
+{
+  if (inst->bitsize > 128)
+    return inst;
+  for (uint64_t i = 0; i < inst->nof_args; i++)
+    {
+      Inst *arg = inst->args[i];
+      if (arg->op != Op::VALUE)
+	return inst;
+    }
+
+  switch (inst->op)
+    {
+    case Op::ASHR:
+      inst = cfold_ashr(inst);
+      break;
+    case Op::LSHR:
+      inst = cfold_lshr(inst);
+      break;
+    case Op::SHL:
+      inst = cfold_shl(inst);
+      break;
+    case Op::ADD:
+      inst = cfold_add(inst);
+      break;
+    case Op::SUB:
+      inst = cfold_sub(inst);
+      break;
+    case Op::AND:
+      inst = cfold_and(inst);
+      break;
+    case Op::OR:
+      inst = cfold_or(inst);
+      break;
+    case Op::XOR:
+      inst = cfold_xor(inst);
+      break;
+    case Op::CONCAT:
+      inst = cfold_concat(inst);
+      break;
+    case Op::EXTRACT:
+      inst = cfold_extract(inst);
+      break;
+    case Op::MUL:
+      inst = cfold_mul(inst);
+      break;
+    case Op::NE:
+      inst = cfold_ne(inst);
+      break;
+    case Op::EQ:
+      inst = cfold_eq(inst);
+      break;
+    case Op::NEG:
+      inst = cfold_neg(inst);
+      break;
+    case Op::NOT:
+      inst = cfold_not(inst);
+      break;
+    case Op::SEXT:
+      inst = cfold_sext(inst);
+      break;
+    case Op::SGE:
+      inst = cfold_sge(inst);
+      break;
+    case Op::SGT:
+      inst = cfold_sgt(inst);
+      break;
+    case Op::SLE:
+      inst = cfold_sle(inst);
+      break;
+    case Op::SLT:
+      inst = cfold_slt(inst);
+      break;
+    case Op::UGE:
+      inst = cfold_uge(inst);
+      break;
+    case Op::UGT:
+      inst = cfold_ugt(inst);
+      break;
+    case Op::ULE:
+      inst = cfold_ule(inst);
+      break;
+    case Op::ULT:
+      inst = cfold_ult(inst);
+      break;
+    case Op::ZEXT:
+      inst = cfold_zext(inst);
+      break;
+    default:
+      break;
+    }
+
+  return inst;
+}
 
 Inst *simplify_inst(Inst *inst)
 {
