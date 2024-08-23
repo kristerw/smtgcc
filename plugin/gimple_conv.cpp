@@ -2825,7 +2825,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
     case POINTER_PLUS_EXPR:
       {
 	assert(arg1_prov);
-	arg2 = type_convert(arg2, arg2_type, arg1_type);
 	Inst *ptr = bb->build_inst(Op::ADD, arg1, arg2);
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
