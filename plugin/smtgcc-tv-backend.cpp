@@ -12,6 +12,8 @@
 using namespace std::string_literals;
 using namespace smtgcc;
 
+static const int stack_size = 1024 * 100;
+
 int plugin_is_GPL_compatible;
 
 const pass_data tv_pass_data =
@@ -417,6 +419,18 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
       rstate->sym_name2mem.insert({mem_obj.sym_name, mem});
     }
 
+  // Set up the stack.
+  assert(stack_size < (((uint64_t)1) << rstate->module->ptr_offset_bits));
+  Inst *id = entry_bb->value_inst(-128, rstate->module->ptr_id_bits);
+  Inst *mem_size =
+    entry_bb->value_inst(stack_size, rstate->module->ptr_offset_bits);
+  Inst *flags = entry_bb->value_inst(0, 32);
+  Inst *stack =
+    entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
+  Inst *size = entry_bb->value_inst(stack_size, stack->bitsize);
+  stack = entry_bb->build_inst(Op::ADD, stack, size);
+  entry_bb->build_inst(Op::WRITE, rstate->registers[2], stack);
+
   uint32_t reg_nbr = 10;
   uint32_t freg_nbr = 10;
 
@@ -425,6 +439,7 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
   // Set up the PARAM instructions and copy the result to the correct
   // register or memory as required by the ABI.
   int param_number = 0;
+  std::vector<Inst*> stack_values;
   for (tree decl = DECL_ARGUMENTS(fun->decl); decl; decl = DECL_CHAIN(decl))
     {
       uint32_t bitsize = bitsize_for_type(TREE_TYPE(decl));
@@ -448,45 +463,62 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
       std::optional<Regs> arg_regs = regs_for_value(rstate, param, type);
       if (arg_regs)
 	{
+	  // Ensure the stack is aligned when writing values wider than
+	  // one register.
+	  if (reg_nbr > 17
+	       && (*arg_regs).regs[0]
+	       && (*arg_regs).regs[1]
+	       && (stack_values.size() & 1))
+	    stack_values.push_back(nullptr);
+
 	  if ((*arg_regs).regs[0])
 	    {
-	      // TODO: Values are passed on the stack when all registers
-	      // are used.
 	      if (reg_nbr > 17)
-		throw Not_implemented("riscv: too many arguments");
-
-	      Inst *reg = rstate->registers[reg_nbr++];
-	      entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).regs[0]);
+		stack_values.push_back((*arg_regs).regs[0]);
+	      else
+		{
+		  Inst *reg = rstate->registers[reg_nbr++];
+		  entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).regs[0]);
+		}
 	    }
 	  if ((*arg_regs).regs[1])
 	    {
-	      // TODO: Values are passed on the stack when all registers
-	      // are used.
 	      if (reg_nbr > 17)
-		throw Not_implemented("riscv: too many arguments");
-
-	      Inst *reg = rstate->registers[reg_nbr++];
-	      entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).regs[1]);
+		stack_values.push_back((*arg_regs).regs[1]);
+	      else
+		{
+		  Inst *reg = rstate->registers[reg_nbr++];
+		  entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).regs[1]);
+		}
 	    }
+
+	  // Ensure the stack is aligned when writing floating-point values
+	  // wider than one register.
+	  if (reg_nbr > 17
+	       && (*arg_regs).fregs[0]
+	       && (*arg_regs).fregs[1]
+	       && (stack_values.size() & 1))
+	    stack_values.push_back(nullptr);
+
 	  if ((*arg_regs).fregs[0])
 	    {
-	      // TODO: Values are passed on the stack when all registers
-	      // are used.
 	      if (freg_nbr > 17)
-		throw Not_implemented("riscv: too many arguments");
-
-	      Inst *reg = rstate->fregisters[freg_nbr++];
-	      entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[0]);
+		stack_values.push_back((*arg_regs).fregs[0]);
+	      else
+		{
+		  Inst *reg = rstate->fregisters[freg_nbr++];
+		  entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[0]);
+		}
 	    }
 	  if ((*arg_regs).fregs[1])
 	    {
-	      // TODO: Values are passed on the stack when all registers
-	      // are used.
 	      if (freg_nbr > 17)
-		throw Not_implemented("riscv: too many arguments");
-
-	      Inst *reg = rstate->fregisters[freg_nbr++];
-	      entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[1]);
+		stack_values.push_back((*arg_regs).fregs[1]);
+	      else
+		{
+		  Inst *reg = rstate->fregisters[freg_nbr++];
+		  entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[1]);
+		}
 	    }
 	}
       else
@@ -496,6 +528,38 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
 	}
 
       param_number++;
+    }
+
+  if (!stack_values.empty())
+    {
+      uint32_t reg_size = rstate->reg_bitsize / 8;
+      uint32_t size = stack_values.size() * reg_size;
+      size = (size + 15) & ~15;   // Keep the stack 16-bytes aligned.
+      Inst *size_inst = entry_bb->value_inst(size, rstate->reg_bitsize);
+      Inst *sp_reg = rstate->registers[2];
+      Inst *sp = entry_bb->build_inst(Op::READ, sp_reg);
+      sp = entry_bb->build_inst(Op::SUB, sp, size_inst);
+      entry_bb->build_inst(Op::WRITE, sp_reg, sp);
+
+      for (auto value : stack_values)
+	{
+	  if (!value)
+	    {
+	      Inst *size_inst = entry_bb->value_inst(reg_size, sp->bitsize);
+	      sp = entry_bb->build_inst(Op::ADD, sp, size_inst);
+	      continue;
+	    }
+
+	  for (uint32_t i = 0; i < reg_size; i++)
+	    {
+	      Inst *high = entry_bb->value_inst(i * 8 + 7, 32);
+	      Inst *low = entry_bb->value_inst(i * 8, 32);
+	      Inst *byte = entry_bb->build_inst(Op::EXTRACT, value, high, low);
+	      entry_bb->build_inst(Op::STORE, sp, byte);
+	      Inst *one = entry_bb->value_inst(1, sp->bitsize);
+	      sp = entry_bb->build_inst(Op::ADD, sp, one);
+	    }
+	}
     }
 }
 
