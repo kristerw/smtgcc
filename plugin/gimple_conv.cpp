@@ -132,6 +132,8 @@ struct Converter {
   Addr process_address(tree expr, bool is_mem_access);
   std::tuple<Inst *, Inst *, Inst *> vector_as_array(tree expr);
   std::tuple<Inst *, Inst *, Inst *> process_load(tree expr);
+  bool is_load(tree expr);
+  void load_store_overlap_ub_check(tree store_expr, tree load_expr);
   void process_store(tree addr_expr, tree value_expr);
   std::tuple<Inst *, Inst *, Inst *> load_value(Inst *ptr, uint64_t size);
   void store_value(Inst *ptr, Inst *value, Inst *indef = nullptr);
@@ -755,16 +757,19 @@ void Converter::load_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond)
 // unless they are identical.
 void Converter::overlap_ub_check(Inst *src_ptr, Inst *dst_ptr, uint64_t size)
 {
+  if (size <= 1)
+    return;
+
   Inst *size_inst = bb->value_inst(size - 1, src_ptr->bitsize);
   Inst *src_end = bb->build_inst(Op::ADD, src_ptr, size_inst);
   Inst *dst_end = bb->build_inst(Op::ADD, dst_ptr, size_inst);
 
   Inst *cond1 = bb->build_inst(Op::ULT, src_ptr, dst_ptr);
-  Inst *cond2 = bb->build_inst(Op::ULT, dst_ptr, src_end);
+  Inst *cond2 = bb->build_inst(Op::ULE, dst_ptr, src_end);
   bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
 
   Inst *cond3 = bb->build_inst(Op::ULT, dst_ptr, src_ptr);
-  Inst *cond4 = bb->build_inst(Op::ULT, src_ptr, dst_end);
+  Inst *cond4 = bb->build_inst(Op::ULE, src_ptr, dst_end);
   bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond3, cond4));
 }
 
@@ -1777,8 +1782,75 @@ void Converter::store_value(Inst *orig_ptr, Inst *value, Inst *indef)
     }
 }
 
+bool Converter::is_load(tree expr)
+{
+  switch (TREE_CODE(expr))
+    {
+    case ARRAY_REF:
+      {
+	tree array = TREE_OPERAND(expr, 0);
+	// Indexing element of a vector as vec[2] is done by an  ARRAY_REF of
+	// a VIEW_CONVERT_EXPR of the vector.
+	if (TREE_CODE(array) == VIEW_CONVERT_EXPR
+	    && VECTOR_TYPE_P(TREE_TYPE(TREE_OPERAND(array, 0))))
+	  return false;
+	return true;
+      }
+    case COMPONENT_REF:
+      if (is_extracting_from_value(expr))
+	return false;
+      return true;
+    case MEM_REF:
+    case TARGET_MEM_REF:
+    case VAR_DECL:
+    case RESULT_DECL:
+      return true;
+    default:
+      return false;
+    }
+}
+
+// It is UB if the objects in a gimple_assign doing both a load and store
+// overlap (unless the load/store addresses are identical).
+void Converter::load_store_overlap_ub_check(tree store_expr, tree load_expr)
+{
+  assert(!is_bit_field(load_expr));
+  assert(!is_bit_field(store_expr));
+
+  Addr store_addr = process_address(store_expr, true);
+  Addr load_addr = process_address(load_expr, true);
+  uint64_t size = bytesize_for_type(TREE_TYPE(load_expr));
+  if (size <= 1)
+    return;
+
+  // TODO: There are cases where bit_alignment1 and bit_alignment2
+  // are inconsistent -- sometimes bit_alignment1 is larges, and
+  // sometimes bit_alignment2. And they varies in strange ways.
+  // E.g. bit_alignment1 contain info about __builtin_assume_aligned
+  // and is often correct in size of type alignment. But sometimes it
+  // has the element alignment for vectors. Or 128 when bit_alignment2
+  // is 256.
+  uint32_t bit_alignment1 = TYPE_ALIGN(TREE_TYPE(load_expr));
+  uint32_t bit_alignment2 = get_object_alignment(load_expr);
+  uint32_t bit_alignment3 = get_object_alignment(store_expr);
+  uint32_t load_bit_alignment = std::max(bit_alignment1, bit_alignment2);
+  uint32_t store_bit_alignment = std::max(bit_alignment1, bit_alignment3);
+  assert((bit_alignment1 & 7) == 0);
+  assert((bit_alignment2 & 7) == 0);
+  assert((bit_alignment3 & 7) == 0);
+  uint32_t load_alignment = load_bit_alignment / 8;
+  uint32_t store_alignment = store_bit_alignment / 8;
+  if (size <= load_alignment || size <= store_alignment)
+    return;
+
+  overlap_ub_check(load_addr.ptr, store_addr.ptr, size);
+}
+
 void Converter::process_store(tree addr_expr, tree value_expr)
 {
+  if (is_load(value_expr))
+    load_store_overlap_ub_check(addr_expr, value_expr);
+
   if (TREE_CODE(value_expr) == STRING_CST)
     {
       uint64_t str_len = TREE_STRING_LENGTH(value_expr);
