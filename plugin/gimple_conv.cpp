@@ -3904,14 +3904,16 @@ void Converter::process_cfn_clz(gimple *stmt)
   Inst *arg = tree2inst(arg_expr);
   uint32_t nof_elem;
   uint32_t elem_bitsize;
+  tree arg_elem_type;
   if (VECTOR_TYPE_P(arg_type))
     {
-      tree arg_elem_type = TREE_TYPE(arg_type);
+      arg_elem_type = TREE_TYPE(arg_type);
       elem_bitsize = bitsize_for_type(arg_elem_type);
       nof_elem = bitsize_for_type(arg_type) / elem_bitsize;
     }
   else
     {
+      arg_elem_type = arg_type;
       elem_bitsize = arg->bitsize;
       nof_elem = 1;
     }
@@ -3933,16 +3935,27 @@ void Converter::process_cfn_clz(gimple *stmt)
     return;
   tree lhs_type = TREE_TYPE(lhs);
   assert(VECTOR_TYPE_P(arg_type) == VECTOR_TYPE_P(lhs_type));
-  int bitsize;
+  uint32_t bitsize;
+  tree lhs_elem_type;
   if (VECTOR_TYPE_P(arg_type))
-    bitsize = bitsize_for_type(TREE_TYPE(lhs_type));
+    {
+      lhs_elem_type = TREE_TYPE(lhs_type);
+      bitsize = bitsize_for_type(TREE_TYPE(lhs_type));
+    }
   else
-    bitsize = bitsize_for_type(lhs_type);
+    {
+      lhs_elem_type = lhs_type;
+      bitsize = bitsize_for_type(lhs_type);
+    }
   Inst *inst0;
   if (nargs == 1)
     inst0 = bb->value_inst(elem_bitsize, bitsize);
   else
-    inst0 = tree2inst(gimple_call_arg(stmt, 1));
+    {
+      inst0 = tree2inst(gimple_call_arg(stmt, 1));
+      if (inst0->bitsize != bitsize)
+	inst0 = type_convert(inst0, arg_elem_type, lhs_elem_type);
+    }
 
   Inst *res = nullptr;
   for (uint32_t j = 0; j < nof_elem; j++)
@@ -4100,14 +4113,16 @@ void Converter::process_cfn_ctz(gimple *stmt)
   Inst *arg = tree2inst(arg_expr);
   uint32_t nof_elem;
   uint32_t elem_bitsize;
+  tree arg_elem_type;
   if (VECTOR_TYPE_P(arg_type))
     {
-      tree arg_elem_type = TREE_TYPE(arg_type);
+      arg_elem_type = TREE_TYPE(arg_type);
       elem_bitsize = bitsize_for_type(arg_elem_type);
       nof_elem = bitsize_for_type(arg_type) / elem_bitsize;
     }
   else
     {
+      arg_elem_type = arg_type;
       elem_bitsize = arg->bitsize;
       nof_elem = 1;
     }
@@ -4129,16 +4144,27 @@ void Converter::process_cfn_ctz(gimple *stmt)
     return;
   tree lhs_type = TREE_TYPE(lhs);
   assert(VECTOR_TYPE_P(arg_type) == VECTOR_TYPE_P(lhs_type));
-  int bitsize;
+  uint32_t bitsize;
+  tree lhs_elem_type;
   if (VECTOR_TYPE_P(arg_type))
-    bitsize = bitsize_for_type(TREE_TYPE(lhs_type));
+    {
+      lhs_elem_type = TREE_TYPE(lhs_type);
+      bitsize = bitsize_for_type(TREE_TYPE(lhs_type));
+    }
   else
-    bitsize = bitsize_for_type(lhs_type);
+    {
+      lhs_elem_type = lhs_type;
+      bitsize = bitsize_for_type(lhs_type);
+    }
   Inst *inst0;
   if (nargs == 1)
     inst0 = bb->value_inst(elem_bitsize, bitsize);
   else
-    inst0 = tree2inst(gimple_call_arg(stmt, 1));
+    {
+      inst0 = tree2inst(gimple_call_arg(stmt, 1));
+      if (inst0->bitsize != bitsize)
+	inst0 = type_convert(inst0, arg_elem_type, lhs_elem_type);
+    }
 
   Inst *res = nullptr;
   for (uint32_t j = 0; j < nof_elem; j++)
