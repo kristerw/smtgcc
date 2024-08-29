@@ -3402,7 +3402,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::vector_constructor(tree expr)
   assert(VECTOR_TYPE_P(TREE_TYPE(expr)));
   unsigned HOST_WIDE_INT idx;
   tree value;
-  uint32_t vector_size = bytesize_for_type(TREE_TYPE(expr)) * 8;
+  uint32_t vector_bitsize = bitsize_for_type(TREE_TYPE(expr));
   Inst *res = nullptr;
   Inst *indef = nullptr;
   bool any_elem_has_indef = false;
@@ -3432,14 +3432,15 @@ std::tuple<Inst *, Inst *, Inst *> Converter::vector_constructor(tree expr)
   if (CONSTRUCTOR_NO_CLEARING(expr))
     throw Not_implemented("vector_constructor: CONSTRUCTOR_NO_CLEARING");
   if (!res)
-    res = bb->value_inst(0, vector_size);
-  else if (res->bitsize != vector_size)
+    res = bb->value_inst(0, vector_bitsize);
+  else if (res->bitsize != vector_bitsize)
     {
-      assert(res->bitsize < vector_size);
-      Inst *zero = bb->value_inst(0, vector_size - res->bitsize);
+      assert(res->bitsize < vector_bitsize);
+      Inst *zero = bb->value_inst(0, vector_bitsize - res->bitsize);
       res = bb->build_inst(Op::CONCAT, zero, res);
       indef = bb->build_inst(Op::CONCAT, zero, indef);
     }
+
   if (!any_elem_has_indef)
     {
       // No element had indef information, so `indef` only consists of the
