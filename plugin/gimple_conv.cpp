@@ -983,6 +983,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	{
 	  indef = it2->second;
 	  assert(indef);
+	  assert(indef->bitsize == inst->bitsize);
 	}
       Inst *prov = nullptr;
       auto it3 = tree2prov.find(expr);
@@ -3635,6 +3636,10 @@ void Converter::process_gimple_assign(gimple *stmt)
 	    inst = bb->build_inst(Op::CONCAT, arg2, arg1);
 	    if (arg1_indef || arg2_indef)
 	      {
+		if (arg1_indef)
+		  arg1_indef = to_mem_repr(arg1_indef, TREE_TYPE(rhs1));
+		if (arg2_indef)
+		  arg2_indef = to_mem_repr(arg2_indef, TREE_TYPE(rhs2));
 		if (!arg1_indef)
 		  arg1_indef = bb->value_inst(0, arg1->bitsize);
 		if (!arg2_indef)
