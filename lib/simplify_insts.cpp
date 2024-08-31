@@ -782,6 +782,22 @@ Inst *simplify_lshr(Inst *inst)
       return new_inst2;
     }
 
+  // lshr (lshr x, c1), c2 -> lshr x, (c1 + c2)
+  if (inst->args[1]->op == Op::VALUE
+      && inst->args[0]->op == Op::LSHR
+      && inst->args[0]->args[1]->op == Op::VALUE)
+    {
+      Inst *x = inst->args[0]->args[0];
+      unsigned __int128 c1 = inst->args[0]->args[1]->value();
+      unsigned __int128 c2 = inst->args[1]->value();
+      assert(c1 < inst->bitsize);
+      assert(c2 < inst->bitsize);
+      Inst *c = inst->bb->value_inst(c1 + c2, inst->bitsize);
+      Inst *new_inst = create_inst(Op::LSHR, x, c);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   return inst;
 }
 
@@ -971,7 +987,7 @@ Inst *simplify_mul(Inst *inst)
       return new_inst;
     }
 
-  // mul (add, x, c2), c1 -> add (mul x, c1), (c1 * c2)
+  // mul (add x, c2), c1 -> add (mul x, c1), (c1 * c2)
   if (arg2->op == Op::VALUE &&
       arg1->op == Op::ADD &&
       arg1->args[1]->op == Op::VALUE)
@@ -985,6 +1001,34 @@ Inst *simplify_mul(Inst *inst)
       Inst *new_inst2 = create_inst(Op::ADD, new_inst1, val);
       new_inst2->insert_before(inst);
       return new_inst2;
+    }
+
+  // mul (mul x, c2), c1 -> mul x, (c1 * c2)
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::MUL
+      && arg1->args[1]->op == Op::VALUE)
+    {
+      unsigned __int128 c1 = arg2->value();
+      unsigned __int128 c2 = arg1->args[1]->value();
+      Inst *c = inst->bb->value_inst(c1 * c2, inst->bitsize);
+      Inst *new_inst = create_inst(Op::MUL, arg1->args[0], c);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // mul (shl x, c2), c1 -> mul x, (c1 * (1 << c2))
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::SHL
+      && arg1->args[1]->op == Op::VALUE)
+    {
+      unsigned __int128 c1 = arg2->value();
+      unsigned __int128 c2 = arg1->args[1]->value();
+      assert(c2 < inst->bitsize);
+      Inst *c = inst->bb->value_inst(c1 * (((unsigned __int128)1) << c2),
+				     inst->bitsize);
+      Inst *new_inst = create_inst(Op::MUL, arg1->args[0], c);
+      new_inst->insert_before(inst);
+      return new_inst;
     }
 
   return inst;
@@ -1514,6 +1558,37 @@ Inst *simplify_shl(Inst *inst)
       Inst *new_inst2 = create_inst(Op::SHL, new_inst1, arg2);
       new_inst2->insert_before(inst);
       return new_inst2;
+    }
+
+  // shl (shl x, c1), c2 -> shl x, (c1 + c2)
+  if (inst->args[1]->op == Op::VALUE
+      && inst->args[0]->op == Op::SHL
+      && inst->args[0]->args[1]->op == Op::VALUE)
+    {
+      Inst *x = inst->args[0]->args[0];
+      unsigned __int128 c1 = inst->args[0]->args[1]->value();
+      unsigned __int128 c2 = inst->args[1]->value();
+      assert(c1 < inst->bitsize);
+      assert(c2 < inst->bitsize);
+      Inst *c = inst->bb->value_inst(c1 + c2, inst->bitsize);
+      Inst *new_inst = create_inst(Op::SHL, x, c);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // shl (mul x, c2), c1 -> mul x, ((1 << c1) * c2)
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::MUL
+      && arg1->args[1]->op == Op::VALUE)
+    {
+      unsigned __int128 c1 = arg2->value();
+      unsigned __int128 c2 = arg1->args[1]->value();
+      assert(c1 < inst->bitsize);
+      Inst *c = inst->bb->value_inst((((unsigned __int128)1) << c1) * c2,
+				     inst->bitsize);
+      Inst *new_inst = create_inst(Op::MUL, arg1->args[0], c);
+      new_inst->insert_before(inst);
+      return new_inst;
     }
 
   return inst;
