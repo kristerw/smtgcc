@@ -905,6 +905,14 @@ Inst *simplify_sext(Inst *inst)
       return new_inst;
     }
 
+  // sext (zext x) -> zext x
+  if (arg1->op == Op::ZEXT)
+    {
+      Inst *new_inst = create_inst(Op::ZEXT, arg1->args[0], arg2);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   // sext (extract (sext x)) -> sext (extract x)
   if (arg1->op == Op::EXTRACT && arg1->args[0]->op == Op::SEXT)
     {
