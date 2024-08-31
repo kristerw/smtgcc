@@ -1050,6 +1050,10 @@ Inst *simplify_neg(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
 
+  // neg (neg x) -> x
+  if (arg1->op == Op::NEG)
+    return arg1->args[0];
+
   // For Boolean x: neg (zext x) -> sext x
   if (arg1->op == Op::ZEXT && arg1->args[0]->bitsize == 1)
     {
