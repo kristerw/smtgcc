@@ -81,32 +81,51 @@ void Vrp::handle_and(Inst *inst)
 
   uint32_t lz = std::max(leading_zeros(arg1), leading_zeros(arg2));
   uint32_t tz = std::max(trailing_zeros(arg1), trailing_zeros(arg2));
-  if (arg2->op == Op::VALUE)
+
+  if (arg2->op == Op::VALUE && arg2->value() != 0)
     {
-      unsigned __int128 value = arg2->value();
+      // Delete "and x, c" if we know that all the bits that are 0 in the
+      // constant c are already 0 in x.
+      {
+	uint32_t c_lz = clz(arg2->value()) - (128 - arg2->bitsize);
+	uint32_t c_tz = ctz(arg2->value());
+	if (c_lz <= leading_zeros(arg1)
+	    && c_tz <= trailing_zeros(arg1)
+	    && c_lz + popcount(arg2->value()) + c_tz == arg2->bitsize)
+	  {
+	    inst->replace_all_uses_with(arg1);
+	    return;
+	  }
+      }
 
-      unsigned __int128 lz_mask = -1;
-      uint32_t lz_shift = (128 - inst->bitsize) + lz;
-      assert(lz_shift <= 128);
-      lz_mask = (lz_shift < 128) ? lz_mask >> lz_shift : 0;
-      value = value & lz_mask;
+      // Simplify "and x, c" by clearing the bits of the constant c for which
+      // we know the bits in x are 0.
+      {
+	unsigned __int128 value = arg2->value();
 
-      unsigned __int128 tz_mask = -1;
-      uint32_t tz_shift = tz;
-      assert(tz_shift <= 128);
-      tz_mask = (tz_shift < 128) ? tz_mask << tz_shift : 0;
-      value = value & tz_mask;
+	unsigned __int128 lz_mask = -1;
+	uint32_t lz_shift = (128 - inst->bitsize) + lz;
+	assert(lz_shift <= 128);
+	lz_mask = (lz_shift < 128) ? lz_mask >> lz_shift : 0;
+	value = value & lz_mask;
 
-      if (value != arg2->value())
-	{
-	  Inst *v = inst->bb->value_inst(value, inst->bitsize);
-	  handle_inst(v);
-	  Inst *new_inst = create_inst(Op::AND, arg1, v);
-	  new_inst->insert_before(inst);
-	  inst->replace_all_uses_with(new_inst);
-	  handle_inst(new_inst);
-	  return;
-	}
+	unsigned __int128 tz_mask = -1;
+	uint32_t tz_shift = tz;
+	assert(tz_shift <= 128);
+	tz_mask = (tz_shift < 128) ? tz_mask << tz_shift : 0;
+	value = value & tz_mask;
+
+	if (value != arg2->value())
+	  {
+	    Inst *v = inst->bb->value_inst(value, inst->bitsize);
+	    handle_inst(v);
+	    Inst *new_inst = create_inst(Op::AND, arg1, v);
+	    new_inst->insert_before(inst);
+	    inst->replace_all_uses_with(new_inst);
+	    handle_inst(new_inst);
+	    return;
+	  }
+      }
     }
 
   if (tz > 0)
