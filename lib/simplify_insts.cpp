@@ -1292,6 +1292,10 @@ Inst *simplify_sub(Inst *inst)
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
+  // sub x, x -> 0
+  if (arg1 == arg2)
+    return inst->bb->value_inst(0, inst->bitsize);
+
   // sub x, c -> add x, -c
   if (arg2->op == Op::VALUE)
     {
