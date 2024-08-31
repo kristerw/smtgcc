@@ -858,6 +858,10 @@ Inst *simplify_xor(Inst *inst)
       return new_inst;
     }
 
+  // xor x, x -> 0
+  if (arg1 == arg2)
+    return inst->bb->value_inst(0, inst->bitsize);
+
   // xor (sext x) (sext y) -> sext (xor x, y)
   // xor (zext x) (zext y) -> zext (xor x, y)
   if (((arg1->op == Op::SEXT && arg2->op == Op::SEXT)
