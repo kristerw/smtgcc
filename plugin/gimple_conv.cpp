@@ -180,6 +180,7 @@ struct Converter {
   void process_cfn_mask_load(gimple *stmt);
   void process_cfn_mask_store(gimple *stmt);
   void process_cfn_memcpy(gimple *stmt);
+  void process_cfn_memmove(gimple *stmt);
   void process_cfn_memset(gimple *stmt);
   void process_cfn_mul_overflow(gimple *stmt);
   void process_cfn_nan(gimple *stmt);
@@ -4527,6 +4528,51 @@ void Converter::process_cfn_memcpy(gimple *stmt)
     }
 }
 
+void Converter::process_cfn_memmove(gimple *stmt)
+{
+  if (TREE_CODE(gimple_call_arg(stmt, 2)) != INTEGER_CST)
+    throw Not_implemented("non-constant memmove size");
+  auto [orig_dest_ptr, dest_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
+  auto [orig_src_ptr, src_prov] = tree2inst_prov(gimple_call_arg(stmt, 1));
+  unsigned __int128 size = get_int_cst_val(gimple_call_arg(stmt, 2));
+  if (size > MAX_MEMORY_UNROLL_LIMIT)
+    throw Not_implemented("too large memmove");
+
+  store_ub_check(orig_dest_ptr, dest_prov, size);
+  load_ub_check(orig_src_ptr, src_prov, size);
+
+  tree lhs = gimple_call_lhs(stmt);
+  if (lhs)
+    {
+      constrain_range(bb, lhs, orig_dest_ptr);
+      tree2instruction.insert({lhs, orig_dest_ptr});
+      tree2prov.insert({lhs, dest_prov});
+    }
+
+  std::vector<Inst*> bytes;
+  bytes.reserve(size);
+  std::vector<Inst*> mem_flags;
+  mem_flags.reserve(size);
+  std::vector<Inst*> indefs;
+  indefs.reserve(size);
+  for (size_t i = 0; i < size; i++)
+    {
+      Inst *offset = bb->value_inst(i, orig_src_ptr->bitsize);
+      Inst *src_ptr = bb->build_inst(Op::ADD, orig_src_ptr, offset);
+      bytes.push_back(bb->build_inst(Op::LOAD, src_ptr));
+      mem_flags.push_back(bb->build_inst(Op::GET_MEM_FLAG, src_ptr));
+      indefs.push_back(bb->build_inst(Op::GET_MEM_INDEF, src_ptr));
+    }
+  for (size_t i = 0; i < size; i++)
+    {
+      Inst *offset = bb->value_inst(i, orig_src_ptr->bitsize);
+      Inst *dest_ptr = bb->build_inst(Op::ADD, orig_dest_ptr, offset);
+      bb->build_inst(Op::STORE, dest_ptr, bytes[i]);
+      bb->build_inst(Op::SET_MEM_FLAG, dest_ptr, mem_flags[i]);
+      bb->build_inst(Op::SET_MEM_INDEF, dest_ptr, indefs[i]);
+    }
+}
+
 void Converter::process_cfn_memset(gimple *stmt)
 {
   if (TREE_CODE(gimple_call_arg(stmt, 2)) != INTEGER_CST)
@@ -5120,6 +5166,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_BUILT_IN_MEMCPY:
       process_cfn_memcpy(stmt);
+      break;
+    case CFN_BUILT_IN_MEMMOVE:
+      process_cfn_memmove(stmt);
       break;
     case CFN_BUILT_IN_MEMSET:
       process_cfn_memset(stmt);
