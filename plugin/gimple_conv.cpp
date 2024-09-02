@@ -4503,20 +4503,27 @@ void Converter::process_cfn_memcpy(gimple *stmt)
       tree2prov.insert({lhs, dest_prov});
     }
 
+  std::vector<Inst*> bytes;
+  bytes.reserve(size);
+  std::vector<Inst*> mem_flags;
+  mem_flags.reserve(size);
+  std::vector<Inst*> indefs;
+  indefs.reserve(size);
   for (size_t i = 0; i < size; i++)
     {
       Inst *offset = bb->value_inst(i, orig_src_ptr->bitsize);
       Inst *src_ptr = bb->build_inst(Op::ADD, orig_src_ptr, offset);
+      bytes.push_back(bb->build_inst(Op::LOAD, src_ptr));
+      mem_flags.push_back(bb->build_inst(Op::GET_MEM_FLAG, src_ptr));
+      indefs.push_back(bb->build_inst(Op::GET_MEM_INDEF, src_ptr));
+    }
+  for (size_t i = 0; i < size; i++)
+    {
+      Inst *offset = bb->value_inst(i, orig_src_ptr->bitsize);
       Inst *dest_ptr = bb->build_inst(Op::ADD, orig_dest_ptr, offset);
-
-      Inst *byte = bb->build_inst(Op::LOAD, src_ptr);
-      bb->build_inst(Op::STORE, dest_ptr, byte);
-
-      Inst *mem_flag = bb->build_inst(Op::GET_MEM_FLAG, src_ptr);
-      bb->build_inst(Op::SET_MEM_FLAG, dest_ptr, mem_flag);
-
-      Inst *indef = bb->build_inst(Op::GET_MEM_INDEF, src_ptr);
-      bb->build_inst(Op::SET_MEM_INDEF, dest_ptr, indef);
+      bb->build_inst(Op::STORE, dest_ptr, bytes[i]);
+      bb->build_inst(Op::SET_MEM_FLAG, dest_ptr, mem_flags[i]);
+      bb->build_inst(Op::SET_MEM_INDEF, dest_ptr, indefs[i]);
     }
 }
 
