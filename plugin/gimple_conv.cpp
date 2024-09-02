@@ -923,6 +923,8 @@ uint8_t Converter::padding_at_offset(tree type, uint64_t offset)
       uint8_t padding = 0xff;
       for (tree fld = TYPE_FIELDS(type); fld; fld = DECL_CHAIN(fld))
 	{
+	  if (TREE_CODE(fld) != FIELD_DECL)
+	    continue;
 	  tree elem_type = TREE_TYPE(fld);
 	  padding &= padding_at_offset(elem_type, offset);
 	}
