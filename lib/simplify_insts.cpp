@@ -1738,8 +1738,9 @@ Inst *simplify_extract(Inst *inst)
 
   // Simplify "extract (ashr x, c)":
   //  * If it is only extracting from x, it is changed to "extract x".
-  //  * If it is only extracting from the extended bits, it is changed
-  //    to a sext of the most significant bit of x.
+  //  * If it is only extracting from the extended bits, including the
+  //    most significant bit of x, it is changed to a sext of the most
+  //    significant bit of x.
   if (arg1->op == Op::ASHR && arg1->args[1]->op == Op::VALUE)
     {
       Inst *x = arg1->args[0];
@@ -1755,7 +1756,7 @@ Inst *simplify_extract(Inst *inst)
 	  new_inst->insert_before(inst);
 	  return new_inst;
 	}
-      else if (lo_val >= x->bitsize)
+      else if (lo_val >= x->bitsize - 1)
 	{
 	  Inst *idx = inst->bb->value_inst(x->bitsize - 1, 32);
 	  Inst *new_inst = create_inst(Op::EXTRACT, x, idx, idx);
