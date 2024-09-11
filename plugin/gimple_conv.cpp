@@ -4893,7 +4893,7 @@ void Converter::process_cfn_reduc(gimple *stmt)
 	extract_vec_elem(bb, arg, arg_indef, arg_prov, elem_bitsize, i);
       std::tie(inst, indef, prov) =
 	process_binary_scalar(code, inst, indef, prov, elem, elem_indef,
-			      elem_prov, elem_type, elem_type, elem_type);
+			      elem_prov, elem_type, elem_type, elem_type, true);
     }
 
   if (lhs)
