@@ -105,6 +105,8 @@ private:
   void get_right_paren(unsigned idx);
   void get_end_of_line(unsigned idx);
   void gen_cond_branch(Op op);
+  void call___divdi3();
+  void call___udivdi3();
   void gen_call();
   void gen_tail();
   void store_ub_check(Inst *ptr, uint64_t size);
@@ -570,12 +572,57 @@ void parser::gen_cond_branch(Op op)
   current_bb = false_bb;
 }
 
+void parser::call___divdi3()
+{
+  assert(reg_bitsize == 32);
+  Inst *a0 = current_bb->build_inst(Op::READ, rstate->registers[10 + 0]);
+  Inst *a1 = current_bb->build_inst(Op::READ, rstate->registers[10 + 1]);
+  Inst *a2 = current_bb->build_inst(Op::READ, rstate->registers[10 + 2]);
+  Inst *a3 = current_bb->build_inst(Op::READ, rstate->registers[10 + 3]);
+  Inst *arg1 = current_bb->build_inst(Op::CONCAT, a1, a0);
+  Inst *arg2 = current_bb->build_inst(Op::CONCAT, a3, a2);
+  Inst *zero = current_bb->value_inst(0, arg2->bitsize);
+  current_bb->build_inst(Op::UB, current_bb->build_inst(Op::EQ, arg2, zero));
+  Inst *res = current_bb->build_inst(Op::SDIV, arg1, arg2);
+  a0 = current_bb->build_trunc(res, reg_bitsize);
+  Inst *high = current_bb->value_inst(2 * reg_bitsize - 1, 32);
+  Inst *low = current_bb->value_inst(reg_bitsize, 32);
+  a1 = current_bb->build_inst(Op::EXTRACT, res, high, low);
+  current_bb->build_inst(Op::WRITE, rstate->registers[10 + 0], a0);
+  current_bb->build_inst(Op::WRITE, rstate->registers[10 + 1], a1);
+}
+
+void parser::call___udivdi3()
+{
+  assert(reg_bitsize == 32);
+  Inst *a0 = current_bb->build_inst(Op::READ, rstate->registers[10 + 0]);
+  Inst *a1 = current_bb->build_inst(Op::READ, rstate->registers[10 + 1]);
+  Inst *a2 = current_bb->build_inst(Op::READ, rstate->registers[10 + 2]);
+  Inst *a3 = current_bb->build_inst(Op::READ, rstate->registers[10 + 3]);
+  Inst *arg1 = current_bb->build_inst(Op::CONCAT, a1, a0);
+  Inst *arg2 = current_bb->build_inst(Op::CONCAT, a3, a2);
+  Inst *zero = current_bb->value_inst(0, arg2->bitsize);
+  current_bb->build_inst(Op::UB, current_bb->build_inst(Op::EQ, arg2, zero));
+  Inst *res = current_bb->build_inst(Op::UDIV, arg1, arg2);
+  a0 = current_bb->build_trunc(res, reg_bitsize);
+  Inst *high = current_bb->value_inst(2 * reg_bitsize - 1, 32);
+  Inst *low = current_bb->value_inst(reg_bitsize, 32);
+  a1 = current_bb->build_inst(Op::EXTRACT, res, high, low);
+  current_bb->build_inst(Op::WRITE, rstate->registers[10 + 0], a0);
+  current_bb->build_inst(Op::WRITE, rstate->registers[10 + 1], a1);
+}
+
 void parser::gen_call()
 {
   std::string name = get_name(1);
   get_end_of_line(2);
 
-  throw Not_implemented("call " + name);
+  if (name == "__divdi3")
+    call___divdi3();
+  if (name == "__udivdi3")
+    call___udivdi3();
+  else
+    throw Not_implemented("call " + name);
 }
 
 void parser::gen_tail()
