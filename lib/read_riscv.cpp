@@ -104,22 +104,22 @@ private:
   void get_left_paren(unsigned idx);
   void get_right_paren(unsigned idx);
   void get_end_of_line(unsigned idx);
-  void gen_cond_branch(Op op);
+  void process_cond_branch(Op op);
   void call___divdi3();
   void call___udivdi3();
-  void gen_call();
-  void gen_tail();
+  void process_call();
+  void process_tail();
   void store_ub_check(Inst *ptr, uint64_t size);
   void load_ub_check(Inst *ptr, uint64_t size);
-  void gen_load(int size, LStype lstype = LStype::signed_ls);
-  void gen_store(int size, LStype lstype = LStype::signed_ls);
-  void gen_funary(std::string name, Op op);
-  void gen_fbinary(std::string name, Op op);
-  void gen_fcmp(std::string name, Op op);
-  void gen_iunary(std::string name, Op op);
-  void gen_ibinary(std::string name, Op op);
-  void gen_icmp(std::string name, Op op);
-  void gen_ishift(std::string name, Op op);
+  void process_load(int size, LStype lstype = LStype::signed_ls);
+  void process_store(int size, LStype lstype = LStype::signed_ls);
+  void process_funary(std::string name, Op op);
+  void process_fbinary(std::string name, Op op);
+  void process_fcmp(std::string name, Op op);
+  void process_iunary(std::string name, Op op);
+  void process_ibinary(std::string name, Op op);
+  void process_icmp(std::string name, Op op);
+  void process_ishift(std::string name, Op op);
 
   void parse_function();
 
@@ -557,7 +557,7 @@ void parser::get_end_of_line(unsigned idx)
 		      token_string(tokens[idx - 1]), line_number);
 }
 
-void parser::gen_cond_branch(Op op)
+void parser::process_cond_branch(Op op)
 {
   Inst *arg1 = get_reg_value(1);
   get_comma(2);
@@ -612,7 +612,7 @@ void parser::call___udivdi3()
   bb->build_inst(Op::WRITE, rstate->registers[10 + 1], a1);
 }
 
-void parser::gen_call()
+void parser::process_call()
 {
   std::string name = get_name(1);
   get_end_of_line(2);
@@ -625,7 +625,7 @@ void parser::gen_call()
     throw Not_implemented("call " + name);
 }
 
-void parser::gen_tail()
+void parser::process_tail()
 {
   std::string name = get_name(1);
   get_end_of_line(2);
@@ -691,7 +691,7 @@ void parser::load_ub_check(Inst *ptr, uint64_t size)
   bb->build_inst(Op::UB, out_of_bound);
 }
 
-void parser::gen_load(int size, LStype lstype)
+void parser::process_load(int size, LStype lstype)
 {
   Inst *ptr;
   Inst *dest;
@@ -733,7 +733,7 @@ void parser::gen_load(int size, LStype lstype)
   bb->build_inst(Op::WRITE, dest, value);
 }
 
-void parser::gen_store(int size, LStype lstype)
+void parser::process_store(int size, LStype lstype)
 {
   Inst *ptr;
   Inst *value;
@@ -761,7 +761,7 @@ void parser::gen_store(int size, LStype lstype)
     }
 }
 
-void parser::gen_funary(std::string name, Op op)
+void parser::process_funary(std::string name, Op op)
 {
   Inst *dest = get_freg(1);
   get_comma(2);
@@ -783,7 +783,7 @@ void parser::gen_funary(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::gen_fbinary(std::string name, Op op)
+void parser::process_fbinary(std::string name, Op op)
 {
   Inst *dest = get_freg(1);
   get_comma(2);
@@ -808,7 +808,7 @@ void parser::gen_fbinary(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::gen_fcmp(std::string name, Op op)
+void parser::process_fcmp(std::string name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -830,7 +830,7 @@ void parser::gen_fcmp(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::gen_iunary(std::string name, Op op)
+void parser::process_iunary(std::string name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -849,7 +849,7 @@ void parser::gen_iunary(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::gen_ibinary(std::string name, Op op)
+void parser::process_ibinary(std::string name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -880,7 +880,7 @@ void parser::gen_ibinary(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::gen_ishift(std::string name, Op op)
+void parser::process_ishift(std::string name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -919,7 +919,7 @@ void parser::gen_ishift(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::gen_icmp(std::string name, Op op)
+void parser::process_icmp(std::string name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -968,9 +968,9 @@ void parser::parse_function()
   if (name.starts_with(".cfi"))
     ;
   else if (name == "add" || name == "addw" || name == "addi" || name == "addiw")
-    gen_ibinary(name, Op::ADD);
+    process_ibinary(name, Op::ADD);
   else if (name == "mul" || name == "mulw")
-    gen_ibinary(name, Op::MUL);
+    process_ibinary(name, Op::MUL);
   else if (name == "mulh" || name == "mulhu" || name == "mulhsu")
     {
       Inst *dest = get_reg(1);
@@ -999,22 +999,22 @@ void parser::parse_function()
       bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "div" || name == "divw")
-    gen_ibinary(name, Op::SDIV);
+    process_ibinary(name, Op::SDIV);
   else if (name == "divu" || name == "divuw")
-    gen_ibinary(name, Op::UDIV);
+    process_ibinary(name, Op::UDIV);
   else if (name == "rem" || name == "remw")
-    gen_ibinary(name, Op::SREM);
+    process_ibinary(name, Op::SREM);
   else if (name == "remu" || name == "remuw")
-    gen_ibinary(name, Op::UREM);
+    process_ibinary(name, Op::UREM);
   else if (name == "slt" || name == "sltw" || name == "slti" || name == "sltiw")
-    gen_icmp(name, Op::SLT);
+    process_icmp(name, Op::SLT);
   else if (name == "sltu" || name == "sltuw"
 	   || name == "sltiu" || name == "sltiuw")
-    gen_icmp(name, Op::ULT);
+    process_icmp(name, Op::ULT);
   else if (name == "sgt" || name == "sgtw")
-    gen_icmp(name, Op::SGT);
+    process_icmp(name, Op::SGT);
   else if (name == "sgtu" || name == "sgtuw")
-    gen_icmp(name, Op::UGT);
+    process_icmp(name, Op::UGT);
   else if (name == "seqz" || name == "seqzw")
     {
       // Pseudo instruction.
@@ -1053,21 +1053,21 @@ void parser::parse_function()
     }
   else if (name == "and" || name == "andw"
 	   || name == "andi" || name == "andiw")
-    gen_ibinary(name, Op::AND);
+    process_ibinary(name, Op::AND);
   else if (name == "or" || name == "orw" || name == "ori" || name == "oriw")
-    gen_ibinary(name, Op::OR);
+    process_ibinary(name, Op::OR);
   else if (name == "xor" || name == "xorw" || name == "xori" || name == "xoriw")
-    gen_ibinary(name, Op::XOR);
+    process_ibinary(name, Op::XOR);
   else if (name == "sll" || name == "sllw" || name == "slli" || name == "slliw")
-    gen_ishift(name, Op::SHL);
+    process_ishift(name, Op::SHL);
   else if (name == "srl" || name == "srlw" || name == "srli" || name == "srliw")
-    gen_ishift(name, Op::LSHR);
+    process_ishift(name, Op::LSHR);
   else if (name == "sra" || name == "sraw" || name == "srai" || name == "sraiw")
-    gen_ishift(name, Op::ASHR);
+    process_ishift(name, Op::ASHR);
   else if (name == "sub" || name == "subw")
-    gen_ibinary(name, Op::SUB);
+    process_ibinary(name, Op::SUB);
   else if (name == "neg" || name == "negw")
-    gen_iunary(name, Op::NEG);
+    process_iunary(name, Op::NEG);
   else if (name == "sext.w")
     {
       Inst *dest = get_reg(1);
@@ -1081,9 +1081,9 @@ void parser::parse_function()
       bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "not")
-    gen_iunary(name, Op::NOT);
+    process_iunary(name, Op::NOT);
   else if (name == "mv")
-    gen_iunary(name, Op::MOV);
+    process_iunary(name, Op::MOV);
   else if (name == "li")
     {
       Inst *dest = get_reg(1);
@@ -1111,49 +1111,49 @@ void parser::parse_function()
       bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "call")
-    gen_call();
+    process_call();
   else if (name == "tail")
-    gen_tail();
+    process_tail();
   else if (name == "ld" && reg_bitsize == 64)
-    gen_load(8);
+    process_load(8);
   else if (name == "lw")
-    gen_load(4);
+    process_load(4);
   else if (name == "lh")
-    gen_load(2);
+    process_load(2);
   else if (name == "lhu")
-    gen_load(2, LStype::unsigned_ls);
+    process_load(2, LStype::unsigned_ls);
   else if (name == "lb")
-    gen_load(1);
+    process_load(1);
   else if (name == "lbu")
-    gen_load(1, LStype::unsigned_ls);
+    process_load(1, LStype::unsigned_ls);
   else if (name == "sd" && reg_bitsize == 64)
-    gen_store(8);
+    process_store(8);
   else if (name == "sw")
-    gen_store(4);
+    process_store(4);
   else if (name == "sh")
-    gen_store(2);
+    process_store(2);
   else if (name == "sb")
-    gen_store(1);
+    process_store(1);
   else if (name == "beq")
-    gen_cond_branch(Op::EQ);
+    process_cond_branch(Op::EQ);
   else if (name == "bne")
-    gen_cond_branch(Op::NE);
+    process_cond_branch(Op::NE);
   else if (name == "ble")
-    gen_cond_branch(Op::SLE);
+    process_cond_branch(Op::SLE);
   else if (name == "bleu")
-    gen_cond_branch(Op::ULE);
+    process_cond_branch(Op::ULE);
   else if (name == "blt")
-    gen_cond_branch(Op::SLT);
+    process_cond_branch(Op::SLT);
   else if (name == "bltu")
-    gen_cond_branch(Op::ULT);
+    process_cond_branch(Op::ULT);
   else if (name == "bge")
-    gen_cond_branch(Op::SGE);
+    process_cond_branch(Op::SGE);
   else if (name == "bgeu")
-    gen_cond_branch(Op::UGE);
+    process_cond_branch(Op::UGE);
   else if (name == "bgt")
-    gen_cond_branch(Op::SGT);
+    process_cond_branch(Op::SGT);
   else if (name == "bgtu")
-    gen_cond_branch(Op::UGT);
+    process_cond_branch(Op::UGT);
   else if (name == "j")
     {
       Basic_block *dest_bb = get_bb(1);
@@ -1176,37 +1176,37 @@ void parser::parse_function()
       bb = nullptr;
     }
   else if (name == "fld")
-    gen_load(8, LStype::float_ls);
+    process_load(8, LStype::float_ls);
   else if (name == "flw")
-    gen_load(4, LStype::float_ls);
+    process_load(4, LStype::float_ls);
   else if (name == "fsd")
-    gen_store(8, LStype::float_ls);
+    process_store(8, LStype::float_ls);
   else if (name == "fsw")
-    gen_store(4, LStype::float_ls);
+    process_store(4, LStype::float_ls);
   else if (name == "fabs.s" || name == "fabs.d")
-    gen_funary(name, Op::FABS);
+    process_funary(name, Op::FABS);
   else if (name == "fmv.s" || name == "fmv.d")
-    gen_funary(name, Op::MOV);
+    process_funary(name, Op::MOV);
   else if (name == "fneg.s" || name == "fneg.d")
-    gen_funary(name, Op::FNEG);
+    process_funary(name, Op::FNEG);
   else if (name == "fadd.s" || name == "fadd.d")
-    gen_fbinary(name, Op::FADD);
+    process_fbinary(name, Op::FADD);
   else if (name == "fsub.s" || name == "fsub.d")
-    gen_fbinary(name, Op::FSUB);
+    process_fbinary(name, Op::FSUB);
   else if (name == "fmul.s" || name == "fmul.d")
-    gen_fbinary(name, Op::FMUL);
+    process_fbinary(name, Op::FMUL);
   else if (name == "fdiv.s" || name == "fdiv.d")
-    gen_fbinary(name, Op::FDIV);
+    process_fbinary(name, Op::FDIV);
   else if (name == "feq.s" || name == "feq.d")
-    gen_fcmp(name, Op::FEQ);
+    process_fcmp(name, Op::FEQ);
   else if (name == "flt.s" || name == "flt.d")
-    gen_fcmp(name, Op::FLT);
+    process_fcmp(name, Op::FLT);
   else if (name == "fle.s" || name == "fle.d")
-    gen_fcmp(name, Op::FLE);
+    process_fcmp(name, Op::FLE);
   else if (name == "fgt.s" || name == "fgt.d")
-    gen_fcmp(name, Op::FGT);
+    process_fcmp(name, Op::FGT);
   else if (name == "fge.s" || name == "fge.d")
-    gen_fcmp(name, Op::FGE);
+    process_fcmp(name, Op::FGE);
   else
     throw Parse_error("unhandled instruction: "s + name, line_number);
 }
