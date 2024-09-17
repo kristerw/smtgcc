@@ -70,7 +70,7 @@ struct parser {
 
 private:
   Function *current_func = nullptr;
-  Basic_block *current_bb = nullptr;
+  Basic_block *bb = nullptr;
   std::map<std::string, Basic_block *> label2bb;
   std::map<uint32_t, Inst *> id2inst;
 
@@ -428,8 +428,8 @@ Inst *parser::get_hilo_addr(const token& tok)
 	    throw Parse_error("too large decimal integer value", line_number);
 	  pos++;
 	}
-      Inst *value_inst = current_bb->value_inst(value, addr->bitsize);
-      addr = current_bb->build_inst(Op::ADD, addr, value_inst);
+      Inst *value_inst = bb->value_inst(value, addr->bitsize);
+      addr = bb->build_inst(Op::ADD, addr, value_inst);
     }
   assert(buf[pos] == ')');
   return addr;
@@ -442,12 +442,12 @@ Inst *parser::get_hi(unsigned idx)
   if (tokens[idx].kind != lexeme::hi)
     throw Parse_error("expected %lo instead of "
 		      + token_string(tokens[idx]), line_number);
-  Inst *high = current_bb->value_inst(31, 32);
-  Inst *low = current_bb->value_inst(12, 32);
+  Inst *high = bb->value_inst(31, 32);
+  Inst *low = bb->value_inst(12, 32);
   Inst *addr = get_hilo_addr(tokens[idx]);
-  Inst *res = current_bb->build_inst(Op::EXTRACT, addr, high, low);
-  Inst *zero = current_bb->value_inst(0, 12);
-  return current_bb->build_inst(Op::CONCAT, res, zero);
+  Inst *res = bb->build_inst(Op::EXTRACT, addr, high, low);
+  Inst *zero = bb->value_inst(0, 12);
+  return bb->build_inst(Op::CONCAT, res, zero);
 }
 
 Inst *parser::get_lo(unsigned idx)
@@ -457,7 +457,7 @@ Inst *parser::get_lo(unsigned idx)
   if (tokens[idx].kind != lexeme::lo)
     throw Parse_error("expected %lo instead of "
 		      + token_string(tokens[idx]), line_number);
-  return current_bb->build_trunc(get_hilo_addr(tokens[idx]), 12);
+  return bb->build_trunc(get_hilo_addr(tokens[idx]), 12);
 }
 
 Inst *parser::get_imm(unsigned idx)
@@ -468,9 +468,9 @@ Inst *parser::get_imm(unsigned idx)
   if (tokens[idx].kind == lexeme::lo)
     inst = get_lo(idx);
   else
-    inst = current_bb->value_inst(get_hex_or_integer(idx), 12);
-  Inst *bitsize = current_bb->value_inst(reg_bitsize, 32);
-  return current_bb->build_inst(Op::SEXT, inst, bitsize);
+    inst = bb->value_inst(get_hex_or_integer(idx), 12);
+  Inst *bitsize = bb->value_inst(reg_bitsize, 32);
+  return bb->build_inst(Op::SEXT, inst, bitsize);
 }
 
 Inst *parser::get_reg_value(unsigned idx)
@@ -482,13 +482,13 @@ Inst *parser::get_reg_value(unsigned idx)
       && buf[tokens[idx].pos + 1] == 'e'
       && buf[tokens[idx].pos + 2] == 'r'
       && buf[tokens[idx].pos + 3] == 'o')
-    return current_bb->value_inst(0, reg_bitsize);
-  return current_bb->build_inst(Op::READ, get_reg(idx));
+    return bb->value_inst(0, reg_bitsize);
+  return bb->build_inst(Op::READ, get_reg(idx));
 }
 
 Inst *parser::get_freg_value(unsigned idx)
 {
-  return current_bb->build_inst(Op::READ, get_freg(idx));
+  return bb->build_inst(Op::READ, get_freg(idx));
 }
 
 Basic_block *parser::get_bb(unsigned idx)
@@ -567,49 +567,49 @@ void parser::gen_cond_branch(Op op)
   get_end_of_line(6);
 
   Basic_block *false_bb = current_func->build_bb();
-  Inst *cond = current_bb->build_inst(op, arg1, arg2);
-  current_bb->build_br_inst(cond, true_bb, false_bb);
-  current_bb = false_bb;
+  Inst *cond = bb->build_inst(op, arg1, arg2);
+  bb->build_br_inst(cond, true_bb, false_bb);
+  bb = false_bb;
 }
 
 void parser::call___divdi3()
 {
   assert(reg_bitsize == 32);
-  Inst *a0 = current_bb->build_inst(Op::READ, rstate->registers[10 + 0]);
-  Inst *a1 = current_bb->build_inst(Op::READ, rstate->registers[10 + 1]);
-  Inst *a2 = current_bb->build_inst(Op::READ, rstate->registers[10 + 2]);
-  Inst *a3 = current_bb->build_inst(Op::READ, rstate->registers[10 + 3]);
-  Inst *arg1 = current_bb->build_inst(Op::CONCAT, a1, a0);
-  Inst *arg2 = current_bb->build_inst(Op::CONCAT, a3, a2);
-  Inst *zero = current_bb->value_inst(0, arg2->bitsize);
-  current_bb->build_inst(Op::UB, current_bb->build_inst(Op::EQ, arg2, zero));
-  Inst *res = current_bb->build_inst(Op::SDIV, arg1, arg2);
-  a0 = current_bb->build_trunc(res, reg_bitsize);
-  Inst *high = current_bb->value_inst(2 * reg_bitsize - 1, 32);
-  Inst *low = current_bb->value_inst(reg_bitsize, 32);
-  a1 = current_bb->build_inst(Op::EXTRACT, res, high, low);
-  current_bb->build_inst(Op::WRITE, rstate->registers[10 + 0], a0);
-  current_bb->build_inst(Op::WRITE, rstate->registers[10 + 1], a1);
+  Inst *a0 = bb->build_inst(Op::READ, rstate->registers[10 + 0]);
+  Inst *a1 = bb->build_inst(Op::READ, rstate->registers[10 + 1]);
+  Inst *a2 = bb->build_inst(Op::READ, rstate->registers[10 + 2]);
+  Inst *a3 = bb->build_inst(Op::READ, rstate->registers[10 + 3]);
+  Inst *arg1 = bb->build_inst(Op::CONCAT, a1, a0);
+  Inst *arg2 = bb->build_inst(Op::CONCAT, a3, a2);
+  Inst *zero = bb->value_inst(0, arg2->bitsize);
+  bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg2, zero));
+  Inst *res = bb->build_inst(Op::SDIV, arg1, arg2);
+  a0 = bb->build_trunc(res, reg_bitsize);
+  Inst *high = bb->value_inst(2 * reg_bitsize - 1, 32);
+  Inst *low = bb->value_inst(reg_bitsize, 32);
+  a1 = bb->build_inst(Op::EXTRACT, res, high, low);
+  bb->build_inst(Op::WRITE, rstate->registers[10 + 0], a0);
+  bb->build_inst(Op::WRITE, rstate->registers[10 + 1], a1);
 }
 
 void parser::call___udivdi3()
 {
   assert(reg_bitsize == 32);
-  Inst *a0 = current_bb->build_inst(Op::READ, rstate->registers[10 + 0]);
-  Inst *a1 = current_bb->build_inst(Op::READ, rstate->registers[10 + 1]);
-  Inst *a2 = current_bb->build_inst(Op::READ, rstate->registers[10 + 2]);
-  Inst *a3 = current_bb->build_inst(Op::READ, rstate->registers[10 + 3]);
-  Inst *arg1 = current_bb->build_inst(Op::CONCAT, a1, a0);
-  Inst *arg2 = current_bb->build_inst(Op::CONCAT, a3, a2);
-  Inst *zero = current_bb->value_inst(0, arg2->bitsize);
-  current_bb->build_inst(Op::UB, current_bb->build_inst(Op::EQ, arg2, zero));
-  Inst *res = current_bb->build_inst(Op::UDIV, arg1, arg2);
-  a0 = current_bb->build_trunc(res, reg_bitsize);
-  Inst *high = current_bb->value_inst(2 * reg_bitsize - 1, 32);
-  Inst *low = current_bb->value_inst(reg_bitsize, 32);
-  a1 = current_bb->build_inst(Op::EXTRACT, res, high, low);
-  current_bb->build_inst(Op::WRITE, rstate->registers[10 + 0], a0);
-  current_bb->build_inst(Op::WRITE, rstate->registers[10 + 1], a1);
+  Inst *a0 = bb->build_inst(Op::READ, rstate->registers[10 + 0]);
+  Inst *a1 = bb->build_inst(Op::READ, rstate->registers[10 + 1]);
+  Inst *a2 = bb->build_inst(Op::READ, rstate->registers[10 + 2]);
+  Inst *a3 = bb->build_inst(Op::READ, rstate->registers[10 + 3]);
+  Inst *arg1 = bb->build_inst(Op::CONCAT, a1, a0);
+  Inst *arg2 = bb->build_inst(Op::CONCAT, a3, a2);
+  Inst *zero = bb->value_inst(0, arg2->bitsize);
+  bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg2, zero));
+  Inst *res = bb->build_inst(Op::UDIV, arg1, arg2);
+  a0 = bb->build_trunc(res, reg_bitsize);
+  Inst *high = bb->value_inst(2 * reg_bitsize - 1, 32);
+  Inst *low = bb->value_inst(reg_bitsize, 32);
+  a1 = bb->build_inst(Op::EXTRACT, res, high, low);
+  bb->build_inst(Op::WRITE, rstate->registers[10 + 0], a0);
+  bb->build_inst(Op::WRITE, rstate->registers[10 + 1], a1);
 }
 
 void parser::gen_call()
@@ -635,38 +635,38 @@ void parser::gen_tail()
 
 void parser::store_ub_check(Inst *ptr, uint64_t size)
 {
-  Inst *ptr_mem_id = current_bb->build_extract_id(ptr);
+  Inst *ptr_mem_id = bb->build_extract_id(ptr);
 
   // It is UB to write to constant memory.
-  Inst *is_const = current_bb->build_inst(Op::IS_CONST_MEM, ptr_mem_id);
-  current_bb->build_inst(Op::UB, is_const);
+  Inst *is_const = bb->build_inst(Op::IS_CONST_MEM, ptr_mem_id);
+  bb->build_inst(Op::UB, is_const);
 
   // It is UB if the store overflows into a different memory object.
-  Inst *size_inst = current_bb->value_inst(size - 1, 32);
-  Inst *last_addr = current_bb->build_inst(Op::ADD, ptr, size_inst);
-  Inst *last_mem_id = current_bb->build_extract_id(last_addr);
-  Inst *is_ub = current_bb->build_inst(Op::NE, ptr_mem_id, last_mem_id);
-  current_bb->build_inst(Op::UB, is_ub);
+  Inst *size_inst = bb->value_inst(size - 1, 32);
+  Inst *last_addr = bb->build_inst(Op::ADD, ptr, size_inst);
+  Inst *last_mem_id = bb->build_extract_id(last_addr);
+  Inst *is_ub = bb->build_inst(Op::NE, ptr_mem_id, last_mem_id);
+  bb->build_inst(Op::UB, is_ub);
 
   // It is UB if the end is outside the memory object -- the start is
   // obviously in the memory object if the end is within the object.
   // Otherwise, the  previous overflow check would have failed.
-  Inst *mem_size = current_bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
-  Inst *offset = current_bb->build_extract_offset(last_addr);
-  Inst *out_of_bound = current_bb->build_inst(Op::UGE, offset, mem_size);
-  current_bb->build_inst(Op::UB, out_of_bound);
+  Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
+  Inst *offset = bb->build_extract_offset(last_addr);
+  Inst *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
+  bb->build_inst(Op::UB, out_of_bound);
 }
 
 void parser::load_ub_check(Inst *ptr, uint64_t size)
 {
-  Inst *ptr_mem_id = current_bb->build_extract_id(ptr);
+  Inst *ptr_mem_id = bb->build_extract_id(ptr);
 
   // It is UB if the store overflows into a different memory object.
-  Inst *size_inst = current_bb->value_inst(size - 1, 32);
-  Inst *last_addr = current_bb->build_inst(Op::ADD, ptr, size_inst);
-  Inst *last_mem_id = current_bb->build_extract_id(last_addr);
-  Inst *is_ub = current_bb->build_inst(Op::NE, ptr_mem_id, last_mem_id);
-  current_bb->build_inst(Op::UB, is_ub);
+  Inst *size_inst = bb->value_inst(size - 1, 32);
+  Inst *last_addr = bb->build_inst(Op::ADD, ptr, size_inst);
+  Inst *last_mem_id = bb->build_extract_id(last_addr);
+  Inst *is_ub = bb->build_inst(Op::NE, ptr_mem_id, last_mem_id);
+  bb->build_inst(Op::UB, is_ub);
 
   // It is UB if the start is outside the memory object.
   // The RISC-V backend sometimes reads where the end is outside the memory
@@ -685,10 +685,10 @@ void parser::load_ub_check(Inst *ptr, uint64_t size)
   //
   // TODO: We should improve this to verify that it does not read more bytes
   // than are guaranteed to be available.
-  Inst *mem_size = current_bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
-  Inst *offset = current_bb->build_extract_offset(ptr);
-  Inst *out_of_bound = current_bb->build_inst(Op::UGE, offset, mem_size);
-  current_bb->build_inst(Op::UB, out_of_bound);
+  Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
+  Inst *offset = bb->build_extract_offset(ptr);
+  Inst *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
+  bb->build_inst(Op::UB, out_of_bound);
 }
 
 void parser::gen_load(int size, LStype lstype)
@@ -706,31 +706,31 @@ void parser::gen_load(int size, LStype lstype)
   get_right_paren(6);
   get_end_of_line(7);
 
-  ptr = current_bb->build_inst(Op::ADD, base, offset);
+  ptr = bb->build_inst(Op::ADD, base, offset);
   load_ub_check(ptr, size);
   Inst *value = nullptr;
   for (int i = 0; i < size; i++)
     {
-      Inst *size_inst = current_bb->value_inst(i, ptr->bitsize);
-      Inst *addr = current_bb->build_inst(Op::ADD, ptr, size_inst);
-      Inst *byte = current_bb->build_inst(Op::LOAD, addr);
+      Inst *size_inst = bb->value_inst(i, ptr->bitsize);
+      Inst *addr = bb->build_inst(Op::ADD, ptr, size_inst);
+      Inst *byte = bb->build_inst(Op::LOAD, addr);
       if (value)
-	value = current_bb->build_inst(Op::CONCAT, byte, value);
+	value = bb->build_inst(Op::CONCAT, byte, value);
       else
 	value = byte;
     }
   if (lstype == LStype::float_ls && size == 4)
     {
-      Inst *m1 = current_bb->value_m1_inst(32);
-      value = current_bb->build_inst(Op::CONCAT, m1, value);
+      Inst *m1 = bb->value_m1_inst(32);
+      value = bb->build_inst(Op::CONCAT, m1, value);
     }
   else if (value->bitsize < reg_bitsize)
     {
-      Inst *bitsize = current_bb->value_inst(reg_bitsize, 32);
+      Inst *bitsize = bb->value_inst(reg_bitsize, 32);
       Op op = lstype == LStype::unsigned_ls ? Op::ZEXT : Op::SEXT;
-      value = current_bb->build_inst(op, value, bitsize);
+      value = bb->build_inst(op, value, bitsize);
     }
-  current_bb->build_inst(Op::WRITE, dest, value);
+  bb->build_inst(Op::WRITE, dest, value);
 }
 
 void parser::gen_store(int size, LStype lstype)
@@ -748,16 +748,16 @@ void parser::gen_store(int size, LStype lstype)
   get_right_paren(6);
   get_end_of_line(7);
 
-  ptr = current_bb->build_inst(Op::ADD, base, offset);
+  ptr = bb->build_inst(Op::ADD, base, offset);
   store_ub_check(ptr, size);
   for (int i = 0; i < size; i++)
     {
-      Inst *size_inst = current_bb->value_inst(i, ptr->bitsize);
-      Inst *addr = current_bb->build_inst(Op::ADD, ptr, size_inst);
-      Inst *high = current_bb->value_inst(i * 8 + 7, 32);
-      Inst *low = current_bb->value_inst(i * 8, 32);
-      Inst *byte = current_bb->build_inst(Op::EXTRACT, value, high, low);
-      current_bb->build_inst(Op::STORE, addr, byte);
+      Inst *size_inst = bb->value_inst(i, ptr->bitsize);
+      Inst *addr = bb->build_inst(Op::ADD, ptr, size_inst);
+      Inst *high = bb->value_inst(i * 8 + 7, 32);
+      Inst *low = bb->value_inst(i * 8, 32);
+      Inst *byte = bb->build_inst(Op::EXTRACT, value, high, low);
+      bb->build_inst(Op::STORE, addr, byte);
     }
 }
 
@@ -772,15 +772,15 @@ void parser::gen_funary(std::string name, Op op)
     name[name.length() - 2] == '.' && name[name.length() - 1] == 's';
   if (is_single_prec)
     {
-      arg1 = current_bb->build_trunc(arg1, 32);
+      arg1 = bb->build_trunc(arg1, 32);
     }
-  Inst *res = current_bb->build_inst(op, arg1);
+  Inst *res = bb->build_inst(op, arg1);
   if (is_single_prec)
     {
-      Inst *m1 = current_bb->value_m1_inst(32);
-      res = current_bb->build_inst(Op::CONCAT, m1, res);
+      Inst *m1 = bb->value_m1_inst(32);
+      res = bb->build_inst(Op::CONCAT, m1, res);
     }
-  current_bb->build_inst(Op::WRITE, dest, res);
+  bb->build_inst(Op::WRITE, dest, res);
 }
 
 void parser::gen_fbinary(std::string name, Op op)
@@ -796,16 +796,16 @@ void parser::gen_fbinary(std::string name, Op op)
     name[name.length() - 2] == '.' && name[name.length() - 1] == 's';
   if (is_single_prec)
     {
-      arg1 = current_bb->build_trunc(arg1, 32);
-      arg2 = current_bb->build_trunc(arg2, 32);
+      arg1 = bb->build_trunc(arg1, 32);
+      arg2 = bb->build_trunc(arg2, 32);
     }
-  Inst *res = current_bb->build_inst(op, arg1, arg2);
+  Inst *res = bb->build_inst(op, arg1, arg2);
   if (is_single_prec)
     {
-      Inst *m1 = current_bb->value_m1_inst(32);
-      res = current_bb->build_inst(Op::CONCAT, m1, res);
+      Inst *m1 = bb->value_m1_inst(32);
+      res = bb->build_inst(Op::CONCAT, m1, res);
     }
-  current_bb->build_inst(Op::WRITE, dest, res);
+  bb->build_inst(Op::WRITE, dest, res);
 }
 
 void parser::gen_fcmp(std::string name, Op op)
@@ -821,13 +821,13 @@ void parser::gen_fcmp(std::string name, Op op)
     name[name.length() - 2] == '.' && name[name.length() - 1] == 's';
   if (is_single_prec)
     {
-      arg1 = current_bb->build_trunc(arg1, 32);
-      arg2 = current_bb->build_trunc(arg2, 32);
+      arg1 = bb->build_trunc(arg1, 32);
+      arg2 = bb->build_trunc(arg2, 32);
     }
-  Inst *res = current_bb->build_inst(op, arg1, arg2);
-  Inst *bitsize = current_bb->value_inst(reg_bitsize, 32);
-  res = current_bb->build_inst(Op::ZEXT, res, bitsize);
-  current_bb->build_inst(Op::WRITE, dest, res);
+  Inst *res = bb->build_inst(op, arg1, arg2);
+  Inst *bitsize = bb->value_inst(reg_bitsize, 32);
+  res = bb->build_inst(Op::ZEXT, res, bitsize);
+  bb->build_inst(Op::WRITE, dest, res);
 }
 
 void parser::gen_iunary(std::string name, Op op)
@@ -839,14 +839,14 @@ void parser::gen_iunary(std::string name, Op op)
 
   bool has_w_suffix = name[name.length() - 1] == 'w';
   if (has_w_suffix)
-    arg1 = current_bb->build_trunc(arg1, 32);
-  Inst *res = current_bb->build_inst(op, arg1);
+    arg1 = bb->build_trunc(arg1, 32);
+  Inst *res = bb->build_inst(op, arg1);
   if (has_w_suffix)
     {
-      Inst *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      res = current_bb->build_inst(Op::SEXT, res, bitsize);
+      Inst *bitsize = bb->value_inst(reg_bitsize, 32);
+      res = bb->build_inst(Op::SEXT, res, bitsize);
     }
-  current_bb->build_inst(Op::WRITE, dest, res);
+  bb->build_inst(Op::WRITE, dest, res);
 }
 
 void parser::gen_ibinary(std::string name, Op op)
@@ -868,16 +868,16 @@ void parser::gen_ibinary(std::string name, Op op)
   bool has_w_suffix = name[name.length() - 1] == 'w';
   if (has_w_suffix)
     {
-      arg1 = current_bb->build_trunc(arg1, 32);
-      arg2 = current_bb->build_trunc(arg2, 32);
+      arg1 = bb->build_trunc(arg1, 32);
+      arg2 = bb->build_trunc(arg2, 32);
     }
-  Inst *res = current_bb->build_inst(op, arg1, arg2);
+  Inst *res = bb->build_inst(op, arg1, arg2);
   if (has_w_suffix)
     {
-      Inst *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      res = current_bb->build_inst(Op::SEXT, res, bitsize);
+      Inst *bitsize = bb->value_inst(reg_bitsize, 32);
+      res = bb->build_inst(Op::SEXT, res, bitsize);
     }
-  current_bb->build_inst(Op::WRITE, dest, res);
+  bb->build_inst(Op::WRITE, dest, res);
 }
 
 void parser::gen_ishift(std::string name, Op op)
@@ -899,24 +899,24 @@ void parser::gen_ishift(std::string name, Op op)
   bool has_w_suffix = name[name.length() - 1] == 'w';
   if (reg_bitsize == 32 || has_w_suffix)
     {
-      arg1 = current_bb->build_trunc(arg1, 32);
-      arg2 = current_bb->build_trunc(arg2, 5);
-      Inst *bitsize = current_bb->value_inst(32, 32);
-      arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
+      arg1 = bb->build_trunc(arg1, 32);
+      arg2 = bb->build_trunc(arg2, 5);
+      Inst *bitsize = bb->value_inst(32, 32);
+      arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize);
     }
   else
     {
-      arg2 = current_bb->build_trunc(arg2, 6);
-      Inst *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      arg2 = current_bb->build_inst(Op::ZEXT, arg2, bitsize);
+      arg2 = bb->build_trunc(arg2, 6);
+      Inst *bitsize = bb->value_inst(reg_bitsize, 32);
+      arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize);
     }
-  Inst *res = current_bb->build_inst(op, arg1, arg2);
+  Inst *res = bb->build_inst(op, arg1, arg2);
   if (has_w_suffix)
     {
-      Inst *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      res = current_bb->build_inst(Op::SEXT, res, bitsize);
+      Inst *bitsize = bb->value_inst(reg_bitsize, 32);
+      res = bb->build_inst(Op::SEXT, res, bitsize);
     }
-  current_bb->build_inst(Op::WRITE, dest, res);
+  bb->build_inst(Op::WRITE, dest, res);
 }
 
 void parser::gen_icmp(std::string name, Op op)
@@ -942,13 +942,13 @@ void parser::gen_icmp(std::string name, Op op)
   bool has_w_suffix = name[name.length() - 1] == 'w';
   if (has_w_suffix)
     {
-      arg1 = current_bb->build_trunc(arg1, 32);
-      arg2 = current_bb->build_trunc(arg2, 32);
+      arg1 = bb->build_trunc(arg1, 32);
+      arg2 = bb->build_trunc(arg2, 32);
     }
-  Inst *res = current_bb->build_inst(op, arg1, arg2);
-  Inst *bitsize = current_bb->value_inst(reg_bitsize, 32);
-  res = current_bb->build_inst(Op::ZEXT, res, bitsize);
-  current_bb->build_inst(Op::WRITE, dest, res);
+  Inst *res = bb->build_inst(op, arg1, arg2);
+  Inst *bitsize = bb->value_inst(reg_bitsize, 32);
+  res = bb->build_inst(Op::ZEXT, res, bitsize);
+  bb->build_inst(Op::WRITE, dest, res);
 }
 
 void parser::parse_function()
@@ -958,9 +958,9 @@ void parser::parse_function()
     Basic_block *dest_bb = get_bb_def(0);
     get_end_of_line(1);
 
-    if (current_bb)
-      current_bb->build_br_inst(dest_bb);
-    current_bb = dest_bb;
+    if (bb)
+      bb->build_br_inst(dest_bb);
+    bb = dest_bb;
     return;
   }
 
@@ -989,14 +989,14 @@ void parser::parse_function()
 	  op1 = Op::ZEXT;
 	  op2 = Op::ZEXT;
 	}
-      Inst *bitsize = current_bb->value_inst(2 * reg_bitsize, 32);
-      arg1 = current_bb->build_inst(op1, arg1, bitsize);
-      arg2 = current_bb->build_inst(op2, arg2, bitsize);
-      Inst *res = current_bb->build_inst(Op::MUL, arg1, arg2);
-      Inst *high = current_bb->value_inst(2 * reg_bitsize - 1, 32);
-      Inst *low = current_bb->value_inst(reg_bitsize, 32);
-      res = current_bb->build_inst(Op::EXTRACT, res, high, low);
-      current_bb->build_inst(Op::WRITE, dest, res);
+      Inst *bitsize = bb->value_inst(2 * reg_bitsize, 32);
+      arg1 = bb->build_inst(op1, arg1, bitsize);
+      arg2 = bb->build_inst(op2, arg2, bitsize);
+      Inst *res = bb->build_inst(Op::MUL, arg1, arg2);
+      Inst *high = bb->value_inst(2 * reg_bitsize - 1, 32);
+      Inst *low = bb->value_inst(reg_bitsize, 32);
+      res = bb->build_inst(Op::EXTRACT, res, high, low);
+      bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "div" || name == "divw")
     gen_ibinary(name, Op::SDIV);
@@ -1025,13 +1025,13 @@ void parser::parse_function()
 
       if (name == "seqzw")
 	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
+	  arg1 = bb->build_trunc(arg1, 32);
 	}
-      Inst *zero = current_bb->value_inst(0, arg1->bitsize);
-      Inst *res = current_bb->build_inst(Op::EQ, arg1, zero);
-      Inst *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      res = current_bb->build_inst(Op::ZEXT, res, bitsize);
-      current_bb->build_inst(Op::WRITE, dest, res);
+      Inst *zero = bb->value_inst(0, arg1->bitsize);
+      Inst *res = bb->build_inst(Op::EQ, arg1, zero);
+      Inst *bitsize = bb->value_inst(reg_bitsize, 32);
+      res = bb->build_inst(Op::ZEXT, res, bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "snez" || name == "snezw")
     {
@@ -1043,13 +1043,13 @@ void parser::parse_function()
 
       if (name == "snezw")
 	{
-	  arg1 = current_bb->build_trunc(arg1, 32);
+	  arg1 = bb->build_trunc(arg1, 32);
 	}
-      Inst *zero = current_bb->value_inst(0, arg1->bitsize);
-      Inst *res = current_bb->build_inst(Op::NE, arg1, zero);
-      Inst *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      res = current_bb->build_inst(Op::ZEXT, res, bitsize);
-      current_bb->build_inst(Op::WRITE, dest, res);
+      Inst *zero = bb->value_inst(0, arg1->bitsize);
+      Inst *res = bb->build_inst(Op::NE, arg1, zero);
+      Inst *bitsize = bb->value_inst(reg_bitsize, 32);
+      res = bb->build_inst(Op::ZEXT, res, bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "and" || name == "andw"
 	   || name == "andi" || name == "andiw")
@@ -1075,10 +1075,10 @@ void parser::parse_function()
       Inst *arg1 = get_reg_value(3);
       get_end_of_line(4);
 
-      Inst *res = current_bb->build_trunc(arg1, 32);
-      Inst *bitsize = current_bb->value_inst(reg_bitsize, 32);
-      res = current_bb->build_inst(Op::SEXT, res, bitsize);
-      current_bb->build_inst(Op::WRITE, dest, res);
+      Inst *res = bb->build_trunc(arg1, 32);
+      Inst *bitsize = bb->value_inst(reg_bitsize, 32);
+      res = bb->build_inst(Op::SEXT, res, bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "not")
     gen_iunary(name, Op::NOT);
@@ -1091,10 +1091,10 @@ void parser::parse_function()
       // TODO: Use a correct wrapper.
       //       Sort of get_imm(3); but with correct size.
       unsigned __int128 value = get_hex_or_integer(3);
-      Inst *arg1 = current_bb->value_inst(value, reg_bitsize);
+      Inst *arg1 = bb->value_inst(value, reg_bitsize);
       get_end_of_line(4);
 
-      current_bb->build_inst(Op::WRITE, dest, arg1);
+      bb->build_inst(Op::WRITE, dest, arg1);
     }
   else if (name == "lui")
     {
@@ -1105,10 +1105,10 @@ void parser::parse_function()
 
       if (reg_bitsize > 32)
 	{
-	  Inst *bitsize = current_bb->value_inst(reg_bitsize, 32);
-	  res = current_bb->build_inst(Op::SEXT, res, bitsize);
+	  Inst *bitsize = bb->value_inst(reg_bitsize, 32);
+	  res = bb->build_inst(Op::SEXT, res, bitsize);
 	}
-      current_bb->build_inst(Op::WRITE, dest, res);
+      bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "call")
     gen_call();
@@ -1159,21 +1159,21 @@ void parser::parse_function()
       Basic_block *dest_bb = get_bb(1);
       get_end_of_line(2);
 
-      current_bb->build_br_inst(dest_bb);
-      current_bb = nullptr;
+      bb->build_br_inst(dest_bb);
+      bb = nullptr;
     }
   else if (name == "ebreak")
     {
-      current_bb->build_inst(Op::UB, current_bb->value_inst(1, 1));
-      current_bb->build_br_inst(rstate->exit_bb);
-      current_bb = nullptr;
+      bb->build_inst(Op::UB, bb->value_inst(1, 1));
+      bb->build_br_inst(rstate->exit_bb);
+      bb = nullptr;
     }
   else if (name == "ret" || name == "jr")
     {
       // TODO: jr and ret are pseudoinstructions. Verify that they
       // jump to the correct location.
-      current_bb->build_br_inst(rstate->exit_bb);
-      current_bb = nullptr;
+      bb->build_br_inst(rstate->exit_bb);
+      bb = nullptr;
     }
   else if (name == "fld")
     gen_load(8, LStype::float_ls);
@@ -1558,8 +1558,8 @@ Function *parser::parse(std::string const& file_name)
 	    current_func = module->functions[1];
 	    Basic_block *entry_bb = rstate->entry_bb;
 
-	    current_bb = current_func->build_bb();
-	    entry_bb->build_br_inst(current_bb);
+	    bb = current_func->build_bb();
+	    entry_bb->build_br_inst(bb);
 
 	    // TODO: Do not hard code ID values.
 	    int next_id = -126;
@@ -1610,12 +1610,12 @@ Function *parser::parse(std::string const& file_name)
 	    //   .L4:
 	    //        .size   foo, .-foo
 	    //
-	    // Make this valid by branching back to current_bb (this is then
+	    // Make this valid by branching back to bb (this is then
 	    // removed when building RPO as the BB is unreachable).
-	    if (current_bb)
+	    if (bb)
 	      {
-		current_bb->build_br_inst(current_bb);
-		current_bb = nullptr;
+		bb->build_br_inst(bb);
+		bb = nullptr;
 	      }
 
 	    parser_state = state::done;
