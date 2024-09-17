@@ -45,20 +45,6 @@ using namespace smtgcc;
 
 namespace {
 
-// Setting this to true makes us check that tgt is a refinement of src
-// for both possible values of CFN_LOOP_VECTORIZED. This slows down the
-// checking and reports issues for cases that are arguably correct (such as
-// in gcc.c-torture/execute/pr94734.c where the true case has been changed
-// from
-//   if (x == (i & 0x25))
-//     arr[y] = i;
-// to
-//   _25 = &arr[y_12(D)];
-//   .MASK_STORE (_25, 32B, _2, i_17);
-// which may result in invalid indexing for cases where `x == (i & 0x25)` is
-// false, but would not be a problem after vectorization.
-bool check_loop_vectorized = false;
-
 struct Addr {
   Inst *ptr;
   uint64_t bitoffset;
@@ -216,17 +202,6 @@ struct Converter {
   void process_instructions(int nof_blocks, int *postorder);
   Function *process_function();
 };
-
-Inst *get_lv_inst(Function *func)
-{
-  for (Inst *inst = func->bbs[0]->first_inst; inst; inst = inst->next)
-    {
-      if (inst->op == Op::SYMBOLIC
-	  && inst->args[0]->value() == LOOP_VECT_SYM_IDX)
-	return inst;
-    }
-  return nullptr;
-}
 
 // Build the minimal signed integer value for the bitsize.
 // The bitsize may be larger than 128.
@@ -4315,22 +4290,7 @@ void Converter::process_cfn_fmin(gimple *stmt)
 void Converter::process_cfn_loop_vectorized(gimple *stmt)
 {
   tree lhs = gimple_call_lhs(stmt);
-  assert(lhs);
-  Basic_block *entry_bb = func->bbs[0];
-  Inst *cond;
-  if (check_loop_vectorized)
-    {
-      if (!loop_vect_sym)
-	{
-	  Inst *idx_inst = entry_bb->value_inst(LOOP_VECT_SYM_IDX, 32);
-	  Inst *bs_inst = entry_bb->value_inst(1, 32);
-	  loop_vect_sym = entry_bb->build_inst(Op::SYMBOLIC, idx_inst, bs_inst);
-	}
-      cond = loop_vect_sym;
-    }
-  else
-    cond = entry_bb->value_inst(0, 1);
-  tree2instruction.insert({lhs, cond});
+  tree2instruction.insert({lhs, bb->value_inst(0, 1)});
 }
 
 void Converter::process_cfn_mask_load(gimple *stmt)
@@ -6353,31 +6313,6 @@ Module *create_module()
       ptr_offset_bits = 48;
     }
   return create_module(ptr_bits, ptr_id_bits, ptr_offset_bits);
-}
-
-// We emit CFN_LOOP_VECTORIZED as a symbolic value, which ensures that we
-// verify tgt is a refinement of src regardless of its value. However, this
-// approach can lead to false positives in cases where gcc decides not to
-// vectorize the loop. The issue arises because the 'true' branch of
-// CFN_LOOP_VECTORIZED may have changed some integer variables to unsigned
-// to prevent overflow. When CFN_LOOP_VECTORIZED is eliminated, we then
-// detect a possible overflow when this is compared to tgt, which now only
-// contains the original, overflowing calculations.
-//
-// We address this by setting CFN_LOOP_VECTORIZED to `false` in src if tgt
-// does not include any CFN_LOOP_VECTORIZED.
-void adjust_loop_vectorized(smtgcc::Module *module)
-{
-  assert(module->functions.size() == 2);
-  Function *src = module->functions[0];
-  Function *tgt = module->functions[1];
-  if (src->name != "src")
-    std::swap(src, tgt);
-  assert(src->name == "src" && tgt->name == "tgt");
-  Inst *src_lv_inst = get_lv_inst(src);
-  Inst *tgt_lv_inst = get_lv_inst(tgt);
-  if (src_lv_inst && !tgt_lv_inst)
-    src_lv_inst->replace_all_uses_with(src_lv_inst->bb->value_inst(0, 1));
 }
 
 // The logical bitsize used in the IR for the GCC type/
