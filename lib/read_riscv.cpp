@@ -502,9 +502,9 @@ Basic_block *parser::get_bb(unsigned idx)
   auto I = label2bb.find(label);
   if (I != label2bb.end())
     return I->second;
-  Basic_block *bb = current_func->build_bb();
-  label2bb.insert({label, bb});
-  return bb;
+  Basic_block *new_bb = current_func->build_bb();
+  label2bb.insert({label, new_bb});
+  return new_bb;
 }
 
 Basic_block *parser::get_bb_def(unsigned idx)
@@ -520,9 +520,9 @@ Basic_block *parser::get_bb_def(unsigned idx)
   auto I = label2bb.find(label);
   if (I != label2bb.end())
     return I->second;
-  Basic_block *bb = current_func->build_bb();
-  label2bb.insert({label, bb});
-  return bb;
+  Basic_block *new_bb = current_func->build_bb();
+  label2bb.insert({label, new_bb});
+  return new_bb;
 }
 
 void parser::get_comma(unsigned idx)
@@ -955,12 +955,12 @@ void parser::parse_function()
 {
   if (tokens[0].kind == lexeme::label_def)
   {
-    Basic_block *bb = get_bb_def(0);
+    Basic_block *dest_bb = get_bb_def(0);
     get_end_of_line(1);
 
     if (current_bb)
-      current_bb->build_br_inst(bb);
-    current_bb = bb;
+      current_bb->build_br_inst(dest_bb);
+    current_bb = dest_bb;
     return;
   }
 
@@ -1558,10 +1558,8 @@ Function *parser::parse(std::string const& file_name)
 	    current_func = module->functions[1];
 	    Basic_block *entry_bb = rstate->entry_bb;
 
-	    Basic_block *bb = current_func->build_bb();
-	    entry_bb->build_br_inst(bb);
-
-	    current_bb = bb;
+	    current_bb = current_func->build_bb();
+	    entry_bb->build_br_inst(current_bb);
 
 	    // TODO: Do not hard code ID values.
 	    int next_id = -126;
