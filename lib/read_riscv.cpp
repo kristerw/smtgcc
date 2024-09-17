@@ -69,7 +69,7 @@ struct parser {
   Function *src_func;
 
 private:
-  Function *current_func = nullptr;
+  Function *func = nullptr;
   Basic_block *bb = nullptr;
   std::map<std::string, Basic_block *> label2bb;
   std::map<uint32_t, Inst *> id2inst;
@@ -502,7 +502,7 @@ Basic_block *parser::get_bb(unsigned idx)
   auto I = label2bb.find(label);
   if (I != label2bb.end())
     return I->second;
-  Basic_block *new_bb = current_func->build_bb();
+  Basic_block *new_bb = func->build_bb();
   label2bb.insert({label, new_bb});
   return new_bb;
 }
@@ -520,7 +520,7 @@ Basic_block *parser::get_bb_def(unsigned idx)
   auto I = label2bb.find(label);
   if (I != label2bb.end())
     return I->second;
-  Basic_block *new_bb = current_func->build_bb();
+  Basic_block *new_bb = func->build_bb();
   label2bb.insert({label, new_bb});
   return new_bb;
 }
@@ -566,7 +566,7 @@ void parser::gen_cond_branch(Op op)
   Basic_block *true_bb = get_bb(5);
   get_end_of_line(6);
 
-  Basic_block *false_bb = current_func->build_bb();
+  Basic_block *false_bb = func->build_bb();
   Inst *cond = bb->build_inst(op, arg1, arg2);
   bb->build_br_inst(cond, true_bb, false_bb);
   bb = false_bb;
@@ -1555,10 +1555,10 @@ Function *parser::parse(std::string const& file_name)
 
 	if (label == rstate->func_name)
 	  {
-	    current_func = module->functions[1];
+	    func = module->functions[1];
 	    Basic_block *entry_bb = rstate->entry_bb;
 
-	    bb = current_func->build_bb();
+	    bb = func->build_bb();
 	    entry_bb->build_br_inst(bb);
 
 	    // TODO: Do not hard code ID values.
@@ -1632,7 +1632,7 @@ Function *parser::parse(std::string const& file_name)
   if (parser_state != state::done)
     throw Parse_error("EOF in the middle of a function", line_number);
 
-  return current_func;
+  return func;
 }
 
 } // end anonymous namespace
