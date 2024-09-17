@@ -106,6 +106,7 @@ private:
   void get_end_of_line(unsigned idx);
   void process_cond_branch(Op op);
   Inst *gen_bswap(Inst *arg);
+  Inst *gen_popcount(Inst *arg);
   Inst *gen_sdiv(Inst *arg1, Inst *arg2);
   Inst *gen_udiv(Inst *arg1, Inst *arg2);
   Inst *read_arg(uint32_t reg, uint32_t bitsize);
@@ -588,6 +589,20 @@ Inst *parser::gen_bswap(Inst *arg)
   return inst;
 }
 
+Inst *parser::gen_popcount(Inst *arg)
+{
+  Inst *bs = bb->value_inst(reg_bitsize, 32);
+  Inst *bit = bb->build_extract_bit(arg, 0);
+  Inst *inst = bb->build_inst(Op::ZEXT, bit, bs);
+  for (uint32_t i = 1; i < arg->bitsize; i++)
+    {
+      bit = bb->build_extract_bit(arg, i);
+      Inst *ext = bb->build_inst(Op::ZEXT, bit, bs);
+      inst = bb->build_inst(Op::ADD, inst, ext);
+    }
+  return inst;
+}
+
 Inst *parser::gen_sdiv(Inst *arg1, Inst *arg2)
 {
   Inst *zero = bb->value_inst(0, arg2->bitsize);
@@ -660,11 +675,25 @@ void parser::process_call()
       write_retval(res);
       return;
     }
-  else if (name == "__udivdi3" && reg_bitsize == 32)
+  if (name == "__udivdi3" && reg_bitsize == 32)
     {
       Inst *arg1 = read_arg(10 + 0, 64);
       Inst *arg2 = read_arg(10 + 2, 64);
       Inst *res = gen_udiv(arg1, arg2);
+      write_retval(res);
+      return;
+    }
+  if (name == "__popcountdi2" && reg_bitsize == 32)
+    {
+      Inst *arg = read_arg(10 + 0, 64);
+      Inst *res = gen_popcount(arg);
+      write_retval(res);
+      return;
+    }
+  if (name == "__popcountsi2" && reg_bitsize == 32)
+    {
+      Inst *arg = read_arg(10 + 0, 32);
+      Inst *res = gen_popcount(arg);
       write_retval(res);
       return;
     }
