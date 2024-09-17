@@ -4719,18 +4719,16 @@ void Converter::process_cfn_popcount(gimple *stmt)
     throw Not_implemented("process_cfn_popcount: vector type");
   Inst *arg = tree2inst(gimple_call_arg(stmt, 0));
   int bitwidth = arg->bitsize;
-  Inst *eight = bb->value_inst(8, 32);
+  int lhs_bitwidth = TYPE_PRECISION(TREE_TYPE(lhs));
+  Inst *lhs_bitwidth_inst = bb->value_inst(lhs_bitwidth, 32);
   Inst *bit = bb->build_extract_bit(arg, 0);
-  Inst *res = bb->build_inst(Op::ZEXT, bit, eight);
+  Inst *res = bb->build_inst(Op::ZEXT, bit, lhs_bitwidth_inst);
   for (int i = 1; i < bitwidth; i++)
     {
       bit = bb->build_extract_bit(arg, i);
-      Inst *ext = bb->build_inst(Op::ZEXT, bit, eight);
+      Inst *ext = bb->build_inst(Op::ZEXT, bit, lhs_bitwidth_inst);
       res = bb->build_inst(Op::ADD, res, ext);
     }
-  int lhs_bitwidth = TYPE_PRECISION(TREE_TYPE(lhs));
-  Inst *lhs_bitwidth_inst = bb->value_inst(lhs_bitwidth, 32);
-  res = bb->build_inst(Op::ZEXT, res, lhs_bitwidth_inst);
   constrain_range(bb, lhs, res);
   tree2instruction.insert({lhs, res});
 }
