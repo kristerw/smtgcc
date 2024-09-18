@@ -582,6 +582,7 @@ unsigned int tv_pass::execute(function *fun)
       rstate.module = module;
       rstate.memory_objects = state.memory_objects;
       rstate.func_name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl));
+      rstate.file_name = DECL_SOURCE_FILE(fun->decl);
 
       Function *tgt = module->build_function("tgt");
       rstate.entry_bb = tgt->build_bb();
@@ -728,7 +729,8 @@ static void finish(void *, void *data)
 	      assert(result.message);
 	      std::string msg = *result.message;
 	      msg.pop_back();
-	      inform(UNKNOWN_LOCATION, "%s", msg.c_str());
+	      fprintf(stderr, "%s:%s: %s\n", state.file_name.c_str(),
+		      state.func_name.c_str(), msg.c_str());
 	    }
 	}
       catch (Parse_error error)

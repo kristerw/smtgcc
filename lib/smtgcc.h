@@ -425,6 +425,7 @@ struct riscv_state {
   // The memory instruction corresponding to each symbol.
   std::map<std::string, Inst *> sym_name2mem;
 
+  std::string file_name;
   std::string func_name;
   Module *module;
   Basic_block *entry_bb;
