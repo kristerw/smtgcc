@@ -513,6 +513,24 @@ Inst *simplify_concat(Inst *inst)
       return new_inst1;
     }
 
+  // We canonicalize concat so sequences of concat are always expressed
+  // as "concat x, (concat y, concat ...)". The intention is that we should
+  // get the same IR if we load an 8-byte value as if we concatenate two
+  // 4-byte values.
+  if (arg1->op == Op::CONCAT)
+    {
+      std::vector<Inst *> elems;
+      flatten(arg1, elems);
+      Inst *new_inst = arg2;
+      for (auto elem : elems)
+	{
+	  new_inst = create_inst(Op::CONCAT, elem, new_inst);
+	  new_inst->insert_before(inst);
+	  new_inst = simplify_inst(new_inst);
+	}
+      return new_inst;
+    }
+
   return inst;
 }
 
