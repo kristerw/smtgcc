@@ -74,6 +74,9 @@ private:
   std::map<std::string, Basic_block *> label2bb;
   std::map<uint32_t, Inst *> id2inst;
 
+  // Dummy register used for instructions that write to the zero register.
+  Inst *zero_reg;
+
   void lex_line(void);
   void lex_label_or_label_def(void);
   void lex_hex(void);
@@ -320,6 +323,12 @@ Inst *parser::get_reg(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
+  if (tokens[idx].size == 4
+      && buf[tokens[idx].pos + 0] == 'z'
+      && buf[tokens[idx].pos + 1] == 'e'
+      && buf[tokens[idx].pos + 2] == 'r'
+      && buf[tokens[idx].pos + 3] == 'o')
+    return zero_reg;
   if (tokens[idx].size == 2
       && buf[tokens[idx].pos + 0] == 's'
       && buf[tokens[idx].pos + 1] == 'p')
@@ -1641,6 +1650,8 @@ Function *parser::parse(std::string const& file_name)
   assert(module->functions.size() == 2);
   reg_bitsize = rstate->reg_bitsize;
   src_func = module->functions[0];
+  Inst *bs = rstate->entry_bb->value_inst(reg_bitsize, 32);
+  zero_reg = rstate->entry_bb->build_inst(Op::REGISTER, bs);
 
   parse_rodata();
 
