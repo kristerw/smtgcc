@@ -206,10 +206,17 @@ void parser::lex_hex_or_integer(void)
 
 void parser::lex_name(void)
 {
-  assert(isalpha(buf[pos]) || buf[pos] == '_' || buf[pos] == '.');
+  assert(isalpha(buf[pos])
+	 || buf[pos] == '_'
+	 || buf[pos] == '.'
+	 || buf[pos] == '$');
   int start_pos = pos;
   pos++;
-  while (isalnum(buf[pos]) || buf[pos] == '_' || buf[pos] == '-' || buf[pos] == '.')
+  while (isalnum(buf[pos])
+	 || buf[pos] == '_'
+	 || buf[pos] == '-'
+	 || buf[pos] == '.'
+	 || buf[pos] == '$')
     pos++;
   tokens.emplace_back(lexeme::name, start_pos, pos - start_pos);
 }
