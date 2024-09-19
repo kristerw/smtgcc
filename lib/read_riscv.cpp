@@ -1598,6 +1598,29 @@ void parser::parse_rodata()
 	  skip_line();
 	  continue;
 	}
+      if (buf[pos] == '.'
+	  && buf[pos + 1] == 'l'
+	  && buf[pos + 2] == 'o'
+	  && buf[pos + 3] == 'c'
+	  && buf[pos + 4] == 'a'
+	  && buf[pos + 5] == 'l'
+	  && (buf[pos + 6] == ' ' || buf[pos + 6] == '\t'))
+	{
+	  pos += 7;
+	  skip_line();
+	  continue;
+	}
+      if (buf[pos] == '.'
+	  && buf[pos + 1] == 'c'
+	  && buf[pos + 2] == 'o'
+	  && buf[pos + 3] == 'm'
+	  && buf[pos + 4] == 'm'
+	  && (buf[pos + 5] == ' ' || buf[pos + 5] == '\t'))
+	{
+	  pos += 6;
+	  skip_line();
+	  continue;
+	}
 
       pos = start_pos;
 
