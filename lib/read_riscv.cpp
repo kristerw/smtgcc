@@ -1279,6 +1279,8 @@ void parser::parse_function()
       bb->build_br_inst(rstate->exit_bb);
       bb = nullptr;
     }
+  else if (name == "nop")
+    ;
   else if (name == "fld")
     process_load(8, LStype::float_ls);
   else if (name == "flw")
