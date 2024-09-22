@@ -586,6 +586,38 @@ Inst *simplify_eq(Inst *inst)
       && is_value_one(arg2))
     return arg1->args[0];
 
+  // (zext x) == c -> x == c
+  if (arg1->op == Op::ZEXT && arg2->op == Op::VALUE)
+    {
+      Inst *x = arg1->args[0];
+      unsigned __int128 c = arg2->value();
+      unsigned shift = 128 - x->bitsize;
+      unsigned __int128 trunc_c = (c << shift) >> shift;
+      if (c == trunc_c)
+	{
+	  Inst *new_c = inst->bb->value_inst(trunc_c, x->bitsize);
+	  Inst *new_inst = create_inst(Op::EQ, x, new_c);
+	  new_inst->insert_before(inst);
+	  return new_inst;
+	}
+    }
+
+  // (sext x) == c -> x == c
+  if (arg1->op == Op::SEXT && arg2->op == Op::VALUE)
+    {
+      Inst *x = arg1->args[0];
+      __int128 c = arg2->value();
+      int shift = 128 - x->bitsize;
+      __int128 trunc_c = (c << shift) >> shift;
+      if (c == trunc_c)
+	{
+	  Inst *new_c = inst->bb->value_inst(trunc_c, x->bitsize);
+	  Inst *new_inst = create_inst(Op::EQ, x, new_c);
+	  new_inst->insert_before(inst);
+	  return new_inst;
+	}
+    }
+
   // x == x -> true
   if (arg1 == arg2)
     return inst->bb->value_inst(1, 1);
@@ -647,6 +679,38 @@ Inst *simplify_ne(Inst *inst)
   // x != x -> false
   if (arg1 == arg2)
     return inst->bb->value_inst(0, 1);
+
+  // (zext x) != c -> x == c
+  if (arg1->op == Op::ZEXT && arg2->op == Op::VALUE)
+    {
+      Inst *x = arg1->args[0];
+      unsigned __int128 c = arg2->value();
+      unsigned shift = 128 - x->bitsize;
+      unsigned __int128 trunc_c = (c << shift) >> shift;
+      if (c == trunc_c)
+	{
+	  Inst *new_c = inst->bb->value_inst(trunc_c, x->bitsize);
+	  Inst *new_inst = create_inst(Op::NE, x, new_c);
+	  new_inst->insert_before(inst);
+	  return new_inst;
+	}
+    }
+
+  // (sext x) != c -> x == c
+  if (arg1->op == Op::SEXT && arg2->op == Op::VALUE)
+    {
+      Inst *x = arg1->args[0];
+      __int128 c = arg2->value();
+      int shift = 128 - x->bitsize;
+      __int128 trunc_c = (c << shift) >> shift;
+      if (c == trunc_c)
+	{
+	  Inst *new_c = inst->bb->value_inst(trunc_c, x->bitsize);
+	  Inst *new_inst = create_inst(Op::NE, x, new_c);
+	  new_inst->insert_before(inst);
+	  return new_inst;
+	}
+    }
 
   // Comparing chains of identical elements by 0 is changed to only
   // compare one element with 0. For example,
