@@ -109,6 +109,7 @@ private:
   void get_end_of_line(unsigned idx);
   void process_cond_branch(Op op);
   Inst *gen_bswap(Inst *arg);
+  Inst *gen_clrsb(Inst *arg);
   Inst *gen_clz(Inst *arg);
   Inst *gen_ctz(Inst *arg);
   Inst *gen_parity(Inst *arg);
@@ -608,6 +609,20 @@ Inst *parser::gen_bswap(Inst *arg)
   return inst;
 }
 
+Inst *parser::gen_clrsb(Inst *arg)
+{
+  Inst *signbit = bb->build_extract_bit(arg, arg->bitsize - 1);
+  Inst *inst = bb->value_inst(arg->bitsize - 1, 32);
+  for (unsigned i = 0; i < arg->bitsize - 1; i++)
+    {
+      Inst *bit = bb->build_extract_bit(arg, i);
+      Inst *cmp = bb->build_inst(Op::NE, bit, signbit);
+      Inst *val = bb->value_inst(arg->bitsize - i - 2, 32);
+      inst = bb->build_inst(Op::ITE, cmp, val, inst);
+    }
+  return inst;
+}
+
 Inst *parser::gen_clz(Inst *arg)
 {
   Inst *zero = bb->value_inst(0, arg->bitsize);
@@ -726,6 +741,21 @@ void parser::process_call()
     {
       Inst *arg = read_arg(10 + 0, 32);
       Inst *res = gen_bswap(arg);
+      write_retval(res);
+      return;
+    }
+  if (name == "__clrsbdi2" && reg_bitsize == 32)
+    {
+      Inst *arg = read_arg(10 + 0, 64);
+      Inst *res = gen_clrsb(arg);
+      res = bb->build_inst(Op::SEXT, res, bb->value_inst(64, 32));
+      write_retval(res);
+      return;
+    }
+  if (name == "__clrsbsi2" && reg_bitsize == 32)
+    {
+      Inst *arg = read_arg(10 + 0, 32);
+      Inst *res = gen_clrsb(arg);
       write_retval(res);
       return;
     }
