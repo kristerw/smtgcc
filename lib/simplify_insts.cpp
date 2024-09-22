@@ -1732,6 +1732,26 @@ Inst *simplify_extract(Inst *inst)
 	}
     }
 
+  // Simplify "extract (shl x, c)":
+  //  * If it is only extracting from x, it is changed to "extract x".
+  //  * If it is only extracting from the extended bits, it is changed to 0.
+  if (arg1->op == Op::SHL && arg1->args[1]->op == Op::VALUE)
+    {
+      Inst *x = arg1->args[0];
+      uint64_t c = arg1->args[1]->value();
+      assert(c > 0 && c < x->bitsize);
+      if (high_val < c)
+	return inst->bb->value_inst(0, inst->bitsize);
+      else if (low_val >= c)
+	{
+	  Inst *high = inst->bb->value_inst(high_val - c, 32);
+	  Inst *low = inst->bb->value_inst(low_val - c, 32);
+	  Inst *new_inst = create_inst(Op::EXTRACT, x, high, low);
+	  new_inst->insert_before(inst);
+	  return new_inst;
+	}
+    }
+
   // Simplify "extract (lshr x, c)":
   //  * If it is only extracting from x, it is changed to "extract x".
   //  * If it is only extracting from the extended bits, it is changed to 0.
