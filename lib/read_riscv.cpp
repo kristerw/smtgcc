@@ -763,6 +763,24 @@ void parser::process_call()
   std::string name = get_name(1);
   get_end_of_line(2);
 
+  if (name == "__ashldi3" && reg_bitsize == 32)
+    {
+      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *arg2 = read_arg(10 + 2, 32);
+      arg2 = bb->build_inst(Op::ZEXT, arg2, bb->value_inst(64, 32));
+      Inst *res = bb->build_inst(Op::SHL, arg1, arg2);
+      write_retval(res);
+      return;
+    }
+  if (name == "__ashrdi3" && reg_bitsize == 32)
+    {
+      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *arg2 = read_arg(10 + 2, 32);
+      arg2 = bb->build_inst(Op::ZEXT, arg2, bb->value_inst(64, 32));
+      Inst *res = bb->build_inst(Op::ASHR, arg1, arg2);
+      write_retval(res);
+      return;
+    }
   if (name == "__bswapdi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
@@ -850,6 +868,15 @@ void parser::process_call()
     {
       Inst *arg = read_arg(10 + 0, 32);
       Inst *res = gen_ffs(arg);
+      write_retval(res);
+      return;
+    }
+  if (name == "__lshrdi3" && reg_bitsize == 32)
+    {
+      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *arg2 = read_arg(10 + 2, 32);
+      arg2 = bb->build_inst(Op::ZEXT, arg2, bb->value_inst(64, 32));
+      Inst *res = bb->build_inst(Op::LSHR, arg1, arg2);
       write_retval(res);
       return;
     }
