@@ -109,6 +109,8 @@ private:
   void get_end_of_line(unsigned idx);
   void process_cond_branch(Op op);
   Inst *gen_bswap(Inst *arg);
+  Inst *gen_clz(Inst *arg);
+  Inst *gen_ctz(Inst *arg);
   Inst *gen_parity(Inst *arg);
   Inst *gen_popcount(Inst *arg);
   Inst *gen_sdiv(Inst *arg1, Inst *arg2);
@@ -606,6 +608,36 @@ Inst *parser::gen_bswap(Inst *arg)
   return inst;
 }
 
+Inst *parser::gen_clz(Inst *arg)
+{
+  Inst *zero = bb->value_inst(0, arg->bitsize);
+  Inst *ub = bb->build_inst(Op::EQ, arg, zero);
+  bb->build_inst(Op::UB, ub);
+  Inst *inst = bb->value_inst(arg->bitsize, 32);
+  for (unsigned i = 0; i < arg->bitsize; i++)
+    {
+      Inst *bit = bb->build_extract_bit(arg, i);
+      Inst *val = bb->value_inst(arg->bitsize - i - 1, 32);
+      inst = bb->build_inst(Op::ITE, bit, val, inst);
+    }
+  return inst;
+}
+
+Inst *parser::gen_ctz(Inst *arg)
+{
+  Inst *zero = bb->value_inst(0, arg->bitsize);
+  Inst *ub = bb->build_inst(Op::EQ, arg, zero);
+  bb->build_inst(Op::UB, ub);
+  Inst *inst = bb->value_inst(arg->bitsize, 32);
+  for (int i = arg->bitsize - 1; i >= 0; i--)
+    {
+      Inst *bit = bb->build_extract_bit(arg, i);
+      Inst *val = bb->value_inst(i, 32);
+      inst = bb->build_inst(Op::ITE, bit, val, inst);
+    }
+  return inst;
+}
+
 Inst *parser::gen_parity(Inst *arg)
 {
   Inst *inst = bb->build_extract_bit(arg, 0);
@@ -694,6 +726,36 @@ void parser::process_call()
     {
       Inst *arg = read_arg(10 + 0, 32);
       Inst *res = gen_bswap(arg);
+      write_retval(res);
+      return;
+    }
+  if (name == "__clzdi2" && reg_bitsize == 32)
+    {
+      Inst *arg = read_arg(10 + 0, 64);
+      Inst *res = gen_clz(arg);
+      res = bb->build_inst(Op::SEXT, res, bb->value_inst(64, 32));
+      write_retval(res);
+      return;
+    }
+  if (name == "__clzsi2" && reg_bitsize == 32)
+    {
+      Inst *arg = read_arg(10 + 0, 32);
+      Inst *res = gen_clz(arg);
+      write_retval(res);
+      return;
+    }
+  if (name == "__ctzdi2" && reg_bitsize == 32)
+    {
+      Inst *arg = read_arg(10 + 0, 64);
+      Inst *res = gen_ctz(arg);
+      res = bb->build_inst(Op::SEXT, res, bb->value_inst(64, 32));
+      write_retval(res);
+      return;
+    }
+  if (name == "__ctzsi2" && reg_bitsize == 32)
+    {
+      Inst *arg = read_arg(10 + 0, 32);
+      Inst *res = gen_ctz(arg);
       write_retval(res);
       return;
     }
