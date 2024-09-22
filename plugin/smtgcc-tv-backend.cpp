@@ -712,7 +712,11 @@ static void finish(void *, void *data)
 	  // This is handled during unrolling for the GIMPLE passes, but
 	  // it does not work here because we must do unrolling before
 	  // eliminating the register instructions.
-	  for (int i = 0; i < 3; i++)
+	  simplify_insts(func);
+	  dead_code_elimination(func);
+	  simplify_cfg(func);
+	  vrp(func);
+	  for (int i = 0; i < 2; i++)
 	    {
 	      simplify_insts(func);
 	      dead_code_elimination(func);
