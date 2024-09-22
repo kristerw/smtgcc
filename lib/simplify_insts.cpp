@@ -865,13 +865,13 @@ Inst *simplify_lshr(Inst *inst)
     }
 
   // lshr (lshr x, c1), c2 -> lshr x, (c1 + c2)
-  if (inst->args[1]->op == Op::VALUE
-      && inst->args[0]->op == Op::LSHR
-      && inst->args[0]->args[1]->op == Op::VALUE)
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::LSHR
+      && arg1->args[1]->op == Op::VALUE)
     {
-      Inst *x = inst->args[0]->args[0];
-      unsigned __int128 c1 = inst->args[0]->args[1]->value();
-      unsigned __int128 c2 = inst->args[1]->value();
+      Inst *x = arg1->args[0];
+      unsigned __int128 c1 = arg1->args[1]->value();
+      unsigned __int128 c2 = arg2->value();
       assert(c1 < inst->bitsize);
       assert(c2 < inst->bitsize);
       Inst *c = inst->bb->value_inst(c1 + c2, inst->bitsize);
@@ -882,17 +882,17 @@ Inst *simplify_lshr(Inst *inst)
 
   // lshr (shl (sext x), c), c -> zext x if c is the same as the number of
   // extended bits.
-  if (inst->args[1]->op == Op::VALUE
-      && inst->args[0]->op == Op::SHL
-      && inst->args[0]->args[1] == inst->args[1]
-      && inst->args[0]->args[0]->op == Op::SEXT)
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::SHL
+      && arg1->args[1] == arg2
+      && arg1->args[0]->op == Op::SEXT)
     {
-      unsigned __int128 c = inst->args[1]->value();
-      Inst *x = inst->args[0]->args[0]->args[0];
+      unsigned __int128 c = arg2->value();
+      Inst *x = arg1->args[0]->args[0];
       if (c == inst->bitsize - x->bitsize)
 	{
 	  Inst *new_inst = create_inst(Op::ZEXT, x,
-				       inst->args[0]->args[0]->args[1]);
+				       arg1->args[0]->args[1]);
 	  new_inst->insert_before(inst);
 	  return new_inst;
 	}
@@ -900,15 +900,15 @@ Inst *simplify_lshr(Inst *inst)
 
   // lshr (shl (zext x), c), c -> zext x if c <= the number of
   // extended bits.
-  if (inst->args[1]->op == Op::VALUE
-      && inst->args[0]->op == Op::SHL
-      && inst->args[0]->args[1] == inst->args[1]
-      && inst->args[0]->args[0]->op == Op::ZEXT)
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::SHL
+      && arg1->args[1] == arg2
+      && arg1->args[0]->op == Op::ZEXT)
     {
-      unsigned __int128 c = inst->args[1]->value();
-      Inst *x = inst->args[0]->args[0]->args[0];
+      unsigned __int128 c = arg2->value();
+      Inst *x = arg1->args[0]->args[0];
       if (c <= inst->bitsize - x->bitsize)
-	return inst->args[0]->args[0];
+	return arg1->args[0];
     }
 
   return inst;
@@ -1694,13 +1694,13 @@ Inst *simplify_shl(Inst *inst)
     }
 
   // shl (shl x, c1), c2 -> shl x, (c1 + c2)
-  if (inst->args[1]->op == Op::VALUE
-      && inst->args[0]->op == Op::SHL
-      && inst->args[0]->args[1]->op == Op::VALUE)
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::SHL
+      && arg1->args[1]->op == Op::VALUE)
     {
-      Inst *x = inst->args[0]->args[0];
-      unsigned __int128 c1 = inst->args[0]->args[1]->value();
-      unsigned __int128 c2 = inst->args[1]->value();
+      Inst *x = arg1->args[0];
+      unsigned __int128 c1 = arg1->args[1]->value();
+      unsigned __int128 c2 = arg2->value();
       assert(c1 < inst->bitsize);
       assert(c2 < inst->bitsize);
       Inst *c = inst->bb->value_inst(c1 + c2, inst->bitsize);
