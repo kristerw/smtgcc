@@ -681,7 +681,7 @@ Inst *parser::gen_parity(Inst *arg)
 
 Inst *parser::gen_popcount(Inst *arg)
 {
-  Inst *bs = bb->value_inst(reg_bitsize, 32);
+  Inst *bs = bb->value_inst(32, 32);
   Inst *bit = bb->build_extract_bit(arg, 0);
   Inst *inst = bb->build_inst(Op::ZEXT, bit, bs);
   for (uint32_t i = 1; i < arg->bitsize; i++)
@@ -709,32 +709,52 @@ Inst *parser::gen_udiv(Inst *arg1, Inst *arg2)
 
 Inst *parser::read_arg(uint32_t reg, uint32_t bitsize)
 {
-  assert(reg_bitsize == 32);
-  if (bitsize == 32)
-    return bb->build_inst(Op::READ, rstate->registers[reg]);
+  if (reg_bitsize == 64)
+    {
+      Inst *inst = bb->build_inst(Op::READ, rstate->registers[reg]);
+      if (bitsize == 64)
+	return inst;
+      return bb->build_trunc(inst, bitsize);
+    }
   else
     {
-      assert(bitsize == 64);
-      Inst *a0 = bb->build_inst(Op::READ, rstate->registers[reg + 0]);
-      Inst *a1 = bb->build_inst(Op::READ, rstate->registers[reg + 1]);
-      return bb->build_inst(Op::CONCAT, a1, a0);
+      assert(reg_bitsize == 32);
+      if (bitsize == 32)
+	return bb->build_inst(Op::READ, rstate->registers[reg]);
+      else
+	{
+	  assert(bitsize == 64);
+	  Inst *a0 = bb->build_inst(Op::READ, rstate->registers[reg + 0]);
+	  Inst *a1 = bb->build_inst(Op::READ, rstate->registers[reg + 1]);
+	  return bb->build_inst(Op::CONCAT, a1, a0);
+	}
     }
 }
 
 void parser::write_retval(Inst *retval)
 {
-  assert(reg_bitsize == 32);
-  if (retval->bitsize == 32)
-    bb->build_inst(Op::WRITE, rstate->registers[10 + 0], retval);
+  if (reg_bitsize == 64)
+    {
+      if (retval->bitsize == 32)
+	retval = bb->build_inst(Op::SEXT, retval, bb->value_inst(64, 32));
+      assert(retval->bitsize == 64);
+      bb->build_inst(Op::WRITE, rstate->registers[10 + 0], retval);
+    }
   else
     {
-      assert(retval->bitsize == 64);
-      Inst *a0 = bb->build_trunc(retval, reg_bitsize);
-      Inst *high = bb->value_inst(2 * reg_bitsize - 1, 32);
-      Inst *low = bb->value_inst(reg_bitsize, 32);
-      Inst *a1 = bb->build_inst(Op::EXTRACT, retval, high, low);
-      bb->build_inst(Op::WRITE, rstate->registers[10 + 0], a0);
-      bb->build_inst(Op::WRITE, rstate->registers[10 + 1], a1);
+      assert(reg_bitsize == 32);
+      if (retval->bitsize == 32)
+	bb->build_inst(Op::WRITE, rstate->registers[10 + 0], retval);
+      else
+	{
+	  assert(retval->bitsize == 64);
+	  Inst *a0 = bb->build_trunc(retval, reg_bitsize);
+	  Inst *high = bb->value_inst(2 * reg_bitsize - 1, 32);
+	  Inst *low = bb->value_inst(reg_bitsize, 32);
+	  Inst *a1 = bb->build_inst(Op::EXTRACT, retval, high, low);
+	  bb->build_inst(Op::WRITE, rstate->registers[10 + 0], a0);
+	  bb->build_inst(Op::WRITE, rstate->registers[10 + 1], a1);
+	}
     }
 }
 
@@ -743,21 +763,21 @@ void parser::process_call()
   std::string name = get_name(1);
   get_end_of_line(2);
 
-  if (name == "__bswapdi2" && reg_bitsize == 32)
+  if (name == "__bswapdi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
       Inst *res = gen_bswap(arg);
       write_retval(res);
       return;
     }
-  if (name == "__bswapsi2" && reg_bitsize == 32)
+  if (name == "__bswapsi2")
     {
       Inst *arg = read_arg(10 + 0, 32);
       Inst *res = gen_bswap(arg);
       write_retval(res);
       return;
     }
-  if (name == "__clrsbdi2" && reg_bitsize == 32)
+  if (name == "__clrsbdi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
       Inst *res = gen_clrsb(arg);
@@ -772,7 +792,7 @@ void parser::process_call()
       write_retval(res);
       return;
     }
-  if (name == "__clzdi2" && reg_bitsize == 32)
+  if (name == "__clzdi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
       Inst *res = gen_clz(arg);
@@ -787,7 +807,7 @@ void parser::process_call()
       write_retval(res);
       return;
     }
-  if (name == "__ctzdi2" && reg_bitsize == 32)
+  if (name == "__ctzdi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
       Inst *res = gen_ctz(arg);
@@ -818,7 +838,7 @@ void parser::process_call()
       write_retval(res);
       return;
     }
-  if (name == "__ffsdi2" && reg_bitsize == 32)
+  if (name == "__ffsdi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
       Inst *res = gen_ffs(arg);
@@ -826,17 +846,18 @@ void parser::process_call()
       write_retval(res);
       return;
     }
-  if (name == "__ffssi2" && reg_bitsize == 32)
+  if (name == "__ffssi2" || name == "ffs")
     {
       Inst *arg = read_arg(10 + 0, 32);
       Inst *res = gen_ffs(arg);
       write_retval(res);
       return;
     }
-  if (name == "__popcountdi2" && reg_bitsize == 32)
+  if (name == "__popcountdi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
       Inst *res = gen_popcount(arg);
+      res = bb->build_inst(Op::SEXT, res, bb->value_inst(64, 32));
       write_retval(res);
       return;
     }
@@ -847,7 +868,7 @@ void parser::process_call()
       write_retval(res);
       return;
     }
-  if (name == "__paritydi2" && reg_bitsize == 32)
+  if (name == "__paritydi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
       Inst *res = gen_parity(arg);
@@ -882,7 +903,7 @@ void parser::store_ub_check(Inst *ptr, uint64_t size)
   bb->build_inst(Op::UB, is_const);
 
   // It is UB if the store overflows into a different memory object.
-  Inst *size_inst = bb->value_inst(size - 1, 32);
+  Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
   Inst *last_addr = bb->build_inst(Op::ADD, ptr, size_inst);
   Inst *last_mem_id = bb->build_extract_id(last_addr);
   Inst *is_ub = bb->build_inst(Op::NE, ptr_mem_id, last_mem_id);
@@ -902,7 +923,7 @@ void parser::load_ub_check(Inst *ptr, uint64_t size)
   Inst *ptr_mem_id = bb->build_extract_id(ptr);
 
   // It is UB if the store overflows into a different memory object.
-  Inst *size_inst = bb->value_inst(size - 1, 32);
+  Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
   Inst *last_addr = bb->build_inst(Op::ADD, ptr, size_inst);
   Inst *last_mem_id = bb->build_extract_id(last_addr);
   Inst *is_ub = bb->build_inst(Op::NE, ptr_mem_id, last_mem_id);
