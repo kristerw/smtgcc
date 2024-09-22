@@ -112,6 +112,7 @@ private:
   Inst *gen_clrsb(Inst *arg);
   Inst *gen_clz(Inst *arg);
   Inst *gen_ctz(Inst *arg);
+  Inst *gen_ffs(Inst *arg);
   Inst *gen_parity(Inst *arg);
   Inst *gen_popcount(Inst *arg);
   Inst *gen_sdiv(Inst *arg1, Inst *arg2);
@@ -653,6 +654,18 @@ Inst *parser::gen_ctz(Inst *arg)
   return inst;
 }
 
+Inst *parser::gen_ffs(Inst *arg)
+{
+  Inst *inst = bb->value_inst(0, 32);
+  for (int i = arg->bitsize - 1; i >= 0; i--)
+    {
+      Inst *bit = bb->build_extract_bit(arg, i);
+      Inst *val = bb->value_inst(i + 1, 32);
+      inst = bb->build_inst(Op::ITE, bit, val, inst);
+    }
+  return inst;
+}
+
 Inst *parser::gen_parity(Inst *arg)
 {
   Inst *inst = bb->build_extract_bit(arg, 0);
@@ -802,6 +815,21 @@ void parser::process_call()
       Inst *arg1 = read_arg(10 + 0, 64);
       Inst *arg2 = read_arg(10 + 2, 64);
       Inst *res = gen_udiv(arg1, arg2);
+      write_retval(res);
+      return;
+    }
+  if (name == "__ffsdi2" && reg_bitsize == 32)
+    {
+      Inst *arg = read_arg(10 + 0, 64);
+      Inst *res = gen_ffs(arg);
+      res = bb->build_inst(Op::SEXT, res, bb->value_inst(64, 32));
+      write_retval(res);
+      return;
+    }
+  if (name == "__ffssi2" && reg_bitsize == 32)
+    {
+      Inst *arg = read_arg(10 + 0, 32);
+      Inst *res = gen_ffs(arg);
       write_retval(res);
       return;
     }
