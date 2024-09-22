@@ -686,6 +686,9 @@ static void finish(void *, void *data)
 
   for (auto& state : my_pass->functions)
     {
+      if (config.verbose > 0)
+	fprintf(stderr, "SMTGCC: Checking %s\n", state.func_name.c_str());
+
       try
 	{
 	  Module *module = state.module;
