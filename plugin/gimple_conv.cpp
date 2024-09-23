@@ -5628,6 +5628,9 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
       unsigned HOST_WIDE_INT idx;
       tree index;
       tree value;
+      if (TREE_CODE(initial) != CONSTRUCTOR)
+	throw Not_implemented("init_var_values: initial record/union value "
+			      "is not a CONSTRUCTOR");
       FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(initial), idx, index, value)
 	{
 	  uint64_t offset = get_int_cst_val(DECL_FIELD_OFFSET(index));
