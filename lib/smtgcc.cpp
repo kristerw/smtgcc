@@ -282,6 +282,13 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2)
   return inst;
 }
 
+Inst *create_inst(Op op, Inst *arg1, uint32_t arg2_val)
+{
+  assert(op == Op::SEXT || op == Op::ZEXT);
+  Inst *arg2 = arg1->bb->value_inst(arg2_val, 32);
+  return create_inst(op, arg1, arg2);
+}
+
 Inst *create_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
 {
   Inst *inst = new Inst;
@@ -324,6 +331,14 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
       inst->bitsize = arg2->bitsize;
     }
   return inst;
+}
+
+Inst *create_inst(Op op, Inst *arg1, uint32_t arg2_val, uint32_t arg3_val)
+{
+  assert(op == Op::EXTRACT);
+  Inst *arg2 = arg1->bb->value_inst(arg2_val, 32);
+  Inst *arg3 = arg1->bb->value_inst(arg3_val, 32);
+  return create_inst(op, arg1, arg2, arg3);
 }
 
 Inst *create_br_inst(Basic_block *dest_bb)
@@ -750,8 +765,27 @@ Inst *Basic_block::build_inst(Op op, Inst *arg1, Inst *arg2)
   return inst;
 }
 
+Inst *Basic_block::build_inst(Op op, Inst *arg1, uint32_t arg2_val)
+{
+  assert(op == Op::SEXT || op == Op::ZEXT);
+  Inst *arg2 = value_inst(arg2_val, 32);
+  Inst *inst = create_inst(op, arg1, arg2);
+  insert_last(inst);
+  return inst;
+}
+
 Inst *Basic_block::build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
 {
+  Inst *inst = create_inst(op, arg1, arg2, arg3);
+  insert_last(inst);
+  return inst;
+}
+
+Inst *Basic_block::build_inst(Op op, Inst *arg1, uint32_t arg2_val, uint32_t arg3_val)
+{
+  assert(op == Op::EXTRACT);
+  Inst *arg2 = value_inst(arg2_val, 32);
+  Inst *arg3 = value_inst(arg3_val, 32);
   Inst *inst = create_inst(op, arg1, arg2, arg3);
   insert_last(inst);
   return inst;
@@ -844,8 +878,7 @@ Inst *Basic_block::build_extract_offset(Inst *arg)
 Inst *Basic_block::build_extract_bit(Inst *arg, uint32_t bit_idx)
 {
   assert(bit_idx < arg->bitsize);
-  Inst *idx = value_inst(bit_idx, 32);
-  return build_inst(Op::EXTRACT, arg, idx, idx);
+  return build_inst(Op::EXTRACT, arg, bit_idx, bit_idx);
 }
 
 // Convenience function for truncating the value to nof_bits bits.
@@ -854,9 +887,7 @@ Inst *Basic_block::build_trunc(Inst *arg, uint32_t nof_bits)
   assert(nof_bits <= arg->bitsize);
   if (nof_bits == arg->bitsize)
     return arg;
-  Inst *high = value_inst(nof_bits - 1, 32);
-  Inst *low = value_inst(0, 32);
-  return build_inst(Op::EXTRACT, arg, high, low);
+  return build_inst(Op::EXTRACT, arg, nof_bits - 1, 0);
 }
 
 void Basic_block::print(FILE *stream) const

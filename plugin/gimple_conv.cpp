@@ -350,25 +350,16 @@ Inst *extract_elem(Basic_block *bb, Inst *vec, uint32_t elem_bitsize, Inst *idx)
   // would limit optimizations such as constant folding for the shift
   // calculation for vectors wider than 128 bits.
   if (idx->bitsize < 32)
-    idx = bb->build_inst(Op::ZEXT, idx, bb->value_inst(32, 32));
+    idx = bb->build_inst(Op::ZEXT, idx, 32);
 
   Inst *elm_bsize = bb->value_inst(elem_bitsize, idx->bitsize);
   Inst *shift = bb->build_inst(Op::MUL, idx, elm_bsize);
   if (shift->bitsize > vec->bitsize)
-    {
-      Inst *high = bb->value_inst(vec->bitsize - 1, 32);
-      Inst *low = bb->value_inst(0, 32);
-      shift = bb->build_inst(Op::EXTRACT, shift, high, low);
-    }
+    shift = bb->build_trunc(shift, vec->bitsize);
   else if (shift->bitsize < vec->bitsize)
-    {
-      Inst *bitsize_inst = bb->value_inst(vec->bitsize, 32);
-      shift = bb->build_inst(Op::ZEXT, shift, bitsize_inst);
-    }
+    shift = bb->build_inst(Op::ZEXT, shift, vec->bitsize);
   Inst *inst = bb->build_inst(Op::LSHR, vec, shift);
-  Inst *high = bb->value_inst(elem_bitsize - 1, 32);
-  Inst *low = bb->value_inst(0, 32);
-  return bb->build_inst(Op::EXTRACT, inst, high, low);
+  return bb->build_trunc(inst, elem_bitsize);
 }
 
 // Add checks in the src function to ensure that the value is a valid value
@@ -420,7 +411,7 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
     {
       Inst *tmp = bb->build_trunc(inst, bitsize_for_type(type));
       Op op = TYPE_UNSIGNED(type) ? Op::ZEXT : Op::SEXT;
-      tmp = bb->build_inst(op, tmp, bb->value_inst(inst->bitsize, 32));
+      tmp = bb->build_inst(op, tmp, inst->bitsize);
       bb->build_inst(Op::UB, bb->build_inst(Op::NE, inst, tmp));
     }
 
@@ -759,11 +750,10 @@ std::pair<Inst *, Inst *> Converter::to_mem_repr(Inst *inst, Inst *indef, tree t
   assert(inst->bitsize < bitsize);
   if (INTEGRAL_TYPE_P(type))
     {
-      Inst *bitsize_inst = bb->value_inst(bitsize, 32);
       Op op = TYPE_UNSIGNED(type) ? Op::ZEXT : Op::SEXT;
-      inst = bb->build_inst(op, inst, bitsize_inst);
+      inst = bb->build_inst(op, inst, bitsize);
       if (indef)
-	indef = bb->build_inst(Op::SEXT, indef, bitsize_inst);
+	indef = bb->build_inst(Op::SEXT, indef, bitsize);
     }
   return {inst, indef};
 }
@@ -938,11 +928,9 @@ std::tuple<Inst *, Inst *, Inst *> Converter::extract_component_ref(tree expr)
   uint64_t bit_offset = get_int_cst_val(DECL_FIELD_BIT_OFFSET(field));
   uint64_t low_val = 8 * offset + bit_offset;
   uint64_t high_val = low_val + bitsize_for_type(TREE_TYPE(expr)) - 1;
-  Inst *high = bb->value_inst(high_val, 32);
-  Inst *low = bb->value_inst(low_val, 32);
-  inst = bb->build_inst(Op::EXTRACT, inst, high, low);
+  inst = bb->build_inst(Op::EXTRACT, inst, high_val, low_val);
   if (indef)
-    indef = bb->build_inst(Op::EXTRACT, indef, high, low);
+    indef = bb->build_inst(Op::EXTRACT, indef, high_val, low_val);
   if (!prov && POINTER_TYPE_P(TREE_TYPE(expr)))
     prov = extract_id(inst);
   return {inst, indef, prov};
@@ -1243,10 +1231,7 @@ Inst *Converter::get_res_indef(Inst *arg1_indef, tree lhs_type)
       res_indef = bb->build_inst(Op::NE, arg1_indef, zero);
       uint64_t bitsize = bitsize_for_type(lhs_type);
       if (TREE_CODE(lhs_type) != BOOLEAN_TYPE && bitsize > res_indef->bitsize)
-	{
-	  Inst *bs_inst = bb->value_inst(bitsize, 32);
-	  res_indef = bb->build_inst(Op::SEXT, res_indef, bs_inst);
-	}
+	res_indef = bb->build_inst(Op::SEXT, res_indef, bitsize);
     }
   return res_indef;
 }
@@ -1272,10 +1257,7 @@ Inst *Converter::get_res_indef(Inst *arg1_indef, Inst *arg2_indef, tree lhs_type
     {
       uint64_t bitsize = bitsize_for_type(lhs_type);
       if (TREE_CODE(lhs_type) != BOOLEAN_TYPE && bitsize > res_indef->bitsize)
-	{
-	  Inst *bs_inst = bb->value_inst(bitsize, 32);
-	  res_indef = bb->build_inst(Op::SEXT, res_indef, bs_inst);
-	}
+	res_indef = bb->build_inst(Op::SEXT, res_indef, bitsize);
     }
   return res_indef;
 }
@@ -1310,10 +1292,7 @@ Inst *Converter::get_res_indef(Inst *arg1_indef, Inst *arg2_indef, Inst *arg3_in
     {
       uint64_t bitsize = bitsize_for_type(lhs_type);
       if (TREE_CODE(lhs_type) != BOOLEAN_TYPE && bitsize > res_indef->bitsize)
-	{
-	  Inst *bs_inst = bb->value_inst(bitsize, 32);
-	  res_indef = bb->build_inst(Op::SEXT, res_indef, bs_inst);
-	}
+	res_indef = bb->build_inst(Op::SEXT, res_indef, bitsize);
     }
   return res_indef;
 }
@@ -1330,11 +1309,10 @@ Addr Converter::process_array_ref(tree expr, bool is_mem_access)
   Inst *idx = tree2inst(index);
   if (idx->bitsize < addr.ptr->bitsize)
     {
-      Inst *bitsize_inst = bb->value_inst(addr.ptr->bitsize, 32);
       if (TYPE_UNSIGNED(TREE_TYPE(index)))
-	idx = bb->build_inst(Op::ZEXT, idx, bitsize_inst);
+	idx = bb->build_inst(Op::ZEXT, idx, addr.ptr->bitsize);
       else
-	idx = bb->build_inst(Op::SEXT, idx, bitsize_inst);
+	idx = bb->build_inst(Op::SEXT, idx, addr.ptr->bitsize);
     }
   else if (idx->bitsize > addr.ptr->bitsize)
     {
@@ -1377,8 +1355,7 @@ Addr Converter::process_array_ref(tree expr, bool is_mem_access)
   else
     {
       Op op = TYPE_UNSIGNED(TREE_TYPE(index)) ? Op::ZEXT : Op::SEXT;
-      Inst *ext_bitsize_inst = bb->value_inst(ptr->bitsize * 2, 32);
-      Inst *eidx = bb->build_inst(op, idx, ext_bitsize_inst);
+      Inst *eidx = bb->build_inst(op, idx, ptr->bitsize * 2);
       Inst *eelm_size = bb->value_inst(elem_size, ptr->bitsize * 2);
       Inst *eoffset = bb->build_inst(Op::MUL, eidx, eelm_size);
       uint32_t ptr_offset_bits = module->ptr_offset_bits;
@@ -1612,10 +1589,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::vector_as_array(tree expr)
   Inst *shift = bb->build_inst(Op::MUL, idx, elm_bitsize);
 
   if (inst->bitsize > shift->bitsize)
-    {
-      Inst *bitsize_inst = bb->value_inst(inst->bitsize, 32);
-      shift = bb->build_inst(Op::ZEXT, shift, bitsize_inst);
-    }
+    shift = bb->build_inst(Op::ZEXT, shift, inst->bitsize);
   else if (inst->bitsize < shift->bitsize)
     shift = bb->build_trunc(shift, inst->bitsize);
   inst = bb->build_inst(Op::LSHR, inst, shift);
@@ -1674,7 +1648,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
 
       // TODO: Rename. This is not mem_flags -- we only splats one flag.
       Inst *flag = bb->build_inst(Op::GET_MEM_FLAG, ptr);
-      flag = bb->build_inst(Op::SEXT, flag, bb->value_inst(8, 32));
+      flag = bb->build_inst(Op::SEXT, flag, 8);
       if (mem_flags2)
 	mem_flags2 = bb->build_inst(Op::CONCAT, flag, mem_flags2);
       else
@@ -1730,7 +1704,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::load_value(Inst *orig_ptr, uint64_
       else
 	indef = indef_byte;
       Inst *flag = bb->build_inst(Op::GET_MEM_FLAG, ptr);
-      flag = bb->build_inst(Op::SEXT, flag, bb->value_inst(8, 32));
+      flag = bb->build_inst(Op::SEXT, flag, 8);
       if (mem_flags)
 	mem_flags = bb->build_inst(Op::CONCAT, flag, mem_flags);
       else
@@ -2006,10 +1980,9 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	  else if (src_prec < dest_prec)
 	    {
 	      Op op = TYPE_UNSIGNED(src_type) ? Op::ZEXT : Op::SEXT;
-	      Inst *dest_prec_inst = bb->value_inst(dest_prec, 32);
-	      inst =  bb->build_inst(op, inst, dest_prec_inst);
+	      inst =  bb->build_inst(op, inst, dest_prec);
 	      if (indef)
-		res_indef =  bb->build_inst(op, indef, dest_prec_inst);
+		res_indef =  bb->build_inst(op, indef, dest_prec);
 	      prov = nullptr;
 	    }
 	  if (POINTER_TYPE_P(dest_type))
@@ -2117,11 +2090,10 @@ std::pair<Inst *, Inst *> Converter::process_unary_bool(enum tree_code code, Ins
   uint64_t precision = TYPE_PRECISION(lhs_type);
   if (lhs->bitsize == 1 && precision > 1)
     {
-      Inst *bitsize_inst = bb->value_inst(precision, 32);
       Op op = TYPE_UNSIGNED(lhs_type) ? Op::ZEXT : Op::SEXT;
-      lhs = bb->build_inst(op, lhs, bitsize_inst);
+      lhs = bb->build_inst(op, lhs, precision);
       if (lhs_indef)
-	lhs_indef = bb->build_inst(Op::SEXT, lhs_indef, bitsize_inst);
+	lhs_indef = bb->build_inst(Op::SEXT, lhs_indef, precision);
     }
   if (lhs->bitsize > 1)
     check_wide_bool(lhs, lhs_type, bb);
@@ -2589,11 +2561,10 @@ std::pair<Inst *, Inst *> Converter::process_binary_bool(enum tree_code code, In
   uint64_t precision = TYPE_PRECISION(lhs_type);
   if (lhs->bitsize == 1 && precision > 1)
     {
-      Inst *bitsize_inst = bb->value_inst(precision, 32);
       Op op = TYPE_UNSIGNED(lhs_type) ? Op::ZEXT : Op::SEXT;
-      lhs = bb->build_inst(op, lhs, bitsize_inst);
+      lhs = bb->build_inst(op, lhs, precision);
       if (lhs_indef)
-	lhs_indef = bb->build_inst(Op::SEXT, lhs_indef, bitsize_inst);
+	lhs_indef = bb->build_inst(Op::SEXT, lhs_indef, precision);
     }
   if (lhs->bitsize > 1)
     check_wide_bool(lhs, lhs_type, bb);
@@ -2728,10 +2699,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 		res_indef = nullptr;
 	      }
 	    else
-	      {
-		Inst *bs_inst = bb->value_inst(arg1->bitsize, 32);
-		res_indef = bb->build_inst(Op::SEXT, is_indef, bs_inst);
-	      }
+	      res_indef = bb->build_inst(Op::SEXT, is_indef, arg1->bitsize);
 	  }
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
@@ -2986,9 +2954,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	// Pointers are treated as unsigned, and the result must fit in
 	// a signed integer of the same width.
 	assert(arg1->bitsize == arg2->bitsize);
-	Inst *ext_bitsize_inst = bb->value_inst(arg1->bitsize + 1, 32);
-	Inst *earg1 = bb->build_inst(Op::ZEXT, arg1, ext_bitsize_inst);
-	Inst *earg2 = bb->build_inst(Op::ZEXT, arg2, ext_bitsize_inst);
+	Inst *earg1 = bb->build_inst(Op::ZEXT, arg1, arg1->bitsize + 1);
+	Inst *earg2 = bb->build_inst(Op::ZEXT, arg2, arg2->bitsize + 1);
 	Inst *eres = bb->build_inst(Op::SUB, earg1, earg2);
 	int bitsize = arg1->bitsize;
 	Inst *etop_bit_idx = bb->value_inst(bitsize, 32);
@@ -3018,8 +2985,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	res_indef = get_res_indef(arg1_indef, lhs_type);
 	arg2 = type_convert(arg2, arg2_type, arg1_type);
 	Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
-	Inst *bitsize_inst = bb->value_inst(concat->bitsize, 32);
-	Inst *shift = bb->build_inst(Op::ZEXT, arg2, bitsize_inst);
+	Inst *shift = bb->build_inst(Op::ZEXT, arg2, concat->bitsize);
 	Inst *shifted = bb->build_inst(Op::LSHR, concat, shift);
 	return {bb->build_trunc(shifted, arg1->bitsize), res_indef, nullptr};
       }
@@ -3032,8 +2998,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	res_indef = get_res_indef(arg1_indef, lhs_type);
 	arg2 = type_convert(arg2, arg2_type, arg1_type);
 	Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
-	Inst *bitsize_inst = bb->value_inst(concat->bitsize, 32);
-	Inst *shift = bb->build_inst(Op::ZEXT, arg2, bitsize_inst);
+	Inst *shift = bb->build_inst(Op::ZEXT, arg2, concat->bitsize);
 	Inst *shifted = bb->build_inst(Op::SHL, concat, shift);
 	Inst *high = bb->value_inst(2 * arg1->bitsize - 1, 32);
 	Inst *low = bb->value_inst(arg1->bitsize, 32);
@@ -3054,22 +3019,20 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
     case WIDEN_MULT_EXPR:
       {
 	assert(arg1->bitsize == arg2->bitsize);
-	Inst *new_bitsize_inst =
-	  bb->value_inst(bitsize_for_type(lhs_type), 32);
+	uint32_t new_bitsize = bitsize_for_type(lhs_type);
 	Op op1 = TYPE_UNSIGNED(arg1_type) ? Op::ZEXT : Op::SEXT;
-	arg1 = bb->build_inst(op1, arg1, new_bitsize_inst);
+	arg1 = bb->build_inst(op1, arg1, new_bitsize);
 	Op op2 = TYPE_UNSIGNED(arg2_type) ? Op::ZEXT : Op::SEXT;
-	arg2 = bb->build_inst(op2, arg2, new_bitsize_inst);
+	arg2 = bb->build_inst(op2, arg2, new_bitsize);
 	return {bb->build_inst(Op::MUL, arg1, arg2), res_indef, nullptr};
       }
     case MULT_HIGHPART_EXPR:
       {
 	assert(arg1->bitsize == arg2->bitsize);
 	assert(TYPE_UNSIGNED(arg1_type) == TYPE_UNSIGNED(arg2_type));
-	Inst *new_bitsize_inst = bb->value_inst(2 * arg1->bitsize, 32);
 	Op op = is_unsigned ? Op::ZEXT : Op::SEXT;
-	arg1 = bb->build_inst(op, arg1, new_bitsize_inst);
-	arg2 = bb->build_inst(op, arg2, new_bitsize_inst);
+	arg1 = bb->build_inst(op, arg1, 2 * arg1->bitsize);
+	arg2 = bb->build_inst(op, arg2, 2 * arg2->bitsize);
 	Inst *mul = bb->build_inst(Op::MUL, arg1, arg2);
 	Inst *high = bb->value_inst(mul->bitsize - 1, 32);
 	Inst *low = bb->value_inst(mul->bitsize / 2, 32);
@@ -3758,8 +3721,8 @@ void Converter::process_cfn_add_overflow(gimple *stmt)
   if (res_indef)
     {
       Inst *overflow_indef = bb->build_trunc(res_indef, 1);
-      Inst *bs = bb->value_inst(res_indef->bitsize, 32);
-      overflow_indef = bb->build_inst(Op::ZEXT, overflow_indef, bs);
+      overflow_indef =
+	bb->build_inst(Op::ZEXT, overflow_indef, res_indef->bitsize);
       res_indef = to_mem_repr(res_indef, lhs_elem_type);
       overflow_indef = to_mem_repr(overflow_indef, lhs_elem_type);
       res_indef = bb->build_inst(Op::CONCAT, overflow_indef, res_indef);
@@ -3768,27 +3731,25 @@ void Converter::process_cfn_add_overflow(gimple *stmt)
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   unsigned bitsize = 1 + std::max(arg1->bitsize, arg2->bitsize);
   bitsize = 1 + std::max(bitsize, lhs_elem_bitsize);
-  Inst *bitsize_inst = bb->value_inst(bitsize, 32);
   if (TYPE_UNSIGNED(arg1_type))
-    arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize_inst);
+    arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize);
   else
-    arg1 = bb->build_inst(Op::SEXT, arg1, bitsize_inst);
+    arg1 = bb->build_inst(Op::SEXT, arg1, bitsize);
   if (TYPE_UNSIGNED(arg2_type))
-    arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize_inst);
+    arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize);
   else
-    arg2 = bb->build_inst(Op::SEXT, arg2, bitsize_inst);
+    arg2 = bb->build_inst(Op::SEXT, arg2, bitsize);
   Inst *inst = bb->build_inst(Op::ADD, arg1, arg2);
   Inst *res = bb->build_trunc(inst, lhs_elem_bitsize);
   Inst *eres;
   if (TYPE_UNSIGNED(lhs_elem_type))
-    eres = bb->build_inst(Op::ZEXT, res, bitsize_inst);
+    eres = bb->build_inst(Op::ZEXT, res, bitsize);
   else
-    eres = bb->build_inst(Op::SEXT, res, bitsize_inst);
+    eres = bb->build_inst(Op::SEXT, res, bitsize);
   Inst *overflow = bb->build_inst(Op::NE, inst, eres);
 
   res = to_mem_repr(res, lhs_elem_type);
-  Inst *res_bitsize_inst = bb->value_inst(res->bitsize, 32);
-  overflow = bb->build_inst(Op::ZEXT, overflow, res_bitsize_inst);
+  overflow = bb->build_inst(Op::ZEXT, overflow, res->bitsize);
   res = bb->build_inst(Op::CONCAT, overflow, res);
   constrain_range(bb, lhs, res);
   tree2instruction.insert({lhs, res});
@@ -4637,8 +4598,8 @@ void Converter::process_cfn_mul_overflow(gimple *stmt)
   if (res_indef)
     {
       Inst *overflow_indef = bb->build_trunc(res_indef, 1);
-      Inst *bs = bb->value_inst(res_indef->bitsize, 32);
-      overflow_indef = bb->build_inst(Op::ZEXT, overflow_indef, bs);
+      overflow_indef =
+	bb->build_inst(Op::ZEXT, overflow_indef, res_indef->bitsize);
       res_indef = to_mem_repr(res_indef, lhs_elem_type);
       overflow_indef = to_mem_repr(overflow_indef, lhs_elem_type);
       res_indef = bb->build_inst(Op::CONCAT, overflow_indef, res_indef);
@@ -4646,27 +4607,25 @@ void Converter::process_cfn_mul_overflow(gimple *stmt)
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   unsigned bitsize =
     1 + std::max(arg1->bitsize + arg2->bitsize, lhs_elem_bitsize);
-  Inst *bitsize_inst = bb->value_inst(bitsize, 32);
   if (TYPE_UNSIGNED(arg1_type))
-    arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize_inst);
+    arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize);
   else
-    arg1 = bb->build_inst(Op::SEXT, arg1, bitsize_inst);
+    arg1 = bb->build_inst(Op::SEXT, arg1, bitsize);
   if (TYPE_UNSIGNED(arg2_type))
-    arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize_inst);
+    arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize);
   else
-    arg2 = bb->build_inst(Op::SEXT, arg2, bitsize_inst);
+    arg2 = bb->build_inst(Op::SEXT, arg2, bitsize);
   Inst *inst = bb->build_inst(Op::MUL, arg1, arg2);
   Inst *res = bb->build_trunc(inst, lhs_elem_bitsize);
   Inst *eres;
   if (TYPE_UNSIGNED(lhs_elem_type))
-    eres = bb->build_inst(Op::ZEXT, res, bitsize_inst);
+    eres = bb->build_inst(Op::ZEXT, res, bitsize);
   else
-    eres = bb->build_inst(Op::SEXT, res, bitsize_inst);
+    eres = bb->build_inst(Op::SEXT, res, bitsize);
   Inst *overflow = bb->build_inst(Op::NE, inst, eres);
 
   res = to_mem_repr(res, lhs_elem_type);
-  Inst *res_bitsize_inst = bb->value_inst(res->bitsize, 32);
-  overflow = bb->build_inst(Op::ZEXT, overflow, res_bitsize_inst);
+  overflow = bb->build_inst(Op::ZEXT, overflow, res->bitsize);
   res = bb->build_inst(Op::CONCAT, overflow, res);
   constrain_range(bb, lhs, res);
   tree2instruction.insert({lhs, res});
@@ -4704,8 +4663,7 @@ void Converter::process_cfn_parity(gimple *stmt)
       inst = bb->build_inst(Op::XOR, inst, bit);
     }
   bitwidth = TYPE_PRECISION(TREE_TYPE(lhs));
-  Inst *bitwidth_inst = bb->value_inst(bitwidth, 32);
-  inst = bb->build_inst(Op::ZEXT, inst, bitwidth_inst);
+  inst = bb->build_inst(Op::ZEXT, inst, bitwidth);
   constrain_range(bb, lhs, inst);
   tree2instruction.insert({lhs, inst});
 }
@@ -4720,13 +4678,12 @@ void Converter::process_cfn_popcount(gimple *stmt)
   Inst *arg = tree2inst(gimple_call_arg(stmt, 0));
   int bitwidth = arg->bitsize;
   int lhs_bitwidth = TYPE_PRECISION(TREE_TYPE(lhs));
-  Inst *lhs_bitwidth_inst = bb->value_inst(lhs_bitwidth, 32);
   Inst *bit = bb->build_extract_bit(arg, 0);
-  Inst *res = bb->build_inst(Op::ZEXT, bit, lhs_bitwidth_inst);
+  Inst *res = bb->build_inst(Op::ZEXT, bit, lhs_bitwidth);
   for (int i = 1; i < bitwidth; i++)
     {
       bit = bb->build_extract_bit(arg, i);
-      Inst *ext = bb->build_inst(Op::ZEXT, bit, lhs_bitwidth_inst);
+      Inst *ext = bb->build_inst(Op::ZEXT, bit, lhs_bitwidth);
       res = bb->build_inst(Op::ADD, res, ext);
     }
   constrain_range(bb, lhs, res);
@@ -4743,8 +4700,7 @@ void Converter::process_cfn_signbit(gimple *stmt)
     throw Not_implemented("process_cfn_signbit: vector type");
   Inst *signbit = bb->build_extract_bit(arg1, arg1->bitsize - 1);
   uint32_t bitsize = bitsize_for_type(TREE_TYPE(lhs));
-  Inst *lhs_bitsize_inst = bb->value_inst(bitsize, 32);
-  Inst *inst = bb->build_inst(Op::ZEXT, signbit, lhs_bitsize_inst);
+  Inst *inst = bb->build_inst(Op::ZEXT, signbit, bitsize);
   constrain_range(bb, lhs, inst);
   tree2instruction.insert({lhs, inst});
 }
@@ -4767,8 +4723,8 @@ void Converter::process_cfn_sub_overflow(gimple *stmt)
   if (res_indef)
     {
       Inst *overflow_indef = bb->build_trunc(res_indef, 1);
-      Inst *bs = bb->value_inst(res_indef->bitsize, 32);
-      overflow_indef = bb->build_inst(Op::ZEXT, overflow_indef, bs);
+      overflow_indef
+	= bb->build_inst(Op::ZEXT, overflow_indef, res_indef->bitsize);
       res_indef = to_mem_repr(res_indef, lhs_elem_type);
       overflow_indef = to_mem_repr(overflow_indef, lhs_elem_type);
       res_indef = bb->build_inst(Op::CONCAT, overflow_indef, res_indef);
@@ -4776,27 +4732,25 @@ void Converter::process_cfn_sub_overflow(gimple *stmt)
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   unsigned bitsize = 1 + std::max(arg1->bitsize, arg2->bitsize);
   bitsize = 1 + std::max(bitsize, lhs_elem_bitsize);
-  Inst *bitsize_inst = bb->value_inst(bitsize, 32);
   if (TYPE_UNSIGNED(arg1_type))
-    arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize_inst);
+    arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize);
   else
-    arg1 = bb->build_inst(Op::SEXT, arg1, bitsize_inst);
+    arg1 = bb->build_inst(Op::SEXT, arg1, bitsize);
   if (TYPE_UNSIGNED(arg2_type))
-    arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize_inst);
+    arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize);
   else
-    arg2 = bb->build_inst(Op::SEXT, arg2, bitsize_inst);
+    arg2 = bb->build_inst(Op::SEXT, arg2, bitsize);
   Inst *inst = bb->build_inst(Op::SUB, arg1, arg2);
   Inst *res = bb->build_trunc(inst, lhs_elem_bitsize);
   Inst *eres;
   if (TYPE_UNSIGNED(lhs_elem_type))
-    eres = bb->build_inst(Op::ZEXT, res, bitsize_inst);
+    eres = bb->build_inst(Op::ZEXT, res, bitsize);
   else
-    eres = bb->build_inst(Op::SEXT, res, bitsize_inst);
+    eres = bb->build_inst(Op::SEXT, res, bitsize);
   Inst *overflow = bb->build_inst(Op::NE, inst, eres);
 
   res = to_mem_repr(res, lhs_elem_type);
-  Inst *res_bitsize_inst = bb->value_inst(res->bitsize, 32);
-  overflow = bb->build_inst(Op::ZEXT, overflow, res_bitsize_inst);
+  overflow = bb->build_inst(Op::ZEXT, overflow, res->bitsize);
   res = bb->build_inst(Op::CONCAT, overflow, res);
   constrain_range(bb, lhs, res);
   tree2instruction.insert({lhs, res});
@@ -5013,10 +4967,9 @@ void Converter::process_cfn_uaddc(gimple *stmt)
   assert(arg1->bitsize == arg3->bitsize);
   assert(lhs_elem_bitsize == arg1->bitsize);
 
-  Inst *bitsize_inst = bb->value_inst(arg1->bitsize + 2, 32);
-  arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize_inst);
-  arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize_inst);
-  arg3 = bb->build_inst(Op::ZEXT, arg3, bitsize_inst);
+  arg1 = bb->build_inst(Op::ZEXT, arg1, arg1->bitsize + 2);
+  arg2 = bb->build_inst(Op::ZEXT, arg2, arg2->bitsize + 2);
+  arg3 = bb->build_inst(Op::ZEXT, arg3, arg3->bitsize + 2);
   Inst *sum = bb->build_inst(Op::ADD, arg1, arg2);
   sum = bb->build_inst(Op::ADD, sum, arg3);
   Inst *res = bb->build_trunc(sum, lhs_elem_bitsize);
@@ -5026,8 +4979,7 @@ void Converter::process_cfn_uaddc(gimple *stmt)
   Inst *overflow = bb->build_inst(Op::EXTRACT, sum, high, low);
   Inst *zero = bb->value_inst(0, overflow->bitsize);
   overflow = bb->build_inst(Op::NE, overflow, zero);
-  Inst *lhs_elem_bitsize_inst = bb->value_inst(lhs_elem_bitsize, 32);
-  overflow = bb->build_inst(Op::ZEXT, overflow, lhs_elem_bitsize_inst);
+  overflow = bb->build_inst(Op::ZEXT, overflow, lhs_elem_bitsize);
   res = bb->build_inst(Op::CONCAT, overflow, res);
   constrain_range(bb, lhs, res);
   tree2instruction.insert({lhs, res});
@@ -5061,10 +5013,9 @@ void Converter::process_cfn_usubc(gimple *stmt)
   Inst *res_indef =
     get_res_indef(arg1_indef, arg2_indef, arg3_indef, TREE_TYPE(lhs));
 
-  Inst *bitsize_inst = bb->value_inst(arg1->bitsize + 2, 32);
-  arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize_inst);
-  arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize_inst);
-  arg3 = bb->build_inst(Op::ZEXT, arg3, bitsize_inst);
+  arg1 = bb->build_inst(Op::ZEXT, arg1, arg1->bitsize + 2);
+  arg2 = bb->build_inst(Op::ZEXT, arg2, arg2->bitsize + 2);
+  arg3 = bb->build_inst(Op::ZEXT, arg3, arg3->bitsize + 2);
   Inst *sum = bb->build_inst(Op::SUB, arg1, arg2);
   sum = bb->build_inst(Op::SUB, sum, arg3);
   Inst *res = bb->build_trunc(sum, lhs_elem_bitsize);
@@ -5074,8 +5025,7 @@ void Converter::process_cfn_usubc(gimple *stmt)
   Inst *overflow = bb->build_inst(Op::EXTRACT, sum, high, low);
   Inst *zero = bb->value_inst(0, overflow->bitsize);
   overflow = bb->build_inst(Op::NE, overflow, zero);
-  Inst *lhs_elem_bitsize_inst = bb->value_inst(lhs_elem_bitsize, 32);
-  overflow = bb->build_inst(Op::ZEXT, overflow, lhs_elem_bitsize_inst);
+  overflow = bb->build_inst(Op::ZEXT, overflow, lhs_elem_bitsize);
   res = bb->build_inst(Op::CONCAT, overflow, res);
   constrain_range(bb, lhs, res);
   tree2instruction.insert({lhs, res});

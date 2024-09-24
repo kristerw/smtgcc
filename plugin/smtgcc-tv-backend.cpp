@@ -63,11 +63,10 @@ static Inst *pad_to_reg_size(riscv_state *rstate, Inst *inst, tree type)
   assert(inst->bitsize <= rstate->reg_bitsize);
   if (inst->bitsize < rstate->reg_bitsize)
     {
-      Inst *bs_inst = inst->bb->value_inst(rstate->reg_bitsize, 32);
       if (INTEGRAL_TYPE_P(type) && TYPE_UNSIGNED(type))
-	inst = inst->bb->build_inst(Op::ZEXT, inst, bs_inst);
+	inst = inst->bb->build_inst(Op::ZEXT, inst, rstate->reg_bitsize);
       else
-	inst = inst->bb->build_inst(Op::SEXT, inst, bs_inst);
+	inst = inst->bb->build_inst(Op::SEXT, inst, rstate->reg_bitsize);
     }
   return inst;
 }
@@ -141,9 +140,7 @@ static std::optional<Regs> regs_for_fp_struct(riscv_state *rstate, Inst *value, 
       uint64_t bit_offset = get_int_cst_val(DECL_FIELD_BIT_OFFSET(fld));
       uint64_t low_val = 8 * offset + bit_offset;
       uint64_t high_val = low_val + bitsize_for_type(type) - 1;
-      Inst *high = bb->value_inst(high_val, 32);
-      Inst *low = bb->value_inst(low_val, 32);
-      Inst *inst = bb->build_inst(Op::EXTRACT, value, high, low);
+      Inst *inst = bb->build_inst(Op::EXTRACT, value, high_val, low_val);
       if (SCALAR_FLOAT_TYPE_P(type))
 	{
 	  assert(freg_nbr < 2);
