@@ -1809,14 +1809,87 @@ void parser::parse_function()
       bb->build_inst(Op::WRITE, dest, res);
     }
 
-  // Zbc
-  //  - clmul, clmulh, clmulr
-
   // Zbs
-  //  - bclr, bclri
-  //  - bext, bexti
-  //  - binv, binvi
-  //  - bset, bseti
+  else if (name == "bclr" || name == "bclri")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2;
+      bool is_imm = name[name.length() - 1] == 'i';
+      if (is_imm)
+	arg2 = get_imm(5);
+      else
+	arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      Inst *mask = bb->value_inst(reg_bitsize - 1, reg_bitsize);
+      arg2 = bb->build_inst(Op::AND, arg2, mask);
+      Inst *res = bb->build_inst(Op::SHL, bb->value_inst(1, reg_bitsize), arg2);
+      res = bb->build_inst(Op::AND, arg1, bb->build_inst(Op::NOT, res));
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "bext" || name == "bexti")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2;
+      bool is_imm = name[name.length() - 1] == 'i';
+      if (is_imm)
+	arg2 = get_imm(5);
+      else
+	arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      Inst *mask = bb->value_inst(reg_bitsize - 1, reg_bitsize);
+      arg2 = bb->build_inst(Op::AND, arg2, mask);
+      Inst *res = bb->build_inst(Op::LSHR, arg1, arg2);
+      res = bb->build_inst(Op::AND, res, bb->value_inst(1, reg_bitsize));
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "binv" || name == "binvi")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2;
+      bool is_imm = name[name.length() - 1] == 'i';
+      if (is_imm)
+	arg2 = get_imm(5);
+      else
+	arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      Inst *mask = bb->value_inst(reg_bitsize - 1, reg_bitsize);
+      arg2 = bb->build_inst(Op::AND, arg2, mask);
+      Inst *res = bb->build_inst(Op::SHL, bb->value_inst(1, reg_bitsize), arg2);
+      res = bb->build_inst(Op::XOR, arg1, res);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "bset" || name == "bseti")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2;
+      bool is_imm = name[name.length() - 1] == 'i';
+      if (is_imm)
+	arg2 = get_imm(5);
+      else
+	arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      Inst *mask = bb->value_inst(reg_bitsize - 1, reg_bitsize);
+      arg2 = bb->build_inst(Op::AND, arg2, mask);
+      Inst *res = bb->build_inst(Op::SHL, bb->value_inst(1, reg_bitsize), arg2);
+      res = bb->build_inst(Op::OR, arg1, res);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
 
   else
     throw Parse_error("unhandled instruction: "s + name, line_number);
