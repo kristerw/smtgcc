@@ -132,6 +132,7 @@ private:
   void process_ibinary(std::string name, Op op);
   void process_icmp(std::string name, Op op);
   void process_ishift(std::string name, Op op);
+  void process_zba_sh_add(uint64_t shift_val, bool truncate_arg1);
 
   void parse_function();
 
@@ -1218,6 +1219,23 @@ void parser::process_icmp(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
+void parser::process_zba_sh_add(uint64_t shift_val, bool truncate_arg1)
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_reg_value(5);
+  get_end_of_line(6);
+
+  if (truncate_arg1)
+    arg1 = bb->build_inst(Op::ZEXT, bb->build_trunc(arg1, 32), reg_bitsize);
+  Inst *shift = bb->value_inst(shift_val, reg_bitsize);
+  Inst *res = bb->build_inst(Op::SHL, arg1, shift);
+  res = bb->build_inst(Op::ADD, res, arg2);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
 void parser::parse_function()
 {
   if (tokens[0].kind == lexeme::label_def)
@@ -1469,12 +1487,55 @@ void parser::parse_function()
     process_fcmp(name, Op::FGE);
 
   // Zba
-  //  - add.uw
-  //  - sh1add, sh1add.uw
-  //  - sh2add, sh2add.uw
-  //  - sh3add, sh3add.uw
-  //  - slli.uw
-  //  - zext.w
+  else if (name == "add.uw")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      arg1 = bb->build_inst(Op::ZEXT, bb->build_trunc(arg1, 32), reg_bitsize);
+      Inst *res = bb->build_inst(Op::ADD, arg1, arg2);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "sh1add")
+    process_zba_sh_add(1, false);
+  else if (name == "sh1add.uw")
+    process_zba_sh_add(1, true);
+  else if (name == "sh2add")
+    process_zba_sh_add(2, false);
+  else if (name == "sh2add.uw")
+    process_zba_sh_add(2, true);
+  else if (name == "sh3add")
+    process_zba_sh_add(3, false);
+  else if (name == "sh3add.uw")
+    process_zba_sh_add(3, true);
+  else if (name == "slli.uw")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2 = get_imm(5);
+      get_end_of_line(6);
+
+      arg1 = bb->build_inst(Op::ZEXT, bb->build_trunc(arg1, 32), reg_bitsize);
+      Inst *res = bb->build_inst(Op::SHL, arg1, arg2);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "zext.w")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_end_of_line(4);
+
+      arg1 = bb->build_trunc(arg1, 32);
+      Inst *res = bb->build_inst(Op::ZEXT, arg1, reg_bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
 
   // Zbb
   else if (name == "andn")
