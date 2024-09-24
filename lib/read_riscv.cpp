@@ -621,9 +621,6 @@ Inst *parser::gen_clrsb(Inst *arg)
 
 Inst *parser::gen_clz(Inst *arg)
 {
-  Inst *zero = bb->value_inst(0, arg->bitsize);
-  Inst *ub = bb->build_inst(Op::EQ, arg, zero);
-  bb->build_inst(Op::UB, ub);
   Inst *inst = bb->value_inst(arg->bitsize, 32);
   for (unsigned i = 0; i < arg->bitsize; i++)
     {
@@ -636,9 +633,6 @@ Inst *parser::gen_clz(Inst *arg)
 
 Inst *parser::gen_ctz(Inst *arg)
 {
-  Inst *zero = bb->value_inst(0, arg->bitsize);
-  Inst *ub = bb->build_inst(Op::EQ, arg, zero);
-  bb->build_inst(Op::UB, ub);
   Inst *inst = bb->value_inst(arg->bitsize, 32);
   for (int i = arg->bitsize - 1; i >= 0; i--)
     {
@@ -806,6 +800,9 @@ void parser::process_call()
   if (name == "__clzdi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
+      Inst *zero = bb->value_inst(0, arg->bitsize);
+      Inst *ub = bb->build_inst(Op::EQ, arg, zero);
+      bb->build_inst(Op::UB, ub);
       Inst *res = gen_clz(arg);
       res = bb->build_inst(Op::SEXT, res, 64);
       write_retval(res);
@@ -814,6 +811,9 @@ void parser::process_call()
   if (name == "__clzsi2" && reg_bitsize == 32)
     {
       Inst *arg = read_arg(10 + 0, 32);
+      Inst *zero = bb->value_inst(0, arg->bitsize);
+      Inst *ub = bb->build_inst(Op::EQ, arg, zero);
+      bb->build_inst(Op::UB, ub);
       Inst *res = gen_clz(arg);
       write_retval(res);
       return;
@@ -821,6 +821,9 @@ void parser::process_call()
   if (name == "__ctzdi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
+      Inst *zero = bb->value_inst(0, arg->bitsize);
+      Inst *ub = bb->build_inst(Op::EQ, arg, zero);
+      bb->build_inst(Op::UB, ub);
       Inst *res = gen_ctz(arg);
       res = bb->build_inst(Op::SEXT, res, 64);
       write_retval(res);
@@ -829,6 +832,9 @@ void parser::process_call()
   if (name == "__ctzsi2" && reg_bitsize == 32)
     {
       Inst *arg = read_arg(10 + 0, 32);
+      Inst *zero = bb->value_inst(0, arg->bitsize);
+      Inst *ub = bb->build_inst(Op::EQ, arg, zero);
+      bb->build_inst(Op::UB, ub);
       Inst *res = gen_ctz(arg);
       write_retval(res);
       return;
@@ -1461,6 +1467,296 @@ void parser::parse_function()
     process_fcmp(name, Op::FGT);
   else if (name == "fge.s" || name == "fge.d")
     process_fcmp(name, Op::FGE);
+
+  // Zba
+  //  - add.uw
+  //  - sh1add, sh1add.uw
+  //  - sh2add, sh2add.uw
+  //  - sh3add, sh3add.uw
+  //  - slli.uw
+  //  - zext.w
+
+  // Zbb
+  else if (name == "andn")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      Inst *res = bb->build_inst(Op::AND, arg1, bb->build_inst(Op::NOT, arg2));
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "orn")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      Inst *res = bb->build_inst(Op::OR, arg1, bb->build_inst(Op::NOT, arg2));
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "xnor")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      Inst *res = bb->build_inst(Op::NOT, bb->build_inst(Op::XOR, arg1, arg2));
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "clz" || name == "clzw")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_end_of_line(4);
+
+      bool has_w_suffix = name[name.length() - 1] == 'w';
+      if (has_w_suffix)
+	arg1 = bb->build_trunc(arg1, 32);
+      Inst *res = gen_clz(arg1);
+      if (reg_bitsize == 64)
+	res = bb->build_inst(Op::SEXT, res, reg_bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "ctz" || name == "ctzw")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_end_of_line(4);
+
+      bool has_w_suffix = name[name.length() - 1] == 'w';
+      if (has_w_suffix)
+	arg1 = bb->build_trunc(arg1, 32);
+      Inst *res = gen_ctz(arg1);
+      if (reg_bitsize == 64)
+	res = bb->build_inst(Op::SEXT, res, reg_bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "cpop" || name == "cpopw")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_end_of_line(4);
+
+      bool has_w_suffix = name[name.length() - 1] == 'w';
+      if (has_w_suffix)
+	arg1 = bb->build_trunc(arg1, 32);
+      Inst *res = gen_popcount(arg1);
+      if (reg_bitsize == 64)
+	res = bb->build_inst(Op::SEXT, res, reg_bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "max")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      Inst *cmp = bb->build_inst(Op::SGE, arg1, arg2);
+      Inst *res = bb->build_inst(Op::ITE, cmp, arg1, arg2);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "maxu")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      Inst *cmp = bb->build_inst(Op::UGE, arg1, arg2);
+      Inst *res = bb->build_inst(Op::ITE, cmp, arg1, arg2);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "min")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      Inst *cmp = bb->build_inst(Op::SLT, arg1, arg2);
+      Inst *res = bb->build_inst(Op::ITE, cmp, arg1, arg2);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "minu")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      Inst *cmp = bb->build_inst(Op::ULT, arg1, arg2);
+      Inst *res = bb->build_inst(Op::ITE, cmp, arg1, arg2);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "sext.b")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_end_of_line(4);
+
+      arg1 = bb->build_trunc(arg1, 8);
+      Inst *res = bb->build_inst(Op::SEXT, arg1, reg_bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "sext.h")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_end_of_line(4);
+
+      arg1 = bb->build_trunc(arg1, 16);
+      Inst *res = bb->build_inst(Op::SEXT, arg1, reg_bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "zext.h")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_end_of_line(4);
+
+      arg1 = bb->build_trunc(arg1, 16);
+      Inst *res = bb->build_inst(Op::ZEXT, arg1, reg_bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "rol" || name == "rolw")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      bool has_w_suffix = name[name.length() - 1] == 'w';
+      if (has_w_suffix)
+	{
+	  arg1 = bb->build_trunc(arg1, 32);
+	  arg2 = bb->build_trunc(arg2, 32);
+	}
+      if (arg1->bitsize == 32)
+	arg2 = bb->build_trunc(arg2, 5);
+      else
+	arg2 = bb->build_trunc(arg2, 6);
+      arg2 = bb->build_inst(Op::ZEXT, arg2, arg1->bitsize);
+      Inst *shl = bb->build_inst(Op::SHL, arg1, arg2);
+      Inst *bs = bb->value_inst(arg1->bitsize, arg1->bitsize);
+      Inst *shift = bb->build_inst(Op::SUB, bs, arg2);
+      Inst *lshr = bb->build_inst(Op::LSHR, arg1, shift);
+      Inst *res = bb->build_inst(Op::OR, shl, lshr);
+      if (has_w_suffix)
+	res = bb->build_inst(Op::SEXT, res, reg_bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "ror" || name == "rori" || name == "rorw" || name == "roriw")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_comma(4);
+      Inst *arg2;
+      bool is_imm =
+	name[name.length() - 1] == 'i'
+	|| (name[name.length() - 2] == 'i' && name[name.length() - 1] == 'w');
+      if (is_imm)
+	arg2 = get_imm(5);
+      else
+	arg2 = get_reg_value(5);
+      get_end_of_line(6);
+
+      bool has_w_suffix = name[name.length() - 1] == 'w';
+      if (has_w_suffix)
+	{
+	  arg1 = bb->build_trunc(arg1, 32);
+	  arg2 = bb->build_trunc(arg2, 32);
+	}
+      if (arg1->bitsize == 32)
+	arg2 = bb->build_trunc(arg2, 5);
+      else
+	arg2 = bb->build_trunc(arg2, 6);
+      arg2 = bb->build_inst(Op::ZEXT, arg2, arg1->bitsize);
+      Inst *lshr = bb->build_inst(Op::LSHR, arg1, arg2);
+      Inst *bs = bb->value_inst(arg1->bitsize, arg1->bitsize);
+      Inst *shift = bb->build_inst(Op::SUB, bs, arg2);
+      Inst *shl = bb->build_inst(Op::SHL, arg1, shift);
+      Inst *res = bb->build_inst(Op::OR, lshr, shl);
+      if (has_w_suffix)
+	res = bb->build_inst(Op::SEXT, res, reg_bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "orc.b")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_end_of_line(4);
+
+      Inst *zero = bb->value_inst(0, 8);
+      Inst *res = nullptr;
+      for (unsigned i = 0; i < reg_bitsize / 8; i++)
+	{
+	  Inst *byte = bb->build_inst(Op::EXTRACT, arg1, i * 8 + 7, i * 8);
+	  Inst *cmp = bb->build_inst(Op::NE, byte, zero);
+	  byte = bb->build_inst(Op::SEXT, cmp, 8);
+	  if (res)
+	    res = bb->build_inst(Op::CONCAT, byte, res);
+	  else
+	    res = byte;
+	}
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "rev8")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_end_of_line(4);
+
+      Inst *res = nullptr;
+      for (unsigned i = 0; i < reg_bitsize / 8; i++)
+	{
+	  Inst *byte = bb->build_inst(Op::EXTRACT, arg1, i * 8 + 7, i * 8);
+	  if (res)
+	    res = bb->build_inst(Op::CONCAT, res, byte);
+	  else
+	    res = byte;
+	}
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+
+  // Zbc
+  //  - clmul, clmulh, clmulr
+
+  // Zbs
+  //  - bclr, bclri
+  //  - bext, bexti
+  //  - binv, binvi
+  //  - bset, bseti
+
   else
     throw Parse_error("unhandled instruction: "s + name, line_number);
 }
