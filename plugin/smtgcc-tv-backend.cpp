@@ -36,7 +36,6 @@ struct tv_pass : gimple_opt_pass
   {
   }
   unsigned int execute(function *fun) final override;
-  bool error_has_been_reported = false;
   std::vector<riscv_state> functions;
 };
 
@@ -562,9 +561,6 @@ static void setup_riscv_function(riscv_state *rstate, Function *src_func, functi
 
 unsigned int tv_pass::execute(function *fun)
 {
-  if (error_has_been_reported)
-    return 0;
-
   try
     {
       CommonState state;
@@ -592,7 +588,6 @@ unsigned int tv_pass::execute(function *fun)
   catch (Not_implemented& error)
     {
       fprintf(stderr, "Not implemented: %s\n", error.msg.c_str());
-      error_has_been_reported = true;
     }
   return 0;
 }
@@ -678,9 +673,6 @@ static void finish(void *, void *data)
     return;
 
   struct tv_pass *my_pass = (struct tv_pass *)data;
-  if (my_pass->error_has_been_reported)
-    return;
-
   for (auto& state : my_pass->functions)
     {
       if (config.verbose > 0)
