@@ -66,6 +66,7 @@ struct parser {
   riscv_state *rstate;
   Module *module;
   uint32_t reg_bitsize;
+  uint32_t freg_bitsize;
   Function *src_func;
 
 private:
@@ -128,6 +129,10 @@ private:
   void process_funary(std::string name, Op op);
   void process_fbinary(std::string name, Op op);
   void process_fcmp(std::string name, Op op);
+  void process_fcvt_i2f(uint32_t src_bitsize, uint32_t dest_bitsize,
+			bool is_unsigned);
+  void process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
+			bool is_unsigned);
   void process_iunary(std::string name, Op op);
   void process_ibinary(std::string name, Op op);
   void process_icmp(std::string name, Op op);
@@ -1114,6 +1119,47 @@ void parser::process_fcmp(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
+void parser::process_fcvt_i2f(uint32_t src_bitsize, uint32_t dest_bitsize,
+			      bool is_unsigned)
+{
+  Inst *dest = get_freg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_end_of_line(4);
+
+  if (src_bitsize < freg_bitsize)
+    arg1 = bb->build_trunc(arg1, src_bitsize);
+  Op op = is_unsigned ? Op::U2F : Op::S2F;
+  Inst *res = bb->build_inst(op, arg1, dest_bitsize);
+  if (dest_bitsize < freg_bitsize)
+    {
+      Inst *m1 = bb->value_m1_inst(32);
+      res = bb->build_inst(Op::CONCAT, m1, res);
+    }
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void parser::process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
+			      bool is_unsigned)
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_freg_value(3);
+  get_comma(4);
+  std::string rounding_mode = get_name(5);
+  if (rounding_mode != "rtz")
+    throw Parse_error("expected rtz as rounding mode", line_number);
+  get_end_of_line(6);
+
+  if (src_bitsize < freg_bitsize)
+    arg1 = bb->build_trunc(arg1, src_bitsize);
+  Op op = is_unsigned ? Op::F2U : Op::F2S;
+  Inst *res = bb->build_inst(op, arg1, dest_bitsize);
+  if (dest_bitsize < reg_bitsize)
+    res = bb->build_inst(is_unsigned ? Op::ZEXT : Op::SEXT, res, reg_bitsize);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
 void parser::process_iunary(std::string name, Op op)
 {
   Inst *dest = get_reg(1);
@@ -1485,6 +1531,39 @@ void parser::parse_function()
     process_fcmp(name, Op::FGT);
   else if (name == "fge.s" || name == "fge.d")
     process_fcmp(name, Op::FGE);
+
+  else if (name == "fcvt.s.w")
+    process_fcvt_i2f(32, 32, false);
+  else if (name == "fcvt.s.wu")
+    process_fcvt_i2f(32, 32, true);
+  else if (name == "fcvt.d.w")
+    process_fcvt_i2f(32, 64, false);
+  else if (name == "fcvt.d.wu")
+    process_fcvt_i2f(32, 64, true);
+  else if (name == "fcvt.s.l")
+    process_fcvt_i2f(64, 32, false);
+  else if (name == "fcvt.s.lu")
+    process_fcvt_i2f(64, 32, true);
+  else if (name == "fcvt.d.l")
+    process_fcvt_i2f(64, 64, false);
+  else if (name == "fcvt.d.lu")
+    process_fcvt_i2f(64, 64, true);
+  else if (name == "fcvt.w.s")
+    process_fcvt_f2i(32, 32, false);
+  else if (name == "fcvt.wu.s")
+    process_fcvt_f2i(32, 32, true);
+  else if (name == "fcvt.l.s")
+    process_fcvt_f2i(32, 64, false);
+  else if (name == "fcvt.lu.s")
+    process_fcvt_f2i(32, 64, true);
+  else if (name == "fcvt.w.d")
+    process_fcvt_f2i(64, 32, false);
+  else if (name == "fcvt.wu.d")
+    process_fcvt_f2i(64, 32, true);
+  else if (name == "fcvt.l.d")
+    process_fcvt_f2i(64, 64, false);
+  else if (name == "fcvt.lu.d")
+    process_fcvt_f2i(64, 64, true);
 
   // Zba
   else if (name == "add.uw")
@@ -2241,6 +2320,7 @@ Function *parser::parse(std::string const& file_name)
   module = rstate->module;
   assert(module->functions.size() == 2);
   reg_bitsize = rstate->reg_bitsize;
+  freg_bitsize = rstate->freg_bitsize;
   src_func = module->functions[0];
   Inst *bs = rstate->entry_bb->value_inst(reg_bitsize, 32);
   zero_reg = rstate->entry_bb->build_inst(Op::REGISTER, bs);
