@@ -1593,7 +1593,49 @@ void parser::parse_function()
     process_fcmp(name, Op::FGT);
   else if (name == "fge.s" || name == "fge.d")
     process_fcmp(name, Op::FGE);
+  else if (name == "fsgnj.s")
+    {
+      Inst *dest = get_freg(1);
+      get_comma(2);
+      Inst *arg1 = get_freg_value(3);
+      get_comma(4);
+      Inst *arg2 = get_freg_value(5);
+      get_end_of_line(6);
 
+      arg1 = bb->build_trunc(arg1, 32);
+      Inst *signbit = bb->build_extract_bit(arg2, 31);
+      Inst *res = bb->build_trunc(arg1, 31);
+      res = bb->build_inst(Op::CONCAT, signbit, res);
+      // For now, treat copying the sign to NaN as always producing the
+      // original canonical NaN in order to be consistent with how it is
+      // handled in the GIMPLE converter.
+      // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
+      Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
+      res = bb->build_inst(Op::ITE, is_nan, arg1, res);
+      Inst *m1 = bb->value_m1_inst(32);
+      res = bb->build_inst(Op::CONCAT, m1, res);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "fsgnj.d")
+    {
+      Inst *dest = get_freg(1);
+      get_comma(2);
+      Inst *arg1 = get_freg_value(3);
+      get_comma(4);
+      Inst *arg2 = get_freg_value(5);
+      get_end_of_line(6);
+
+      Inst *signbit = bb->build_extract_bit(arg2, arg2->bitsize - 1);
+      Inst *res = bb->build_trunc(arg1, arg1->bitsize - 1);
+      res = bb->build_inst(Op::CONCAT, signbit, res);
+      // For now, treat copying the sign to NaN as always producing the
+      // original canonical NaN in order to be consistent with how it is
+      // handled in the GIMPLE converter.
+      // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
+      Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
+      res = bb->build_inst(Op::ITE, is_nan, arg1, res);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
   else if (name == "fcvt.s.w")
     process_fcvt_i2f(32, 32, false);
   else if (name == "fcvt.s.wu")
