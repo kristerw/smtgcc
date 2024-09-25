@@ -1714,6 +1714,31 @@ void parser::parse_function()
     process_min_max(32, false);
   else if (name == "fmax.d")
     process_min_max(64, false);
+  else if (name == "fmv.x.s" || name == "fmv.x.w")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_freg_value(3);
+      get_end_of_line(4);
+
+      Inst *res = bb->build_trunc(arg1, 32);
+      if (reg_bitsize > res->bitsize)
+	res = bb->build_inst(Op::SEXT, res, reg_bitsize);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
+  else if (name == "fmv.s.x" || name == "fmv.w.x")
+    {
+      Inst *dest = get_freg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_end_of_line(4);
+
+      if (arg1->bitsize > 32)
+	arg1 = bb->build_trunc(arg1, 32);
+      Inst *m1 = bb->value_m1_inst(32);
+      Inst *res = bb->build_inst(Op::CONCAT, m1, arg1);
+      bb->build_inst(Op::WRITE, dest, res);
+    }
 
   // Zba
   else if (name == "add.uw")
