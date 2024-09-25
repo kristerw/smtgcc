@@ -876,6 +876,36 @@ void parser::process_call()
       write_retval(res);
       return;
     }
+  if (name == "__fixsfdi" && reg_bitsize == 32)
+    {
+      Inst *arg1 = bb->build_inst(Op::READ, rstate->fregisters[10 + 0]);
+      arg1 = bb->build_trunc(arg1, 32);
+      Inst *res = bb->build_inst(Op::F2S, arg1, 64);
+      write_retval(res);
+      return;
+    }
+  if (name == "__fixunssfdi" && reg_bitsize == 32)
+    {
+      Inst *arg1 = bb->build_inst(Op::READ, rstate->fregisters[10 + 0]);
+      arg1 = bb->build_trunc(arg1, 32);
+      Inst *res = bb->build_inst(Op::F2U, arg1, 64);
+      write_retval(res);
+      return;
+    }
+  if (name == "__fixdfdi" && reg_bitsize == 32)
+    {
+      Inst *arg1 = bb->build_inst(Op::READ, rstate->fregisters[10 + 0]);
+      Inst *res = bb->build_inst(Op::F2S, arg1, 64);
+      write_retval(res);
+      return;
+    }
+  if (name == "__fixunsdfdi" && reg_bitsize == 32)
+    {
+      Inst *arg1 = bb->build_inst(Op::READ, rstate->fregisters[10 + 0]);
+      Inst *res = bb->build_inst(Op::F2U, arg1, 64);
+      write_retval(res);
+      return;
+    }
   if (name == "__floatdisf" && reg_bitsize == 32)
     {
       Inst *arg1 = read_arg(10 + 0, 64);
