@@ -1995,10 +1995,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	}
       if (FLOAT_TYPE_P(dest_type))
 	{
-	  unsigned dest_prec = TYPE_PRECISION(dest_type);
-	  Inst *dest_prec_inst = bb->value_inst(dest_prec, 32);
 	  Op op = TYPE_UNSIGNED(src_type) ? Op::U2F : Op::S2F;
-	  Inst *res = bb->build_inst(op, inst, dest_prec_inst);
+	  Inst *res = bb->build_inst(op, inst, TYPE_PRECISION(dest_type));
 	  return {res, res_indef, nullptr};
 	}
     }
@@ -2018,9 +2016,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	  Inst *max = tree2inst(TYPE_MAX_VALUE(dest_type));
 	  Op op = TYPE_UNSIGNED(dest_type) ? Op::U2F : Op::S2F;
 	  int src_bitsize = TYPE_PRECISION(src_type);
-	  Inst *src_bitsize_inst = bb->value_inst(src_bitsize, 32);
-	  Inst *fmin = bb->build_inst(op, min, src_bitsize_inst);
-	  Inst *fmax = bb->build_inst(op, max, src_bitsize_inst);
+	  Inst *fmin = bb->build_inst(op, min, src_bitsize);
+	  Inst *fmax = bb->build_inst(op, max, src_bitsize);
 	  Inst *clow = bb->build_inst(Op::FGE, inst, fmin);
 	  Inst *chigh = bb->build_inst(Op::FLE, inst, fmax);
 	  Inst *is_in_range = bb->build_inst(Op::AND, clow, chigh);
@@ -2029,10 +2026,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	  if (indef)
 	    build_ub_if_not_zero(indef);
 
-	  int dest_bitsize = bitsize_for_type(dest_type);
 	  op = TYPE_UNSIGNED(dest_type) ? Op::F2U : Op::F2S;
-	  Inst *dest_bitsize_inst = bb->value_inst(dest_bitsize, 32);
-	  Inst *res = bb->build_inst(op, inst, dest_bitsize_inst);
+	  Inst *res = bb->build_inst(op, inst, bitsize_for_type(dest_type));
 	  return {res, nullptr, nullptr};
 	}
       if (FLOAT_TYPE_P(dest_type))
@@ -2041,8 +2036,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	  unsigned dest_prec = TYPE_PRECISION(dest_type);
 	  if (src_prec == dest_prec)
 	    return {inst, res_indef, nullptr};
-	  Inst *dest_prec_inst = bb->value_inst(dest_prec, 32);
-	  Inst *res = bb->build_inst(Op::FCHPREC, inst, dest_prec_inst);
+	  Inst *res = bb->build_inst(Op::FCHPREC, inst, dest_prec);
 	  return {res, res_indef, nullptr};
 	}
     }

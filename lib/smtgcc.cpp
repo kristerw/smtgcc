@@ -284,7 +284,7 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2)
 
 Inst *create_inst(Op op, Inst *arg1, uint32_t arg2_val)
 {
-  assert(op == Op::SEXT || op == Op::ZEXT);
+  assert(inst_info[(int)op].iclass == Inst_class::conv);
   Inst *arg2 = arg1->bb->value_inst(arg2_val, 32);
   return create_inst(op, arg1, arg2);
 }
@@ -767,7 +767,7 @@ Inst *Basic_block::build_inst(Op op, Inst *arg1, Inst *arg2)
 
 Inst *Basic_block::build_inst(Op op, Inst *arg1, uint32_t arg2_val)
 {
-  assert(op == Op::SEXT || op == Op::ZEXT);
+  assert(inst_info[(int)op].iclass == Inst_class::conv);
   Inst *arg2 = value_inst(arg2_val, 32);
   Inst *inst = create_inst(op, arg1, arg2);
   insert_last(inst);
