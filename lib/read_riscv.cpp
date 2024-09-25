@@ -133,6 +133,7 @@ private:
 			bool is_unsigned);
   void process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
 			bool is_unsigned);
+  void process_min_max(uint32_t bitsize, bool is_min);
   void process_iunary(std::string name, Op op);
   void process_ibinary(std::string name, Op op);
   void process_icmp(std::string name, Op op);
@@ -1222,6 +1223,43 @@ void parser::process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
   bb->build_inst(Op::WRITE, dest, res);
 }
 
+void parser::process_min_max(uint32_t bitsize, bool is_min)
+{
+  Inst *dest = get_freg(1);
+  get_comma(2);
+  Inst *arg1 = get_freg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_freg_value(5);
+  get_end_of_line(6);
+
+  if (bitsize == 32)
+    {
+      arg1 = bb->build_trunc(arg1, 32);
+      arg2 = bb->build_trunc(arg2, 32);
+    }
+  Inst *is_nan = bb->build_inst(Op::IS_NAN, arg2);
+  Inst *cmp = bb->build_inst(is_min ? Op::FLT : Op::FGT, arg1, arg2);
+  Inst *res1 = bb->build_inst(Op::ITE, cmp, arg1, arg2);
+  Inst *res2 = bb->build_inst(Op::ITE, is_nan, arg1, res1);
+  // 0.0 and -0.0 is equal as floating point values, and fmin(0.0, -0.0)
+  // may return eiter of them. But we treat them as 0.0 > -0.0 here,
+  // otherwise we will report miscompilations when GCC switch the order
+  // of the arguments.
+  Inst *zero = bb->value_inst(0, arg1->bitsize);
+  Inst *is_zero1 = bb->build_inst(Op::FEQ, arg1, zero);
+  Inst *is_zero2 = bb->build_inst(Op::FEQ, arg2, zero);
+  Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
+  Inst *cmp2 = bb->build_inst(is_min ? Op::SLT : Op::SGT, arg1, arg2);
+  Inst *res3 = bb->build_inst(Op::ITE, cmp2, arg1, arg2);
+  Inst *res = bb->build_inst(Op::ITE, is_zero, res3, res2);
+  if (bitsize == 32)
+    {
+      Inst *m1 = bb->value_m1_inst(32);
+      res = bb->build_inst(Op::CONCAT, m1, res);
+    }
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
 void parser::process_iunary(std::string name, Op op)
 {
   Inst *dest = get_reg(1);
@@ -1668,6 +1706,14 @@ void parser::parse_function()
     process_fcvt_f2i(64, 64, false);
   else if (name == "fcvt.lu.d")
     process_fcvt_f2i(64, 64, true);
+  else if (name == "fmin.s")
+    process_min_max(32, true);
+  else if (name == "fmin.d")
+    process_min_max(64, true);
+  else if (name == "fmax.s")
+    process_min_max(32, false);
+  else if (name == "fmax.d")
+    process_min_max(64, false);
 
   // Zba
   else if (name == "add.uw")
