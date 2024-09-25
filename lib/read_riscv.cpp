@@ -876,6 +876,38 @@ void parser::process_call()
       write_retval(res);
       return;
     }
+  if (name == "__floatdisf" && reg_bitsize == 32)
+    {
+      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *res = bb->build_inst(Op::S2F, arg1, 32);
+      Inst *m1 = bb->value_m1_inst(32);
+      res = bb->build_inst(Op::CONCAT, m1, res);
+      bb->build_inst(Op::WRITE, rstate->fregisters[10 + 0], res);
+      return;
+    }
+  if (name == "__floatundisf" && reg_bitsize == 32)
+    {
+      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *res = bb->build_inst(Op::U2F, arg1, 32);
+      Inst *m1 = bb->value_m1_inst(32);
+      res = bb->build_inst(Op::CONCAT, m1, res);
+      bb->build_inst(Op::WRITE, rstate->fregisters[10 + 0], res);
+      return;
+    }
+  if (name == "__floatdidf" && reg_bitsize == 32)
+    {
+      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *res = bb->build_inst(Op::S2F, arg1, 64);
+      bb->build_inst(Op::WRITE, rstate->fregisters[10 + 0], res);
+      return;
+    }
+  if (name == "__floatundidf" && reg_bitsize == 32)
+    {
+      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *res = bb->build_inst(Op::U2F, arg1, 64);
+      bb->build_inst(Op::WRITE, rstate->fregisters[10 + 0], res);
+      return;
+    }
   if (name == "__lshrdi3" && reg_bitsize == 32)
     {
       Inst *arg1 = read_arg(10 + 0, 64);
