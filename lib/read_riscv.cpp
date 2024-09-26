@@ -149,9 +149,9 @@ void parser::skip_space_and_comments()
 {
   while (isspace(buf[pos]))
     pos++;
-  if (buf[pos] == ';')
+  if (buf[pos] == '#')
     {
-      while (buf[pos])
+      while (buf[pos] != '\n')
 	pos++;
     }
 }
@@ -2160,10 +2160,10 @@ void parser::parse_function()
 void parser::lex_line(void)
 {
   tokens.clear();
-  while (buf[pos] != '\n')
+  while (buf[pos] != '\n' && buf[pos] != ';')
     {
       skip_space_and_comments();
-      if (!buf[pos])
+      if (buf[pos] == '\n' || buf[pos] == ';')
 	break;
       if (isdigit(buf[pos]) || buf[pos] == '-')
 	lex_hex_or_integer();
@@ -2525,7 +2525,8 @@ Function *parser::parse(std::string const& file_name)
       break;
     assert(pos < file_size);
 
-    line_number++;
+    if (pos == 0 || buf[pos] != ';')
+      line_number++;
 
     if (parser_state == state::global)
       {
