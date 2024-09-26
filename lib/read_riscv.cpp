@@ -348,6 +348,10 @@ Inst *parser::get_reg(unsigned idx)
       && buf[tokens[idx].pos + 3] == 'o')
     return zero_reg;
   if (tokens[idx].size == 2
+      && buf[tokens[idx].pos + 0] == 'x'
+      && buf[tokens[idx].pos + 1] == '0')
+    return zero_reg;
+  if (tokens[idx].size == 2
       && buf[tokens[idx].pos + 0] == 's'
       && buf[tokens[idx].pos + 1] == 'p')
     return rstate->registers[2];
@@ -511,6 +515,10 @@ Inst *parser::get_reg_value(unsigned idx)
       && buf[tokens[idx].pos + 1] == 'e'
       && buf[tokens[idx].pos + 2] == 'r'
       && buf[tokens[idx].pos + 3] == 'o')
+    return bb->value_inst(0, reg_bitsize);
+  if (tokens[idx].size == 2
+      && buf[tokens[idx].pos + 0] == 'x'
+      && buf[tokens[idx].pos + 1] == '0')
     return bb->value_inst(0, reg_bitsize);
   return bb->build_inst(Op::READ, get_reg(idx));
 }
