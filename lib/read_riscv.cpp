@@ -133,6 +133,7 @@ private:
 			bool is_unsigned);
   void process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
 			bool is_unsigned);
+  void process_fcvt_f2f(uint32_t src_bitsize, uint32_t dest_bitsize);
   void process_min_max(uint32_t bitsize, bool is_min);
   void process_iunary(std::string name, Op op);
   void process_ibinary(std::string name, Op op);
@@ -1231,6 +1232,24 @@ void parser::process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
   bb->build_inst(Op::WRITE, dest, res);
 }
 
+void parser::process_fcvt_f2f(uint32_t src_bitsize, uint32_t dest_bitsize)
+{
+  Inst *dest = get_freg(1);
+  get_comma(2);
+  Inst *arg1 = get_freg_value(3);
+  get_end_of_line(4);
+
+  if (src_bitsize == 32)
+    arg1 = bb->build_trunc(arg1, 32);
+  Inst *res = bb->build_inst(Op::FCHPREC, arg1, dest_bitsize);
+  if (dest_bitsize == 32)
+    {
+      Inst *m1 = bb->value_m1_inst(32);
+      res = bb->build_inst(Op::CONCAT, m1, res);
+    }
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
 void parser::process_min_max(uint32_t bitsize, bool is_min)
 {
   Inst *dest = get_freg(1);
@@ -1714,6 +1733,10 @@ void parser::parse_function()
     process_fcvt_f2i(64, 64, false);
   else if (name == "fcvt.lu.d")
     process_fcvt_f2i(64, 64, true);
+  else if (name == "fcvt.d.s")
+    process_fcvt_f2f(32, 64);
+  else if (name == "fcvt.s.d")
+    process_fcvt_f2f(64, 32);
   else if (name == "fmin.s")
     process_min_max(32, true);
   else if (name == "fmin.d")
