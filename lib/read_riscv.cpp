@@ -2238,7 +2238,10 @@ std::string parser::parse_cmd()
   size_t start_pos = pos;
   while (buf[pos] == '.' || isalnum(buf[pos]))
     pos++;
-  assert(buf[pos] == ' ' || buf[pos] == '\t' || buf[pos] == '\n');
+  assert(buf[pos] == ' '
+	 || buf[pos] == '\t'
+	 || buf[pos] == '\n'
+	 || buf[pos] == ':');
   return std::string(&buf[start_pos], pos - start_pos);
 }
 
@@ -2253,6 +2256,11 @@ void parser::parse_data(std::vector<unsigned char>& data)
       assert(pos < buf.size());
 
       skip_whitespace();
+      if (buf[pos] != '.')
+	{
+	  pos = start_pos;
+	  return;
+	}
       std::string cmd = parse_cmd();
       if (cmd == ".dword"
 	  || cmd == ".word"
