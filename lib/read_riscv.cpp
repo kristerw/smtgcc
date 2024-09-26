@@ -2330,8 +2330,58 @@ void parser::parse_data(std::vector<unsigned char>& data)
 	}
       else if (cmd == ".string" || cmd == ".ascii")
 	{
-	  // TODO: Implement. Note: we must handle escape sequences such as \n.
-	  throw Parse_error(".string/.ascii not implemented", line_number);
+	  skip_whitespace();
+
+	  if (buf[pos++] != '"')
+	    throw Parse_error("expected '\"' after " + cmd, line_number);
+
+	  while (buf[pos] != '"')
+	    {
+	      assert(buf[pos] != '\n');
+	      if (buf[pos] == '\\')
+		{
+		  char c = buf[++pos];
+		  if (c == 'b')
+		    data.push_back('\b');
+		  else if (c == 'f')
+		    data.push_back('\f');
+		  else if (c == 'n')
+		    data.push_back('\n');
+		  else if (c == 'r')
+		    data.push_back('\r');
+		  else if (c == 't')
+		    data.push_back('\t');
+		  else if (c == '"')
+		    data.push_back('\"');
+		  else if (c == '\\')
+		    data.push_back('\\');
+		  else if ('0' <= c && c <= '7')
+		    {
+		      uint8_t val = c;
+		      for (int i = 1; i < 3; i++)
+			{
+			  c = buf[pos + 1];
+			  if (c < '0' || c > '7')
+			    break;
+			  val = val * 8 + (c - '0');
+			  pos++;
+			}
+		      data.push_back(val);
+		    }
+		  else
+		    throw Parse_error("unknown escape sequence \\"s + c,
+				      line_number);
+		}
+	      else
+		data.push_back(buf[pos]);
+	      pos++;
+	    }
+	  pos++;
+	  assert(buf[pos] == '\n');
+	  skip_line();
+
+	  if (cmd == ".string")
+	    data.push_back(0);
 	}
       else if (cmd == ".zero")
 	{
@@ -2458,6 +2508,18 @@ void parser::parse_rodata()
 	  && buf[pos + 2] == 'o'
 	  && buf[pos + 3] == 'c'
 	  && buf[pos + 4] == 'a'
+	  && buf[pos + 5] == 'l'
+	  && (buf[pos + 6] == ' ' || buf[pos + 6] == '\t'))
+	{
+	  pos += 7;
+	  skip_line();
+	  continue;
+	}
+      if (buf[pos] == '.'
+	  && buf[pos + 1] == 'g'
+	  && buf[pos + 2] == 'l'
+	  && buf[pos + 3] == 'o'
+	  && buf[pos + 4] == 'b'
 	  && buf[pos + 5] == 'l'
 	  && (buf[pos + 6] == ' ' || buf[pos + 6] == '\t'))
 	{
