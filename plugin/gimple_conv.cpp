@@ -5533,6 +5533,13 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
 	  Inst *byte = entry_bb->value_inst(p[i], 8);
 	  entry_bb->build_inst(Op::STORE, ptr, byte);
 	}
+      for (uint64_t i = len; i < size; i++)
+	{
+	  Inst *offset = entry_bb->value_inst(i, mem_inst->bitsize);
+	  Inst *ptr = entry_bb->build_inst(Op::ADD, mem_inst, offset);
+	  Inst *byte = entry_bb->value_inst(0, 8);
+	  entry_bb->build_inst(Op::STORE, ptr, byte);
+	}
       return;
     }
 
