@@ -254,6 +254,9 @@ unsigned __int128 get_wide_int_val(wide_int v)
 
 void check_type(tree type)
 {
+  if (AGGREGATE_TYPE_P(type) && TYPE_REVERSE_STORAGE_ORDER(type))
+    throw Not_implemented("reverse storage order");
+
   // Note: We do not check that all elements in structures/arrays have
   // valid type -- they will be checked when the fields are accessed.
   // This makes us able to analyze progams having invalid elements in
@@ -1606,6 +1609,9 @@ std::tuple<Inst *, Inst *, Inst *> Converter::vector_as_array(tree expr)
 
 std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
 {
+  if (reverse_storage_order_for_component_p(expr))
+    throw Not_implemented("reverse storage order");
+
   tree type = TREE_TYPE(expr);
   uint64_t bitsize = bitsize_for_type(type);
   uint64_t size = bytesize_for_type(type);
@@ -1802,6 +1808,9 @@ void Converter::load_store_overlap_ub_check(tree store_expr, tree load_expr)
 
 void Converter::process_store(tree addr_expr, tree value_expr)
 {
+  if (reverse_storage_order_for_component_p(addr_expr))
+    throw Not_implemented("reverse storage order");
+
   if (is_load(value_expr))
     load_store_overlap_ub_check(addr_expr, value_expr);
 
