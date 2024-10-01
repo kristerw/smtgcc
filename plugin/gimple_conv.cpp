@@ -365,6 +365,25 @@ Inst *extract_elem(Basic_block *bb, Inst *vec, uint32_t elem_bitsize, Inst *idx)
   return bb->build_trunc(inst, elem_bitsize);
 }
 
+bool is_bit_field(tree expr)
+{
+  tree_code code = TREE_CODE(expr);
+  if (code == COMPONENT_REF)
+    {
+      tree field = TREE_OPERAND(expr, 1);
+      if (DECL_BIT_FIELD_TYPE(field))
+	return true;
+    }
+  else if (code == BIT_FIELD_REF)
+    {
+      uint64_t bitsize = get_int_cst_val(TREE_OPERAND(expr, 1));
+      uint64_t bit_offset = get_int_cst_val(TREE_OPERAND(expr, 2));
+      return (bitsize % 8) != 0 || (bit_offset % 8) != 0;
+    }
+
+  return false;
+}
+
 // Add checks in the src function to ensure that the value is a valid value
 // for the type. The main use is to make sure the initial state is valid
 // (for example, global pointers can't point to local memory).
@@ -919,6 +938,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::extract_component_ref(tree expr)
 {
   tree object = TREE_OPERAND(expr, 0);
   tree field = TREE_OPERAND(expr, 1);
+  tree type = TREE_TYPE(expr);
   auto [inst, indef, prov] = tree2inst_indef_prov(object);
 
   // TODO: This will need implementation of index checking in variably sized
@@ -930,11 +950,25 @@ std::tuple<Inst *, Inst *, Inst *> Converter::extract_component_ref(tree expr)
   uint64_t offset = get_int_cst_val(DECL_FIELD_OFFSET(field));
   uint64_t bit_offset = get_int_cst_val(DECL_FIELD_BIT_OFFSET(field));
   uint64_t low_val = 8 * offset + bit_offset;
-  uint64_t high_val = low_val + bitsize_for_type(TREE_TYPE(expr)) - 1;
-  inst = bb->build_inst(Op::EXTRACT, inst, high_val, low_val);
-  if (indef)
-    indef = bb->build_inst(Op::EXTRACT, indef, high_val, low_val);
-  if (!prov && POINTER_TYPE_P(TREE_TYPE(expr)))
+  if (is_bit_field(expr))
+    {
+      uint64_t high_val = low_val + bitsize_for_type(type) - 1;
+      inst = bb->build_inst(Op::EXTRACT, inst, high_val, low_val);
+      if (indef)
+	indef = bb->build_inst(Op::EXTRACT, indef, high_val, low_val);
+    }
+  else
+    {
+      uint64_t high_val = low_val + bytesize_for_type(type) * 8 - 1;
+      inst = bb->build_inst(Op::EXTRACT, inst, high_val, low_val);
+      if (indef)
+	indef = bb->build_inst(Op::EXTRACT, indef, high_val, low_val);
+      constrain_src_value(inst, type);
+      inst = bb->build_trunc(inst, bitsize_for_type(type));
+      if (indef)
+	indef = bb->build_trunc(indef, bitsize_for_type(type));
+    }
+  if (!prov && POINTER_TYPE_P(type))
     prov = extract_id(inst);
   return {inst, indef, prov};
 }
@@ -1545,25 +1579,6 @@ Addr Converter::process_address(tree expr, bool is_mem_access)
 
   const char *name = get_tree_code_name(TREE_CODE(expr));
   throw Not_implemented("process_address: "s + name);
-}
-
-bool is_bit_field(tree expr)
-{
-  tree_code code = TREE_CODE(expr);
-  if (code == COMPONENT_REF)
-    {
-      tree field = TREE_OPERAND(expr, 1);
-      if (DECL_BIT_FIELD_TYPE(field))
-	return true;
-    }
-  else if (code == BIT_FIELD_REF)
-    {
-      uint64_t bitsize = get_int_cst_val(TREE_OPERAND(expr, 1));
-      uint64_t bit_offset = get_int_cst_val(TREE_OPERAND(expr, 2));
-      return (bitsize % 8) != 0 || (bit_offset % 8) != 0;
-    }
-
-  return false;
 }
 
 std::tuple<Inst *, Inst *, Inst *> Converter::vector_as_array(tree expr)
