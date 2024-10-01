@@ -569,7 +569,7 @@ unsigned int tv_pass::execute(function *fun)
     {
       CommonState state;
       Module *module = create_module();
-      Function *src = process_function(module, &state, fun, false);
+      Function *src = process_function(module, &state, fun, false, Arch::riscv);
       src->name = "src";
       unroll_and_optimize(src);
 

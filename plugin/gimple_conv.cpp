@@ -52,10 +52,11 @@ struct Addr {
 };
 
 struct Converter {
-  Converter(Module *module, CommonState *state, function *fun, bool is_tgt_func = false)
+  Converter(Module *module, CommonState *state, function *fun, bool is_tgt_func, Arch arch)
     : module{module}
     , state{state}
     , fun{fun}
+    , arch{arch}
     , is_tgt_func{is_tgt_func}
   {}
   ~Converter()
@@ -66,6 +67,7 @@ struct Converter {
   Module *module;
   CommonState *state;
   function *fun;
+  Arch arch;
   Function *func = nullptr;
   Basic_block *bb = nullptr;
   Inst *loop_vect_sym = nullptr;
@@ -1896,6 +1898,28 @@ void Converter::process_store(tree addr_expr, tree value_expr)
       bb->build_inst(Op::UB, is_ub);
     }
 
+  // The addresses assigned to local variables differ between GIMPLE and the
+  // RISC-V assembly, which makes smtgcc-tv-backend incorrectly report that
+  // the code is miscompiled when a local variable is written to global
+  // memory, such as
+  //
+  //   int *p;
+  //   void foo(void) {
+  //     int i;
+  //     p = &i;
+  //   }
+  //
+  // For now, we solve this by making storing a local pointer UB.
+  //
+  // TODO: Find a better way of handling this.
+  if (arch == Arch::riscv && !is_tgt_func && POINTER_TYPE_P(value_type))
+    {
+      Inst *value_mem_id = extract_id(value);
+      Inst *zero = bb->value_inst(0, module->ptr_id_bits);
+      Inst *is_ub = bb->build_inst(Op::SLT, value_mem_id, zero);
+      bb->build_inst(Op::UB, is_ub);
+    }
+
   uint64_t size;
   if (is_bitfield)
     {
@@ -1984,6 +2008,32 @@ void Converter::process_store(tree addr_expr, tree value_expr)
 std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *indef, Inst *prov, tree src_type, tree dest_type)
 {
   Inst *res_indef = get_res_indef(indef, dest_type);
+
+  // The addresses assigned to local variables differ between GIMPLE and the
+  // RISC-V assembly, which makes smtgcc-tv-backend incorrectly report that
+  // the code is miscompiled when a local variable is written to global
+  // memory, such as
+  //
+  //   uintptr_t p;
+  //   void foo(void) {
+  //     int i;
+  //     p = &i;
+  //   }
+  //
+  // For now, we solve this by making converting a local pointer to a non-
+  // pointer type UB.
+  //
+  // TODO: Find a better way of handling this.
+  if (arch == Arch::riscv
+      && !is_tgt_func
+      && POINTER_TYPE_P(src_type)
+      && !POINTER_TYPE_P(dest_type))
+    {
+      Inst *value_mem_id = extract_id(inst);
+      Inst *zero = bb->value_inst(0, module->ptr_id_bits);
+      Inst *is_ub = bb->build_inst(Op::SLT, value_mem_id, zero);
+      bb->build_inst(Op::UB, is_ub);
+    }
 
   if (INTEGRAL_TYPE_P(src_type) || POINTER_TYPE_P(src_type) || TREE_CODE(src_type) == OFFSET_TYPE)
     {
@@ -6241,9 +6291,9 @@ Function *Converter::process_function()
 
 } // end anonymous namespace
 
-Function *process_function(Module *module, CommonState *state, function *fun, bool is_tgt_func)
+Function *process_function(Module *module, CommonState *state, function *fun, bool is_tgt_func, Arch arch)
 {
-  Converter func(module, state, fun, is_tgt_func);
+  Converter func(module, state, fun, is_tgt_func, arch);
   return func.process_function();
 }
 

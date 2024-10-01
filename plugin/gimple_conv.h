@@ -4,6 +4,11 @@
 #include <map>
 #include <vector>
 
+enum class Arch {
+  generic,
+  riscv
+};
+
 struct CommonState {
   // ID 0 - reserved for NULL
   //    1 - reserved for anonymous memory
@@ -14,7 +19,7 @@ struct CommonState {
   std::vector<smtgcc::MemoryObject> memory_objects;
 };
 
-smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun, bool is_tgt_func = false);
+smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun, bool is_tgt_func, Arch arch = Arch::generic);
 void unroll_and_optimize(smtgcc::Function *func);
 void unroll_and_optimize(smtgcc::Module *module);
 smtgcc::Module *create_module();
