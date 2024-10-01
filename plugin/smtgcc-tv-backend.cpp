@@ -70,11 +70,16 @@ static Inst *pad_to_reg_size(riscv_state *rstate, Inst *inst, tree type)
   return inst;
 }
 
+struct struct_elem {
+  tree fld;
+  uint64_t bit_offset;
+};
+
 // Flatten structure fields as described in the hardware floating-point
 // calling convention.
 // Returns false if the structure cannot be handled by the calling convention
 // (and therefore must fall back to the integer calling convention).
-static bool flatten_struct(riscv_state *rstate, tree struct_type, std::vector<tree>& elems, int& nof_r, int& nof_f)
+static bool flatten_struct(riscv_state *rstate, tree struct_type, std::vector<struct_elem>& elems, int& nof_r, int& nof_f, uint64_t bitoffset = 0)
 {
   for (tree fld = TYPE_FIELDS(struct_type); fld; fld = DECL_CHAIN(fld))
     {
@@ -84,25 +89,28 @@ static bool flatten_struct(riscv_state *rstate, tree struct_type, std::vector<tr
       uint64_t bitsize = bitsize_for_type(type);
       if (bitsize == 0)
 	continue;
+      uint64_t off = get_int_cst_val(DECL_FIELD_OFFSET(fld));
+      uint64_t bitoff = get_int_cst_val(DECL_FIELD_BIT_OFFSET(fld));
+      uint64_t fld_bitoffset = 8 * off + bitoff + bitoffset;
       if (SCALAR_FLOAT_TYPE_P(type) && bitsize <= rstate->freg_bitsize)
 	{
-	  elems.push_back(fld);
+	  elems.push_back({fld, fld_bitoffset});
 	  nof_f++;
 	}
       else if (COMPLEX_FLOAT_TYPE_P(type) &&
 	       bitsize <= 2 * rstate->freg_bitsize)
 	{
-	  elems.push_back(fld);
+	  elems.push_back({fld, fld_bitoffset});
 	  nof_f += 2;
 	}
       else if (INTEGRAL_TYPE_P(type) && bitsize <= rstate->reg_bitsize)
 	{
-	  elems.push_back(fld);
+	  elems.push_back({fld, fld_bitoffset});
 	  nof_r++;
 	}
       else if (TREE_CODE(type) == RECORD_TYPE)
 	{
-	  if (!flatten_struct(rstate, type, elems, nof_r, nof_f))
+	  if (!flatten_struct(rstate, type, elems, nof_r, nof_f, fld_bitoffset))
 	    return false;
 	}
       else
@@ -122,7 +130,7 @@ static bool flatten_struct(riscv_state *rstate, tree struct_type, std::vector<tr
 // instructions for each register the structure will be passed in.
 static std::optional<Regs> regs_for_fp_struct(riscv_state *rstate, Inst *value, tree struct_type)
 {
-  std::vector<tree> elems;
+  std::vector<struct_elem> elems;
   int nof_r = 0;
   int nof_f = 0;
   if (!flatten_struct(rstate, struct_type, elems, nof_r, nof_f))
@@ -132,12 +140,10 @@ static std::optional<Regs> regs_for_fp_struct(riscv_state *rstate, Inst *value, 
   Regs regs;
   int reg_nbr = 0;
   int freg_nbr = 0;
-  for (tree fld : elems)
+  for (auto [fld, fld_bitoffset] : elems)
     {
       tree type = TREE_TYPE(fld);
-      uint64_t offset = get_int_cst_val(DECL_FIELD_OFFSET(fld));
-      uint64_t bit_offset = get_int_cst_val(DECL_FIELD_BIT_OFFSET(fld));
-      uint64_t low_val = 8 * offset + bit_offset;
+      uint64_t low_val = fld_bitoffset;
       uint64_t high_val = low_val + bitsize_for_type(type) - 1;
       Inst *inst = bb->build_inst(Op::EXTRACT, value, high_val, low_val);
       if (SCALAR_FLOAT_TYPE_P(type))
@@ -251,7 +257,7 @@ static void build_return(riscv_state *rstate, Function *src_func, function *fun,
     }
 
   // Handle the hardware floating-point calling convention.
-  std::vector<tree> elems;
+  std::vector<struct_elem> elems;
   int nof_r = 0;
   int nof_f = 0;
   if (TREE_CODE(ret_type) == RECORD_TYPE
@@ -260,7 +266,7 @@ static void build_return(riscv_state *rstate, Function *src_func, function *fun,
       uint32_t reg_nbr = 10;
       uint32_t freg_nbr = 10;
       Inst *retval = nullptr;
-      for (tree fld : elems)
+      for (auto [fld, fld_bitoffset] : elems)
 	{
 	  tree type = TREE_TYPE(fld);
 	  uint64_t type_bitsize = bitsize_for_type(type);
@@ -286,12 +292,10 @@ static void build_return(riscv_state *rstate, Function *src_func, function *fun,
 		bb->build_ret_inst(bb->build_inst(Op::CONCAT, imag, real));
 	      return;
 	    }
-	  uint64_t offset = get_int_cst_val(DECL_FIELD_OFFSET(fld));
-	  uint64_t bit_offset = get_int_cst_val(DECL_FIELD_BIT_OFFSET(fld));
-	  uint64_t low_val = 8 * offset + bit_offset;
-	  if (low_val > 0 && (!retval || retval->bitsize < low_val))
+	  if (fld_bitoffset > 0 && (!retval || retval->bitsize < fld_bitoffset))
 	    {
-	      uint64_t nof_pad = retval ? low_val - retval->bitsize : low_val;
+	      uint64_t nof_pad =
+		retval ? fld_bitoffset - retval->bitsize : fld_bitoffset;
 	      Inst *pad = bb->value_inst(0, nof_pad);
 	      if (retval)
 		retval = bb->build_inst(Op::CONCAT, pad, retval);
