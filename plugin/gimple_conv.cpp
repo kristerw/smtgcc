@@ -6320,7 +6320,7 @@ void unroll_and_optimize(Module *module)
     unroll_and_optimize(func);
 }
 
-Module *create_module()
+Module *create_module(Arch arch)
 {
   assert(POINTER_SIZE == 32 || POINTER_SIZE == 64);
   uint32_t ptr_bits;
@@ -6334,9 +6334,18 @@ Module *create_module()
     }
   else
     {
-      ptr_bits = 64;
-      ptr_id_bits = 16;
-      ptr_offset_bits = 48;
+      if (arch == Arch::riscv)
+	{
+	  ptr_bits = 64;
+	  ptr_id_bits = 8;
+	  ptr_offset_bits = 24;
+	}
+      else
+	{
+	  ptr_bits = 64;
+	  ptr_id_bits = 16;
+	  ptr_offset_bits = 48;
+	}
     }
   return create_module(ptr_bits, ptr_id_bits, ptr_offset_bits);
 }

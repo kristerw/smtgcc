@@ -22,7 +22,7 @@ struct CommonState {
 smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun, bool is_tgt_func, Arch arch = Arch::generic);
 void unroll_and_optimize(smtgcc::Function *func);
 void unroll_and_optimize(smtgcc::Module *module);
-smtgcc::Module *create_module();
+smtgcc::Module *create_module(Arch arch = Arch::generic);
 uint64_t bitsize_for_type(tree type);
 unsigned __int128 get_int_cst_val(tree expr);
 
