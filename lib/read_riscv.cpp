@@ -1770,6 +1770,24 @@ void parser::parse_function()
       Inst *res = bb->build_inst(Op::CONCAT, m1, arg1);
       bb->build_inst(Op::WRITE, dest, res);
     }
+  else if (name == "fmv.x.d")
+    {
+      Inst *dest = get_reg(1);
+      get_comma(2);
+      Inst *arg1 = get_freg_value(3);
+      get_end_of_line(4);
+
+      bb->build_inst(Op::WRITE, dest, arg1);
+    }
+  else if (name == "fmv.d.x")
+    {
+      Inst *dest = get_freg(1);
+      get_comma(2);
+      Inst *arg1 = get_reg_value(3);
+      get_end_of_line(4);
+
+      bb->build_inst(Op::WRITE, dest, arg1);
+    }
 
   // Zba
   else if (name == "add.uw")
