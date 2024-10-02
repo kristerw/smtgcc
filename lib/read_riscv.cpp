@@ -1567,6 +1567,8 @@ void parser::parse_function()
     process_load(8);
   else if (name == "lw")
     process_load(4);
+  else if (name == "lwu")
+    process_load(4, LStype::unsigned_ls);
   else if (name == "lh")
     process_load(2);
   else if (name == "lhu")
