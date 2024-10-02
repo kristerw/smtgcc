@@ -957,6 +957,14 @@ void parser::process_call()
       write_retval(res);
       return;
     }
+  if (name == "__moddi3" && reg_bitsize == 32)
+    {
+      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *arg2 = read_arg(10 + 2, 64);
+      Inst *res = bb->build_inst(Op::SREM, arg1, arg2);
+      write_retval(res);
+      return;
+    }
   if (name == "__popcountdi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
@@ -983,6 +991,14 @@ void parser::process_call()
     {
       Inst *arg = read_arg(10 + 0, 32);
       Inst *res = gen_parity(arg);
+      write_retval(res);
+      return;
+    }
+  if (name == "__umoddi3" && reg_bitsize == 32)
+    {
+      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *arg2 = read_arg(10 + 2, 64);
+      Inst *res = bb->build_inst(Op::UREM, arg1, arg2);
       write_retval(res);
       return;
     }
