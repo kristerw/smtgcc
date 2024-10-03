@@ -16,14 +16,17 @@ Usage: smtgcc-opt [OPTION]... [FILE]
 Perform optimizations on the specified FILE.
 
 Options:
-  -h, --help         Display this help message and exit.
-  -c                 Check that the optimizations are correct.
-  -simplify_inst     Run instruction simplification optimization.
-  -simplify_cfg      Run control flow graph simplification optimization.
-  -dce               Run dead code elimination optimization.
-  -vrp               Run value range propagation optimization.
-  -loop_unroll       Run loop unrolling optimization.
-  -convert           Run the conversion transformation pass.
+  -h, --help            Display this help message and exit.
+  -c                    Check that the optimizations are correct.
+  -simplify_inst        Run instruction simplification optimization.
+  -simplify_cfg         Run control flow graph simplification optimization.
+  -simplify_mem         Run memory simplification optimization.
+  -dce                  Run dead code elimination optimization.
+  -vrp                  Run value range propagation optimization.
+  -loop_unroll          Run loop unrolling optimization.
+  -ls_elim              Run load/store elimination optimization.
+  -canonicalize_memory  Harmonize memory between src and tgt.
+  -convert              Run the conversion transformation pass.
 
 Examples:
   smtgcc-opt -simplify_inst example.ir
@@ -100,9 +103,12 @@ int main(int argc, char **argv)
 	flag_c = true;
       else if (!strcmp(arg, "-simplify_inst")
 	       || !strcmp(arg, "-simplify_cfg")
+	       || !strcmp(arg, "-simplify_mem")
 	       || !strcmp(arg, "-dce")
 	       || !strcmp(arg, "-vrp")
 	       || !strcmp(arg, "-loop_unroll")
+	       || !strcmp(arg, "-ls_elim")
+	       || !strcmp(arg, "-canonicalize_memory")
 	       || !strcmp(arg, "-convert"))
 	opts.push_back(arg);
       else
@@ -136,12 +142,18 @@ int main(int argc, char **argv)
 	  simplify_insts(module);
 	else if (opt == "-simplify_cfg")
 	  simplify_cfg(module);
+	else if (opt == "-simplify_mem")
+	  simplify_mem(module);
 	else if (opt == "-dce")
 	  dead_code_elimination(module);
 	else if (opt == "-vrp")
 	  vrp(module);
 	else if (opt == "-loop_unroll")
 	  loop_unroll(module);
+	else if (opt == "-ls_elim")
+	  ls_elim(module);
+	else if (opt == "-canonicalize_memory")
+	  canonicalize_memory(module);
 	else if (opt == "-convert")
 	  {
 	    for (auto func : module->functions)
