@@ -43,6 +43,7 @@ tools_objects = $(tools_sources:.cpp=.o)
 
 plugin_sources = \
 	plugin/gimple_conv.cpp \
+	plugin/riscv.cpp \
 	plugin/smtgcc-check-refine.cpp \
 	plugin/smtgcc-tv-backend.cpp \
 	plugin/smtgcc-tv.cpp
@@ -82,8 +83,8 @@ smtgcc-opt: tools/smtgcc-opt.o $(lib_objects)
 smtgcc-check-refine.so: plugin/smtgcc-check-refine.o plugin/gimple_conv.o $(lib_objects)
 	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-check-refine.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)
 
-smtgcc-tv-backend.so: plugin/smtgcc-tv-backend.o plugin/gimple_conv.o $(lib_objects)
-	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-tv-backend.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)
+smtgcc-tv-backend.so: plugin/smtgcc-tv-backend.o plugin/gimple_conv.o plugin/riscv.o $(lib_objects)
+	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-tv-backend.o plugin/riscv.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)
 
 smtgcc-tv.so: plugin/smtgcc-tv.o plugin/gimple_conv.o $(lib_objects)
 	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-tv.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)

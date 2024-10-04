@@ -4,6 +4,11 @@
 #include <map>
 #include <vector>
 
+#include "gcc-plugin.h"
+#include "tree.h"
+
+#include "smtgcc.h"
+
 enum class Arch {
   generic,
   riscv
@@ -25,5 +30,7 @@ void unroll_and_optimize(smtgcc::Module *module);
 smtgcc::Module *create_module(Arch arch = Arch::generic);
 uint64_t bitsize_for_type(tree type);
 unsigned __int128 get_int_cst_val(tree expr);
+
+smtgcc::riscv_state setup_riscv_function(CommonState *state, smtgcc::Function *src_func, function *fun);
 
 #endif
