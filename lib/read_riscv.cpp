@@ -50,8 +50,8 @@ struct Parser {
 
   std::vector<char> buf;
 
-  std::optional<std::string> parse_label_def();
-  std::string parse_cmd();
+  std::optional<std::string_view> parse_label_def();
+  std::string_view parse_cmd();
   void parse_data(std::vector<unsigned char>& data);
   void skip_line();
   void skip_whitespace();
@@ -67,7 +67,7 @@ struct Parser {
 private:
   Function *func = nullptr;
   Basic_block *bb = nullptr;
-  std::map<std::string, Basic_block *> label2bb;
+  std::map<std::string_view, Basic_block *> label2bb;
   std::map<uint32_t, Inst *> id2inst;
 
   // Dummy register used for instructions that write to the zero register.
@@ -81,7 +81,7 @@ private:
   void lex_name(void);
   void lex_hilo(void);
 
-  std::string token_string(const Token& tok);
+  std::string_view token_string(const Token& tok);
 
   uint32_t get_u32(const char *p);
   unsigned __int128 get_hex(const char *p);
@@ -97,7 +97,7 @@ private:
   Inst *get_freg_value(unsigned idx);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
-  std::string get_name(unsigned idx);
+  std::string_view get_name(unsigned idx);
   void get_comma(unsigned idx);
   void get_left_paren(unsigned idx);
   void get_right_paren(unsigned idx);
@@ -120,19 +120,19 @@ private:
   void load_ub_check(Inst *ptr, uint64_t size);
   void process_load(int size, LStype lstype = LStype::signed_ls);
   void process_store(int size, LStype lstype = LStype::signed_ls);
-  void process_funary(std::string name, Op op);
-  void process_fbinary(std::string name, Op op);
-  void process_fcmp(std::string name, Op op);
+  void process_funary(std::string_view name, Op op);
+  void process_fbinary(std::string_view name, Op op);
+  void process_fcmp(std::string_view name, Op op);
   void process_fcvt_i2f(uint32_t src_bitsize, uint32_t dest_bitsize,
 			bool is_unsigned);
   void process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
 			bool is_unsigned);
   void process_fcvt_f2f(uint32_t src_bitsize, uint32_t dest_bitsize);
   void process_min_max(uint32_t bitsize, bool is_min);
-  void process_iunary(std::string name, Op op);
-  void process_ibinary(std::string name, Op op);
-  void process_icmp(std::string name, Op op);
-  void process_ishift(std::string name, Op op);
+  void process_iunary(std::string_view name, Op op);
+  void process_ibinary(std::string_view name, Op op);
+  void process_icmp(std::string_view name, Op op);
+  void process_ishift(std::string_view name, Op op);
   void process_zba_sh_add(uint64_t shift_val, bool truncate_arg1);
 
   void parse_function();
@@ -254,17 +254,18 @@ void Parser::lex_hilo(void)
   tokens.emplace_back(op, start_pos, pos - start_pos);
 }
 
-std::string Parser::token_string(const Token& tok)
+std::string_view Parser::token_string(const Token& tok)
 {
-  return std::string(&buf[tok.pos], tok.size);
+  return std::string_view(&buf[tok.pos], tok.size);
 }
 
-std::string Parser::get_name(unsigned idx)
+std::string_view Parser::get_name(unsigned idx)
 {
   if (tokens.size() <= idx || tokens[idx].kind != Lexeme::name)
-    throw Parse_error("expected a name after " + token_string(tokens[idx - 1]),
+    throw Parse_error("expected a name after "
+		      + std::string(token_string(tokens[idx - 1])),
 		      line_number);
-  return std::string(&buf[tokens[idx].pos], tokens[idx].size);
+  return std::string_view(&buf[tokens[idx].pos], tokens[idx].size);
 }
 
 uint32_t Parser::get_u32(const char *p)
@@ -308,7 +309,7 @@ unsigned __int128 Parser::get_hex_or_integer(unsigned idx)
     throw Parse_error("expected more arguments", line_number);
   if (tokens[idx].kind != Lexeme::hex && tokens[idx].kind != Lexeme::integer)
     throw Parse_error("expected a hexadecimal or decimal integer instead of "
-		      + token_string(tokens[idx]), line_number);
+		      + std::string(token_string(tokens[idx])), line_number);
 
   int pos = tokens[idx].pos;
   if (buf[pos] == '-')
@@ -350,7 +351,7 @@ Inst *Parser::get_reg(unsigned idx)
 	  && buf[tokens[idx].pos] != 's'
 	  && buf[tokens[idx].pos] != 't'))
     throw Parse_error("expected a register instead of "
-		      + token_string(tokens[idx]), line_number);
+		      + std::string(token_string(tokens[idx])), line_number);
   // TODO: Check length.
   uint32_t value = buf[tokens[idx].pos + 1] - '0';
   if (tokens[idx].size == 3)
@@ -373,7 +374,7 @@ Inst *Parser::get_reg(unsigned idx)
     }
   else
     throw Parse_error("expected a register instead of "
-		      + token_string(tokens[idx]), line_number);
+		      + std::string(token_string(tokens[idx])), line_number);
 }
 
 Inst *Parser::get_freg(unsigned idx)
@@ -389,7 +390,8 @@ Inst *Parser::get_freg(unsigned idx)
     {
       if (buf[pos] != 'a' && buf[pos] != 's' && buf[pos] != 't')
 	throw Parse_error("invalid floating point register "
-			  + token_string(tokens[idx]), line_number);
+			  + std::string(token_string(tokens[idx])),
+			  line_number);
       is_pseudo_reg = true;
       pos++;
     }
@@ -463,7 +465,7 @@ Inst *Parser::get_hi(unsigned idx)
     throw Parse_error("expected more arguments", line_number);
   if (tokens[idx].kind != Lexeme::hi)
     throw Parse_error("expected %lo instead of "
-		      + token_string(tokens[idx]), line_number);
+		      + std::string(token_string(tokens[idx])), line_number);
   Inst *addr = get_hilo_addr(tokens[idx]);
   Inst *res = bb->build_inst(Op::EXTRACT, addr, 31, 12);
   Inst *lo_signbit = bb->build_extract_bit(addr, 11);
@@ -479,7 +481,7 @@ Inst *Parser::get_lo(unsigned idx)
     throw Parse_error("expected more arguments", line_number);
   if (tokens[idx].kind != Lexeme::lo)
     throw Parse_error("expected %lo instead of "
-		      + token_string(tokens[idx]), line_number);
+		      + std::string(token_string(tokens[idx])), line_number);
   return bb->build_trunc(get_hilo_addr(tokens[idx]), 12);
 }
 
@@ -523,8 +525,8 @@ Basic_block *Parser::get_bb(unsigned idx)
     throw Parse_error("expected more arguments", line_number);
   if (tokens[idx].kind != Lexeme::label)
     throw Parse_error("expected a label instead of "
-		      + token_string(tokens[idx]), line_number);
-  std::string label(&buf[tokens[idx].pos], tokens[idx].size);
+		      + std::string(token_string(tokens[idx])), line_number);
+  std::string_view label(&buf[tokens[idx].pos], tokens[idx].size);
   auto I = label2bb.find(label);
   if (I != label2bb.end())
     return I->second;
@@ -539,10 +541,10 @@ Basic_block *Parser::get_bb_def(unsigned idx)
     throw Parse_error("expected more arguments", line_number);
   if (tokens[idx].kind != Lexeme::label_def)
     throw Parse_error("expected a label instead of "
-		      + token_string(tokens[idx]), line_number);
+		      + std::string(token_string(tokens[idx])), line_number);
   assert(tokens[idx].size > 0
 	 && buf[tokens[idx].pos + tokens[idx].size - 1] == ':');
-  std::string label(&buf[tokens[idx].pos], tokens[idx].size - 1);
+  std::string_view label(&buf[tokens[idx].pos], tokens[idx].size - 1);
   auto I = label2bb.find(label);
   if (I != label2bb.end())
     return I->second;
@@ -555,7 +557,8 @@ void Parser::get_comma(unsigned idx)
 {
   assert(idx > 0);
   if (tokens.size() <= idx || tokens[idx].kind != Lexeme::comma)
-    throw Parse_error("expected a ',' after " + token_string(tokens[idx - 1]),
+    throw Parse_error("expected a ',' after "
+		      + std::string(token_string(tokens[idx - 1])),
 		      line_number);
 }
 
@@ -563,7 +566,8 @@ void Parser::get_left_paren(unsigned idx)
 {
   assert(idx > 0);
   if (tokens.size() <= idx || tokens[idx].kind != Lexeme::left_paren)
-    throw Parse_error("expected a '(' after " + token_string(tokens[idx - 1]),
+    throw Parse_error("expected a '(' after "
+		      + std::string(token_string(tokens[idx - 1])),
 		      line_number);
 }
 
@@ -571,7 +575,8 @@ void Parser::get_right_paren(unsigned idx)
 {
   assert(idx > 0);
   if (tokens.size() <= idx || tokens[idx].kind != Lexeme::right_paren)
-    throw Parse_error("expected a ')' after " + token_string(tokens[idx - 1]),
+    throw Parse_error("expected a ')' after "
+		      + std::string(token_string(tokens[idx - 1])),
 		      line_number);
 }
 
@@ -579,8 +584,9 @@ void Parser::get_end_of_line(unsigned idx)
 {
   assert(idx > 0);
   if (tokens.size() > idx)
-    throw Parse_error("expected end of line after " +
-		      token_string(tokens[idx - 1]), line_number);
+    throw Parse_error("expected end of line after "
+		      + std::string(token_string(tokens[idx - 1])),
+				    line_number);
 }
 
 void Parser::process_cond_branch(Op op)
@@ -751,7 +757,7 @@ void Parser::write_retval(Inst *retval)
 
 void Parser::process_call()
 {
-  std::string name = get_name(1);
+  std::string_view name = get_name(1);
   get_end_of_line(2);
 
   if (name == "__ashldi3" && reg_bitsize == 32)
@@ -991,15 +997,15 @@ void Parser::process_call()
       return;
     }
 
-  throw Not_implemented("call " + name);
+  throw Not_implemented("call " + std::string(name));
 }
 
 void Parser::process_tail()
 {
-  std::string name = get_name(1);
+  std::string_view name = get_name(1);
   get_end_of_line(2);
 
-  throw Not_implemented("tail " + name);
+  throw Not_implemented("tail " + std::string(name));
 }
 
 void Parser::store_ub_check(Inst *ptr, uint64_t size)
@@ -1127,7 +1133,7 @@ void Parser::process_store(int size, LStype lstype)
     }
 }
 
-void Parser::process_funary(std::string name, Op op)
+void Parser::process_funary(std::string_view name, Op op)
 {
   Inst *dest = get_freg(1);
   get_comma(2);
@@ -1149,7 +1155,7 @@ void Parser::process_funary(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void Parser::process_fbinary(std::string name, Op op)
+void Parser::process_fbinary(std::string_view name, Op op)
 {
   Inst *dest = get_freg(1);
   get_comma(2);
@@ -1174,7 +1180,7 @@ void Parser::process_fbinary(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void Parser::process_fcmp(std::string name, Op op)
+void Parser::process_fcmp(std::string_view name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1222,7 +1228,7 @@ void Parser::process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
   get_comma(2);
   Inst *arg1 = get_freg_value(3);
   get_comma(4);
-  std::string rounding_mode = get_name(5);
+  std::string_view rounding_mode = get_name(5);
   if (rounding_mode != "rtz")
     throw Parse_error("expected rtz as rounding mode", line_number);
   get_end_of_line(6);
@@ -1291,7 +1297,7 @@ void Parser::process_min_max(uint32_t bitsize, bool is_min)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void Parser::process_iunary(std::string name, Op op)
+void Parser::process_iunary(std::string_view name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1307,7 +1313,7 @@ void Parser::process_iunary(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void Parser::process_ibinary(std::string name, Op op)
+void Parser::process_ibinary(std::string_view name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1335,7 +1341,7 @@ void Parser::process_ibinary(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void Parser::process_ishift(std::string name, Op op)
+void Parser::process_ishift(std::string_view name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1365,7 +1371,7 @@ void Parser::process_ishift(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void Parser::process_icmp(std::string name, Op op)
+void Parser::process_icmp(std::string_view name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1427,9 +1433,10 @@ void Parser::parse_function()
   }
 
   if (tokens[0].kind != Lexeme::name)
-    throw Parse_error("syntax error: ", line_number);
+    throw Parse_error("syntax error: " + std::string(token_string(tokens[0])),
+		      line_number);
 
-  std::string name = get_name(0);
+  std::string_view name = get_name(0);
   if (name.starts_with(".cfi"))
     ;
   else if (name == "add" || name == "addw" || name == "addi" || name == "addiw")
@@ -2204,7 +2211,8 @@ void Parser::parse_function()
     }
 
   else
-    throw Parse_error("unhandled instruction: "s + name, line_number);
+    throw Parse_error("unhandled instruction: "s + std::string(name),
+		      line_number);
 }
 
 void Parser::lex_line(void)
@@ -2256,7 +2264,7 @@ void Parser::lex_line(void)
   pos++;
 }
 
-std::optional<std::string> Parser::parse_label_def()
+std::optional<std::string_view> Parser::parse_label_def()
 {
   size_t start_pos = pos;
   while (buf[pos] != ':' && buf[pos] != '\n')
@@ -2268,7 +2276,7 @@ std::optional<std::string> Parser::parse_label_def()
       pos++;
       return {};
     }
-  std::string label(&buf[start_pos], pos - start_pos);
+  std::string_view label(&buf[start_pos], pos - start_pos);
   pos++;
   if (buf[pos] == '\n')
     {
@@ -2278,7 +2286,7 @@ std::optional<std::string> Parser::parse_label_def()
   return {};
 }
 
-std::string Parser::parse_cmd()
+std::string_view Parser::parse_cmd()
 {
   size_t start_pos = pos;
   while (buf[pos] == '.' || isalnum(buf[pos]))
@@ -2287,7 +2295,7 @@ std::string Parser::parse_cmd()
 	 || buf[pos] == '\t'
 	 || buf[pos] == '\n'
 	 || buf[pos] == ':');
-  return std::string(&buf[start_pos], pos - start_pos);
+  return std::string_view(&buf[start_pos], pos - start_pos);
 }
 
 void Parser::parse_data(std::vector<unsigned char>& data)
@@ -2306,7 +2314,7 @@ void Parser::parse_data(std::vector<unsigned char>& data)
 	  pos = start_pos;
 	  return;
 	}
-      std::string cmd = parse_cmd();
+      std::string_view cmd = parse_cmd();
       if (cmd == ".dword"
 	  || cmd == ".word"
 	  || cmd == ".half"
@@ -2355,7 +2363,8 @@ void Parser::parse_data(std::vector<unsigned char>& data)
 	  skip_whitespace();
 
 	  if (buf[pos++] != '"')
-	    throw Parse_error("expected '\"' after " + cmd, line_number);
+	    throw Parse_error("expected '\"' after " + std::string(cmd),
+			      line_number);
 
 	  while (buf[pos] != '"')
 	    {
@@ -2483,7 +2492,7 @@ void Parser::parse_rodata()
 	  size_t first_pos = pos;
 	  while (buf[pos] == '.' || isalnum(buf[pos]))
 	    pos++;
-	  std::string name(&buf[first_pos], pos - first_pos);
+	  std::string_view name(&buf[first_pos], pos - first_pos);
 	  if (name.starts_with(".rodata") || name.starts_with(".srodata"))
 	    parser_state = state::memory_section;
 	  else
@@ -2565,16 +2574,18 @@ void Parser::parse_rodata()
 
       if (parser_state == state::memory_section)
 	{
-	  std::optional<std::string> label = parse_label_def();
+	  std::optional<std::string_view> label = parse_label_def();
 	  if (label)
 	    {
-	      // TODO: Change to check for duplicated labels.
-	      assert(!sym_name2data.contains(*label));
+	      std::string label_name = std::string(*label);
 
-	      parse_data(sym_name2data[*label]);
+	      // TODO: Change to check for duplicated labels.
+	      assert(!sym_name2data.contains(label_name));
+
+	      parse_data(sym_name2data[label_name]);
 
 	      // TODO: Change to check.
-	      assert(!sym_name2data[*label].empty());
+	      assert(!sym_name2data[label_name].empty());
 
 	      continue;
 	    }
@@ -2637,7 +2648,7 @@ Function *Parser::parse(std::string const& file_name)
 
     if (parser_state == state::global)
       {
-	std::optional<std::string> label = parse_label_def();
+	std::optional<std::string_view> label = parse_label_def();
 	if (!label)
 	  continue;
 
