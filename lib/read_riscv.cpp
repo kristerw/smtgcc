@@ -13,21 +13,16 @@ using namespace smtgcc;
 namespace smtgcc {
 namespace {
 
-// TODO: Check that all instructions are supported by asm. For example,
-// I am not sure that the "w" version of sgt is supported...
+struct Parser {
+  Parser(riscv_state *rstate) : rstate{rstate} {}
 
-struct parser {
-  parser(riscv_state *rstate) : rstate{rstate} {}
-
-  enum class lexeme {
+  enum class Lexeme {
     label,
     label_def,
-    variable,
     name,
     integer,
     hex,
     comma,
-    assign,
     lo,
     hi,
     left_bracket,
@@ -42,12 +37,12 @@ struct parser {
     float_ls
   };
 
-  struct token {
-    lexeme kind;
+  struct Token {
+    Lexeme kind;
     int pos;
     int size;
   };
-  std::vector<token> tokens;
+  std::vector<Token> tokens;
   std::map<std::string, std::vector<unsigned char>> sym_name2data;
 
   int line_number = 0;
@@ -86,16 +81,15 @@ private:
   void lex_name(void);
   void lex_hilo(void);
 
-  std::string token_string(const token& tok);
+  std::string token_string(const Token& tok);
 
-  std::string get_name(const char *p);
   uint32_t get_u32(const char *p);
   unsigned __int128 get_hex(const char *p);
 
   unsigned __int128 get_hex_or_integer(unsigned idx);
   Inst *get_reg(unsigned idx);
   Inst *get_freg(unsigned idx);
-  Inst *get_hilo_addr(const token& tok);
+  Inst *get_hilo_addr(const Token& tok);
   Inst *get_hi(unsigned idx);
   Inst *get_lo(unsigned idx);
   Inst *get_imm(unsigned idx);
@@ -146,7 +140,7 @@ private:
   void skip_space_and_comments();
 };
 
-void parser::skip_space_and_comments()
+void Parser::skip_space_and_comments()
 {
   while (isspace(buf[pos]))
     pos++;
@@ -157,7 +151,7 @@ void parser::skip_space_and_comments()
     }
 }
 
-void parser::lex_label_or_label_def(void)
+void Parser::lex_label_or_label_def(void)
 {
   assert(buf[pos] == '.');
   int start_pos = pos;
@@ -173,13 +167,13 @@ void parser::lex_label_or_label_def(void)
   if (buf[pos] == ':')
     {
       pos++;
-      tokens.emplace_back(lexeme::label_def, start_pos, pos - start_pos);
+      tokens.emplace_back(Lexeme::label_def, start_pos, pos - start_pos);
     }
   else
-    tokens.emplace_back(lexeme::label, start_pos, pos - start_pos);
+    tokens.emplace_back(Lexeme::label, start_pos, pos - start_pos);
 }
 
-void parser::lex_hex(void)
+void Parser::lex_hex(void)
 {
   assert(buf[pos] == '0');
   int start_pos = pos;
@@ -190,10 +184,10 @@ void parser::lex_hex(void)
     throw Parse_error("expected a hex digit after 0x", line_number);
   while (isxdigit(buf[pos]))
     pos++;
-  tokens.emplace_back(lexeme::hex, start_pos, pos - start_pos);
+  tokens.emplace_back(Lexeme::hex, start_pos, pos - start_pos);
 }
 
-void parser::lex_integer(void)
+void Parser::lex_integer(void)
 {
   int start_pos = pos;
   if (buf[pos] == '-')
@@ -204,10 +198,10 @@ void parser::lex_integer(void)
     throw Parse_error("octal numbers are not supported", line_number);
   while (isdigit(buf[pos]))
     pos++;
-  tokens.emplace_back(lexeme::integer, start_pos, pos - start_pos);
+  tokens.emplace_back(Lexeme::integer, start_pos, pos - start_pos);
 }
 
-void parser::lex_hex_or_integer(void)
+void Parser::lex_hex_or_integer(void)
 {
   assert(isdigit(buf[pos]) || buf[pos] == '-');
   if (buf[pos] == '0' && (buf[pos + 1] == 'x' || buf[pos + 1] == 'X'))
@@ -216,7 +210,7 @@ void parser::lex_hex_or_integer(void)
     lex_integer();
 }
 
-void parser::lex_name(void)
+void Parser::lex_name(void)
 {
   assert(isalpha(buf[pos])
 	 || buf[pos] == '_'
@@ -230,14 +224,14 @@ void parser::lex_name(void)
 	 || buf[pos] == '.'
 	 || buf[pos] == '$')
     pos++;
-  tokens.emplace_back(lexeme::name, start_pos, pos - start_pos);
+  tokens.emplace_back(Lexeme::name, start_pos, pos - start_pos);
 }
 
-void parser::lex_hilo(void)
+void Parser::lex_hilo(void)
 {
   int start_pos = pos;
   bool is_lo = (buf[pos] == '%' && buf[pos + 1] == 'l' && buf[pos + 2] == 'o');
-  lexeme op = is_lo ? lexeme::lo : lexeme::hi;
+  Lexeme op = is_lo ? Lexeme::lo : Lexeme::hi;
   if (buf[pos + 3] != '(')
     throw Parse_error("expected '('", line_number);
   pos += 4;
@@ -260,29 +254,20 @@ void parser::lex_hilo(void)
   tokens.emplace_back(op, start_pos, pos - start_pos);
 }
 
-std::string parser::token_string(const token& tok)
+std::string Parser::token_string(const Token& tok)
 {
   return std::string(&buf[tok.pos], tok.size);
 }
 
-std::string parser::get_name(const char *p)
+std::string Parser::get_name(unsigned idx)
 {
-  std::string name;
-  while (isalnum(*p) || *p == '_' || *p == '-' || *p == '.')
-    name.push_back(*p++);
-  return name;
-}
-
-std::string parser::get_name(unsigned idx)
-{
-  assert(idx > 0);
-  if (tokens.size() <= idx || tokens[idx].kind != lexeme::name)
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::name)
     throw Parse_error("expected a name after " + token_string(tokens[idx - 1]),
 		      line_number);
-  return get_name(&buf[tokens[idx].pos]);
+  return std::string(&buf[tokens[idx].pos], tokens[idx].size);
 }
 
-uint32_t parser::get_u32(const char *p)
+uint32_t Parser::get_u32(const char *p)
 {
   assert(isdigit(*p));
   uint64_t value = 0;
@@ -295,7 +280,7 @@ uint32_t parser::get_u32(const char *p)
   return value;
 }
 
-unsigned __int128 parser::get_hex(const char *p)
+unsigned __int128 Parser::get_hex(const char *p)
 {
   const unsigned __int128 max_val = -1;
   unsigned __int128 value = 0;
@@ -317,11 +302,11 @@ unsigned __int128 parser::get_hex(const char *p)
   return value;
 }
 
-unsigned __int128 parser::get_hex_or_integer(unsigned idx)
+unsigned __int128 Parser::get_hex_or_integer(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
-  if (tokens[idx].kind != lexeme::hex && tokens[idx].kind != lexeme::integer)
+  if (tokens[idx].kind != Lexeme::hex && tokens[idx].kind != Lexeme::integer)
     throw Parse_error("expected a hexadecimal or decimal integer instead of "
 		      + token_string(tokens[idx]), line_number);
 
@@ -329,7 +314,7 @@ unsigned __int128 parser::get_hex_or_integer(unsigned idx)
   if (buf[pos] == '-')
     pos++;
   unsigned __int128 val;
-  if (tokens[idx].kind == lexeme::integer)
+  if (tokens[idx].kind == Lexeme::integer)
     val = get_u32(&buf[pos]);
   else
     val = get_hex(&buf[pos]);
@@ -338,7 +323,7 @@ unsigned __int128 parser::get_hex_or_integer(unsigned idx)
   return val;
 }
 
-Inst *parser::get_reg(unsigned idx)
+Inst *Parser::get_reg(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
@@ -360,7 +345,7 @@ Inst *parser::get_reg(unsigned idx)
       && buf[tokens[idx].pos + 0] == 'r'
       && buf[tokens[idx].pos + 1] == 'a')
     return rstate->registers[1];
-  if (tokens[idx].kind != lexeme::name
+  if (tokens[idx].kind != Lexeme::name
       || (buf[tokens[idx].pos] != 'a'
 	  && buf[tokens[idx].pos] != 's'
 	  && buf[tokens[idx].pos] != 't'))
@@ -391,7 +376,7 @@ Inst *parser::get_reg(unsigned idx)
 		      + token_string(tokens[idx]), line_number);
 }
 
-Inst *parser::get_freg(unsigned idx)
+Inst *Parser::get_freg(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
@@ -438,7 +423,7 @@ Inst *parser::get_freg(unsigned idx)
     return rstate->fregisters[value];
 }
 
-Inst *parser::get_hilo_addr(const token& tok)
+Inst *Parser::get_hilo_addr(const Token& tok)
 {
   assert(tok.size > 5);
   assert(buf[tok.pos + 3] == '(');
@@ -472,11 +457,11 @@ Inst *parser::get_hilo_addr(const token& tok)
   return addr;
 }
 
-Inst *parser::get_hi(unsigned idx)
+Inst *Parser::get_hi(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
-  if (tokens[idx].kind != lexeme::hi)
+  if (tokens[idx].kind != Lexeme::hi)
     throw Parse_error("expected %lo instead of "
 		      + token_string(tokens[idx]), line_number);
   Inst *addr = get_hilo_addr(tokens[idx]);
@@ -488,29 +473,29 @@ Inst *parser::get_hi(unsigned idx)
   return bb->build_inst(Op::CONCAT, res, zero);
 }
 
-Inst *parser::get_lo(unsigned idx)
+Inst *Parser::get_lo(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
-  if (tokens[idx].kind != lexeme::lo)
+  if (tokens[idx].kind != Lexeme::lo)
     throw Parse_error("expected %lo instead of "
 		      + token_string(tokens[idx]), line_number);
   return bb->build_trunc(get_hilo_addr(tokens[idx]), 12);
 }
 
-Inst *parser::get_imm(unsigned idx)
+Inst *Parser::get_imm(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
   Inst *inst;
-  if (tokens[idx].kind == lexeme::lo)
+  if (tokens[idx].kind == Lexeme::lo)
     inst = get_lo(idx);
   else
     inst = bb->value_inst(get_hex_or_integer(idx), 12);
   return bb->build_inst(Op::SEXT, inst, reg_bitsize);
 }
 
-Inst *parser::get_reg_value(unsigned idx)
+Inst *Parser::get_reg_value(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
@@ -527,16 +512,16 @@ Inst *parser::get_reg_value(unsigned idx)
   return bb->build_inst(Op::READ, get_reg(idx));
 }
 
-Inst *parser::get_freg_value(unsigned idx)
+Inst *Parser::get_freg_value(unsigned idx)
 {
   return bb->build_inst(Op::READ, get_freg(idx));
 }
 
-Basic_block *parser::get_bb(unsigned idx)
+Basic_block *Parser::get_bb(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
-  if (tokens[idx].kind != lexeme::label)
+  if (tokens[idx].kind != Lexeme::label)
     throw Parse_error("expected a label instead of "
 		      + token_string(tokens[idx]), line_number);
   std::string label(&buf[tokens[idx].pos], tokens[idx].size);
@@ -548,11 +533,11 @@ Basic_block *parser::get_bb(unsigned idx)
   return new_bb;
 }
 
-Basic_block *parser::get_bb_def(unsigned idx)
+Basic_block *Parser::get_bb_def(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
-  if (tokens[idx].kind != lexeme::label_def)
+  if (tokens[idx].kind != Lexeme::label_def)
     throw Parse_error("expected a label instead of "
 		      + token_string(tokens[idx]), line_number);
   assert(tokens[idx].size > 0
@@ -566,31 +551,31 @@ Basic_block *parser::get_bb_def(unsigned idx)
   return new_bb;
 }
 
-void parser::get_comma(unsigned idx)
+void Parser::get_comma(unsigned idx)
 {
   assert(idx > 0);
-  if (tokens.size() <= idx || tokens[idx].kind != lexeme::comma)
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::comma)
     throw Parse_error("expected a ',' after " + token_string(tokens[idx - 1]),
 		      line_number);
 }
 
-void parser::get_left_paren(unsigned idx)
+void Parser::get_left_paren(unsigned idx)
 {
   assert(idx > 0);
-  if (tokens.size() <= idx || tokens[idx].kind != lexeme::left_paren)
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::left_paren)
     throw Parse_error("expected a '(' after " + token_string(tokens[idx - 1]),
 		      line_number);
 }
 
-void parser::get_right_paren(unsigned idx)
+void Parser::get_right_paren(unsigned idx)
 {
   assert(idx > 0);
-  if (tokens.size() <= idx || tokens[idx].kind != lexeme::right_paren)
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::right_paren)
     throw Parse_error("expected a ')' after " + token_string(tokens[idx - 1]),
 		      line_number);
 }
 
-void parser::get_end_of_line(unsigned idx)
+void Parser::get_end_of_line(unsigned idx)
 {
   assert(idx > 0);
   if (tokens.size() > idx)
@@ -598,7 +583,7 @@ void parser::get_end_of_line(unsigned idx)
 		      token_string(tokens[idx - 1]), line_number);
 }
 
-void parser::process_cond_branch(Op op)
+void Parser::process_cond_branch(Op op)
 {
   Inst *arg1 = get_reg_value(1);
   get_comma(2);
@@ -613,7 +598,7 @@ void parser::process_cond_branch(Op op)
   bb = false_bb;
 }
 
-Inst *parser::gen_bswap(Inst *arg)
+Inst *Parser::gen_bswap(Inst *arg)
 {
   Inst *inst = bb->build_trunc(arg, 8);
   for (uint32_t i = 8; i < arg->bitsize; i += 8)
@@ -624,7 +609,7 @@ Inst *parser::gen_bswap(Inst *arg)
   return inst;
 }
 
-Inst *parser::gen_clrsb(Inst *arg)
+Inst *Parser::gen_clrsb(Inst *arg)
 {
   Inst *signbit = bb->build_extract_bit(arg, arg->bitsize - 1);
   Inst *inst = bb->value_inst(arg->bitsize - 1, 32);
@@ -638,7 +623,7 @@ Inst *parser::gen_clrsb(Inst *arg)
   return inst;
 }
 
-Inst *parser::gen_clz(Inst *arg)
+Inst *Parser::gen_clz(Inst *arg)
 {
   Inst *inst = bb->value_inst(arg->bitsize, 32);
   for (unsigned i = 0; i < arg->bitsize; i++)
@@ -650,7 +635,7 @@ Inst *parser::gen_clz(Inst *arg)
   return inst;
 }
 
-Inst *parser::gen_ctz(Inst *arg)
+Inst *Parser::gen_ctz(Inst *arg)
 {
   Inst *inst = bb->value_inst(arg->bitsize, 32);
   for (int i = arg->bitsize - 1; i >= 0; i--)
@@ -662,7 +647,7 @@ Inst *parser::gen_ctz(Inst *arg)
   return inst;
 }
 
-Inst *parser::gen_ffs(Inst *arg)
+Inst *Parser::gen_ffs(Inst *arg)
 {
   Inst *inst = bb->value_inst(0, 32);
   for (int i = arg->bitsize - 1; i >= 0; i--)
@@ -674,7 +659,7 @@ Inst *parser::gen_ffs(Inst *arg)
   return inst;
 }
 
-Inst *parser::gen_parity(Inst *arg)
+Inst *Parser::gen_parity(Inst *arg)
 {
   Inst *inst = bb->build_extract_bit(arg, 0);
   for (uint32_t i = 1; i < arg->bitsize; i++)
@@ -687,7 +672,7 @@ Inst *parser::gen_parity(Inst *arg)
   return inst;
 }
 
-Inst *parser::gen_popcount(Inst *arg)
+Inst *Parser::gen_popcount(Inst *arg)
 {
   Inst *bit = bb->build_extract_bit(arg, 0);
   Inst *inst = bb->build_inst(Op::ZEXT, bit, 32);
@@ -700,21 +685,21 @@ Inst *parser::gen_popcount(Inst *arg)
   return inst;
 }
 
-Inst *parser::gen_sdiv(Inst *arg1, Inst *arg2)
+Inst *Parser::gen_sdiv(Inst *arg1, Inst *arg2)
 {
   Inst *zero = bb->value_inst(0, arg2->bitsize);
   bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg2, zero));
   return bb->build_inst(Op::SDIV, arg1, arg2);
 }
 
-Inst *parser::gen_udiv(Inst *arg1, Inst *arg2)
+Inst *Parser::gen_udiv(Inst *arg1, Inst *arg2)
 {
   Inst *zero = bb->value_inst(0, arg2->bitsize);
   bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg2, zero));
   return bb->build_inst(Op::UDIV, arg1, arg2);
 }
 
-Inst *parser::read_arg(uint32_t reg, uint32_t bitsize)
+Inst *Parser::read_arg(uint32_t reg, uint32_t bitsize)
 {
   if (reg_bitsize == 64)
     {
@@ -738,7 +723,7 @@ Inst *parser::read_arg(uint32_t reg, uint32_t bitsize)
     }
 }
 
-void parser::write_retval(Inst *retval)
+void Parser::write_retval(Inst *retval)
 {
   if (reg_bitsize == 64)
     {
@@ -764,7 +749,7 @@ void parser::write_retval(Inst *retval)
     }
 }
 
-void parser::process_call()
+void Parser::process_call()
 {
   std::string name = get_name(1);
   get_end_of_line(2);
@@ -1009,7 +994,7 @@ void parser::process_call()
   throw Not_implemented("call " + name);
 }
 
-void parser::process_tail()
+void Parser::process_tail()
 {
   std::string name = get_name(1);
   get_end_of_line(2);
@@ -1017,7 +1002,7 @@ void parser::process_tail()
   throw Not_implemented("tail " + name);
 }
 
-void parser::store_ub_check(Inst *ptr, uint64_t size)
+void Parser::store_ub_check(Inst *ptr, uint64_t size)
 {
   Inst *ptr_mem_id = bb->build_extract_id(ptr);
 
@@ -1041,7 +1026,7 @@ void parser::store_ub_check(Inst *ptr, uint64_t size)
   bb->build_inst(Op::UB, out_of_bound);
 }
 
-void parser::load_ub_check(Inst *ptr, uint64_t size)
+void Parser::load_ub_check(Inst *ptr, uint64_t size)
 {
   Inst *ptr_mem_id = bb->build_extract_id(ptr);
 
@@ -1075,7 +1060,7 @@ void parser::load_ub_check(Inst *ptr, uint64_t size)
   bb->build_inst(Op::UB, out_of_bound);
 }
 
-void parser::process_load(int size, LStype lstype)
+void Parser::process_load(int size, LStype lstype)
 {
   Inst *ptr;
   Inst *dest;
@@ -1116,7 +1101,7 @@ void parser::process_load(int size, LStype lstype)
   bb->build_inst(Op::WRITE, dest, value);
 }
 
-void parser::process_store(int size, LStype lstype)
+void Parser::process_store(int size, LStype lstype)
 {
   Inst *ptr;
   Inst *value;
@@ -1142,7 +1127,7 @@ void parser::process_store(int size, LStype lstype)
     }
 }
 
-void parser::process_funary(std::string name, Op op)
+void Parser::process_funary(std::string name, Op op)
 {
   Inst *dest = get_freg(1);
   get_comma(2);
@@ -1164,7 +1149,7 @@ void parser::process_funary(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::process_fbinary(std::string name, Op op)
+void Parser::process_fbinary(std::string name, Op op)
 {
   Inst *dest = get_freg(1);
   get_comma(2);
@@ -1189,7 +1174,7 @@ void parser::process_fbinary(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::process_fcmp(std::string name, Op op)
+void Parser::process_fcmp(std::string name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1210,7 +1195,7 @@ void parser::process_fcmp(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::process_fcvt_i2f(uint32_t src_bitsize, uint32_t dest_bitsize,
+void Parser::process_fcvt_i2f(uint32_t src_bitsize, uint32_t dest_bitsize,
 			      bool is_unsigned)
 {
   Inst *dest = get_freg(1);
@@ -1230,7 +1215,7 @@ void parser::process_fcvt_i2f(uint32_t src_bitsize, uint32_t dest_bitsize,
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
+void Parser::process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
 			      bool is_unsigned)
 {
   Inst *dest = get_reg(1);
@@ -1251,7 +1236,7 @@ void parser::process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::process_fcvt_f2f(uint32_t src_bitsize, uint32_t dest_bitsize)
+void Parser::process_fcvt_f2f(uint32_t src_bitsize, uint32_t dest_bitsize)
 {
   Inst *dest = get_freg(1);
   get_comma(2);
@@ -1269,7 +1254,7 @@ void parser::process_fcvt_f2f(uint32_t src_bitsize, uint32_t dest_bitsize)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::process_min_max(uint32_t bitsize, bool is_min)
+void Parser::process_min_max(uint32_t bitsize, bool is_min)
 {
   Inst *dest = get_freg(1);
   get_comma(2);
@@ -1306,7 +1291,7 @@ void parser::process_min_max(uint32_t bitsize, bool is_min)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::process_iunary(std::string name, Op op)
+void Parser::process_iunary(std::string name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1322,7 +1307,7 @@ void parser::process_iunary(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::process_ibinary(std::string name, Op op)
+void Parser::process_ibinary(std::string name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1350,7 +1335,7 @@ void parser::process_ibinary(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::process_ishift(std::string name, Op op)
+void Parser::process_ishift(std::string name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1380,7 +1365,7 @@ void parser::process_ishift(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::process_icmp(std::string name, Op op)
+void Parser::process_icmp(std::string name, Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1411,7 +1396,7 @@ void parser::process_icmp(std::string name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::process_zba_sh_add(uint64_t shift_val, bool truncate_arg1)
+void Parser::process_zba_sh_add(uint64_t shift_val, bool truncate_arg1)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1428,9 +1413,9 @@ void parser::process_zba_sh_add(uint64_t shift_val, bool truncate_arg1)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void parser::parse_function()
+void Parser::parse_function()
 {
-  if (tokens[0].kind == lexeme::label_def)
+  if (tokens[0].kind == Lexeme::label_def)
   {
     Basic_block *dest_bb = get_bb_def(0);
     get_end_of_line(1);
@@ -1441,7 +1426,10 @@ void parser::parse_function()
     return;
   }
 
-  std::string name = get_name(&buf[tokens[0].pos]);
+  if (tokens[0].kind != Lexeme::name)
+    throw Parse_error("syntax error: ", line_number);
+
+  std::string name = get_name(0);
   if (name.starts_with(".cfi"))
     ;
   else if (name == "add" || name == "addw" || name == "addi" || name == "addiw")
@@ -2219,7 +2207,7 @@ void parser::parse_function()
     throw Parse_error("unhandled instruction: "s + name, line_number);
 }
 
-void parser::lex_line(void)
+void Parser::lex_line(void)
 {
   tokens.clear();
   while (buf[pos] != '\n' && buf[pos] != ';')
@@ -2229,7 +2217,7 @@ void parser::lex_line(void)
 	break;
       if (isdigit(buf[pos]) || buf[pos] == '-')
 	lex_hex_or_integer();
-      else if (buf[pos] == '.' && buf[pos + 1] == 'L' ) // TODO: pos+1 check.
+      else if (buf[pos] == '.' && buf[pos + 1] == 'L' )
 	lex_label_or_label_def();
       else if (isalpha(buf[pos]) || buf[pos] == '_' || buf[pos] == '.')
 	lex_name();
@@ -2239,32 +2227,27 @@ void parser::lex_line(void)
 	lex_hilo();
       else if (buf[pos] == ',')
 	{
-	  tokens.emplace_back(lexeme::comma, pos, 1);
-	  pos++;
-	}
-      else if (buf[pos] == '=')
-	{
-	  tokens.emplace_back(lexeme::assign, pos, 1);
+	  tokens.emplace_back(Lexeme::comma, pos, 1);
 	  pos++;
 	}
       else if (buf[pos] == '[')
 	{
-	  tokens.emplace_back(lexeme::left_bracket, pos, 1);
+	  tokens.emplace_back(Lexeme::left_bracket, pos, 1);
 	  pos++;
 	}
       else if (buf[pos] == ']')
 	{
-	  tokens.emplace_back(lexeme::right_bracket, pos, 1);
+	  tokens.emplace_back(Lexeme::right_bracket, pos, 1);
 	  pos++;
 	}
       else if (buf[pos] == '(')
 	{
-	  tokens.emplace_back(lexeme::left_paren, pos, 1);
+	  tokens.emplace_back(Lexeme::left_paren, pos, 1);
 	  pos++;
 	}
       else if (buf[pos] == ')')
 	{
-	  tokens.emplace_back(lexeme::right_paren, pos, 1);
+	  tokens.emplace_back(Lexeme::right_paren, pos, 1);
 	  pos++;
 	}
       else
@@ -2273,7 +2256,7 @@ void parser::lex_line(void)
   pos++;
 }
 
-std::optional<std::string> parser::parse_label_def()
+std::optional<std::string> Parser::parse_label_def()
 {
   size_t start_pos = pos;
   while (buf[pos] != ':' && buf[pos] != '\n')
@@ -2295,7 +2278,7 @@ std::optional<std::string> parser::parse_label_def()
   return {};
 }
 
-std::string parser::parse_cmd()
+std::string Parser::parse_cmd()
 {
   size_t start_pos = pos;
   while (buf[pos] == '.' || isalnum(buf[pos]))
@@ -2307,7 +2290,7 @@ std::string parser::parse_cmd()
   return std::string(&buf[start_pos], pos - start_pos);
 }
 
-void parser::parse_data(std::vector<unsigned char>& data)
+void Parser::parse_data(std::vector<unsigned char>& data)
 {
   for (;;)
     {
@@ -2449,7 +2432,7 @@ void parser::parse_data(std::vector<unsigned char>& data)
     }
 }
 
-void parser::skip_line()
+void Parser::skip_line()
 {
   while (buf[pos] != '\n')
     {
@@ -2458,7 +2441,7 @@ void parser::skip_line()
   pos++;
 }
 
-void parser::skip_whitespace()
+void Parser::skip_whitespace()
 {
   while (buf[pos] == ' ' || buf[pos] == '\t')
     {
@@ -2466,7 +2449,7 @@ void parser::skip_whitespace()
     }
 }
 
-void parser::parse_rodata()
+void Parser::parse_rodata()
 {
   enum class state {
     global,
@@ -2602,7 +2585,7 @@ void parser::parse_rodata()
     }
 }
 
-Function *parser::parse(std::string const& file_name)
+Function *Parser::parse(std::string const& file_name)
 {
   enum class state {
     global,
@@ -2708,8 +2691,7 @@ Function *parser::parse(std::string const& file_name)
 
     if (parser_state == state::function)
       {
-	std::string name = get_name(&buf[tokens[0].pos]);
-	if (name == ".size")
+	if (tokens[0].kind == Lexeme::name && get_name(0) == ".size")
 	  {
 	    // We may have extra labels after the function, such as:
 	    //
@@ -2747,7 +2729,7 @@ Function *parser::parse(std::string const& file_name)
 
 Function *parse_riscv(std::string const& file_name, riscv_state *state)
 {
-  parser p(state);
+  Parser p(state);
   Function *func = p.parse(file_name);
   reverse_post_order(func);
   return func;
