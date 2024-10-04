@@ -481,6 +481,9 @@ Inst *parser::get_hi(unsigned idx)
 		      + token_string(tokens[idx]), line_number);
   Inst *addr = get_hilo_addr(tokens[idx]);
   Inst *res = bb->build_inst(Op::EXTRACT, addr, 31, 12);
+  Inst *lo_signbit = bb->build_extract_bit(addr, 11);
+  Inst *bias = bb->build_inst(Op::ZEXT, lo_signbit, res->bitsize);
+  res = bb->build_inst(Op::ADD, res, bias);
   Inst *zero = bb->value_inst(0, 12);
   return bb->build_inst(Op::CONCAT, res, zero);
 }
