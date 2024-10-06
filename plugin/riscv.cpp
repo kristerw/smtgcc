@@ -374,21 +374,19 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
   rstate.exit_bb = tgt->build_bb();
 
   assert(module->functions.size() == 2);
-  Basic_block *entry_bb = rstate.entry_bb;
+  Basic_block *bb = rstate.entry_bb;
 
   // Registers x0-x31.
   for (int i = 0; i < 32; i++)
     {
-      Inst *bitsize = entry_bb->value_inst(rstate.reg_bitsize, 32);
-      Inst *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
+      Inst *reg = bb->build_inst(Op::REGISTER, rstate.reg_bitsize);
       rstate.registers.push_back(reg);
     }
 
   // Registers f0-f31.
   for (int i = 0; i < 32; i++)
     {
-      Inst *bitsize = entry_bb->value_inst(rstate.freg_bitsize, 32);
-      Inst *reg = entry_bb->build_inst(Op::REGISTER, bitsize);
+      Inst *reg = bb->build_inst(Op::REGISTER, rstate.freg_bitsize);
       rstate.fregisters.push_back(reg);
     }
 
@@ -396,25 +394,22 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
   // GIMPLE IR.
   for (const auto& mem_obj : rstate.memory_objects)
     {
-      Inst *id = entry_bb->value_inst(mem_obj.id, module->ptr_id_bits);
-      Inst *size =
-	entry_bb->value_inst(mem_obj.size, module->ptr_offset_bits);
-      Inst *flags = entry_bb->value_inst(mem_obj.flags, 32);
-      Inst *mem = entry_bb->build_inst(Op::MEMORY, id, size, flags);
+      Inst *id = bb->value_inst(mem_obj.id, module->ptr_id_bits);
+      Inst *size = bb->value_inst(mem_obj.size, module->ptr_offset_bits);
+      Inst *flags = bb->value_inst(mem_obj.flags, 32);
+      Inst *mem = bb->build_inst(Op::MEMORY, id, size, flags);
       rstate.sym_name2mem.insert({mem_obj.sym_name, mem});
     }
 
   // Set up the stack.
   assert(stack_size < (((uint64_t)1) << module->ptr_offset_bits));
-  Inst *id = entry_bb->value_inst(-128, module->ptr_id_bits);
-  Inst *mem_size =
-    entry_bb->value_inst(stack_size, module->ptr_offset_bits);
-  Inst *flags = entry_bb->value_inst(0, 32);
-  Inst *stack =
-    entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
-  Inst *size = entry_bb->value_inst(stack_size, stack->bitsize);
-  stack = entry_bb->build_inst(Op::ADD, stack, size);
-  entry_bb->build_inst(Op::WRITE, rstate.registers[2], stack);
+  Inst *id = bb->value_inst(-128, module->ptr_id_bits);
+  Inst *mem_size = bb->value_inst(stack_size, module->ptr_offset_bits);
+  Inst *flags = bb->value_inst(0, 32);
+  Inst *stack = bb->build_inst(Op::MEMORY, id, mem_size, flags);
+  Inst *size = bb->value_inst(stack_size, stack->bitsize);
+  stack = bb->build_inst(Op::ADD, stack, size);
+  bb->build_inst(Op::WRITE, rstate.registers[2], stack);
 
   uint32_t reg_nbr = 10;
   uint32_t freg_nbr = 10;
@@ -431,9 +426,9 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
       if (bitsize <= 0)
 	throw Not_implemented("Parameter size == 0");
 
-      Inst *param_nbr = entry_bb->value_inst(param_number, 32);
-      Inst *param_bitsize = entry_bb->value_inst(bitsize, 32);
-      Inst *param = entry_bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
+      Inst *param_nbr = bb->value_inst(param_number, 32);
+      Inst *param_bitsize = bb->value_inst(bitsize, 32);
+      Inst *param = bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
 
       tree type = TREE_TYPE(decl);
       if (param_number == 0
@@ -463,7 +458,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 	      else
 		{
 		  Inst *reg = rstate.registers[reg_nbr++];
-		  entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).regs[0]);
+		  bb->build_inst(Op::WRITE, reg, (*arg_regs).regs[0]);
 		}
 	    }
 	  if ((*arg_regs).regs[1])
@@ -473,7 +468,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 	      else
 		{
 		  Inst *reg = rstate.registers[reg_nbr++];
-		  entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).regs[1]);
+		  bb->build_inst(Op::WRITE, reg, (*arg_regs).regs[1]);
 		}
 	    }
 
@@ -492,7 +487,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 	      else
 		{
 		  Inst *reg = rstate.fregisters[freg_nbr++];
-		  entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[0]);
+		  bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[0]);
 		}
 	    }
 	  if ((*arg_regs).fregs[1])
@@ -502,7 +497,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 	      else
 		{
 		  Inst *reg = rstate.fregisters[freg_nbr++];
-		  entry_bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[1]);
+		  bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[1]);
 		}
 	    }
 	}
@@ -520,29 +515,29 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
       uint32_t reg_size = rstate.reg_bitsize / 8;
       uint32_t size = stack_values.size() * reg_size;
       size = (size + 15) & ~15;   // Keep the stack 16-bytes aligned.
-      Inst *size_inst = entry_bb->value_inst(size, rstate.reg_bitsize);
+      Inst *size_inst = bb->value_inst(size, rstate.reg_bitsize);
       Inst *sp_reg = rstate.registers[2];
-      Inst *sp = entry_bb->build_inst(Op::READ, sp_reg);
-      sp = entry_bb->build_inst(Op::SUB, sp, size_inst);
-      entry_bb->build_inst(Op::WRITE, sp_reg, sp);
+      Inst *sp = bb->build_inst(Op::READ, sp_reg);
+      sp = bb->build_inst(Op::SUB, sp, size_inst);
+      bb->build_inst(Op::WRITE, sp_reg, sp);
 
       for (auto value : stack_values)
 	{
 	  if (!value)
 	    {
-	      Inst *size_inst = entry_bb->value_inst(reg_size, sp->bitsize);
-	      sp = entry_bb->build_inst(Op::ADD, sp, size_inst);
+	      Inst *size_inst = bb->value_inst(reg_size, sp->bitsize);
+	      sp = bb->build_inst(Op::ADD, sp, size_inst);
 	      continue;
 	    }
 
 	  for (uint32_t i = 0; i < reg_size; i++)
 	    {
-	      Inst *high = entry_bb->value_inst(i * 8 + 7, 32);
-	      Inst *low = entry_bb->value_inst(i * 8, 32);
-	      Inst *byte = entry_bb->build_inst(Op::EXTRACT, value, high, low);
-	      entry_bb->build_inst(Op::STORE, sp, byte);
-	      Inst *one = entry_bb->value_inst(1, sp->bitsize);
-	      sp = entry_bb->build_inst(Op::ADD, sp, one);
+	      Inst *high = bb->value_inst(i * 8 + 7, 32);
+	      Inst *low = bb->value_inst(i * 8, 32);
+	      Inst *byte = bb->build_inst(Op::EXTRACT, value, high, low);
+	      bb->build_inst(Op::STORE, sp, byte);
+	      Inst *one = bb->value_inst(1, sp->bitsize);
+	      sp = bb->build_inst(Op::ADD, sp, one);
 	    }
 	}
     }

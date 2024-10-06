@@ -267,6 +267,7 @@ struct Basic_block {
   void insert_phi(Inst *inst);
   Inst *build_inst(Op op);
   Inst *build_inst(Op op, Inst *arg);
+  Inst *build_inst(Op op, uint32_t arg_val);
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2);
   Inst *build_inst(Op op, Inst *arg1, uint32_t arg2_val);
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3);

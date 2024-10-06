@@ -758,6 +758,15 @@ Inst *Basic_block::build_inst(Op op, Inst *arg)
   return inst;
 }
 
+Inst *Basic_block::build_inst(Op op, uint32_t arg_val)
+{
+  assert(op == Op::REGISTER);
+  Inst *arg = value_inst(arg_val, 32);
+  Inst *inst = create_inst(op, arg);
+  insert_last(inst);
+  return inst;
+}
+
 Inst *Basic_block::build_inst(Op op, Inst *arg1, Inst *arg2)
 {
   Inst *inst = create_inst(op, arg1, arg2);
