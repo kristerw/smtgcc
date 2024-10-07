@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -52,11 +53,10 @@ struct Addr {
 };
 
 struct Converter {
-  Converter(Module *module, CommonState *state, function *fun, bool is_tgt_func, Arch arch)
+  Converter(Module *module, CommonState *state, function *fun, bool is_tgt_func)
     : module{module}
     , state{state}
     , fun{fun}
-    , arch{arch}
     , is_tgt_func{is_tgt_func}
   {}
   ~Converter()
@@ -67,7 +67,6 @@ struct Converter {
   Module *module;
   CommonState *state;
   function *fun;
-  Arch arch;
   Function *func = nullptr;
   Basic_block *bb = nullptr;
   Inst *loop_vect_sym = nullptr;
@@ -1912,7 +1911,7 @@ void Converter::process_store(tree addr_expr, tree value_expr)
   // For now, we solve this by making storing a local pointer UB.
   //
   // TODO: Find a better way of handling this.
-  if (arch == Arch::riscv && !is_tgt_func && POINTER_TYPE_P(value_type))
+  if (state->arch == Arch::riscv && !is_tgt_func && POINTER_TYPE_P(value_type))
     {
       Inst *value_mem_id = extract_id(value);
       Inst *zero = bb->value_inst(0, module->ptr_id_bits);
@@ -2024,7 +2023,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
   // pointer type UB.
   //
   // TODO: Find a better way of handling this.
-  if (arch == Arch::riscv
+  if (state->arch == Arch::riscv
       && !is_tgt_func
       && POINTER_TYPE_P(src_type)
       && !POINTER_TYPE_P(dest_type))
@@ -5837,13 +5836,13 @@ void Converter::process_variables()
 	    // cannot point to them. Give these a local ID.
 	    if (DECL_ARTIFICIAL(decl))
 	      {
-		if (state->id_local <= -(1 << ((module->ptr_id_bits - 1))))
+		if (state->id_local <= state->ptr_id_min)
 		  throw Not_implemented("too many local variables");
 		id = --state->id_local;
 	      }
 	    else
 	      {
-		if (state->id_global >= (1 << ((module->ptr_id_bits - 1) - 1)))
+		if (state->id_global >= state->ptr_id_max)
 		  throw Not_implemented("too many global variables");
 		id = ++state->id_global;
 	      }
@@ -5912,7 +5911,7 @@ void Converter::process_variables()
 	  id = state->decl2id.at(decl);
 	else
 	  {
-	    if (state->id_local <= -(1 << ((module->ptr_id_bits - 1))))
+	    if (state->id_local <= state->ptr_id_min)
 	      throw Not_implemented("too many local variables");
 	    id = --state->id_local;
 	    state->decl2id.insert({decl, id});
@@ -6291,9 +6290,9 @@ Function *Converter::process_function()
 
 } // end anonymous namespace
 
-Function *process_function(Module *module, CommonState *state, function *fun, bool is_tgt_func, Arch arch)
+Function *process_function(Module *module, CommonState *state, function *fun, bool is_tgt_func)
 {
-  Converter func(module, state, fun, is_tgt_func, arch);
+  Converter func(module, state, fun, is_tgt_func);
   return func.process_function();
 }
 
@@ -6320,6 +6319,30 @@ void unroll_and_optimize(Module *module)
     unroll_and_optimize(func);
 }
 
+CommonState::CommonState(Arch arch)
+  : arch{arch}
+{
+  assert(POINTER_SIZE == 32 || POINTER_SIZE == 64);
+  if (POINTER_SIZE == 32)
+    {
+      ptr_id_max = std::numeric_limits<int8_t>::max();
+      ptr_id_min = std::numeric_limits<int8_t>::min();
+    }
+  else
+    {
+      if (arch == Arch::riscv)
+	{
+	  ptr_id_max = std::numeric_limits<int8_t>::max();
+	  ptr_id_min = std::numeric_limits<int8_t>::min();
+	}
+      else
+	{
+	  ptr_id_max = std::numeric_limits<int16_t>::max();
+	  ptr_id_min = std::numeric_limits<int16_t>::min();
+	}
+    }
+}
+
 Module *create_module(Arch arch)
 {
   assert(POINTER_SIZE == 32 || POINTER_SIZE == 64);
@@ -6337,7 +6360,7 @@ Module *create_module(Arch arch)
       if (arch == Arch::riscv)
 	{
 	  ptr_bits = 64;
-	  ptr_id_bits = 8;
+	  ptr_id_bits = 40;
 	  ptr_offset_bits = 24;
 	}
       else
