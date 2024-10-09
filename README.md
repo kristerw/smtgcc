@@ -96,12 +96,16 @@ Limitations in the current version:
   - ...
 
 ## smtgcc-tv-backend
-smtgcc-tv-backend compares the GIMPLE IR from  the last GIMPLE pass with the generated assembly code, and complains if the resulting assembly code is not a refinement of the GIMPLE IR (that is, if the backend has miscompiled the program).
+smtgcc-tv-backend compares the IR from the last GIMPLE pass with the generated assembly code and reports an error if the resulting assembly code is not a refinement of the IR (i.e., if the backend has miscompiled the program).
 
-This was just a quick experiment, so it has far too many limitations to be useful:
- * Only RISC-V
- * The function must not access global memory
- * The ABI is not correctly implemented, so the function must have a few parameters of an integral type.
+The plugin supports the RISC-V RV32G and RV64G base profiles and the Zba, Zbb, Zbc, and Zbs extensions. It can be invoked as follows:
+```
+riscv64-elf-gcc -O3 -march=rv64gc_zba_zbb_zbs -fno-section-anchors -fno-strict-aliasing -c -fplugin=/path/to/smtgcc-tv-backend.so file.c
+```
+### Limitations
+The limitations of smtgcc-tv-backend include all those listed for smtgcc-tv, with the following additional limitations:
+* You must pass `-fno-section-anchors` to the compiler.
+* Address allocation of local variables differs between the IR and the generated assembly. As a result, the plugin disables checks when a local address is written to memory or cast to an integer type to avoid false positives.
 
 ## smtgcc-check-refine
 smtgcc-check-refine requires the translation unit to consist of two functions named `src` and `tgt`, and it verifies that `tgt` is a refinement of `src`.
