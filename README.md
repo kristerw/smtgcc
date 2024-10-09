@@ -5,7 +5,7 @@ The main functionality is in a plugin, which is passed to GCC when compiling:
 ```
 gcc -O3 -fplugin=smtgcc-tv file.c
 ```
-This plugin checks the IR (Intermediate Representation) before and after each optimization pass and reports an error if the IR after a pass is not a refinement of the input IR (which means the optimized code doesn't do the same thing as the input source code — that is, GCC has miscompiled the program). While the tool is somewhat limited, it has already found several bugs in GCC. A partial list of bugs found includes:
+This plugin checks the GCC IR (Intermediate Representation) before and after each optimization pass and reports an error if the IR after a pass is not a refinement of the input IR (i.e., the optimized code does not behave the same as the input source code, indicating that GCC has miscompiled the program). While the tool has some limitations, it has already discovered several bugs in GCC. A partial list of bugs found includes:
 [106513](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=106513),
 [106523](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=106523),
 [106744](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=106744),
@@ -83,6 +83,18 @@ pr111494.c:2:5: note: ifcvt -> dce: Transformation is not correct (UB)
 ```
 telling us that the output IR of the dce pass is not a refinement of the input that comes from ifcvt (in this case the error is in the vectorizer pass, but we are treating vect followed by dce as one pass because of [PR 111257](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111257)) because the result has more UB than the original, and the tool give us an example for `n = 5` where this happens.
 
+### Limitations
+Limitations in the current version:
+* Function calls are not implemented.
+* Exceptions are not implemented.
+* Only tested on C and C++ source code.
+* Only little endian targets are supported.
+* Irreducible loops are not handled.
+* Memory semantics is not correct:
+  - Strict aliasing does not work, so you must pass `-fno-strict-aliasing` to the compiler.
+  - Handling of pointer provenance is too restrictive.
+  - ...
+
 ## smtgcc-tv-backend
 smtgcc-tv-backend compares the GIMPLE IR from  the last GIMPLE pass with the generated assembly code, and complains if the resulting assembly code is not a refinement of the GIMPLE IR (that is, if the backend has miscompiled the program).
 
@@ -140,20 +152,12 @@ int tgt(int a, int b)
 ```
 Another way to verify such optimizations is to write the test in GIMPLE and pass the `-fgimple` flag to the compiler.
 
-It is good practice to check with `-fdump-tree-ssa` that the IR used by the tool looks as expected. 
+It is good practice to check with `-fdump-tree-ssa` that the IR used by the tool looks as expected.
+
+### Limitations
+smtgcc-check-refine has the same limitations as smtgcc-tv. 
 
 # Environment variables
  * `SMTGCC_VERBOSE` — Print debug information while running. Valid value 0-2, higher value prints more information (Default: 0)
  * `SMTGCC_TIMEOUT` — SMT solver timeout (Default: 120000)
  * `SMTGCC_MEMORY_LIMIT` — SMT solver memory use limit in megabytes (Default: 10240)
-
-# Limitations
-Some of the major limitations in the current version:
-* Function calls are not implemented.
-* Exceptions are not implemented.
-* Only tested on C and C++ source code.
-* Irreducible loops are not handled.
-* Memory semantics is not correct
-  - Strict aliasing does not work, so you must pass `-fno-strict-aliasing` to the compiler.
-  - Handling of pointer provenance is too restrictive.
-  - ...
