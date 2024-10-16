@@ -76,4 +76,52 @@ bool is_value_pow2(Inst *inst)
   return value != 0 && (value & (value - 1)) == 0;
 }
 
+Inst *gen_bitreverse(Basic_block *bb, Inst *arg)
+{
+  Inst *inst = bb->build_trunc(arg, 1);
+  for (uint32_t i = 1; i < arg->bitsize; i += 1)
+    {
+      Inst *bit = bb->build_extract_bit(arg, i);
+      inst = bb->build_inst(Op::CONCAT, inst, bit);
+    }
+  return inst;
+}
+
+Inst *gen_clz(Basic_block *bb, Inst *arg)
+{
+  Inst *inst = bb->value_inst(arg->bitsize, 32);
+  for (unsigned i = 0; i < arg->bitsize; i++)
+    {
+      Inst *bit = bb->build_extract_bit(arg, i);
+      Inst *val = bb->value_inst(arg->bitsize - i - 1, 32);
+      inst = bb->build_inst(Op::ITE, bit, val, inst);
+    }
+  return inst;
+}
+
+Inst *gen_clrsb(Basic_block *bb, Inst *arg)
+{
+  Inst *signbit = bb->build_extract_bit(arg, arg->bitsize - 1);
+  Inst *inst = bb->value_inst(arg->bitsize - 1, 32);
+  for (unsigned i = 0; i < arg->bitsize - 1; i++)
+    {
+      Inst *bit = bb->build_extract_bit(arg, i);
+      Inst *cmp = bb->build_inst(Op::NE, bit, signbit);
+      Inst *val = bb->value_inst(arg->bitsize - i - 2, 32);
+      inst = bb->build_inst(Op::ITE, cmp, val, inst);
+    }
+  return inst;
+}
+
+Inst *gen_bswap(Basic_block *bb, Inst *arg)
+{
+  Inst *inst = bb->build_trunc(arg, 8);
+  for (uint32_t i = 8; i < arg->bitsize; i += 8)
+    {
+      Inst *byte = bb->build_inst(Op::EXTRACT, arg, i + 7, i);
+      inst = bb->build_inst(Op::CONCAT, inst, byte);
+    }
+  return inst;
+}
+
 }  // end namespace smtgcc

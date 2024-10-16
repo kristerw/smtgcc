@@ -10,12 +10,13 @@
 #include "smtgcc.h"
 
 enum class Arch {
-  generic,
+  gimple,
+  aarch64,
   riscv
 };
 
 struct CommonState {
-  CommonState(Arch arch = Arch::generic);
+  CommonState(Arch arch = Arch::gimple);
 
   // ID 0 - reserved for NULL
   //    1 - reserved for anonymous memory
@@ -34,10 +35,11 @@ struct CommonState {
 smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun, bool is_tgt_func);
 void unroll_and_optimize(smtgcc::Function *func);
 void unroll_and_optimize(smtgcc::Module *module);
-smtgcc::Module *create_module(Arch arch = Arch::generic);
+smtgcc::Module *create_module(Arch arch = Arch::gimple);
 uint64_t bitsize_for_type(tree type);
 unsigned __int128 get_int_cst_val(tree expr);
 
+smtgcc::aarch64_state setup_aarch64_function(CommonState *state, smtgcc::Function *src_func, function *fun);
 smtgcc::riscv_state setup_riscv_function(CommonState *state, smtgcc::Function *src_func, function *fun);
 
 #endif

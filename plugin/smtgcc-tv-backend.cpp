@@ -34,20 +34,34 @@ struct tv_pass : gimple_opt_pass
   {
   }
   unsigned int execute(function *fun) final override;
+#ifdef SMTGCC_AARCH64
+  std::vector<aarch64_state> functions;
+#endif
+#ifdef SMTGCC_RISCV
   std::vector<riscv_state> functions;
+#endif
 };
 
 unsigned int tv_pass::execute(function *fun)
 {
   try
     {
+#if defined(SMTGCC_AARCH64)
+      CommonState state(Arch::aarch64);
+      Module *module = create_module(Arch::aarch64);
+#elif defined(SMTGCC_RISCV)
       CommonState state(Arch::riscv);
       Module *module = create_module(Arch::riscv);
+#endif
       Function *src = process_function(module, &state, fun, false);
       src->name = "src";
       unroll_and_optimize(src);
 
+#if defined(SMTGCC_AARCH64)
+      aarch64_state rstate = setup_aarch64_function(&state, src, fun);
+#elif defined(SMTGCC_RISCV)
       riscv_state rstate = setup_riscv_function(&state, src, fun);
+#endif
       functions.push_back(rstate);
     }
   catch (Not_implemented& error)
@@ -146,7 +160,11 @@ static void finish(void *, void *data)
       try
 	{
 	  Module *module = state.module;
+#if defined(SMTGCC_AARCH64)
+	  Function *func = parse_aarch64(asm_file_name, &state);
+#elif defined(SMTGCC_RISCV)
 	  Function *func = parse_riscv(asm_file_name, &state);
+#endif
 	  validate(func);
 
 	  simplify_cfg(func);

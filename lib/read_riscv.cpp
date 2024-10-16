@@ -103,9 +103,6 @@ private:
   void get_right_paren(unsigned idx);
   void get_end_of_line(unsigned idx);
   void process_cond_branch(Op op);
-  Inst *gen_bswap(Inst *arg);
-  Inst *gen_clrsb(Inst *arg);
-  Inst *gen_clz(Inst *arg);
   Inst *gen_ctz(Inst *arg);
   Inst *gen_ffs(Inst *arg);
   Inst *gen_parity(Inst *arg);
@@ -128,7 +125,7 @@ private:
   void process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
 			bool is_unsigned);
   void process_fcvt_f2f(uint32_t src_bitsize, uint32_t dest_bitsize);
-  void process_min_max(uint32_t bitsize, bool is_min);
+  void process_fmin_fmax(uint32_t bitsize, bool is_min);
   void process_iunary(std::string_view name, Op op);
   void process_ibinary(std::string_view name, Op op);
   void process_icmp(std::string_view name, Op op);
@@ -604,43 +601,6 @@ void Parser::process_cond_branch(Op op)
   bb = false_bb;
 }
 
-Inst *Parser::gen_bswap(Inst *arg)
-{
-  Inst *inst = bb->build_trunc(arg, 8);
-  for (uint32_t i = 8; i < arg->bitsize; i += 8)
-    {
-      Inst *byte = bb->build_inst(Op::EXTRACT, arg, i + 7, i);
-      inst = bb->build_inst(Op::CONCAT, inst, byte);
-    }
-  return inst;
-}
-
-Inst *Parser::gen_clrsb(Inst *arg)
-{
-  Inst *signbit = bb->build_extract_bit(arg, arg->bitsize - 1);
-  Inst *inst = bb->value_inst(arg->bitsize - 1, 32);
-  for (unsigned i = 0; i < arg->bitsize - 1; i++)
-    {
-      Inst *bit = bb->build_extract_bit(arg, i);
-      Inst *cmp = bb->build_inst(Op::NE, bit, signbit);
-      Inst *val = bb->value_inst(arg->bitsize - i - 2, 32);
-      inst = bb->build_inst(Op::ITE, cmp, val, inst);
-    }
-  return inst;
-}
-
-Inst *Parser::gen_clz(Inst *arg)
-{
-  Inst *inst = bb->value_inst(arg->bitsize, 32);
-  for (unsigned i = 0; i < arg->bitsize; i++)
-    {
-      Inst *bit = bb->build_extract_bit(arg, i);
-      Inst *val = bb->value_inst(arg->bitsize - i - 1, 32);
-      inst = bb->build_inst(Op::ITE, bit, val, inst);
-    }
-  return inst;
-}
-
 Inst *Parser::gen_ctz(Inst *arg)
 {
   Inst *inst = bb->value_inst(arg->bitsize, 32);
@@ -781,21 +741,21 @@ void Parser::process_call()
   if (name == "__bswapdi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
-      Inst *res = gen_bswap(arg);
+      Inst *res = gen_bswap(bb, arg);
       write_retval(res);
       return;
     }
   if (name == "__bswapsi2")
     {
       Inst *arg = read_arg(10 + 0, 32);
-      Inst *res = gen_bswap(arg);
+      Inst *res = gen_bswap(bb, arg);
       write_retval(res);
       return;
     }
   if (name == "__clrsbdi2")
     {
       Inst *arg = read_arg(10 + 0, 64);
-      Inst *res = gen_clrsb(arg);
+      Inst *res = gen_clrsb(bb, arg);
       res = bb->build_inst(Op::SEXT, res, 64);
       write_retval(res);
       return;
@@ -803,7 +763,7 @@ void Parser::process_call()
   if (name == "__clrsbsi2" && reg_bitsize == 32)
     {
       Inst *arg = read_arg(10 + 0, 32);
-      Inst *res = gen_clrsb(arg);
+      Inst *res = gen_clrsb(bb, arg);
       write_retval(res);
       return;
     }
@@ -813,7 +773,7 @@ void Parser::process_call()
       Inst *zero = bb->value_inst(0, arg->bitsize);
       Inst *ub = bb->build_inst(Op::EQ, arg, zero);
       bb->build_inst(Op::UB, ub);
-      Inst *res = gen_clz(arg);
+      Inst *res = gen_clz(bb, arg);
       res = bb->build_inst(Op::SEXT, res, 64);
       write_retval(res);
       return;
@@ -824,7 +784,7 @@ void Parser::process_call()
       Inst *zero = bb->value_inst(0, arg->bitsize);
       Inst *ub = bb->build_inst(Op::EQ, arg, zero);
       bb->build_inst(Op::UB, ub);
-      Inst *res = gen_clz(arg);
+      Inst *res = gen_clz(bb, arg);
       write_retval(res);
       return;
     }
@@ -1260,7 +1220,7 @@ void Parser::process_fcvt_f2f(uint32_t src_bitsize, uint32_t dest_bitsize)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void Parser::process_min_max(uint32_t bitsize, bool is_min)
+void Parser::process_fmin_fmax(uint32_t bitsize, bool is_min)
 {
   Inst *dest = get_freg(1);
   get_comma(2);
@@ -1754,13 +1714,13 @@ void Parser::parse_function()
   else if (name == "fcvt.s.d")
     process_fcvt_f2f(64, 32);
   else if (name == "fmin.s")
-    process_min_max(32, true);
+    process_fmin_fmax(32, true);
   else if (name == "fmin.d")
-    process_min_max(64, true);
+    process_fmin_fmax(64, true);
   else if (name == "fmax.s")
-    process_min_max(32, false);
+    process_fmin_fmax(32, false);
   else if (name == "fmax.d")
-    process_min_max(64, false);
+    process_fmin_fmax(64, false);
   else if (name == "fmv.x.s" || name == "fmv.x.w")
     {
       Inst *dest = get_reg(1);
@@ -1903,7 +1863,7 @@ void Parser::parse_function()
       bool has_w_suffix = name[name.length() - 1] == 'w';
       if (has_w_suffix)
 	arg1 = bb->build_trunc(arg1, 32);
-      Inst *res = gen_clz(arg1);
+      Inst *res = gen_clz(bb, arg1);
       if (reg_bitsize == 64)
 	res = bb->build_inst(Op::SEXT, res, reg_bitsize);
       bb->build_inst(Op::WRITE, dest, res);
@@ -2116,15 +2076,7 @@ void Parser::parse_function()
       Inst *arg1 = get_reg_value(3);
       get_end_of_line(4);
 
-      Inst *res = nullptr;
-      for (unsigned i = 0; i < reg_bitsize / 8; i++)
-	{
-	  Inst *byte = bb->build_inst(Op::EXTRACT, arg1, i * 8 + 7, i * 8);
-	  if (res)
-	    res = bb->build_inst(Op::CONCAT, res, byte);
-	  else
-	    res = byte;
-	}
+      Inst *res = gen_bswap(bb, arg1);
       bb->build_inst(Op::WRITE, dest, res);
     }
 

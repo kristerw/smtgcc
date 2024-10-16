@@ -12,7 +12,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 96> inst_info{{
+const std::array<Inst_info, 97> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -46,6 +46,7 @@ const std::array<Inst_info, 96> inst_info{{
   {"get_mem_size", Op::GET_MEM_SIZE, Inst_class::iunary, true, false},
   {"get_mem_indef", Op::GET_MEM_INDEF, Inst_class::iunary, true, false},
   {"is_const_mem", Op::IS_CONST_MEM, Inst_class::iunary, true, false},
+  {"is_inf", Op::IS_INF, Inst_class::iunary, true, false},
   {"is_nan", Op::IS_NAN, Inst_class::iunary, true, false},
   {"is_noncanonical_nan", Op::IS_NONCANONICAL_NAN, Inst_class::iunary, true, false},
   {"load", Op::LOAD, Inst_class::iunary, true, false},
@@ -182,6 +183,7 @@ Inst *create_inst(Op op, Inst *arg)
   inst->nof_args = 1;
   inst->args[0] = arg;
   if (op == Op::IS_CONST_MEM
+      || op == Op::IS_INF
       || op == Op::IS_NAN
       || op == Op::IS_NONCANONICAL_NAN
       || op == Op::GET_MEM_FLAG)

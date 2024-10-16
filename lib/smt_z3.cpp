@@ -321,6 +321,13 @@ void Converter::build_bv_unary_smt(const Inst *inst)
   z3::expr arg1 = inst_as_bv(inst->args[0]);
   switch (inst->op)
     {
+    case Op::IS_INF:
+      {
+	z3::expr farg1 = inst_as_fp(inst->args[0]);
+	z3::expr is_inf = z3::expr(ctx, Z3_mk_fpa_is_infinite(ctx, farg1));
+	inst2bool.insert({inst, is_inf});
+      }
+      break;
     case Op::IS_NAN:
       {
 	z3::expr farg1 = inst_as_fp(inst->args[0]);

@@ -1911,7 +1911,8 @@ void Converter::process_store(tree addr_expr, tree value_expr)
   // For now, we solve this by making storing a local pointer UB.
   //
   // TODO: Find a better way of handling this.
-  if (state->arch == Arch::riscv && !is_tgt_func && POINTER_TYPE_P(value_type))
+  if (state->arch != Arch::gimple
+      && !is_tgt_func && POINTER_TYPE_P(value_type))
     {
       Inst *value_mem_id = extract_id(value);
       Inst *zero = bb->value_inst(0, module->ptr_id_bits);
@@ -2023,7 +2024,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
   // pointer type UB.
   //
   // TODO: Find a better way of handling this.
-  if (state->arch == Arch::riscv
+  if (state->arch != Arch::gimple
       && !is_tgt_func
       && POINTER_TYPE_P(src_type)
       && !POINTER_TYPE_P(dest_type))

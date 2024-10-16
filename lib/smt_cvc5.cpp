@@ -316,6 +316,9 @@ void Converter::build_bv_unary_smt(const Inst *inst)
   cvc5::Term arg1 = inst_as_bv(inst->args[0]);
   switch (inst->op)
     {
+    case Op::IS_INF:
+      // TODO: Implement Op::IS_INF
+      throw Not_implemented("build_bv_unary_smt: "s + inst->name());
     case Op::IS_NAN:
       // TODO: Implement Op::IS_NAN
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());

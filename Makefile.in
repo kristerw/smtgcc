@@ -1,7 +1,13 @@
 CC:=@TARGET_COMPILER@
 GCCPLUGINS_DIR:= $(shell $(CC) --print-file-name=plugin)
+ARCH:= $(shell $(CC) -dumpmachine)
 
 CXXFLAGS:=-std=gnu++20 -I. -Ilib -g -fPIC -fno-rtti -O2 -Wall -Wextra
+ifeq ($(findstring aarch64, $(ARCH)), aarch64)
+CXXFLAGS += -DSMTGCC_AARCH64
+else ifeq ($(findstring riscv, $(ARCH)), riscv)
+CXXFLAGS += -DSMTGCC_RISCV
+endif
 
 LIBS:=@LIBS@
 
@@ -14,8 +20,12 @@ tools = \
 
 plugins = \
 	smtgcc-check-refine.so \
-	smtgcc-tv-backend.so \
 	smtgcc-tv.so
+ifeq ($(findstring aarch64, $(ARCH)), aarch64)
+	plugins += smtgcc-tv-backend.so
+else ifeq ($(findstring riscv, $(ARCH)), riscv)
+	plugins += smtgcc-tv-backend.so
+endif
 
 lib_sources = \
 	lib/cfg.cpp \
@@ -23,6 +33,7 @@ lib_sources = \
 	lib/dead_code_elimination.cpp \
 	lib/loop_unroll.cpp \
 	lib/memory_opt.cpp \
+	lib/read_aarch64.cpp \
 	lib/read_ir.cpp \
 	lib/read_riscv.cpp \
 	lib/simplify_insts.cpp \
@@ -43,10 +54,16 @@ tools_objects = $(tools_sources:.cpp=.o)
 
 plugin_sources = \
 	plugin/gimple_conv.cpp \
-	plugin/riscv.cpp \
 	plugin/smtgcc-check-refine.cpp \
 	plugin/smtgcc-tv-backend.cpp \
 	plugin/smtgcc-tv.cpp
+ifeq ($(findstring aarch64, $(ARCH)), aarch64)
+	plugin_sources += plugin/aarch64.cpp
+	backend_objs = plugin/aarch64.o
+else ifeq ($(findstring riscv, $(ARCH)), riscv)
+	plugin_sources += plugin/riscv.cpp
+	backend_objs = plugin/riscv.o
+endif
 plugin_objects = $(plugin_sources:.cpp=.o)
 
 
@@ -83,8 +100,8 @@ smtgcc-opt: tools/smtgcc-opt.o $(lib_objects)
 smtgcc-check-refine.so: plugin/smtgcc-check-refine.o plugin/gimple_conv.o $(lib_objects)
 	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-check-refine.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)
 
-smtgcc-tv-backend.so: plugin/smtgcc-tv-backend.o plugin/gimple_conv.o plugin/riscv.o $(lib_objects)
-	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-tv-backend.o plugin/riscv.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)
+smtgcc-tv-backend.so: plugin/smtgcc-tv-backend.o plugin/gimple_conv.o $(backend_objs) $(lib_objects)
+	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-tv-backend.o plugin/gimple_conv.o $(backend_objs) $(lib_objects) -o $@ $(LIBS)
 
 smtgcc-tv.so: plugin/smtgcc-tv.o plugin/gimple_conv.o $(lib_objects)
 	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-tv.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)
