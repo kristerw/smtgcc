@@ -152,6 +152,8 @@ struct Converter {
   void process_gimple_assign(gimple *stmt);
   void process_gimple_asm(gimple *stmt);
   void process_cfn_add_overflow(gimple *stmt);
+  void process_cfn_bit_andn(gimple *stmt);
+  void process_cfn_bit_iorn(gimple *stmt);
   void process_cfn_assume_aligned(gimple *stmt);
   void process_cfn_bswap(gimple *stmt);
   void process_cfn_clrsb(gimple *stmt);
@@ -3919,6 +3921,82 @@ void Converter::process_cfn_add_overflow(gimple *stmt)
     tree2indef.insert({lhs, res_indef});
 }
 
+void Converter::process_cfn_bit_andn(gimple *stmt)
+{
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+  auto [arg1, arg1_indef] =
+    tree2inst_indef(gimple_call_arg(stmt, 0));
+  auto [arg2, arg2_indef] =
+    tree2inst_indef(gimple_call_arg(stmt, 1));
+
+  arg2 = bb->build_inst(Op::NOT, arg2);
+  Inst *res_indef = nullptr;
+  if (arg1_indef || arg2_indef)
+    {
+      if (!arg1_indef)
+	arg1_indef = bb->value_inst(0, arg1->bitsize);
+      if (!arg2_indef)
+	arg2_indef = bb->value_inst(0, arg2->bitsize);
+
+      // (0 & uninitialized) is 0.
+      // (1 & uninitialized) is uninitialized.
+      Inst *mask =
+	      bb->build_inst(Op::AND,
+			     bb->build_inst(Op::OR, arg1, arg1_indef),
+			     bb->build_inst(Op::OR, arg2, arg2_indef));
+      res_indef =
+	bb->build_inst(Op::AND,
+		       bb->build_inst(Op::OR, arg1_indef, arg2_indef),
+		       mask);
+    }
+  Inst *res = bb->build_inst(Op::AND, arg1, arg2);
+  tree2instruction.insert({lhs, res});
+  if (res_indef)
+    tree2indef.insert({lhs, res_indef});
+}
+
+void Converter::process_cfn_bit_iorn(gimple *stmt)
+{
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+  auto [arg1, arg1_indef] =
+    tree2inst_indef(gimple_call_arg(stmt, 0));
+  auto [arg2, arg2_indef] =
+    tree2inst_indef(gimple_call_arg(stmt, 1));
+
+  arg2 = bb->build_inst(Op::NOT, arg2);
+  Inst *res_indef = nullptr;
+  if (arg1_indef || arg2_indef)
+    {
+      if (!arg1_indef)
+	arg1_indef = bb->value_inst(0, arg1->bitsize);
+      if (!arg2_indef)
+	arg2_indef = bb->value_inst(0, arg2->bitsize);
+
+      // (0 | uninitialized) is uninitialized.
+      // (1 | uninitialized) is 1.
+      Inst *mask =
+	bb->build_inst(Op::AND,
+		       bb->build_inst(Op::OR,
+				      bb->build_inst(Op::NOT, arg1),
+				      arg1_indef),
+		       bb->build_inst(Op::OR,
+				      bb->build_inst(Op::NOT, arg2),
+				      arg2_indef));
+      res_indef =
+	bb->build_inst(Op::AND,
+		       bb->build_inst(Op::OR, arg1_indef, arg2_indef),
+		       mask);
+    }
+  Inst *res = bb->build_inst(Op::OR, arg1, arg2);
+  tree2instruction.insert({lhs, res});
+  if (res_indef)
+    tree2indef.insert({lhs, res_indef});
+}
+
 void Converter::process_cfn_assume_aligned(gimple *stmt)
 {
   auto [arg1, arg1_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
@@ -5227,6 +5305,12 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     {
     case CFN_ADD_OVERFLOW:
       process_cfn_add_overflow(stmt);
+      break;
+    case CFN_BIT_ANDN:
+      process_cfn_bit_andn(stmt);
+      break;
+    case CFN_BIT_IORN:
+      process_cfn_bit_iorn(stmt);
       break;
     case CFN_BUILT_IN_ASSUME_ALIGNED:
       process_cfn_assume_aligned(stmt);
