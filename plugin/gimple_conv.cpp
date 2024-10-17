@@ -5596,10 +5596,20 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
   tree type = TREE_TYPE(initial);
   uint64_t size = bytesize_for_type(TREE_TYPE(initial));
 
-  if (TREE_CODE(initial) == STRING_CST)
+  if (TREE_CODE(initial) == STRING_CST || TREE_CODE(initial) == RAW_DATA_CST)
     {
-      uint64_t len = TREE_STRING_LENGTH(initial);
-      const char *p = TREE_STRING_POINTER(initial);
+      uint64_t len;
+      const char *p;
+      if (TREE_CODE(initial) == RAW_DATA_CST)
+	{
+	  len = RAW_DATA_LENGTH(initial);
+	  p = RAW_DATA_POINTER(initial);
+	}
+      else
+	{
+	  len = TREE_STRING_LENGTH(initial);
+	  p = TREE_STRING_POINTER(initial);
+	}
       for (uint64_t i = 0; i < len; i++)
 	{
 	  Inst *offset = entry_bb->value_inst(i, mem_inst->bitsize);
