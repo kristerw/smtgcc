@@ -133,7 +133,9 @@ private:
   void process_abs();
   void process_adrp();
   void process_adc();
+  void process_adcs();
   void process_sbc();
+  void process_sbcs();
   void process_unary(Op op);
   Inst *process_arg_shift(unsigned idx, Inst *arg);
   Inst *process_arg_ext(unsigned idx, Inst *arg, uint32_t bitsize);
@@ -1319,6 +1321,21 @@ void Parser::process_adc()
   write_reg(dest, res);
 }
 
+void Parser::process_adcs()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  Inst *arg2 = process_last_arg(5, arg1->bitsize);
+
+  Inst *c = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::c]);
+  c = bb->build_inst(Op::ZEXT, c, arg2->bitsize);
+  arg2 = bb->build_inst(Op::ADD, arg2, c);
+  Inst *res = gen_add_cond_flags(arg1, arg2);
+  write_reg(dest, res);
+}
+
 void Parser::process_sbc()
 {
   Inst *dest = get_reg(1);
@@ -1333,6 +1350,23 @@ void Parser::process_sbc()
   c = bb->build_inst(Op::ZEXT, c, arg1->bitsize);
   Inst *res = bb->build_inst(Op::SUB, arg1, arg2);
   res = bb->build_inst(Op::SUB, res, c);
+  write_reg(dest, res);
+}
+
+void Parser::process_sbcs()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_reg_value(5);
+  get_end_of_line(6);
+
+  Inst *c = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::c]);
+  c = bb->build_inst(Op::NOT, c);
+  c = bb->build_inst(Op::ZEXT, c, arg2->bitsize);
+  arg2 = bb->build_inst(Op::ADD, arg2, c);
+  Inst *res = gen_sub_cond_flags(arg1, arg2);
   write_reg(dest, res);
 }
 
@@ -1991,8 +2025,12 @@ void Parser::parse_function()
   // Data processing - arithmetic with carry
   else if (name == "adc")
     process_adc();
+  else if (name == "adcs")
+    process_adcs();
   else if (name == "sbc")
     process_sbc();
+  else if (name == "sbcs")
+    process_sbcs();
 
   // Data processing - integer minimum and maximum
   else if (name == "smax")
@@ -2582,7 +2620,6 @@ void Parser::parse_rodata()
 	  if (label)
 	    {
 	      std::string label_name = std::string(*label);
-	      fprintf(stderr, "==> %s\n", label_name.c_str());
 
 	      // TODO: Change to check for duplicated labels.
 	      assert(!sym_name2data.contains(label_name));
