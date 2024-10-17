@@ -142,6 +142,7 @@ struct Converter {
   Inst *process_binary_scalar(enum tree_code code, Inst *arg1, Inst *arg2, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
   std::tuple<Inst *, Inst *, Inst *> process_binary_scalar(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, Inst *arg2, Inst *arg2_indef, Inst *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
   std::pair<Inst *, Inst *> process_binary_vec(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
+  std::pair<Inst *, Inst *> process_widen_sum_vec(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type);
   Inst *process_ternary(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree arg1_type, tree arg2_type, tree arg3_type);
   Inst *process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree lhs_type, tree arg1_type, tree arg2_type, tree arg3_type);
   std::pair<Inst *, Inst *> process_vec_cond(Inst *arg1, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type);
@@ -3094,6 +3095,13 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	arg2 = bb->build_inst(op2, arg2, new_bitsize);
 	return {bb->build_inst(Op::MUL, arg1, arg2), res_indef, nullptr};
       }
+    case WIDEN_SUM_EXPR:
+      {
+	uint32_t new_bitsize = bitsize_for_type(lhs_type);
+	Op op1 = TYPE_UNSIGNED(arg1_type) ? Op::ZEXT : Op::SEXT;
+	arg1 = bb->build_inst(op1, arg1, new_bitsize);
+	return {bb->build_inst(Op::ADD, arg1, arg2), res_indef, nullptr};
+      }
     case MULT_HIGHPART_EXPR:
       {
 	assert(arg1->bitsize == arg2->bitsize);
@@ -3148,6 +3156,9 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_scalar(enum tree_co
 
 std::pair<Inst *, Inst *> Converter::process_binary_vec(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow)
 {
+  if (code == WIDEN_SUM_EXPR)
+    return process_widen_sum_vec(arg1, arg1_indef, arg2, arg2_indef,
+				 lhs_type, arg1_type, arg2_type);
   assert(VECTOR_TYPE_P(lhs_type));
   assert(VECTOR_TYPE_P(arg1_type));
   tree lhs_elem_type = TREE_TYPE(lhs_type);
@@ -3229,6 +3240,64 @@ std::pair<Inst *, Inst *> Converter::process_binary_vec(enum tree_code code, Ins
   return {res, res_indef};
 }
 
+std::pair<Inst *, Inst *> Converter::process_widen_sum_vec(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type)
+{
+  assert(VECTOR_TYPE_P(lhs_type));
+  assert(VECTOR_TYPE_P(arg1_type));
+  tree lhs_elem_type = TREE_TYPE(lhs_type);
+  tree arg1_elem_type = TREE_TYPE(arg1_type);
+  tree arg2_elem_type = TREE_TYPE(arg2_type);
+
+  uint32_t elem_bitsize = bitsize_for_type(arg2_elem_type);
+  uint32_t nof_elt = bitsize_for_type(arg2_type) / elem_bitsize;
+
+  uint32_t arg1_elem_bitsize = bitsize_for_type(arg1_elem_type);
+  uint32_t arg1_nof_elt = bitsize_for_type(arg1_type) / arg1_elem_bitsize;
+  assert(arg1_nof_elt >= nof_elt);
+  assert(arg1_nof_elt % nof_elt == 0);
+
+  Inst *res = nullptr;
+  Inst *res_indef = nullptr;
+  for (uint64_t i = 0; i < arg1_nof_elt; i++)
+    {
+      Inst *a1_indef = nullptr;
+      Inst *a2_indef = nullptr;
+      Inst *a1 = extract_vec_elem(bb, arg1, arg1_elem_bitsize, i);
+      if (arg1_indef)
+	a1_indef = extract_vec_elem(bb, arg1_indef, arg1_elem_bitsize, i);
+      Inst *a2 = extract_vec_elem(bb, arg2, elem_bitsize, i % nof_elt);
+      if (arg2_indef)
+	a2_indef = extract_vec_elem(bb, arg2_indef, elem_bitsize, i % nof_elt);
+      auto [inst, inst_indef, _] =
+	process_binary_scalar(WIDEN_SUM_EXPR,
+			      a1, a1_indef, nullptr,
+			      a2, a2_indef, nullptr,
+			      lhs_elem_type, arg1_elem_type, arg2_elem_type,
+			      true);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+
+      if (arg1_indef || arg2_indef)
+	{
+	  if (res_indef)
+	    res_indef = bb->build_inst(Op::CONCAT, inst_indef, res_indef);
+	  else
+	    res_indef = inst_indef;
+	}
+
+      if ((i + 1) % nof_elt == 0)
+	{
+	  arg2 = res;
+	  arg2_indef = res_indef;
+	  res = nullptr;
+	  res_indef = nullptr;
+	}
+    }
+  return {arg2, arg2_indef};
+}
+
 Inst *Converter::process_ternary(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree arg1_type, tree arg2_type, tree arg3_type)
 {
   switch (code)
@@ -3250,6 +3319,28 @@ Inst *Converter::process_ternary(enum tree_code code, Inst *arg1, Inst *arg2, In
 	arg2 = type_convert(arg2, arg2_type, arg3_type);
 	Inst *inst = bb->build_inst(Op::MUL, arg1, arg2);
 	return bb->build_inst(Op::ADD, inst, arg3);
+      }
+    case WIDEN_MULT_MINUS_EXPR:
+      {
+	assert(arg1->bitsize == arg2->bitsize);
+	uint32_t new_bitsize = bitsize_for_type(arg3_type);
+	Op op1 = TYPE_UNSIGNED(arg1_type) ? Op::ZEXT : Op::SEXT;
+	arg1 = bb->build_inst(op1, arg1, new_bitsize);
+	Op op2 = TYPE_UNSIGNED(arg2_type) ? Op::ZEXT : Op::SEXT;
+	arg2 = bb->build_inst(op2, arg2, new_bitsize);
+	Inst *mul = bb->build_inst(Op::MUL, arg1, arg2);
+	return bb->build_inst(Op::SUB, arg3, mul);
+      }
+    case WIDEN_MULT_PLUS_EXPR:
+      {
+	assert(arg1->bitsize == arg2->bitsize);
+	uint32_t new_bitsize = bitsize_for_type(arg3_type);
+	Op op1 = TYPE_UNSIGNED(arg1_type) ? Op::ZEXT : Op::SEXT;
+	arg1 = bb->build_inst(op1, arg1, new_bitsize);
+	Op op2 = TYPE_UNSIGNED(arg2_type) ? Op::ZEXT : Op::SEXT;
+	arg2 = bb->build_inst(op2, arg2, new_bitsize);
+	Inst *mul = bb->build_inst(Op::MUL, arg1, arg2);
+	return bb->build_inst(Op::ADD, mul, arg3);
       }
     default:
       throw Not_implemented("process_ternary: "s + get_tree_code_name(code));
@@ -3526,7 +3617,10 @@ void Converter::process_gimple_assign(gimple *stmt)
     {
     case GIMPLE_TERNARY_RHS:
       {
-	if (code == SAD_EXPR || code == DOT_PROD_EXPR)
+	if (code == SAD_EXPR
+	    || code == DOT_PROD_EXPR
+	    || code == WIDEN_MULT_MINUS_EXPR
+	    || code == WIDEN_MULT_PLUS_EXPR)
 	  {
 	    Inst *arg1 = tree2inst(gimple_assign_rhs1(stmt));
 	    Inst *arg2 = tree2inst(gimple_assign_rhs2(stmt));
