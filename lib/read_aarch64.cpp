@@ -2244,7 +2244,7 @@ void Parser::lex_line(void)
 	  else
 	    lex_hex_or_integer();
 	}
-      else if (buf[pos] == '.' && buf[pos + 1] == 'L' )
+      else if (buf[pos] == '.' && buf[pos + 1] == 'L' && isdigit(buf[pos + 2]))
 	lex_label_or_label_def();
       else if (isalpha(buf[pos]) || buf[pos] == '_' || buf[pos] == '.')
 	lex_name();
