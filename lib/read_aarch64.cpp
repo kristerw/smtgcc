@@ -136,6 +136,7 @@ private:
   void process_adcs();
   void process_sbc();
   void process_sbcs();
+  void process_movk();
   void process_unary(Op op);
   Inst *process_arg_shift(unsigned idx, Inst *arg);
   Inst *process_arg_ext(unsigned idx, Inst *arg, uint32_t bitsize);
@@ -1370,6 +1371,37 @@ void Parser::process_sbcs()
   write_reg(dest, res);
 }
 
+void Parser::process_movk()
+{
+  Inst *dest = get_reg(1);
+  Inst *orig = get_reg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_imm(3);
+  assert(tokens.size() > 4 && tokens[4].kind == Lexeme::comma);
+  get_comma(4);
+  std::string_view lsl = get_name(5);
+  if (lsl != "lsl")
+    throw Parse_error("expected lsl for shift", line_number);
+  uint32_t shift = get_imm(6)->value();
+  if (shift != 0 && shift != 16 && shift != 32 && shift != 48)
+    throw Parse_error("invalid shift value for movk", line_number);
+  get_end_of_line(7);
+
+  Inst *res = bb->build_trunc(arg1, 16);
+  if (shift + 16 != orig->bitsize)
+    {
+      Inst *inst =
+	bb->build_inst(Op::EXTRACT, orig, orig->bitsize - 1, shift + 16);
+      res = bb->build_inst(Op::CONCAT, inst, res);
+    }
+  if (shift != 0)
+    {
+      Inst *inst = bb->build_inst(Op::EXTRACT, orig, shift - 1, 0);
+      res = bb->build_inst(Op::CONCAT, res, inst);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_unary(Op op)
 {
   Inst *dest = get_reg(1);
@@ -2067,7 +2099,8 @@ void Parser::parse_function()
   // Data processing - move
   else if (name == "mov")
     process_unary(Op::MOV);
-  // movk
+  else if (name == "movk")
+    process_movk();
 
   // Data processing - absolute value
   else if (name == "abs")
