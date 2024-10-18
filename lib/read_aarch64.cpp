@@ -1991,6 +1991,8 @@ void Parser::parse_function()
       bb->build_br_inst(dest_bb);
       bb = nullptr;
     }
+  else if (name == "bl")
+    process_call();
   else if (name == "ret")
     {
       get_end_of_line(1);
