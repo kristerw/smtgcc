@@ -164,6 +164,7 @@ private:
   void process_ror();
   void process_extr();
   void process_bfi();
+  void process_bfxil();
   void process_ubfx(Op op);
   void process_ubfiz(Op op);
   void parse_vector_op();
@@ -1595,6 +1596,27 @@ void Parser::process_bfi()
   write_reg(dest, res);
 }
 
+void Parser::process_bfxil()
+{
+  Inst *dest = get_reg(1);
+  Inst *orig = get_reg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_imm(5);
+  get_comma(6);
+  Inst *arg3 = get_imm(7);
+  get_end_of_line(8);
+
+  uint32_t lo = arg2->value();
+  uint32_t hi = lo + arg3->value() - 1;
+  Inst *res = bb->build_inst(Op::EXTRACT, arg1, hi, lo);
+  Inst *inst =
+    bb->build_inst(Op::EXTRACT, orig, orig->bitsize - 1, res->bitsize);
+  res = bb->build_inst(Op::CONCAT, inst, res);
+  write_reg(dest, res);
+}
+
 void Parser::process_ubfiz(Op op)
 {
   Inst *dest = get_reg(1);
@@ -2145,7 +2167,8 @@ void Parser::parse_function()
   // Data processing - bitfield insert and extract
   else if (name == "bfi")
     process_bfi();
-  // bfxil
+  else if (name == "bfxil")
+    process_bfxil();
   else if (name == "sbfiz")
     process_ubfiz(Op::SEXT);
   else if (name == "sbfx")
