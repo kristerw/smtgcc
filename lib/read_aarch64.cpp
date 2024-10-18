@@ -2015,27 +2015,27 @@ void Parser::parse_function()
     get_end_of_line(1);
 
   // Loads and Stores
-  else if (name == "ldr") // TODO
+  else if (name == "ldr")
     process_load();
-  else if (name == "ldrb") // TODO
+  else if (name == "ldrb")
     process_load(1);
-  else if (name == "ldrsb") // TODO
+  else if (name == "ldrsb")
     process_load(1, Op::SEXT);
-  else if (name == "ldrh") // TODO
+  else if (name == "ldrh")
     process_load(2);
-  else if (name == "ldrsh") // TODO
+  else if (name == "ldrsh")
     process_load(2, Op::SEXT);
-  else if (name == "ldrsw") // TODO
+  else if (name == "ldrsw")
     process_load(4, Op::SEXT);
-  else if (name == "str") // TODO
+  else if (name == "str")
     process_store();
-  else if (name == "strb") // TODO
+  else if (name == "strb")
     process_store(1);
-  else if (name == "strh") // TODO
+  else if (name == "strh")
     process_store(2);
-  else if (name == "ldp") // TODO
+  else if (name == "ldp")
     process_ldp();
-  else if (name == "stp") // TODO
+  else if (name == "stp")
     process_stp();
 
   // Data processing - arithmetic
