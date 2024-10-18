@@ -43,6 +43,7 @@ struct Parser {
   };
   std::vector<Token> tokens;
   std::map<std::string, std::vector<unsigned char>> sym_name2data;
+  std::map<std::string, std::string> sym_alias;
 
   int line_number = 0;
   size_t pos;
@@ -291,6 +292,8 @@ std::string_view Parser::get_name(unsigned idx)
 Inst *Parser::get_sym_addr(unsigned idx)
 {
   std::string name = std::string(get_name(idx));
+  if (sym_alias.contains(name))
+    name = sym_alias[name];
   if (!rstate->sym_name2mem.contains(name))
     throw Parse_error("unknown symbol " + name, line_number);
   return rstate->sym_name2mem[name];
@@ -2697,6 +2700,41 @@ void Parser::parse_rodata()
 	  && (buf[pos + 5] == ' ' || buf[pos + 5] == '\t'))
 	{
 	  pos += 6;
+	  skip_line();
+	  continue;
+	}
+      if (buf[pos] == '.'
+	  && buf[pos + 1] == 's'
+	  && buf[pos + 2] == 'e'
+	  && buf[pos + 3] == 't'
+	  && (buf[pos + 4] == ' ' || buf[pos + 4] == '\t'))
+	{
+	  pos += 5;
+	  skip_whitespace();
+
+	  int start = pos;
+	  while (isalnum(buf[pos])
+		 || buf[pos] == '_'
+		 || buf[pos] == '-'
+		 || buf[pos] == '.'
+		 || buf[pos] == '$')
+	    pos++;
+	  std::string name1(&buf[start], pos - start);
+
+	  if (buf[pos++] != ',')
+	    continue;
+
+	  start = pos;
+	  while (isalnum(buf[pos])
+		 || buf[pos] == '_'
+		 || buf[pos] == '-'
+		 || buf[pos] == '.'
+		 || buf[pos] == '$')
+	    pos++;
+	  std::string name2(&buf[start], pos - start);
+
+	  sym_alias.insert({name1, name2});
+
 	  skip_line();
 	  continue;
 	}
