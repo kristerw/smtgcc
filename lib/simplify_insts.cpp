@@ -627,6 +627,17 @@ Inst *simplify_eq(Inst *inst)
       return new_inst;
     }
 
+  // (zext x) == (zext y) -> x == y
+  // (sext x) == (sext y) -> x == y
+  if ((arg1->op == Op::ZEXT || arg1->op == Op::SEXT)
+      && arg1->op == arg2->op
+      && arg1->args[0]->bitsize == arg2->args[0]->bitsize)
+    {
+      Inst *new_inst = create_inst(Op::EQ, arg1->args[0], arg2->args[0]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   return inst;
 }
 
@@ -734,6 +745,17 @@ Inst *simplify_ne(Inst *inst)
   if (arg1->op == Op::SUB && is_value_zero(arg2))
     {
       Inst *new_inst = create_inst(Op::NE, arg1->args[0], arg1->args[1]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // (zext x) != (zext y) -> x != y
+  // (sext x) != (sext y) -> x != y
+  if ((arg1->op == Op::ZEXT || arg1->op == Op::SEXT)
+      && arg1->op == arg2->op
+      && arg1->args[0]->bitsize == arg2->args[0]->bitsize)
+    {
+      Inst *new_inst = create_inst(Op::NE, arg1->args[0], arg2->args[0]);
       new_inst->insert_before(inst);
       return new_inst;
     }
