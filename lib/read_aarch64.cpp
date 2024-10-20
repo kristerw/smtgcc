@@ -130,6 +130,7 @@ private:
   void process_mul_op(Op op);
   void process_maddl(Op op);
   void process_msubl(Op op);
+  void process_mnegl(Op op);
   void process_mull(Op op);
   void process_mulh(Op op);
   void process_abs();
@@ -1266,6 +1267,22 @@ void Parser::process_msubl(Op op)
   write_reg(dest, res);
 }
 
+void Parser::process_mnegl(Op op)
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_reg_value(5);
+  get_end_of_line(6);
+
+  arg1 = bb->build_inst(op, arg1, 64);
+  arg2 = bb->build_inst(op, arg2, 64);
+  Inst *res = bb->build_inst(Op::MUL, arg1, arg2);
+  res = bb->build_inst(Op::NEG, res);
+  write_reg(dest, res);
+}
+
 void Parser::process_mull(Op op)
 {
   Inst *dest = get_reg(1);
@@ -2228,6 +2245,8 @@ void Parser::parse_function()
     process_maddl(Op::SEXT);
   else if (name == "smsubl")
     process_msubl(Op::SEXT);
+  else if (name == "smnegl")
+    process_mnegl(Op::SEXT);
   else if (name == "smull")
     process_mull(Op::SEXT);
   else if (name == "smulh")
@@ -2236,6 +2255,8 @@ void Parser::parse_function()
     process_maddl(Op::ZEXT);
   else if (name == "umsubl")
     process_msubl(Op::ZEXT);
+  else if (name == "umnegl")
+    process_mnegl(Op::ZEXT);
   else if (name == "umull")
     process_mull(Op::ZEXT);
   else if (name == "umulh")
