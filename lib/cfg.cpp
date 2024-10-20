@@ -351,6 +351,62 @@ void simplify_cfg(Function *func)
 	    }
 	}
 
+      // GCC sometimes needs an extra empty BB because a phi node in the
+      // destination must be able to distinguish the two sources, which
+      // in our IR looks like:
+      //
+      //   .4:
+      //     %64 = flt %58, %22
+      //     br %64, .5, .6
+      //
+      //   .5:
+      //     br .6
+      //
+      //   .6:
+      //     %67 = phi [ %39, .4 ], [ %45, .5 ]
+      //
+      // Change this to an Op::ITE instruction.
+      if (bb->succs.size() == 2
+	  && ((bb->succs[0]->succs.size() == 1
+	       && bb->succs[0]->phis.empty()
+	       && bb->succs[0]->first_inst->op == Op::BR
+	       && bb->succs[0]->succs[0] == bb->succs[1]
+	       && !bb->succs[1]->phis.empty())
+	      || (bb->succs[1]->succs.size() == 1
+		  && bb->succs[1]->phis.empty()
+		  && bb->succs[1]->first_inst->op == Op::BR
+		  && bb->succs[1]->succs[0] == bb->succs[0]
+		  && !bb->succs[0]->phis.empty())))
+	{
+	  Basic_block *empty_bb;
+	  Basic_block *dest_bb;
+	  if (bb->succs[0]->phis.empty())
+	    {
+	      empty_bb = bb->succs[0];
+	      dest_bb = bb->succs[1];
+	    }
+	  else
+	    {
+	      empty_bb = bb->succs[1];
+	      dest_bb = bb->succs[0];
+	    }
+	  Basic_block *true_bb = bb->succs[0];
+	  Inst *cond = bb->last_inst->args[0];
+
+	  for (auto phi : dest_bb->phis)
+	    {
+	      Inst *inst1 = phi->get_phi_arg(empty_bb);
+	      Inst *inst2 = phi->get_phi_arg(bb);
+	      if (true_bb != empty_bb)
+		std::swap(inst1, inst2);
+	      Inst *ite = bb->build_inst(Op::ITE, cond, inst1, inst2);
+	      phi->update_phi_arg(ite, bb);
+	    }
+
+	  destroy_instruction(bb->last_inst);
+	  bb->build_br_inst(dest_bb);
+	}
+
       // Remove empty BBs ending in unconditional branch by letting the
       // predecessors call the successor.
       remove_empty_bb(bb);
