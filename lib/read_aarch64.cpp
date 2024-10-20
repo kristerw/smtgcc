@@ -139,6 +139,8 @@ private:
   void process_adcs();
   void process_sbc();
   void process_sbcs();
+  void process_ngc();
+  void process_ngcs();
   void process_movk();
   void process_unary(Op op);
   Inst *process_arg_shift(unsigned idx, Inst *arg);
@@ -1413,6 +1415,37 @@ void Parser::process_sbcs()
   write_reg(dest, res);
 }
 
+void Parser::process_ngc()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_end_of_line(4);
+
+  Inst *c = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::c]);
+  c = bb->build_inst(Op::NOT, c);
+  c = bb->build_inst(Op::ZEXT, c, arg1->bitsize);
+  Inst *res = bb->build_inst(Op::NEG, arg1);
+  res = bb->build_inst(Op::SUB, res, c);
+  write_reg(dest, res);
+}
+
+void Parser::process_ngcs()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_end_of_line(4);
+
+  Inst *c = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::c]);
+  c = bb->build_inst(Op::NOT, c);
+  c = bb->build_inst(Op::ZEXT, c, arg1->bitsize);
+  arg1 = bb->build_inst(Op::ADD, arg1, c);
+  Inst *zero = bb->value_inst(0, arg1->bitsize);
+  Inst *res = gen_sub_cond_flags(zero, arg1);
+  write_reg(dest, res);
+}
+
 void Parser::process_movk()
 {
   Inst *dest = get_reg(1);
@@ -2157,6 +2190,10 @@ void Parser::parse_function()
     process_sbc();
   else if (name == "sbcs")
     process_sbcs();
+  else if (name == "ngc")
+    process_ngc();
+  else if (name == "ngcs")
+    process_ngcs();
 
   // Data processing - integer minimum and maximum
   else if (name == "smax")
