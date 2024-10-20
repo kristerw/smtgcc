@@ -826,12 +826,13 @@ void Parser::process_csel(Op op)
 void Parser::process_cset(Op op)
 {
   Inst *dest = get_reg(1);
+  uint32_t dest_bitsize = get_reg_size(1);
   get_comma(2);
   Cond_code cc = get_cc(3);
   get_end_of_line(4);
 
   Inst *cond = build_cond(cc);
-  Inst *res = bb->build_inst(op, cond, dest->bitsize);
+  Inst *res = bb->build_inst(op, cond, dest_bitsize);
   write_reg(dest, res);
 }
 
