@@ -1019,6 +1019,38 @@ Inst *simplify_xor(Inst *inst)
   return inst;
 }
 
+Inst *simplify_s2f(Inst *inst)
+{
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+
+  // s2f (sext x) -> s2f x
+  if (arg1->op == Op::SEXT)
+    {
+      Inst *new_inst = create_inst(Op::S2F, arg1->args[0], arg2);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  return inst;
+}
+
+Inst *simplify_u2f(Inst *inst)
+{
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+
+  // u2f (zext x) -> u2f x
+  if (arg1->op == Op::ZEXT)
+    {
+      Inst *new_inst = create_inst(Op::U2F, arg1->args[0], arg2);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  return inst;
+}
+
 Inst *simplify_sext(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
@@ -2207,7 +2239,13 @@ Inst *simplify_inst(Inst *inst)
     case Op::SADD_WRAPS:
       inst = simplify_sadd_wraps(inst);
       break;
-    case Op:: SEXT:
+    case Op::S2F:
+      inst = simplify_s2f(inst);
+      break;
+    case Op::U2F:
+      inst = simplify_u2f(inst);
+      break;
+    case Op::SEXT:
       inst = simplify_sext(inst);
       break;
     case Op::SGE:
