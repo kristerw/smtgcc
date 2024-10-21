@@ -2277,8 +2277,26 @@ std::pair<Inst *, Inst *> Converter::process_unary_float(enum tree_code code, In
   switch (code)
     {
     case ABS_EXPR:
+      if (state->arch != Arch::gimple)
+	{
+	  // Backends may choose to implement fabs as a bit operation. Skip
+	  // checking if this would generate a non-canonical NaN.
+	  Inst *shift = bb->value_inst(1, arg1->bitsize);
+	  Inst *inst = bb->build_inst(Op::SHL, arg1, shift);
+	  inst = bb->build_inst(Op::LSHR, inst, shift);
+	  constrain_src_value(inst, arg1_type);
+	}
       return {bb->build_inst(Op::FABS, arg1), res_indef};
     case NEGATE_EXPR:
+      if (state->arch != Arch::gimple)
+	{
+	  // Backends may choose to implement fneg as a bit operation. Skip
+	  // checking if this would generate a non-canonical NaN.
+	  unsigned __int128 v = ((unsigned __int128)1) << (arg1->bitsize - 1);
+	  Inst *inst = bb->value_inst(v, arg1->bitsize);
+	  inst = bb->build_inst(Op::XOR, arg1, inst);
+	  constrain_src_value(inst, arg1_type);
+	}
       return {bb->build_inst(Op::FNEG, arg1), res_indef};
     case PAREN_EXPR:
       return {arg1, res_indef};
@@ -4265,22 +4283,12 @@ void Converter::process_cfn_copysign(gimple *stmt)
   Inst *signbit = bb->build_extract_bit(arg2, arg2->bitsize - 1);
   Inst *res = bb->build_trunc(arg1, arg1->bitsize - 1);
   res = bb->build_inst(Op::CONCAT, signbit, res);
-
   tree lhs = gimple_call_lhs(stmt);
-  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
-    throw Not_implemented("process_cfn_copysign: vector type");
-
-  // SMT solvers has only one NaN value, so NEGATE_EXPR of NaN does not
-  // change the value. This leads to incorrect reports of miscompilations
-  // for transformations like -ABS_EXPR(x) -> .COPYSIGN(x, -1.0) because
-  // copysign has introduceed a non-canonical NaN.
-  // For now, treat copying the sign to NaN as always produce the original
-  // canonical NaN.
-  // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
-  Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
-  res = bb->build_inst(Op::ITE, is_nan, arg1, res);
   if (lhs)
     {
+      if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+	throw Not_implemented("process_cfn_copysign: vector type");
+      constrain_src_value(res, TREE_TYPE(lhs));
       constrain_range(bb, lhs, res);
       tree2instruction.insert({lhs, res});
     }
@@ -5282,18 +5290,12 @@ void Converter::process_cfn_xorsign(gimple *stmt)
   Inst *signbit = bb->build_inst(Op::XOR, signbit1, signbit2);
   Inst *res = bb->build_trunc(arg1, arg1->bitsize - 1);
   res = bb->build_inst(Op::CONCAT, signbit, res);
-
   tree lhs = gimple_call_lhs(stmt);
-  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
-    throw Not_implemented("process_cfn_: vector type");
-
-  // For now, treat copying the sign to NaN as always produce the original
-  // canonical NaN.
-  // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
-  Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
-  res = bb->build_inst(Op::ITE, is_nan, arg1, res);
   if (lhs)
     {
+      if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
+	throw Not_implemented("process_cfn_: vector type");
+      constrain_src_value(res, TREE_TYPE(lhs));
       constrain_range(bb, lhs, res);
       tree2instruction.insert({lhs, res});
     }
