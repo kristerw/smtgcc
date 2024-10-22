@@ -6010,6 +6010,8 @@ void Converter::process_variables()
 	tree decl = var->decl;
 	if (lookup_attribute("alias", DECL_ATTRIBUTES(decl)))
 	  continue;
+	if (DECL_REGISTER(decl))
+	  throw Not_implemented("DECL_REGISTER variable");
 	uint64_t size = bytesize_for_type(TREE_TYPE(decl));
 	if (size >= ((uint64_t)1 << module->ptr_offset_bits))
 	  throw Not_implemented("process_function: too large global variable");
@@ -6085,6 +6087,9 @@ void Converter::process_variables()
     unsigned ix;
     FOR_EACH_LOCAL_DECL(fun, ix, decl)
       {
+	if (DECL_REGISTER(decl))
+	  throw Not_implemented("DECL_REGISTER variable");
+
 	// Local static decls are included in the global decls, so their
 	// memory objects have already been created.
 	if (decl2instruction.contains(decl))
