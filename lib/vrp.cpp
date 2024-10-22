@@ -32,10 +32,10 @@ class Vrp
   void handle_phi(Inst *inst);
   void handle_sadd_wraps(Inst *inst);
   void handle_sext(Inst *inst);
-  void handle_sgt(Inst *inst);
+  void handle_slt(Inst *inst);
   void handle_shl(Inst *inst);
   void handle_ssub_wraps(Inst *inst);
-  void handle_ugt(Inst *inst);
+  void handle_ult(Inst *inst);
   void handle_value(Inst *inst);
   void handle_xor(Inst *inst);
   void handle_zext(Inst *inst);
@@ -336,13 +336,13 @@ void Vrp::handle_sext(Inst *inst)
     trailing_zeros_map.insert({inst, tz});
 }
 
-void Vrp::handle_sgt(Inst *inst)
+void Vrp::handle_slt(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // sgt 0, x -> 0 if x has leading zeros.
-  if (is_value_zero(arg1) && leading_zeros(arg2) > 0)
+  // slt x, 0 -> 0 if x has leading zeros.
+  if (leading_zeros(arg1) > 0 && is_value_zero(arg2))
     {
       Inst *zero = inst->bb->value_inst(0, 1);
       handle_inst(zero);
@@ -350,22 +350,22 @@ void Vrp::handle_sgt(Inst *inst)
       return;
     }
 
-  // sgt x, c -> false if c >= the maximum value of x (that is, the value
+  // slt c, x -> false if c >= the maximum value of x (that is, the value
   // where all bits not being leading or trailing zeros are set to 1).
-  if (arg2->op == Op::VALUE && leading_zeros(arg1) > 0)
+  if (arg1->op == Op::VALUE && leading_zeros(arg2) > 0)
     {
       unsigned __int128 lz_mask = -1;
-      uint32_t lz_shift = ((128 - arg1->bitsize) + leading_zeros(arg1));
+      uint32_t lz_shift = ((128 - arg2->bitsize) + leading_zeros(arg2));
       assert(lz_shift <= 128);
       lz_mask = (lz_shift < 128) ? lz_mask >> lz_shift : 0;
 
       unsigned __int128 tz_mask = -1;
-      uint32_t tz_shift = trailing_zeros(arg1);
+      uint32_t tz_shift = trailing_zeros(arg2);
       assert(tz_shift <= 128);
       tz_mask = (tz_shift < 128) ? tz_mask << tz_shift : 0;
 
       __int128 max_value = lz_mask & tz_mask;
-      if (arg2->signed_value() >= max_value)
+      if (arg1->signed_value() >= max_value)
 	{
 	  Inst *zero = inst->bb->value_inst(0, 1);
 	  handle_inst(zero);
@@ -407,27 +407,27 @@ void Vrp::handle_ssub_wraps(Inst *inst)
     }
 }
 
-void Vrp::handle_ugt(Inst *inst)
+void Vrp::handle_ult(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // ugt x, c -> false if c >= the maximum value of x (that is, the value
+  // ult c, x -> false if c >= the maximum value of x (that is, the value
   // where all bits not being leading or trailing zeros are set to 1).
-  if (arg2->op == Op::VALUE)
+  if (arg1->op == Op::VALUE)
     {
       unsigned __int128 lz_mask = -1;
-      uint32_t lz_shift = (128 - arg1->bitsize) + leading_zeros(arg1);
+      uint32_t lz_shift = (128 - arg2->bitsize) + leading_zeros(arg2);
       assert(lz_shift <= 128);
       lz_mask = (lz_shift < 128) ? lz_mask >> lz_shift : 0;
 
       unsigned __int128 tz_mask = -1;
-      uint32_t tz_shift = trailing_zeros(arg1);
+      uint32_t tz_shift = trailing_zeros(arg2);
       assert(tz_shift <= 128);
       tz_mask = (tz_shift < 128) ? tz_mask << tz_shift : 0;
 
       unsigned __int128 max_value = lz_mask & tz_mask;
-      if (arg2->value() >= max_value)
+      if (arg1->value() >= max_value)
 	{
 	  Inst *zero = inst->bb->value_inst(0, 1);
 	  handle_inst(zero);
@@ -520,8 +520,8 @@ void Vrp::handle_inst(Inst *inst)
     case Op::SEXT:
       handle_sext(inst);
       break;
-    case Op::SGT:
-      handle_sgt(inst);
+    case Op::SLT:
+      handle_slt(inst);
       break;
     case Op::SHL:
       handle_shl(inst);
@@ -529,8 +529,8 @@ void Vrp::handle_inst(Inst *inst)
     case Op::SSUB_WRAPS:
       handle_ssub_wraps(inst);
       break;
-    case Op::UGT:
-      handle_ugt(inst);
+    case Op::ULT:
+      handle_ult(inst);
       break;
     case Op::VALUE:
       handle_value(inst);

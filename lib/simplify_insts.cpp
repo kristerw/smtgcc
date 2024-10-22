@@ -1286,16 +1286,37 @@ bool is_ext(Inst *inst)
   return false;
 }
 
+Inst *simplify_fge(Inst *inst)
+{
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+
+  // fge x, y -> fle y, x
+  Inst *new_inst = create_inst(Op::FLE, arg2, arg1);
+  new_inst->insert_before(inst);
+  return new_inst;
+}
+
+Inst *simplify_fgt(Inst *inst)
+{
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+
+  // fgt x, y -> flt y, x
+  Inst *new_inst = create_inst(Op::FLT, arg2, arg1);
+  new_inst->insert_before(inst);
+  return new_inst;
+}
+
 Inst *simplify_sge(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // sge x, x -> true
-  if (arg1 == arg2)
-    return inst->bb->value_inst(1, 1);
-
-  return inst;
+  // sge x, y -> sle y, x
+  Inst *new_inst = create_inst(Op::SLE, arg2, arg1);
+  new_inst->insert_before(inst);
+  return new_inst;
 }
 
 Inst *simplify_sgt(Inst *inst)
@@ -1303,67 +1324,10 @@ Inst *simplify_sgt(Inst *inst)
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // sgt signed_min_val, x -> false
-  if (is_value_signed_min(arg1))
-    return inst->bb->value_inst(0, 1);
-
-  // sgt x, signed_max_val -> false
-  if (is_value_signed_max(arg2))
-    return inst->bb->value_inst(0, 1);
-
-  // For Boolean x: sgt (zext x), c -> false if c is a constant > 0.
-  // This is rather common in UB checks of range information where a Boolean
-  // has been extended to an integer.
-  if (arg1->op == Op::ZEXT
-      && arg1->args[0]->bitsize == 1
-      && arg2->op == Op::VALUE
-      && arg2->signed_value() > 0)
-    return inst->bb->value_inst(0, 1);
-
-  // For Boolean x: sgt c, (zext x) -> false if c is a constant <= 0.
-  if (arg1->op == Op::VALUE
-      && arg1->signed_value() <= 0
-      && arg2->op == Op::ZEXT
-      && arg2->args[0]->bitsize == 1)
-    return inst->bb->value_inst(0, 1);
-
-  // sgt c, (sext x) -> false if c <= the minimal possible value of x
-  if (arg1->op == Op::VALUE && arg2->op == Op::SEXT)
-    {
-      __int128 min_val = 1;
-      min_val = min_val << 127;
-      min_val = min_val >> (128 - arg2->args[0]->bitsize);
-      if (arg1->signed_value() <= min_val)
-	return inst->bb->value_inst(0, 1);
-    }
-
-  // sgt (sext x), c -> false if c >= the maximal possible value of x
-  if (arg2->op == Op::VALUE
-      && arg1->op == Op::SEXT
-      && arg1->args[0]->bitsize > 1)
-    {
-      unsigned __int128 max_val = -1;
-      max_val = max_val >> (129 - arg1->args[0]->bitsize);
-      if (arg2->signed_value() >= (__int128)max_val)
-	return inst->bb->value_inst(0, 1);
-    }
-
-  // sgt 0, (zext x) -> false
-  if (is_value_zero(arg1) && arg2->op == Op::ZEXT)
-    return inst->bb->value_inst(0, 1);
-
-  // sgt (zext x), c -> false if c >= (zext -1)
-  if (arg1->bitsize <= 128
-      && arg1->op == Op::ZEXT
-      && arg2->op == Op::VALUE
-      && arg2->signed_value() >= (((__int128)1 << arg1->args[0]->bitsize) - 1))
-    return inst->bb->value_inst(0, 1);
-
-  // sgt x, x -> false
-  if (arg1 == arg2)
-    return inst->bb->value_inst(0, 1);
-
-  return inst;
+  // sgt x, y -> slt y, x
+  Inst *new_inst = create_inst(Op::SLT, arg2, arg1);
+  new_inst->insert_before(inst);
+  return new_inst;
 }
 
 Inst *simplify_sle(Inst *inst)
@@ -1385,6 +1349,63 @@ Inst *simplify_slt(Inst *inst)
 
   // slt x, x -> false
   if (arg1 == arg2)
+    return inst->bb->value_inst(0, 1);
+
+  // slt x, signed_min_val -> false
+  if (is_value_signed_min(arg2))
+    return inst->bb->value_inst(0, 1);
+
+  // slt signed_max_val, x -> false
+  if (is_value_signed_max(arg1))
+    return inst->bb->value_inst(0, 1);
+
+  // For Boolean x: slt c, (zext x) -> false if c is a constant > 0.
+  // This is rather common in UB checks of range information where a Boolean
+  // has been extended to an integer.
+  if (arg2->op == Op::ZEXT
+      && arg2->args[0]->bitsize == 1
+      && arg1->op == Op::VALUE
+      && arg1->signed_value() > 0)
+    return inst->bb->value_inst(0, 1);
+
+  // For Boolean x: slt (zext x), c -> false if c is a constant <= 0.
+  if (arg2->op == Op::VALUE
+      && arg2->signed_value() <= 0
+      && arg1->op == Op::ZEXT
+      && arg1->args[0]->bitsize == 1)
+    return inst->bb->value_inst(0, 1);
+
+  // slt (sext x), c -> false if c <= the minimal possible value of x
+  if (arg1->op == Op::SEXT && arg2->op == Op::VALUE)
+    {
+      __int128 min_val = 1;
+      min_val = min_val << 127;
+      min_val = min_val >> (128 - arg1->args[0]->bitsize);
+      if (arg2->signed_value() <= min_val)
+	return inst->bb->value_inst(0, 1);
+    }
+
+  // slt c, (sext x) -> false if c >= the maximal possible value of x
+  if (arg1->op == Op::VALUE
+      && arg2->op == Op::SEXT
+      && arg2->args[0]->bitsize > 1)
+    {
+      unsigned __int128 max_val = -1;
+      max_val = max_val >> (129 - arg2->args[0]->bitsize);
+      if (arg1->signed_value() >= (__int128)max_val)
+	return inst->bb->value_inst(0, 1);
+    }
+
+  // slt (zext x), 0 -> false
+  if (arg1->op == Op::ZEXT && is_value_zero(arg2))
+    return inst->bb->value_inst(0, 1);
+
+
+  // slt c, (zext x) -> false if c >= (zext -1)
+  if (arg2->bitsize <= 128
+      && arg2->op == Op::ZEXT
+      && arg1->op == Op::VALUE
+      && arg1->signed_value() >= (((__int128)1 << arg2->args[0]->bitsize) - 1))
     return inst->bb->value_inst(0, 1);
 
   return inst;
@@ -1650,11 +1671,10 @@ Inst *simplify_uge(Inst *inst)
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // uge x, x -> true
-  if (arg1 == arg2)
-    return inst->bb->value_inst(1, 1);
-
-  return inst;
+  // uge x, y -> ule y, x
+  Inst *new_inst = create_inst(Op::ULE, arg2, arg1);
+  new_inst->insert_before(inst);
+  return new_inst;
 }
 
 Inst *simplify_ugt(Inst *inst)
@@ -1662,35 +1682,10 @@ Inst *simplify_ugt(Inst *inst)
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // ugt 0, x -> false
-  if (is_value_zero(arg1))
-    return inst->bb->value_inst(0, 1);
-
-  // ugt x, -1 -> false
-  if (is_value_m1(arg2))
-    return inst->bb->value_inst(0, 1);
-
-  // ugt (zext x), c -> false if c >= the maximal possible value of x
-  if (arg1->op == Op::ZEXT
-      && arg2->op == Op::VALUE)
-    {
-      unsigned __int128 max_val = -1;
-      max_val = max_val >> (128 - arg1->args[0]->bitsize);
-      if (arg2->value() >= max_val)
-	return inst->bb->value_inst(0, 1);
-    }
-
-  // ugt (and x, y), x -> false
-  // ugt (and x, y), y -> false
-  if (arg1->op == Op::AND
-      && (arg1->args[0] == arg2 || arg1->args[1] == arg2))
-    return inst->bb->value_inst(0, 1);
-
-  // ugt x, x -> false
-  if (arg1 == arg2)
-    return inst->bb->value_inst(0, 1);
-
-  return inst;
+  // ugt x, y -> ult y, x
+  Inst *new_inst = create_inst(Op::ULT, arg2, arg1);
+  new_inst->insert_before(inst);
+  return new_inst;
 }
 
 Inst *simplify_ule(Inst *inst)
@@ -1712,6 +1707,30 @@ Inst *simplify_ult(Inst *inst)
 
   // ult x, x -> false
   if (arg1 == arg2)
+    return inst->bb->value_inst(0, 1);
+
+  // ult x, 0 -> false
+  if (is_value_zero(arg2))
+    return inst->bb->value_inst(0, 1);
+
+  // ult -1, x -> false
+  if (is_value_m1(arg1))
+    return inst->bb->value_inst(0, 1);
+
+  // ult (zext x), c -> false if c >= the maximal possible value of x
+  if (arg2->op == Op::ZEXT
+      && arg1->op == Op::VALUE)
+    {
+      unsigned __int128 max_val = -1;
+      max_val = max_val >> (128 - arg2->args[0]->bitsize);
+      if (arg1->value() >= max_val)
+	return inst->bb->value_inst(0, 1);
+    }
+
+  // ult x, (and x, y) -> false
+  // ult y, (and x, y) -> false
+  if (arg2->op == Op::AND
+      && (arg2->args[0] == arg1 || arg2->args[1] == arg1))
     return inst->bb->value_inst(0, 1);
 
   return inst;
@@ -2252,6 +2271,12 @@ Inst *simplify_inst(Inst *inst)
     case Op::U2F:
       inst = simplify_u2f(inst);
       break;
+    case Op::FGE:
+      inst = simplify_fge(inst);
+      break;
+    case Op::FGT:
+      inst = simplify_fgt(inst);
+      break;
     case Op::SEXT:
       inst = simplify_sext(inst);
       break;
@@ -2294,7 +2319,7 @@ Inst *simplify_inst(Inst *inst)
     case Op::XOR:
       inst = simplify_xor(inst);
       break;
-    case Op:: ZEXT:
+    case Op::ZEXT:
       inst = simplify_zext(inst);
       break;
     default:

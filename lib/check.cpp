@@ -185,58 +185,6 @@ Inst *Converter::get_inst(const Cse_key& key, bool may_add_insts)
       if (I != key2inst.end())
 	return I->second;
     }
-  else if (inst_info[(int)key.op].iclass == Inst_class::icomparison
-	   || inst_info[(int)key.op].iclass == Inst_class::fcomparison)
-    {
-      Op op;
-      switch (key.op)
-	{
-	case Op::FGE:
-	  op = Op::FLE;
-	  break;
-	case Op::FGT:
-	  op = Op::FLT;
-	  break;
-	case Op::FLE:
-	  op = Op::FGE;
-	  break;
-	case Op::FLT:
-	  op = Op::FGT;
-	  break;
-	case Op::SGE:
-	  op = Op::SLE;
-	  break;
-	case Op::SGT:
-	  op = Op::SLT;
-	  break;
-	case Op::SLE:
-	  op = Op::SGE;
-	  break;
-	case Op::SLT:
-	  op = Op::SGT;
-	  break;
-	case Op::UGE:
-	  op = Op::ULE;
-	  break;
-	case Op::UGT:
-	  op = Op::ULT;
-	  break;
-	case Op::ULE:
-	  op = Op::UGE;
-	  break;
-	case Op::ULT:
-	  op = Op::UGT;
-	  break;
-	default:
-	  throw Not_implemented("Converter::get_inst: unknown comparison");
-	}
-      Cse_key tmp_key = key;
-      tmp_key.op = op;
-      std::swap(tmp_key.arg1, tmp_key.arg2);
-      I = key2inst.find(tmp_key);
-      if (I != key2inst.end())
-	return I->second;
-    }
 
   // Check if this is a negation of an existing comparison.
   if (may_add_insts
