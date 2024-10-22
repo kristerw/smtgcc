@@ -133,10 +133,6 @@ class Converter {
   Inst *tgt_unique_ub = nullptr;
   Inst *tgt_common_ub = nullptr;
 
-  Inst *ite(Inst *c, Inst *a, Inst *b);
-  Inst *bool_or(Inst *a, Inst *b);
-  Inst *bool_and(Inst *a, Inst *b);
-  Inst *bool_not(Inst *a);
   void add_ub(Basic_block *bb, Inst *cond);
   void add_assert(Basic_block *bb, Inst *cond);
   std::map<Inst *, std::vector<Inst *>, Inst_comp> prepare_ub(Function *func);
@@ -294,7 +290,7 @@ Inst *Converter::get_inst(const Cse_key& key, bool may_add_insts)
       tmp_key.op = op;
       Inst *inst = get_inst(tmp_key, false);
       if (inst)
-	return bool_not(inst);
+	return build_inst(Op::NOT, inst);
     }
 
   return nullptr;
@@ -447,52 +443,6 @@ Converter::Converter(Module *m, bool run_simplify_inst)
   memory_size = build_inst(Op::MEM_SIZE_ARRAY);
 }
 
-Inst *Converter::ite(Inst *c, Inst *a, Inst *b)
-{
-  if (a == b)
-    return a;
-  if (c->op == Op::VALUE)
-    return c->value() ? a : b;
-  return build_inst(Op::ITE, c, a, b);
-}
-
-Inst *Converter::bool_or(Inst *a, Inst *b)
-{
-  if (a->op == Op::VALUE)
-    return a->value() ? a : b;
-  if (b->op == Op::VALUE)
-    return b->value() ? b : a;
-  if (a == b)
-    return a;
-  if (a->op == Op::NOT && a->args[0] == b)
-    return value_inst(1, 1);
-  if (b->op == Op::NOT && b->args[0] == a)
-    return value_inst(1, 1);
-  return build_inst(Op::OR, a, b);
-}
-
-Inst *Converter::bool_and(Inst *a, Inst *b)
-{
-  if (a->op == Op::VALUE)
-    return a->value() ? b : a;
-  if (b->op == Op::VALUE)
-    return b->value() ? a : b;
-  if (a == b)
-    return a;
-  if (a->op == Op::NOT && a->args[0] == b)
-    return value_inst(0, 1);
-  if (b->op == Op::NOT && b->args[0] == a)
-    return value_inst(0, 1);
-  return build_inst(Op::AND, a, b);
-}
-
-Inst *Converter::bool_not(Inst *a)
-{
-  if (a->op == Op::NOT)
-    return a->args[0];
-  return build_inst(Op::NOT, a, true);
-}
-
 void Converter::add_ub(Basic_block *bb, Inst *cond)
 {
   // It is more effective to split Op::OR into two elements to better handle
@@ -518,7 +468,7 @@ void Converter::add_assert(Basic_block *bb, Inst *cond)
   cond = build_inst(Op::NOT, cond);
   if (bb2not_assert.contains(bb))
     {
-      cond = bool_or(bb2not_assert.at(bb), cond);
+      cond = build_inst(Op::OR, bb2not_assert.at(bb), cond);
       bb2not_assert.erase(bb);
     }
   bb2not_assert.insert({bb, cond});
@@ -616,23 +566,24 @@ void Converter::generate_ub()
       Inst *bb_ub = value_inst(0, 1);
       for (auto inst : ub_common)
 	{
-	  bb_ub = bool_or(bb_ub, inst);
+	  bb_ub = build_inst(Op::OR, bb_ub, inst);
 	}
-      common_ub = bool_or(common_ub, bool_and(cond, bb_ub));
+      common_ub =
+	build_inst(Op::OR, common_ub, build_inst(Op::AND, cond, bb_ub));
 
       bb_ub = value_inst(0, 1);
       for (auto inst : ub_src_unique)
 	{
-	  bb_ub = bool_or(bb_ub, inst);
+	  bb_ub = build_inst(Op::OR, bb_ub, inst);
 	}
-      src_ub = bool_or(src_ub, bool_and(cond, bb_ub));
+      src_ub = build_inst(Op::OR, src_ub, build_inst(Op::AND, cond, bb_ub));
 
       bb_ub = value_inst(0, 1);
       for (auto inst : ub_tgt_unique)
 	{
-	  bb_ub = bool_or(bb_ub, inst);
+	  bb_ub = build_inst(Op::OR, bb_ub, inst);
 	}
-      tgt_ub = bool_or(tgt_ub, bool_and(cond, bb_ub));
+      tgt_ub = build_inst(Op::OR, tgt_ub, build_inst(Op::AND, cond, bb_ub));
     }
 
   for (auto cond : cond_src_unique)
@@ -640,9 +591,9 @@ void Converter::generate_ub()
       Inst *bb_ub = value_inst(0, 1);
       for (auto inst : src_bbcond2ub.at(cond))
 	{
-	  bb_ub = bool_or(bb_ub, inst);
+	  bb_ub = build_inst(Op::OR, bb_ub, inst);
 	}
-      src_ub = bool_or(src_ub, bool_and(cond, bb_ub));
+      src_ub = build_inst(Op::OR, src_ub, build_inst(Op::AND, cond, bb_ub));
     }
 
   for (auto cond : cond_tgt_unique)
@@ -650,9 +601,9 @@ void Converter::generate_ub()
       Inst *bb_ub = value_inst(0, 1);
       for (auto inst : tgt_bbcond2ub.at(cond))
 	{
-	  bb_ub = bool_or(bb_ub, inst);
+	  bb_ub = build_inst(Op::OR, bb_ub, inst);
 	}
-      tgt_ub = bool_or(tgt_ub, bool_and(cond, bb_ub));
+      tgt_ub = build_inst(Op::OR, tgt_ub, build_inst(Op::AND, cond, bb_ub));
     }
 
   build_inst(Op::SRC_UB, common_ub, src_ub);
@@ -674,7 +625,9 @@ Inst *Converter::generate_assert(Function *func)
       if (!bb2not_assert.contains(bb))
 	continue;
 
-      assrt = bool_or(assrt, bool_and(bb2not_assert.at(bb), bb2cond.at(bb)));
+      assrt =
+	build_inst(Op::OR, assrt,
+		   build_inst(Op::AND, bb2not_assert.at(bb), bb2cond.at(bb)));
     }
 
   return assrt;
@@ -689,8 +642,8 @@ Inst *Converter::get_full_edge_cond(Basic_block *src, Basic_block *dest)
   assert(src->last_inst->nof_args == 1);
   Inst *cond = translate.at(src->last_inst->args[0]);
   if (dest != src->succs[0])
-    cond = bool_not(cond);
-  return bool_and(bb2cond.at(src), cond);
+    cond = build_inst(Op::NOT, cond);
+  return build_inst(Op::AND, bb2cond.at(src), cond);
 }
 
 void Converter::build_mem_state(Basic_block *bb, std::map<Basic_block*, Inst *>& map)
@@ -701,7 +654,7 @@ void Converter::build_mem_state(Basic_block *bb, std::map<Basic_block*, Inst *>&
     {
       Basic_block *pred_bb = bb->preds[i];
       Inst *cond = get_full_edge_cond(pred_bb, bb);
-      inst = ite(cond, map.at(pred_bb), inst);
+      inst = build_inst(Op::ITE, cond, map.at(pred_bb), inst);
     }
   map.insert({bb, inst});
 }
@@ -721,7 +674,7 @@ void Converter::generate_bb2cond(Basic_block *bb)
       Inst *cond = value_inst(0, 1);
       for (auto pred_bb : bb->preds)
 	{
-	  cond = bool_or(cond, get_full_edge_cond(pred_bb, bb));
+	  cond = build_inst(Op::OR, cond, get_full_edge_cond(pred_bb, bb));
 	}
       bb2cond.insert({bb, cond});
     }
@@ -761,9 +714,9 @@ std::pair<Inst *, Inst *> Converter::simplify_array_access(Inst *array, Inst *ad
 	  auto [value2, array2] = simplify_array_access(arg2, addr, cache);
 	  auto [value3, array3] = simplify_array_access(arg3, addr, cache);
 	  if (value2 && value3)
-	    value = ite(cond, value2, value3);
+	    value = build_inst(Op::ITE, cond, value2, value3);
 	  if (array2 != arg2 || array3 != arg3)
-	    array = ite(cond, array2, array3);
+	    array = build_inst(Op::ITE, cond, array2, array3);
 	  break;
 	}
       else if (array->op == Op::ARRAY_STORE
@@ -829,7 +782,7 @@ Inst *Converter::strip_local_mem(Inst *array, std::map<Inst *, Inst *>& cache)
 	  Inst *array2 = strip_local_mem(arg2, cache);
 	  Inst *array3 = strip_local_mem(arg3, cache);
 	  if (array2 != arg2 || array3 != arg3)
-	    array = ite(cond, array2, array3);
+	    array = build_inst(Op::ITE, cond, array2, array3);
 	  break;
 	}
       else if (array->op == Op::ARRAY_STORE
@@ -1082,7 +1035,7 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       Inst *is_const = value_inst(0, 1);
       for (Inst *id : const_ids)
 	{
-	  is_const = bool_or(is_const, build_inst(Op::EQ, arg1, id));
+	  is_const = build_inst(Op::OR, is_const, build_inst(Op::EQ, arg1, id));
 	}
       new_inst = is_const;
     }
@@ -1151,27 +1104,6 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
 	}
       return;
     }
-  else if (inst->op == Op::ITE)
-    {
-      Inst *arg1 = translate.at(inst->args[0]);
-      Inst *arg2 = translate.at(inst->args[1]);
-      Inst *arg3 = translate.at(inst->args[2]);
-      new_inst = ite(arg1, arg2, arg3);
-    }
-  else if (inst->op == Op::AND && inst->bitsize == 1)
-    {
-      Inst *arg1 = translate.at(inst->args[0]);
-      Inst *arg2 = translate.at(inst->args[1]);
-      new_inst = bool_and(arg1, arg2);
-    }
-  else if (inst->op == Op::OR && inst->bitsize == 1)
-    {
-      Inst *arg1 = translate.at(inst->args[0]);
-      Inst *arg2 = translate.at(inst->args[1]);
-      new_inst = bool_or(arg1, arg2);
-    }
-  else if (inst->op == Op::NOT && inst->bitsize == 1)
-    new_inst = bool_not(translate.at(inst->args[0]));
   else
     {
       assert(inst->op == Op::PRINT || inst->has_lhs());
@@ -1247,14 +1179,14 @@ void Converter::convert_function(Function *func, Function_role role)
 	      Basic_block *pred_bb = phi->phi_args[0].bb;
 	      Inst *cond = get_full_edge_cond(pred_bb, bb);
 	      Inst *inst = translate.at(phi->phi_args[1].inst);
-	      phi_inst = ite(cond, phi_inst, inst);
+	      phi_inst = build_inst(Op::ITE, cond, phi_inst, inst);
 	    }
 	  for (unsigned i = 2; i < phi->phi_args.size(); i++)
 	    {
 	      Basic_block *pred_bb = phi->phi_args[i].bb;
 	      Inst *cond = get_full_edge_cond(pred_bb, bb);
 	      Inst *inst = translate.at(phi->phi_args[i].inst);
-	      phi_inst = ite(cond, inst, phi_inst);
+	      phi_inst = build_inst(Op::ITE, cond, inst, phi_inst);
 	    }
 	  translate.insert({phi, phi_inst});
 	}

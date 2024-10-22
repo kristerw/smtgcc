@@ -959,6 +959,13 @@ Inst *simplify_or(Inst *inst)
       return new_inst2;
     }
 
+  // or (not x), x -> -1
+  // or x, (not x) -> -1
+  if (arg1->op == Op::NOT && arg1->args[0] == arg2)
+    return inst->bb->value_inst(-1, inst->bitsize);
+  if (arg2->op == Op::NOT && arg2->args[0] == arg1)
+    return inst->bb->value_inst(-1, inst->bitsize);
+
   // For Boolean x: or (zext x), 1 -> 1
   if (arg1->op == Op::ZEXT
       && arg1->args[0]->bitsize == 1
