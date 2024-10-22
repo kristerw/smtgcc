@@ -3872,17 +3872,17 @@ void Converter::process_gimple_asm(gimple *stmt)
     }
 
   // Empty asm goto gives us problems with GIMPLE BBs with the wrong
-  // number of EGHE_COUNT preds/succs. This is easy to fix, but does
+  // number of EDGE_COUNT preds/succs. This is easy to fix, but does
   // not give us any benefit until we have real asm handling.
   if (gimple_asm_nlabels(asm_stmt))
     throw Not_implemented("process_function: gimple_asm");
 
-  // TODO: This is not completely correct for asm having output, such as
+  // Asm with output, such as
   //   asm volatile ("" : "+rm" (p));
-  // This will create a new SSA value for the output, which we will then
-  // treat as an uninitialized variable. We should instead do something,
-  // such as creating a new symbolic value. But it is annoying to maintain
-  // this in sync between src and tgt.
+  // needs some more work to constrain the values correctly. Report
+  // "not implemented" for now.
+  if (gimple_asm_noutputs(asm_stmt))
+    throw Not_implemented("process_function: gimple_asm");
 }
 
 void Converter::process_cfn_add_overflow(gimple *stmt)
