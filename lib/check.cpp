@@ -241,6 +241,21 @@ Inst *Converter::get_inst(const Cse_key& key, bool may_add_insts)
 	return build_inst(Op::NOT, inst);
     }
 
+  // CSE min(x,y) with min(y,x) and max(x,y) with max(y,x).
+  if (key.op == Op::ITE
+      && (key.arg1->op == Op::SLE || key.arg1->op == Op::ULE)
+      && ((key.arg1->args[0] == key.arg2 && key.arg1->args[1] == key.arg3)
+	  || (key.arg1->args[0] == key.arg3 && key.arg1->args[1] == key.arg2)))
+    {
+      const Cse_key cmp_key(key.arg1->op, key.arg1->args[1], key.arg1->args[0]);
+      Inst *cmp = get_inst(cmp_key, false);
+      if (cmp)
+	{
+	  const Cse_key ite_key(Op::ITE, cmp, key.arg3, key.arg2);
+	  return get_inst(ite_key, false);
+	}
+    }
+
   return nullptr;
 }
 
