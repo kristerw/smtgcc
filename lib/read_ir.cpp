@@ -550,6 +550,17 @@ Op parser::parse_instruction()
 
 	  current_bb->build_inst(info.op, arg1, arg2);
 	}
+      else if (info.iclass == Inst_class::ternary)
+	{
+	  Inst *arg1 = get_arg(1);
+	  get_comma(2);
+	  Inst *arg2 = get_arg(3);
+	  get_comma(4);
+	  Inst *arg3 = get_arg(5);
+	  get_end_of_line(6);
+
+	  current_bb->build_inst(info.op, arg1, arg2, arg3);
+	}
       else if (info.op == Op::BR)
 	{
 	  br_inst br_args;
