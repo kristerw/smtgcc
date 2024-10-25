@@ -61,7 +61,7 @@ class Unroller
 
 public:
   Unroller(Loop& loop);
-  void unroll();
+  void unroll(int nof_unroll);
 };
 
 template <typename T>
@@ -552,14 +552,14 @@ void Unroller::unroll_one_iteration()
   curr_bb[loop.bbs[0]] = current_loop_header;
 }
 
-void Unroller::unroll()
+void Unroller::unroll(int nof_unroll)
 {
   create_lcssa();
 
   Basic_block *first_unrolled = func->build_bb();
   next_loop_header = first_unrolled;
 
-  for (int i = 0; i < unroll_limit - 1; i++)
+  for (int i = 0; i < nof_unroll - 1; i++)
     {
       unroll_one_iteration();
     }
@@ -623,14 +623,14 @@ void Unroller::unroll()
 
 } // end anonymous namespace
 
-bool loop_unroll(Function *func)
+bool loop_unroll(Function *func, int nof_unroll)
 {
   bool unrolled = false;
 
   while (std::optional<Loop> loop = find_loop(func))
     {
       Unroller unroller(*loop);
-      unroller.unroll();
+      unroller.unroll(nof_unroll);
       reverse_post_order(func);
       simplify_insts(func);
       dead_code_elimination(func);

@@ -405,7 +405,7 @@ void dead_code_elimination(Function *func);
 void dead_code_elimination(Module *module);
 
 // loop_unroll.cpp
-bool loop_unroll(Function *func);
+bool loop_unroll(Function *func, int nof_unroll = unroll_limit);
 bool loop_unroll(Module *module);
 
 // memory_opt.cpp

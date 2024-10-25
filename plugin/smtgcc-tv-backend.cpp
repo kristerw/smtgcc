@@ -168,7 +168,7 @@ static void finish(void *, void *data)
 	  validate(func);
 
 	  simplify_cfg(func);
-	  if (loop_unroll(func))
+	  if (loop_unroll(func, unroll_limit + 1))
 	    {
 	      simplify_insts(func);
 	      dead_code_elimination(func);
