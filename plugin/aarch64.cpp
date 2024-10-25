@@ -107,7 +107,8 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
 
   // Set up the stack.
   assert(stack_size < (((uint64_t)1) << module->ptr_offset_bits));
-  Inst *id = bb->value_inst(-128, module->ptr_id_bits);
+  uint64_t id_val = ((uint64_t)1) << (module->ptr_id_bits - 1);
+  Inst *id = bb->value_inst(id_val, module->ptr_id_bits);
   Inst *mem_size = bb->value_inst(stack_size, module->ptr_offset_bits);
   Inst *flags = bb->value_inst(0, 32);
   Inst *stack = bb->build_inst(Op::MEMORY, id, mem_size, flags);

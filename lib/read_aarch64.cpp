@@ -2910,8 +2910,7 @@ Function *Parser::parse(std::string const& file_name)
 	    bb = func->build_bb();
 	    entry_bb->build_br_inst(bb);
 
-	    // TODO: Do not hard code ID values.
-	    int next_id = -126;
+	    int64_t next_id = -(((int64_t)1) << (module->ptr_id_bits - 1)) + 1;
 	    for (const auto& [name, data] : sym_name2data)
 	      {
 		Inst *mem;
