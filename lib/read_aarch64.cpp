@@ -43,7 +43,7 @@ struct Parser {
   };
   std::vector<Token> tokens;
   std::map<std::string, std::vector<unsigned char>> sym_name2data;
-  std::map<std::string, std::string> sym_alias;
+  std::map<std::string, std::pair<std::string, uint64_t>> sym_alias;
 
   int line_number = 0;
   size_t pos;
@@ -296,11 +296,15 @@ std::string_view Parser::get_name(unsigned idx)
 Inst *Parser::get_sym_addr(unsigned idx)
 {
   std::string name = std::string(get_name(idx));
+  uint64_t offset = 0;
   if (sym_alias.contains(name))
-    name = sym_alias[name];
+    std::tie(name, offset) = sym_alias[name];
   if (!rstate->sym_name2mem.contains(name))
     throw Parse_error("unknown symbol " + name, line_number);
-  return rstate->sym_name2mem[name];
+  Inst *inst = rstate->sym_name2mem[name];
+  if (offset)
+    inst = bb->build_inst(Op::ADD, inst, bb->value_inst(offset, inst->bitsize));
+  return inst;
 }
 
 Parser::Cond_code Parser::get_cc(unsigned idx)
@@ -2801,10 +2805,12 @@ void Parser::parse_rodata()
 		 || buf[pos] == '.'
 		 || buf[pos] == '$')
 	    pos++;
+	  skip_whitespace();
 	  std::string name1(&buf[start], pos - start);
 
 	  if (buf[pos++] != ',')
 	    continue;
+	  skip_whitespace();
 
 	  start = pos;
 	  while (isalnum(buf[pos])
@@ -2813,9 +2819,26 @@ void Parser::parse_rodata()
 		 || buf[pos] == '.'
 		 || buf[pos] == '$')
 	    pos++;
+	  skip_whitespace();
 	  std::string name2(&buf[start], pos - start);
 
-	  sym_alias.insert({name1, name2});
+	  uint64_t offset = 0;
+	  if (buf[pos] == '+')
+	    {
+	      pos++;
+	      skip_whitespace();
+	      while (isdigit(buf[pos]))
+		{
+		  offset = offset * 10 + (buf[pos] - '0');
+		  pos++;
+		}
+	      skip_whitespace();
+	    }
+
+	  if (buf[pos] != '\n')
+	    throw Parse_error(".set", line_number);
+
+	  sym_alias.insert({name1, {name2, offset}});
 
 	  skip_line();
 	  continue;
