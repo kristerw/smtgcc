@@ -44,6 +44,7 @@ struct Parser {
   };
   std::vector<Token> tokens;
   std::map<std::string, std::vector<unsigned char>> sym_name2data;
+  std::map<std::string, std::pair<std::string, uint64_t>> sym_alias;
 
   int line_number = 0;
   size_t pos;
@@ -434,9 +435,14 @@ Inst *Parser::get_hilo_addr(const Token& tok)
 	 || buf[pos] == '.')
     pos++;
   std::string sym_name(&buf[tok.pos + 4], pos - (tok.pos + 4));
+  uint64_t offset = 0;
+  if (sym_alias.contains(sym_name))
+    std::tie(sym_name, offset) = sym_alias[sym_name];
   if (!rstate->sym_name2mem.contains(sym_name))
     throw Parse_error("unknown symbol " + sym_name, line_number);
   Inst *addr = rstate->sym_name2mem.at(sym_name);
+  if (offset)
+    addr = bb->build_inst(Op::ADD, addr, bb->value_inst(offset, addr->bitsize));
   if (buf[pos] == '+')
     {
       pos++;
@@ -2518,6 +2524,60 @@ void Parser::parse_rodata()
 	  && (buf[pos + 5] == ' ' || buf[pos + 5] == '\t'))
 	{
 	  pos += 6;
+	  skip_line();
+	  continue;
+	}
+      if (buf[pos] == '.'
+	  && buf[pos + 1] == 's'
+	  && buf[pos + 2] == 'e'
+	  && buf[pos + 3] == 't'
+	  && (buf[pos + 4] == ' ' || buf[pos + 4] == '\t'))
+	{
+	  pos += 5;
+	  skip_whitespace();
+
+	  int start = pos;
+	  while (isalnum(buf[pos])
+		 || buf[pos] == '_'
+		 || buf[pos] == '-'
+		 || buf[pos] == '.'
+		 || buf[pos] == '$')
+	    pos++;
+	  skip_whitespace();
+	  std::string name1(&buf[start], pos - start);
+
+	  if (buf[pos++] != ',')
+	    continue;
+	  skip_whitespace();
+
+	  start = pos;
+	  while (isalnum(buf[pos])
+		 || buf[pos] == '_'
+		 || buf[pos] == '-'
+		 || buf[pos] == '.'
+		 || buf[pos] == '$')
+	    pos++;
+	  skip_whitespace();
+	  std::string name2(&buf[start], pos - start);
+
+	  uint64_t offset = 0;
+	  if (buf[pos] == '+')
+	    {
+	      pos++;
+	      skip_whitespace();
+	      while (isdigit(buf[pos]))
+		{
+		  offset = offset * 10 + (buf[pos] - '0');
+		  pos++;
+		}
+	      skip_whitespace();
+	    }
+
+	  if (buf[pos] != '\n')
+	    throw Parse_error(".set", line_number);
+
+	  sym_alias.insert({name1, {name2, offset}});
+
 	  skip_line();
 	  continue;
 	}
