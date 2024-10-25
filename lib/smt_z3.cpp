@@ -124,7 +124,7 @@ z3::expr Converter::inst_as_bool(const Inst *inst)
     inst2bool.insert({inst, expr.simplify()});
   else
     inst2bool.insert({inst, expr});
-  return expr;
+  return inst2bool.at(inst);
 }
 
 z3::expr Converter::inst_as_fp(const Inst *inst)
@@ -144,7 +144,7 @@ z3::expr Converter::inst_as_fp(const Inst *inst)
     inst2fp.insert({inst, expr.simplify()});
   else
     inst2fp.insert({inst, expr});
-  return expr;
+  return inst2fp.at(inst);
 }
 
 void Converter::build_bv_comparison_smt(const Inst *inst)
