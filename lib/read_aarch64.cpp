@@ -119,6 +119,7 @@ private:
   Inst *process_address(unsigned idx);
   void process_load(uint32_t trunc_size = 0, Op op = Op::ZEXT);
   void process_ldp();
+  void process_ldpsw();
   void process_store(uint32_t trunc_size = 0);
   void process_stp();
   void process_fcmp();
@@ -1059,6 +1060,34 @@ void Parser::process_ldp()
   uint32_t bitsize = size * 8;
   Inst *value1 = bb->build_trunc(value, bitsize);
   Inst *value2 = bb->build_inst(Op::EXTRACT, value, bitsize * 2 - 1, bitsize);
+
+  write_reg(dest1, value1);
+  write_reg(dest2, value2);
+}
+
+void Parser::process_ldpsw()
+{
+  Inst *dest1 = get_reg(1);
+  get_comma(2);
+  Inst *dest2 = get_reg(3);
+  get_comma(4);
+  Inst *ptr = process_address(5);
+
+  uint32_t size = 4;
+  load_ub_check(ptr, size * 2);
+  Inst *value = bb->build_inst(Op::LOAD, ptr);
+  for (uint32_t i = 1; i < size * 2; i++)
+    {
+      Inst *offset = bb->value_inst(i, ptr->bitsize);
+      Inst *addr = bb->build_inst(Op::ADD, ptr, offset);
+      Inst *byte = bb->build_inst(Op::LOAD, addr);
+      value = bb->build_inst(Op::CONCAT, byte, value);
+    }
+  uint32_t bitsize = size * 8;
+  Inst *value1 = bb->build_trunc(value, bitsize);
+  value1 = bb->build_inst(Op::SEXT, value1, 64);
+  Inst *value2 = bb->build_inst(Op::EXTRACT, value, bitsize * 2 - 1, bitsize);
+  value2 = bb->build_inst(Op::SEXT, value2, 64);
 
   write_reg(dest1, value1);
   write_reg(dest2, value2);
@@ -2164,6 +2193,8 @@ void Parser::parse_function()
     process_store(2);
   else if (name == "ldp")
     process_ldp();
+  else if (name == "ldpsw")
+    process_ldpsw();
   else if (name == "stp")
     process_stp();
 
