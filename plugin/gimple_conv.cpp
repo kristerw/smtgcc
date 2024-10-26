@@ -127,6 +127,7 @@ struct Converter {
   std::tuple<Inst *, Inst *, Inst *> type_convert(Inst *inst, Inst *indef, Inst *prov, tree src_type, tree dest_type);
   Inst *type_convert(Inst *inst, tree src_type, tree dest_type);
   std::pair<Inst *, Inst *> process_unary_bool(enum tree_code code, Inst *arg1, Inst *arg1_indef, tree lhs_type, tree arg1_type);
+  void check_wide_bool(Inst *inst, Inst *indef, tree type);
   std::tuple<Inst *, Inst *, Inst *> process_unary_int(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type);
   Inst *process_unary_scalar(enum tree_code code, Inst *arg1, tree lhs_type, tree arg1_type);
   std::tuple<Inst *, Inst *, Inst *> process_unary_scalar(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type);
@@ -1271,7 +1272,7 @@ Inst *Converter::get_res_indef(Inst *arg1_indef, tree lhs_type)
       Inst *zero = bb->value_inst(0, arg1_indef->bitsize);
       res_indef = bb->build_inst(Op::NE, arg1_indef, zero);
       uint64_t bitsize = bitsize_for_type(lhs_type);
-      if (TREE_CODE(lhs_type) != BOOLEAN_TYPE && bitsize > res_indef->bitsize)
+      if (bitsize > res_indef->bitsize)
 	res_indef = bb->build_inst(Op::SEXT, res_indef, bitsize);
     }
   return res_indef;
@@ -1297,7 +1298,7 @@ Inst *Converter::get_res_indef(Inst *arg1_indef, Inst *arg2_indef, tree lhs_type
   if (res_indef)
     {
       uint64_t bitsize = bitsize_for_type(lhs_type);
-      if (TREE_CODE(lhs_type) != BOOLEAN_TYPE && bitsize > res_indef->bitsize)
+      if (bitsize > res_indef->bitsize)
 	res_indef = bb->build_inst(Op::SEXT, res_indef, bitsize);
     }
   return res_indef;
@@ -1332,7 +1333,7 @@ Inst *Converter::get_res_indef(Inst *arg1_indef, Inst *arg2_indef, Inst *arg3_in
   if (res_indef)
     {
       uint64_t bitsize = bitsize_for_type(lhs_type);
-      if (TREE_CODE(lhs_type) != BOOLEAN_TYPE && bitsize > res_indef->bitsize)
+      if (bitsize > res_indef->bitsize)
 	res_indef = bb->build_inst(Op::SEXT, res_indef, bitsize);
     }
   return res_indef;
@@ -2038,28 +2039,22 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
       bb->build_inst(Op::UB, is_ub);
     }
 
-  if (INTEGRAL_TYPE_P(src_type) || POINTER_TYPE_P(src_type) || TREE_CODE(src_type) == OFFSET_TYPE)
+  if (INTEGRAL_TYPE_P(src_type)
+      || POINTER_TYPE_P(src_type)
+      || TREE_CODE(src_type) == OFFSET_TYPE)
     {
-      if (INTEGRAL_TYPE_P(dest_type) || POINTER_TYPE_P(dest_type) || TREE_CODE(dest_type) == OFFSET_TYPE)
+      if (INTEGRAL_TYPE_P(dest_type)
+	  || POINTER_TYPE_P(dest_type)
+	  || TREE_CODE(dest_type) == OFFSET_TYPE)
 	{
 	  unsigned src_prec = inst->bitsize;
-	  unsigned dest_prec;
-	  if (TREE_CODE(dest_type) == BOOLEAN_TYPE)
-	    {
-	      dest_prec = 1;
-	      if (res_indef && res_indef->bitsize > dest_prec)
-		res_indef = bb->build_trunc(res_indef, dest_prec);
-	    }
-	  else
-	    dest_prec = bitsize_for_type(dest_type);
+	  unsigned dest_prec = bitsize_for_type(dest_type);
 	  if (src_prec > dest_prec)
 	    inst = bb->build_trunc(inst, dest_prec);
 	  else if (src_prec < dest_prec)
 	    {
 	      Op op = TYPE_UNSIGNED(src_type) ? Op::ZEXT : Op::SEXT;
 	      inst =  bb->build_inst(op, inst, dest_prec);
-	      if (indef)
-		res_indef =  bb->build_inst(op, indef, dest_prec);
 	      prov = nullptr;
 	    }
 	  if (POINTER_TYPE_P(dest_type))
@@ -2068,6 +2063,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	      if (!prov)
 		prov = extract_id(inst);
 	    }
+	  if (TREE_CODE(dest_type) == BOOLEAN_TYPE && dest_prec > 1)
+	    check_wide_bool(inst, res_indef, dest_type);
 	  return {inst, res_indef, prov};
 	}
       if (FLOAT_TYPE_P(dest_type))
@@ -2126,8 +2123,15 @@ Inst *Converter::type_convert(Inst *inst, tree src_type, tree dest_type)
   return std::get<0>(type_convert(inst, nullptr, nullptr, src_type, dest_type));
 }
 
-void check_wide_bool(Inst *inst, tree type, Basic_block *bb)
+void Converter::check_wide_bool(Inst *inst, Inst *indef, tree type)
 {
+  if (indef)
+    {
+      Inst *zero = bb->value_inst(0, indef->bitsize);
+      Inst *cond = bb->build_inst(Op::NE, indef, zero);
+      bb->build_inst(Op::UB, cond);
+    }
+
   Inst *false_inst = bb->value_inst(0, inst->bitsize);
   Inst *true_inst = bb->value_inst(1, inst->bitsize);
   if (!TYPE_UNSIGNED(type))
@@ -2142,35 +2146,14 @@ std::pair<Inst *, Inst *> Converter::process_unary_bool(enum tree_code code, Ins
 {
   assert(TREE_CODE(lhs_type) == BOOLEAN_TYPE);
 
-  if (TREE_CODE(arg1_type) == BOOLEAN_TYPE && arg1->bitsize > 1)
-    {
-      arg1 = bb->build_trunc(arg1, 1);
-      if (arg1_indef)
-	{
-	  Inst *zero = bb->value_inst(0, arg1_indef->bitsize);
-	  arg1_indef = bb->build_inst(Op::NE, arg1_indef, zero);
-	}
-    }
-
   auto [lhs, lhs_indef, _] =
     process_unary_int(code, arg1, arg1_indef, nullptr, lhs_type, arg1_type);
 
-  // GCC may use non-standard Boolean types (such as signed-boolean:8), so
-  // we may need to extend the value if we have generated a standard 1-bit
-  // Boolean for a comparison.
-  uint64_t precision = TYPE_PRECISION(lhs_type);
-  if (lhs->bitsize == 1 && precision > 1)
-    {
-      Op op = TYPE_UNSIGNED(lhs_type) ? Op::ZEXT : Op::SEXT;
-      lhs = bb->build_inst(op, lhs, precision);
-      if (lhs_indef)
-	lhs_indef = bb->build_inst(Op::SEXT, lhs_indef, precision);
-    }
   if (lhs->bitsize > 1)
-    check_wide_bool(lhs, lhs_type, bb);
+    check_wide_bool(lhs, lhs_indef, lhs_type);
 
-  assert(lhs->bitsize == precision);
-  assert(!lhs_indef || lhs_indef->bitsize == precision);
+  assert(lhs->bitsize == TYPE_PRECISION(lhs_type));
+  assert(!lhs_indef || lhs_indef->bitsize == TYPE_PRECISION(lhs_type));
   return {lhs, lhs_indef};
 }
 
@@ -2608,25 +2591,6 @@ std::pair<Inst *, Inst *> Converter::process_binary_bool(enum tree_code code, In
 {
   assert(TREE_CODE(lhs_type) == BOOLEAN_TYPE);
 
-  if (TREE_CODE(arg1_type) == BOOLEAN_TYPE && arg1->bitsize > 1)
-    {
-      arg1 = bb->build_trunc(arg1, 1);
-      if (arg1_indef)
-	{
-	  Inst *zero = bb->value_inst(0, arg1_indef->bitsize);
-	  arg1_indef = bb->build_inst(Op::NE, arg1_indef, zero);
-	}
-    }
-  if (TREE_CODE(arg2_type) == BOOLEAN_TYPE && arg2->bitsize > 1)
-    {
-      arg2 = bb->build_trunc(arg2, 1);
-      if (arg2_indef)
-	{
-	  Inst *zero = bb->value_inst(0, arg2_indef->bitsize);
-	  arg2_indef = bb->build_inst(Op::NE, arg2_indef, zero);
-	}
-    }
-
   Inst *lhs;
   Inst *lhs_indef = nullptr;
   if (FLOAT_TYPE_P(arg1_type))
@@ -2652,11 +2616,15 @@ std::pair<Inst *, Inst *> Converter::process_binary_bool(enum tree_code code, In
     {
       Op op = TYPE_UNSIGNED(lhs_type) ? Op::ZEXT : Op::SEXT;
       lhs = bb->build_inst(op, lhs, precision);
-      if (lhs_indef)
+      // process_binary_* creates an indef result of the correct bitsize
+      // for the return type, but the result for comparisons is returned
+      // as a 1-bit value. So we must check if the indef bitsize is already
+      // correct before extending.
+      if (lhs_indef && lhs_indef->bitsize == 1)
 	lhs_indef = bb->build_inst(Op::SEXT, lhs_indef, precision);
     }
-  if (lhs->bitsize > 1)
-    check_wide_bool(lhs, lhs_type, bb);
+  else if (lhs->bitsize > 1)
+    check_wide_bool(lhs, lhs_indef, lhs_type);
 
   assert(lhs->bitsize == precision);
   assert(!lhs_indef || lhs_indef->bitsize == precision);
