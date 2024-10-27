@@ -1658,7 +1658,7 @@ Inst *simplify_ule(Inst *inst)
   if (arg1 == arg2)
     return inst->bb->value_inst(1, 1);
 
-  // ule x, c -> true if c >= the maximal possible value of x
+  // ule x, c -> true if c == the maximal possible value of x
   if (is_value_m1(arg2))
     return inst->bb->value_inst(1, 1);
 
@@ -1724,19 +1724,55 @@ Inst *simplify_ult(Inst *inst)
   if (is_value_zero(arg2))
     return inst->bb->value_inst(0, 1);
 
-  // ult -1, x -> false
+  // ult c, x -> false if c == the maximal possible value of x
   if (is_value_m1(arg1))
     return inst->bb->value_inst(0, 1);
 
-  // ult (zext x), c -> false if c >= the maximal possible value of x
-  if (arg2->op == Op::ZEXT
-      && arg1->op == Op::VALUE)
+  // ult (zext x), (zext y) -> ule x, y
+  if (arg1->op == Op::ZEXT
+      && arg2->op == Op::ZEXT
+      && arg1->args[0]->bitsize == arg2->args[0]->bitsize)
     {
-      unsigned __int128 max_val = -1;
-      max_val = max_val >> (128 - arg2->args[0]->bitsize);
-      if (arg1->value() >= max_val)
-	return inst->bb->value_inst(0, 1);
+      Inst *new_inst = create_inst(Op::ULT, arg1->args[0], arg2->args[0]);
+      new_inst->insert_before(inst);
+      return new_inst;
     }
+
+  // ult (zext x), c -> ult x, (trunc c) if (zext (trunc c)) == c
+  if (arg1->op == Op::ZEXT
+      && arg2->op == Op::VALUE
+      && is_nbit_value(arg2, arg1->args[0]->bitsize))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
+      Inst *new_inst = create_inst(Op::ULT, arg1->args[0], new_const);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // ult c, (zext x) -> ult (trunc c), x if (zext (trunc c)) == c
+  if (arg1->op == Op::VALUE
+      && arg2->op == Op::ZEXT
+      && is_nbit_value(arg1, arg2->args[0]->bitsize))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg1->value(), arg2->args[0]->bitsize);
+      Inst *new_inst = create_inst(Op::ULT, new_const, arg2->args[0]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // ult (zext x), c -> true if (zext (trunc c)) != c
+  if (arg1->op == Op::ZEXT
+      && arg2->op == Op::VALUE
+      && !is_nbit_value(arg2, arg1->args[0]->bitsize))
+    return inst->bb->value_inst(1, 1);
+
+  // ult c, (zext x) -> false if (zext (trunc c)) != c
+  if (arg1->op == Op::VALUE
+      && arg2->op == Op::ZEXT
+      && !is_nbit_value(arg1, arg2->args[0]->bitsize))
+    return inst->bb->value_inst(0, 1);
 
   // ult x, (and x, y) -> false
   // ult y, (and x, y) -> false
