@@ -14,6 +14,28 @@ namespace smtgcc {
 
 namespace {
 
+bool is_nbit_value(Inst *inst, uint32_t bitsize)
+{
+  if (inst->op != Op::VALUE)
+    return false;
+
+  unsigned __int128 c = inst->value();
+  uint32_t shift = 128 - bitsize;
+  unsigned __int128 t = (c << shift) >> shift;
+  return c == t;
+}
+
+bool is_nbit_signed_value(Inst *inst, uint32_t bitsize)
+{
+  if (inst->op != Op::VALUE)
+    return false;
+
+  __int128 c = inst->signed_value();
+  uint32_t shift = 128 - bitsize;
+  __int128 t = (c << shift) >> shift;
+  return c == t;
+}
+
 bool is_boolean_sext(Inst *inst)
 {
   return inst->op == Op::SEXT && inst->args[0]->bitsize == 1;
@@ -536,19 +558,6 @@ Inst *simplify_eq(Inst *inst)
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // Comparing MININT with a sign extended value is always false.
-  // This is common in UB checks when code is negating a promoted char/short.
-  if (arg1->op == Op::SEXT
-      && arg2->op == Op::VALUE
-      && is_value_signed_min(arg2))
-    return inst->bb->value_inst(0, 1);
-
-  // Comparing a negative value with a zero extended value is always false.
-  if (arg1->op == Op::ZEXT
-      && arg2->op == Op::VALUE
-      && arg2->signed_value() < 0)
-    return inst->bb->value_inst(0, 1);
-
   // For Boolean x: x == 1 -> x
   if (arg1->bitsize == 1 && is_value_one(arg2))
     return arg1;
@@ -559,60 +568,6 @@ Inst *simplify_eq(Inst *inst)
       Inst *new_inst = create_inst(Op::NOT, arg1);
       new_inst->insert_before(inst);
       return new_inst;
-    }
-
-  // For Boolean x: (sext/zext x) == 0 -> not x
-  if ((arg1->op == Op::SEXT || arg1->op == Op::ZEXT)
-      && arg1->args[0]->bitsize == 1
-      && is_value_zero(arg2))
-    {
-      Inst *new_inst = create_inst(Op::NOT, arg1->args[0]);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // For Boolean x: (sext x) == -1 -> x
-  if (arg1->op == Op::SEXT
-      && arg1->args[0]->bitsize == 1
-      && is_value_m1(arg2))
-    return arg1->args[0];
-
-  // For Boolean x: (zext x) == 1 -> x
-  if (arg1->op == Op::ZEXT
-      && arg1->args[0]->bitsize == 1
-      && is_value_one(arg2))
-    return arg1->args[0];
-
-  // (zext x) == c -> x == c
-  if (arg1->op == Op::ZEXT && arg2->op == Op::VALUE)
-    {
-      Inst *x = arg1->args[0];
-      unsigned __int128 c = arg2->value();
-      unsigned shift = 128 - x->bitsize;
-      unsigned __int128 trunc_c = (c << shift) >> shift;
-      if (c == trunc_c)
-	{
-	  Inst *new_c = inst->bb->value_inst(trunc_c, x->bitsize);
-	  Inst *new_inst = create_inst(Op::EQ, x, new_c);
-	  new_inst->insert_before(inst);
-	  return new_inst;
-	}
-    }
-
-  // (sext x) == c -> x == c
-  if (arg1->op == Op::SEXT && arg2->op == Op::VALUE)
-    {
-      Inst *x = arg1->args[0];
-      __int128 c = arg2->value();
-      int shift = 128 - x->bitsize;
-      __int128 trunc_c = (c << shift) >> shift;
-      if (c == trunc_c)
-	{
-	  Inst *new_c = inst->bb->value_inst(trunc_c, x->bitsize);
-	  Inst *new_inst = create_inst(Op::EQ, x, new_c);
-	  new_inst->insert_before(inst);
-	  return new_inst;
-	}
     }
 
   // x == x -> true
@@ -638,6 +593,38 @@ Inst *simplify_eq(Inst *inst)
       return new_inst;
     }
 
+  // (zext x) == c -> x == c if (zext (trunc c)) == c
+  // (sext x) == c -> x == c if (sext (trunc c)) == c
+  if (arg1->op == Op::ZEXT
+      && is_nbit_value(arg2, arg1->args[0]->bitsize))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
+      Inst *new_inst = create_inst(Op::EQ, arg1->args[0], new_const);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+  if (arg1->op == Op::SEXT
+      && is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
+      Inst *new_inst = create_inst(Op::EQ, arg1->args[0], new_const);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // (zext x) == c -> 0 if (zext (trunc c)) != c
+  // (sext x) == c -> 0 if (sext (trunc c)) != c
+  if (arg1->op == Op::ZEXT
+      && arg2->op == Op::VALUE
+      && !is_nbit_value(arg2, arg1->args[0]->bitsize))
+    return inst->bb->value_inst(0, 1);
+  if (arg1->op == Op::SEXT
+      && arg2->op == Op::VALUE
+      && !is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
+    return inst->bb->value_inst(0, 1);
+
   return inst;
 }
 
@@ -658,67 +645,9 @@ Inst *simplify_ne(Inst *inst)
       return new_inst;
     }
 
-  // For Boolean x: (sext/zext x) != 0 -> x
-  if ((arg1->op == Op::SEXT || arg1->op == Op::ZEXT)
-      && arg1->args[0]->bitsize == 1
-      && is_value_zero(arg2))
-    return arg1->args[0];
-
-  // For Boolean x: (sext x) != -1 -> not x
-  if (arg1->op == Op::SEXT
-      && arg1->args[0]->bitsize == 1
-      && is_value_m1(arg2))
-    {
-      Inst *new_inst = create_inst(Op::NOT, arg1->args[0]);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // For Boolean x: (zext x) != 1 -> not x
-  if (arg1->op == Op::ZEXT
-      && arg1->args[0]->bitsize == 1
-      && is_value_one(arg2))
-    {
-      Inst *new_inst = create_inst(Op::NOT, arg1->args[0]);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
   // x != x -> false
   if (arg1 == arg2)
     return inst->bb->value_inst(0, 1);
-
-  // (zext x) != c -> x == c
-  if (arg1->op == Op::ZEXT && arg2->op == Op::VALUE)
-    {
-      Inst *x = arg1->args[0];
-      unsigned __int128 c = arg2->value();
-      unsigned shift = 128 - x->bitsize;
-      unsigned __int128 trunc_c = (c << shift) >> shift;
-      if (c == trunc_c)
-	{
-	  Inst *new_c = inst->bb->value_inst(trunc_c, x->bitsize);
-	  Inst *new_inst = create_inst(Op::NE, x, new_c);
-	  new_inst->insert_before(inst);
-	  return new_inst;
-	}
-    }
-
-  // (sext x) != c -> x == c
-  if (arg1->op == Op::SEXT && arg2->op == Op::VALUE)
-    {
-      Inst *x = arg1->args[0];
-      __int128 c = arg2->value();
-      int shift = 128 - x->bitsize;
-      __int128 trunc_c = (c << shift) >> shift;
-      if (c == trunc_c)
-	{
-	  Inst *new_c = inst->bb->value_inst(trunc_c, x->bitsize);
-	  Inst *new_inst = create_inst(Op::NE, x, new_c);
-	  new_inst->insert_before(inst);
-	  return new_inst;
-	}
-    }
 
   // Comparing chains of identical elements by 0 is changed to only
   // compare one element with 0. For example,
@@ -759,6 +688,38 @@ Inst *simplify_ne(Inst *inst)
       new_inst->insert_before(inst);
       return new_inst;
     }
+
+  // (zext x) != c -> x != c if (zext (trunc c)) == c
+  // (sext x) != c -> x != c if (sext (trunc c)) == c
+  if (arg1->op == Op::ZEXT
+      && is_nbit_value(arg2, arg1->args[0]->bitsize))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
+      Inst *new_inst = create_inst(Op::NE, arg1->args[0], new_const);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+  if (arg1->op == Op::SEXT
+      && is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
+      Inst *new_inst = create_inst(Op::NE, arg1->args[0], new_const);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // (zext x) != c -> 1 if (zext (trunc c)) != c
+  // (sext x) != c -> 1 if (sext (trunc c)) != c
+  if (arg1->op == Op::ZEXT
+      && arg2->op == Op::VALUE
+      && !is_nbit_value(arg2, arg1->args[0]->bitsize))
+    return inst->bb->value_inst(1, 1);
+  if (arg1->op == Op::SEXT
+      && arg2->op == Op::VALUE
+      && !is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
+    return inst->bb->value_inst(1, 1);
 
   return inst;
 }
