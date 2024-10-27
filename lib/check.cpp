@@ -146,6 +146,7 @@ class Converter {
   bool may_alias(Inst *p1, Inst *p2);
   void convert(Basic_block *bb, Inst *inst, Function_role role);
 
+  Inst *get_cmp_inst(const Cse_key& key);
   Inst *get_inst(const Cse_key& key, bool may_add_insts = true);
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   Inst *update_key2inst(Inst *inst);
@@ -171,6 +172,34 @@ public:
   Function *dest_func = nullptr;
 };
 
+Inst *Converter::get_cmp_inst(const Cse_key& key)
+{
+  Op op;
+  switch (key.op)
+    {
+    case Op::SLE:
+      op = Op::SLT;
+      break;
+    case Op::SLT:
+      op = Op::SLE;
+      break;
+    case Op::ULE:
+      op = Op::ULT;
+      break;
+    case Op::ULT:
+      op = Op::ULE;
+      break;
+    default:
+      return nullptr;
+    }
+
+  Cse_key tmp_key(op, key.arg2, key.arg1);
+  Inst *inst = get_inst(tmp_key, false);
+  if (inst)
+    return build_inst(Op::NOT, inst);
+  return nullptr;
+}
+
 Inst *Converter::get_inst(const Cse_key& key, bool may_add_insts)
 {
   auto I = key2inst.find(key);
@@ -186,59 +215,13 @@ Inst *Converter::get_inst(const Cse_key& key, bool may_add_insts)
 	return I->second;
     }
 
-  // Check if this is a negation of an existing comparison.
+  // Check if this is a negation of an existing comparison instruction.
   if (may_add_insts
-      && (inst_info[(int)key.op].iclass == Inst_class::icomparison
-	  || key.op == Op::FEQ
-	  || key.op == Op::FNE))
+      && inst_info[(int)key.op].iclass == Inst_class::icomparison)
     {
-      Op op;
-      switch (key.op)
-	{
-	case Op::EQ:
-	  op = Op::NE;
-	  break;
-	case Op::NE:
-	  op = Op::EQ;
-	  break;
-	case Op::SGE:
-	  op = Op::SLT;
-	  break;
-	case Op::SGT:
-	  op = Op::SLE;
-	  break;
-	case Op::SLE:
-	  op = Op::SGT;
-	  break;
-	case Op::SLT:
-	  op = Op::SGE;
-	  break;
-	case Op::UGE:
-	  op = Op::ULT;
-	  break;
-	case Op::UGT:
-	  op = Op::ULE;
-	  break;
-	case Op::ULE:
-	  op = Op::UGT;
-	  break;
-	case Op::ULT:
-	  op = Op::UGE;
-	  break;
-	case Op::FEQ:
-	  op = Op::FNE;
-	  break;
-	case Op::FNE:
-	  op = Op::FEQ;
-	  break;
-	default:
-	  throw Not_implemented("Converter::get_inst: unknown comparison");
-	}
-      Cse_key tmp_key = key;
-      tmp_key.op = op;
-      Inst *inst = get_inst(tmp_key, false);
+      Inst *inst = get_cmp_inst(key);
       if (inst)
-	return build_inst(Op::NOT, inst);
+	return inst;
     }
 
   // CSE min(x,y) with min(y,x) and max(x,y) with max(y,x).
@@ -309,13 +292,6 @@ Inst *Converter::update_key2inst(Inst *inst)
 Inst *Converter::simplify(Inst *inst)
 {
   if (!run_simplify_inst)
-    return inst;
-
-  // The canonical form for comparisons in the converter is using
-  // Op::NOT for the negation of a comparison instead of changing the
-  // opcode, so we do not want simplify_inst optimizing this to a plain
-  // comparison.
-  if (inst->op == Op::NOT && inst->args[0]->iclass() == Inst_class::icomparison)
     return inst;
 
   Inst *orig_inst = inst;
