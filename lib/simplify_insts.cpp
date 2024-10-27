@@ -633,95 +633,13 @@ Inst *simplify_ne(Inst *inst)
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // For Boolean x: x != 0 -> x
-  if (arg1->bitsize == 1 && is_value_zero(arg2))
-    return arg1;
-
-  // For Boolean x: x != 1 -> not x
-  if (arg1->bitsize == 1 && is_value_one(arg2))
-    {
-      Inst *new_inst = create_inst(Op::NOT, arg1);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // x != x -> false
-  if (arg1 == arg2)
-    return inst->bb->value_inst(0, 1);
-
-  // Comparing chains of identical elements by 0 is changed to only
-  // compare one element with 0. For example,
-  //   (concat (concat x, x), x) != 0 -> x != 0
-  // This is common in checks for uninitialized memory.
-  if (arg1->op == Op::CONCAT && is_value_zero(arg2))
-    {
-      std::vector<Inst *> elems;
-      flatten(arg1, elems);
-      bool are_identical =
-	std::all_of(elems.begin(), elems.end(),
-		    [&](auto elem) { return elem == elems.front(); });
-      if (are_identical)
-	{
-	  Inst *elem = elems.front();
-	  Inst *zero = inst->bb->value_inst(0, elem->bitsize);
-	  Inst *new_inst = create_inst(Op::NE, elem, zero);
-	  new_inst->insert_before(inst);
-	  return new_inst;
-	}
-    }
-
-  // (x - y) != 0 -> x != y
-  if (arg1->op == Op::SUB && is_value_zero(arg2))
-    {
-      Inst *new_inst = create_inst(Op::NE, arg1->args[0], arg1->args[1]);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // (zext x) != (zext y) -> x != y
-  // (sext x) != (sext y) -> x != y
-  if ((arg1->op == Op::ZEXT || arg1->op == Op::SEXT)
-      && arg1->op == arg2->op
-      && arg1->args[0]->bitsize == arg2->args[0]->bitsize)
-    {
-      Inst *new_inst = create_inst(Op::NE, arg1->args[0], arg2->args[0]);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // (zext x) != c -> x != c if (zext (trunc c)) == c
-  // (sext x) != c -> x != c if (sext (trunc c)) == c
-  if (arg1->op == Op::ZEXT
-      && is_nbit_value(arg2, arg1->args[0]->bitsize))
-    {
-      Inst *new_const =
-	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
-      Inst *new_inst = create_inst(Op::NE, arg1->args[0], new_const);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-  if (arg1->op == Op::SEXT
-      && is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
-    {
-      Inst *new_const =
-	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
-      Inst *new_inst = create_inst(Op::NE, arg1->args[0], new_const);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // (zext x) != c -> 1 if (zext (trunc c)) != c
-  // (sext x) != c -> 1 if (sext (trunc c)) != c
-  if (arg1->op == Op::ZEXT
-      && arg2->op == Op::VALUE
-      && !is_nbit_value(arg2, arg1->args[0]->bitsize))
-    return inst->bb->value_inst(1, 1);
-  if (arg1->op == Op::SEXT
-      && arg2->op == Op::VALUE
-      && !is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
-    return inst->bb->value_inst(1, 1);
-
-  return inst;
+  // ne x, y -> not (eq x, y)
+  Inst *new_inst1 = create_inst(Op::EQ, arg1, arg2);
+  new_inst1->insert_before(inst);
+  new_inst1 = simplify_inst(new_inst1);
+  Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
+  new_inst2->insert_before(inst);
+  return new_inst2;
 }
 
 Inst *simplify_ashr(Inst *inst)
@@ -1267,6 +1185,20 @@ Inst *simplify_fgt(Inst *inst)
   Inst *new_inst = create_inst(Op::FLT, arg2, arg1);
   new_inst->insert_before(inst);
   return new_inst;
+}
+
+Inst *simplify_fne(Inst *inst)
+{
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+
+  // fne x, y -> not (feq x, y)
+  Inst *new_inst1 = create_inst(Op::FEQ, arg1, arg2);
+  new_inst1->insert_before(inst);
+  new_inst1 = simplify_inst(new_inst1);
+  Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
+  new_inst2->insert_before(inst);
+  return new_inst2;
 }
 
 Inst *simplify_sge(Inst *inst)
@@ -2432,6 +2364,9 @@ Inst *simplify_inst(Inst *inst)
       break;
     case Op::FGT:
       inst = simplify_fgt(inst);
+      break;
+    case Op::FNE:
+      inst = simplify_fne(inst);
       break;
     case Op::SEXT:
       inst = simplify_sext(inst);
