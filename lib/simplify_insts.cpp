@@ -1384,54 +1384,95 @@ Inst *simplify_slt(Inst *inst)
   if (is_value_signed_max(arg1))
     return inst->bb->value_inst(0, 1);
 
-  // For Boolean x: slt c, (zext x) -> false if c is a constant > 0.
-  // This is rather common in UB checks of range information where a Boolean
-  // has been extended to an integer.
-  if (arg2->op == Op::ZEXT
-      && arg2->args[0]->bitsize == 1
-      && arg1->op == Op::VALUE
-      && arg1->signed_value() > 0)
+  // slt (zext x), c -> false if c <= 0
+  if (arg1->op == Op::ZEXT
+      && arg2->op == Op::VALUE
+      && arg2->signed_value() <= 0)
     return inst->bb->value_inst(0, 1);
 
-  // For Boolean x: slt (zext x), c -> false if c is a constant <= 0.
-  if (arg2->op == Op::VALUE
-      && arg2->signed_value() <= 0
-      && arg1->op == Op::ZEXT
-      && arg1->args[0]->bitsize == 1)
-    return inst->bb->value_inst(0, 1);
-
-  // slt (sext x), c -> false if c <= the minimal possible value of x
-  if (arg1->op == Op::SEXT && arg2->op == Op::VALUE)
-    {
-      __int128 min_val = 1;
-      min_val = min_val << 127;
-      min_val = min_val >> (128 - arg1->args[0]->bitsize);
-      if (arg2->signed_value() <= min_val)
-	return inst->bb->value_inst(0, 1);
-    }
-
-  // slt c, (sext x) -> false if c >= the maximal possible value of x
+  // slt c, (zext x) -> true if c < 0
   if (arg1->op == Op::VALUE
-      && arg2->op == Op::SEXT
-      && arg2->args[0]->bitsize > 1)
-    {
-      unsigned __int128 max_val = -1;
-      max_val = max_val >> (129 - arg2->args[0]->bitsize);
-      if (arg1->signed_value() >= (__int128)max_val)
-	return inst->bb->value_inst(0, 1);
-    }
-
-  // slt (zext x), 0 -> false
-  if (arg1->op == Op::ZEXT && is_value_zero(arg2))
-    return inst->bb->value_inst(0, 1);
-
+      && arg1->signed_value() < 0
+      && arg2->op == Op::ZEXT)
+    return inst->bb->value_inst(1, 1);
 
   // slt c, (zext x) -> false if c >= (zext -1)
-  if (arg2->bitsize <= 128
-      && arg2->op == Op::ZEXT
+  if (arg2->op == Op::ZEXT
       && arg1->op == Op::VALUE
       && arg1->signed_value() >= (((__int128)1 << arg2->args[0]->bitsize) - 1))
     return inst->bb->value_inst(0, 1);
+
+  // slt (zext x), (zext y) -> ult x, y
+  if (arg1->op == Op::ZEXT
+      && arg2->op == Op::ZEXT
+      && arg1->args[0]->bitsize == arg2->args[0]->bitsize)
+    {
+      Inst *new_inst = create_inst(Op::ULT, arg1->args[0], arg2->args[0]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // slt (sext x), (sext y) -> slt x, y
+  if (arg1->op == Op::SEXT
+      && arg2->op == Op::SEXT
+      && arg1->args[0]->bitsize == arg2->args[0]->bitsize)
+    {
+      Inst *new_inst = create_inst(Op::SLT, arg1->args[0], arg2->args[0]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // slt (sext x), c -> slt x, (trunc c) if (sext (trunc c)) == c
+  if (arg1->op == Op::SEXT
+      && arg2->op == Op::VALUE
+      && is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
+      Inst *new_inst = create_inst(Op::SLT, arg1->args[0], new_const);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // slt c, (sext x) -> slt (trunc c), x if (sext (trunc c)) == c
+  if (arg1->op == Op::VALUE
+      && arg2->op == Op::SEXT
+      && is_nbit_signed_value(arg1, arg2->args[0]->bitsize))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg1->value(), arg2->args[0]->bitsize);
+      Inst *new_inst = create_inst(Op::SLT, new_const, arg2->args[0]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // slt (sext x), c -> true if (sext (trunc c)) != c && c > 0
+  if (arg1->op == Op::SEXT
+      && arg2->op == Op::VALUE
+      && arg2->signed_value() > 0
+      && !is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
+    return inst->bb->value_inst(1, 1);
+
+  // slt (sext x), c -> false if (sext (trunc c)) != c && c < 0
+  if (arg1->op == Op::SEXT
+      && arg2->op == Op::VALUE
+      && arg2->signed_value() < 0
+      && !is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
+    return inst->bb->value_inst(0, 1);
+
+  // slt c, (sext x) -> false if (zext (trunc c)) != c && c > 0
+  if (arg1->op == Op::VALUE
+      && arg1->signed_value() > 0
+      && arg2->op == Op::SEXT
+      && !is_nbit_signed_value(arg1, arg2->args[0]->bitsize))
+    return inst->bb->value_inst(0, 1);
+
+  // slt c, (sext x) -> true if (zext (trunc c)) != c && c < 0
+  if (arg1->op == Op::VALUE
+      && arg1->signed_value() < 0
+      && arg2->op == Op::SEXT
+      && !is_nbit_signed_value(arg1, arg2->args[0]->bitsize))
+    return inst->bb->value_inst(1, 1);
 
   return inst;
 }
