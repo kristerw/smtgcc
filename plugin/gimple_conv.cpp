@@ -4251,6 +4251,17 @@ void Converter::process_cfn_copysign(gimple *stmt)
   Inst *signbit = bb->build_extract_bit(arg2, arg2->bitsize - 1);
   Inst *res = bb->build_trunc(arg1, arg1->bitsize - 1);
   res = bb->build_inst(Op::CONCAT, signbit, res);
+
+  // SMT solvers has only one NaN value, so NEGATE_EXPR of NaN does not
+  // change the value. This leads to incorrect reports of miscompilations
+  // for transformations like -ABS_EXPR(x) -> .COPYSIGN(x, -1.0) because
+  // copysign has introduceed a non-canonical NaN.
+  // For now, treat copying the sign to NaN as always produce the original
+  // canonical NaN.
+  // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
+  Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
+  res = bb->build_inst(Op::ITE, is_nan, arg1, res);
+
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
     {
@@ -5258,6 +5269,13 @@ void Converter::process_cfn_xorsign(gimple *stmt)
   Inst *signbit = bb->build_inst(Op::XOR, signbit1, signbit2);
   Inst *res = bb->build_trunc(arg1, arg1->bitsize - 1);
   res = bb->build_inst(Op::CONCAT, signbit, res);
+
+  // For now, treat copying the sign to NaN as always produce the original
+  // canonical NaN.
+  // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
+  Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
+  res = bb->build_inst(Op::ITE, is_nan, arg1, res);
+
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
     {
