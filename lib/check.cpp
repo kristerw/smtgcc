@@ -150,6 +150,7 @@ class Converter {
   Inst *get_inst(const Cse_key& key, bool may_add_insts = true);
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   Inst *update_key2inst(Inst *inst);
+  bool is_in_key2inst(Inst *inst);
   Inst *simplify(Inst *inst);
   Inst *build_inst(Op op);
   Inst *build_inst(Op op, Inst *arg, bool insert_after = false);
@@ -274,9 +275,42 @@ Inst *Converter::update_key2inst(Inst *inst)
   return inst;
 }
 
+bool Converter::is_in_key2inst(Inst *inst)
+{
+  Cse_key key(inst->op);
+  switch (inst->iclass())
+    {
+    case Inst_class::nullary:
+      break;
+    case Inst_class::iunary:
+    case Inst_class::funary:
+      key.arg1 = inst->args[0];
+      break;
+    case Inst_class::icomparison:
+    case Inst_class::fcomparison:
+    case Inst_class::ibinary:
+    case Inst_class::fbinary:
+    case Inst_class::conv:
+      key.arg1 = inst->args[0];
+      key.arg2 = inst->args[1];
+      break;
+    case Inst_class::ternary:
+      key.arg1 = inst->args[0];
+      key.arg2 = inst->args[1];
+      key.arg3 = inst->args[2];
+      break;
+    default:
+      return false;
+    }
+
+  return key2inst.contains(key);
+}
+
 Inst *Converter::simplify(Inst *inst)
 {
   if (!run_simplify_inst)
+    return inst;
+  if (!inst->has_lhs())
     return inst;
 
   Inst *orig_inst = inst;
@@ -290,6 +324,22 @@ Inst *Converter::simplify(Inst *inst)
   // The instructions are always inserted right before the instruction
   // being simplified, so the instructions to examine are between the
   // 'prev_inst' and 'orig_inst'.
+  //
+  // The simplification may add new instructions, which in turn are simplified.
+  // This leaves unused instructions in the function, so we must remove them
+  // before adding the new instructions; otherwise, we may CSE subsequent
+  // instructions with these unoptimized instructions.
+  for (Inst *i = orig_inst->prev; i != prev_inst;)
+    {
+      Inst *prev = i->prev;
+      assert(i->has_lhs());
+      if (i != inst
+	  && i->op != Op::VALUE
+	  && i->used_by.empty()
+	  && !is_in_key2inst(inst))
+	destroy_instruction(i);
+      i = prev;
+    }
   for (Inst *i = prev_inst->next; i != orig_inst; i = i->next)
     {
       if (i == inst)
