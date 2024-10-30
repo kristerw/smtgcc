@@ -41,6 +41,11 @@ bool is_boolean_sext(Inst *inst)
   return inst->op == Op::SEXT && inst->args[0]->bitsize == 1;
 }
 
+bool is_boolean_zext(Inst *inst)
+{
+  return inst->op == Op::ZEXT && inst->args[0]->bitsize == 1;
+}
+
 bool is_ite_min(Inst *inst)
 {
   if (inst->op != Op::ITE)
@@ -2196,6 +2201,115 @@ void destroy(Inst *inst)
   destroy_instruction(inst);
 }
 
+std::tuple<Inst *, Inst *, Inst *> get_const_ite(Inst *inst)
+{
+  if (inst->op == Op::ITE
+      && inst->args[1]->op == Op::VALUE
+      && inst->args[2]->op == Op::VALUE)
+    return {inst->args[0], inst->args[1], inst->args[2]};
+  if (is_boolean_sext(inst))
+    {
+      Inst *val1 = inst->bb->value_inst(-1, inst->bitsize);
+      Inst *val2 = inst->bb->value_inst(0, inst->bitsize);
+      return {inst->args[0], val1, val2};
+    }
+  if (is_boolean_zext(inst))
+    {
+      Inst *val1 = inst->bb->value_inst(1, inst->bitsize);
+      Inst *val2 = inst->bb->value_inst(0, inst->bitsize);
+      return {inst->args[0], val1, val2};
+    }
+  return {nullptr, nullptr, nullptr};
+}
+
+// If one argument is an ITE instruction where both values are
+// constants, and the other argument is also a constant, then
+// the instruction is constant-folded (if possible) into the ITE
+// instruction. Here, "zext x" of a boolean x is treated as an
+// ITE instruction "ite x, 1, 0", and "sext x" is treated as
+// "ite x, -1, 0".
+Inst *simplify_over_ite_arg(Inst *inst)
+{
+  if (!inst->has_lhs())
+    return inst;
+
+  switch (inst->iclass())
+    {
+    case Inst_class::iunary:
+      {
+	auto [cond, val1, val2] = get_const_ite(inst->args[0]);
+	if (cond)
+	  {
+	    val1 = create_inst(inst->op, val1);
+	    val1->insert_before(inst);
+	    val1 = simplify_inst(val1);
+	    val2 = create_inst(inst->op, val2);
+	    val2->insert_before(inst);
+	    val2 = simplify_inst(val2);
+	    Inst *ite = create_inst(Op::ITE, cond, val1, val2);
+	    ite->insert_before(inst);
+	    ite = simplify_inst(ite);
+	    return ite;
+	  }
+      }
+      break;
+    case Inst_class::ibinary:
+      if (inst->args[1]->op == Op::VALUE)
+      {
+	auto [cond, val1, val2] = get_const_ite(inst->args[0]);
+	if (cond)
+	  {
+	    val1 = create_inst(inst->op, val1, inst->args[1]);
+	    val1->insert_before(inst);
+	    val1 = simplify_inst(val1);
+	    val2 = create_inst(inst->op, val2, inst->args[1]);
+	    val2->insert_before(inst);
+	    val2 = simplify_inst(val2);
+	    Inst *ite = create_inst(Op::ITE, cond, val1, val2);
+	    ite->insert_before(inst);
+	    ite = simplify_inst(ite);
+	    return ite;
+	  }
+      }
+      break;
+    default:
+      break;
+    }
+
+  // It makes sense to transform some binary instructions even if the other
+  // argument is not constant. For example, AND if one of the ITE values
+  // is 0 or -1.
+  if (inst->op == Op::AND)
+    {
+      Inst *arg1 = inst->args[0];
+      Inst *arg2 = inst->args[1];
+      if (arg1->op != Op::ITE
+	  && !is_boolean_sext(arg1)
+	  && !is_boolean_zext(arg1))
+	std::swap(arg1, arg2);
+      auto [cond, val1, val2] = get_const_ite(arg1);
+      if (cond
+	  && (val1->value() == 0
+	      || val2->value() == 0
+	      || val1->signed_value() == -1
+	      || val2->signed_value() == -1))
+	{
+	  val1 = create_inst(inst->op, val1, arg2);
+	  val1->insert_before(inst);
+	  val1 = simplify_inst(val1);
+	  val2 = create_inst(inst->op, val2, arg2);
+	  val2->insert_before(inst);
+	  val2 = simplify_inst(val2);
+	  Inst *ite = create_inst(Op::ITE, cond, val1, val2);
+	  ite->insert_before(inst);
+	  ite = simplify_inst(ite);
+	  return ite;
+	}
+    }
+
+  return inst;
+}
+
 } // end anonymous namespace
 
 Inst *constant_fold_inst(Inst *inst)
@@ -2419,6 +2533,8 @@ Inst *simplify_inst(Inst *inst)
 
   if (inst != original_inst)
     inst = simplify_inst(inst);
+
+  inst = simplify_over_ite_arg(inst);
 
   return inst;
 }
