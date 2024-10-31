@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <functional>
 #include <limits>
 #include <map>
 #include <set>
@@ -152,6 +153,7 @@ struct Converter {
   void process_constructor(tree lhs, tree rhs);
   void process_gimple_assign(gimple *stmt);
   void process_gimple_asm(gimple *stmt);
+  void process_cfn_binary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem);
   void process_cfn_add_overflow(gimple *stmt);
   void process_cfn_bit_andn(gimple *stmt);
   void process_cfn_bit_iorn(gimple *stmt);
@@ -3853,6 +3855,69 @@ void Converter::process_gimple_asm(gimple *stmt)
     throw Not_implemented("process_function: gimple_asm");
 }
 
+void Converter::process_cfn_binary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem)
+{
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  assert(VECTOR_TYPE_P(TREE_TYPE(arg2_expr)) == VECTOR_TYPE_P(arg1_type));
+  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
+
+  uint32_t nof_elem;
+  uint32_t elem_bitsize;
+  tree elem_type;
+  if (VECTOR_TYPE_P(arg1_type))
+    {
+      elem_type = TREE_TYPE(arg1_type);
+      elem_bitsize = bitsize_for_type(elem_type);
+      nof_elem = bitsize_for_type(arg1_type) / elem_bitsize;
+    }
+  else
+    {
+      elem_type = arg1_type;
+      elem_bitsize = arg1->bitsize;
+      nof_elem = 1;
+    }
+
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+  assert(VECTOR_TYPE_P(TREE_TYPE(lhs)) == VECTOR_TYPE_P(arg1_type));
+
+  Inst *res = nullptr;
+  Inst *res_indef = nullptr;
+  for (uint32_t j = 0; j < nof_elem; j++)
+    {
+      Inst *elem1 = extract_vec_elem(bb, arg1, elem_bitsize, j);
+      Inst *elem2 = extract_vec_elem(bb, arg2, elem_bitsize, j);
+      Inst *elem1_indef = nullptr;
+      if (arg1_indef)
+	elem1_indef = extract_vec_elem(bb, arg1_indef, elem_bitsize, j);
+      Inst *elem2_indef = nullptr;
+      if (arg2_indef)
+	elem2_indef = extract_vec_elem(bb, arg2_indef, elem_bitsize, j);
+
+      auto [inst, indef] =
+	gen_elem(elem1, elem1_indef, elem2, elem2_indef, elem_type);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+      if (indef)
+	{
+	  if (res_indef)
+	    res_indef = bb->build_inst(Op::CONCAT, indef, res_indef);
+	  else
+	    res_indef = indef;
+	}
+    }
+  constrain_range(bb, lhs, res);
+  tree2instruction.insert({lhs, res});
+  if (res_indef)
+    tree2indef.insert({lhs, res_indef});
+}
+
 void Converter::process_cfn_add_overflow(gimple *stmt)
 {
   tree arg1_expr = gimple_call_arg(stmt, 0);
@@ -3909,78 +3974,36 @@ void Converter::process_cfn_add_overflow(gimple *stmt)
 
 void Converter::process_cfn_bit_andn(gimple *stmt)
 {
-  tree lhs = gimple_call_lhs(stmt);
-  if (!lhs)
-    return;
-  auto [arg1, arg1_indef] =
-    tree2inst_indef(gimple_call_arg(stmt, 0));
-  auto [arg2, arg2_indef] =
-    tree2inst_indef(gimple_call_arg(stmt, 1));
-
-  arg2 = bb->build_inst(Op::NOT, arg2);
-  Inst *res_indef = nullptr;
-  if (arg1_indef || arg2_indef)
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
     {
-      if (!arg1_indef)
-	arg1_indef = bb->value_inst(0, arg1->bitsize);
-      if (!arg2_indef)
-	arg2_indef = bb->value_inst(0, arg2->bitsize);
-
-      // (0 & uninitialized) is 0.
-      // (1 & uninitialized) is uninitialized.
-      Inst *mask =
-	      bb->build_inst(Op::AND,
-			     bb->build_inst(Op::OR, arg1, arg1_indef),
-			     bb->build_inst(Op::OR, arg2, arg2_indef));
-      res_indef =
-	bb->build_inst(Op::AND,
-		       bb->build_inst(Op::OR, arg1_indef, arg2_indef),
-		       mask);
-    }
-  Inst *res = bb->build_inst(Op::AND, arg1, arg2);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+      elem2 = bb->build_inst(Op::NOT, elem2);
+      auto [res, res_indef, _] =
+      process_binary_int(BIT_AND_EXPR, false,
+			 elem1, elem1_indef, nullptr,
+			 elem2, elem2_indef, nullptr,
+			 elem_type, elem_type, elem_type);
+      return {res, res_indef};
+    };
+  process_cfn_binary(stmt, gen_elem);
 }
 
 void Converter::process_cfn_bit_iorn(gimple *stmt)
 {
-  tree lhs = gimple_call_lhs(stmt);
-  if (!lhs)
-    return;
-  auto [arg1, arg1_indef] =
-    tree2inst_indef(gimple_call_arg(stmt, 0));
-  auto [arg2, arg2_indef] =
-    tree2inst_indef(gimple_call_arg(stmt, 1));
-
-  arg2 = bb->build_inst(Op::NOT, arg2);
-  Inst *res_indef = nullptr;
-  if (arg1_indef || arg2_indef)
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
     {
-      if (!arg1_indef)
-	arg1_indef = bb->value_inst(0, arg1->bitsize);
-      if (!arg2_indef)
-	arg2_indef = bb->value_inst(0, arg2->bitsize);
-
-      // (0 | uninitialized) is uninitialized.
-      // (1 | uninitialized) is 1.
-      Inst *mask =
-	bb->build_inst(Op::AND,
-		       bb->build_inst(Op::OR,
-				      bb->build_inst(Op::NOT, arg1),
-				      arg1_indef),
-		       bb->build_inst(Op::OR,
-				      bb->build_inst(Op::NOT, arg2),
-				      arg2_indef));
-      res_indef =
-	bb->build_inst(Op::AND,
-		       bb->build_inst(Op::OR, arg1_indef, arg2_indef),
-		       mask);
-    }
-  Inst *res = bb->build_inst(Op::OR, arg1, arg2);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+      elem2 = bb->build_inst(Op::NOT, elem2);
+      auto [res, res_indef, _] =
+      process_binary_int(BIT_IOR_EXPR, false,
+			 elem1, elem1_indef, nullptr,
+			 elem2, elem2_indef, nullptr,
+			 elem_type, elem_type, elem_type);
+      return {res, res_indef};
+    };
+  process_cfn_binary(stmt, gen_elem);
 }
 
 void Converter::process_cfn_assume_aligned(gimple *stmt)
