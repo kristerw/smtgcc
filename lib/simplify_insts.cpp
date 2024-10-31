@@ -394,6 +394,25 @@ Inst *simplify_and(Inst *inst)
       return new_inst2;
     }
 
+  // and (sext x), c -> sext (and x, (trunc c))
+  // and (zext x), c -> zext (and x, (trunc c))
+  if ((arg1->op == Op::SEXT
+       && arg2->op == Op::VALUE
+       && is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
+      || (arg1->op == Op::ZEXT
+	  && arg2->op == Op::VALUE
+	  && is_nbit_value(arg2, arg1->args[0]->bitsize)))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
+      Inst *new_inst1 = create_inst(Op::AND, arg1->args[0], new_const);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(arg1->op, new_inst1, arg1->args[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
   // and (eq x, y), (ne x, y) -> 0
   // and (ne x, y), (eq x, y) -> 0
   if (((arg1->op == Op::EQ && arg2->op == Op::NE)
@@ -843,6 +862,25 @@ Inst *simplify_or(Inst *inst)
       return new_inst2;
     }
 
+  // or (sext x), c -> sext (and x, (trunc c))
+  // or (zext x), c -> zext (and x, (trunc c))
+  if ((arg1->op == Op::SEXT
+       && arg2->op == Op::VALUE
+       && is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
+      || (arg1->op == Op::ZEXT
+	  && arg2->op == Op::VALUE
+	  && is_nbit_value(arg2, arg1->args[0]->bitsize)))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
+      Inst *new_inst1 = create_inst(Op::OR, arg1->args[0], new_const);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(arg1->op, new_inst1, arg1->args[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
   // or (not x), x -> -1
   // or x, (not x) -> -1
   if (arg1->op == Op::NOT && arg1->args[0] == arg2)
@@ -887,6 +925,25 @@ Inst *simplify_xor(Inst *inst)
       && arg1->args[0]->bitsize == arg2->args[0]->bitsize)
     {
       Inst *new_inst1 = create_inst(Op::XOR, arg1->args[0], arg2->args[0]);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(arg1->op, new_inst1, arg1->args[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  // xor (sext x), c -> sext (and x, (trunc c))
+  // xor (zext x), c -> zext (and x, (trunc c))
+  if ((arg1->op == Op::SEXT
+       && arg2->op == Op::VALUE
+       && is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
+      || (arg1->op == Op::ZEXT
+	  && arg2->op == Op::VALUE
+	  && is_nbit_value(arg2, arg1->args[0]->bitsize)))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
+      Inst *new_inst1 = create_inst(Op::XOR, arg1->args[0], new_const);
       new_inst1->insert_before(inst);
       new_inst1 = simplify_inst(new_inst1);
       Inst *new_inst2 = create_inst(arg1->op, new_inst1, arg1->args[1]);
@@ -1619,6 +1676,59 @@ Inst *simplify_ite(Inst *inst)
       Inst *new_inst = create_inst(Op::OR, arg1, arg3);
       new_inst->insert_before(inst);
       return new_inst;
+    }
+
+  // ite x, (sext y), (sext z) -> sext (ite x, y, z)
+  // ite x, (zext y), (zext z) -> zext (ite x, y, z)
+  if ((arg2->op == Op::SEXT || arg2->op == Op::ZEXT)
+      && arg3->op == arg2->op
+      && arg2->args[0]->bitsize == arg3->args[0]->bitsize)
+    {
+      Inst *new_inst1 =
+	create_inst(Op::ITE, arg1, arg2->args[0], arg3->args[0]);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(arg2->op, new_inst1, arg2->args[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  // ite x, (sext y), c -> sext (ite x, y, (trunc c))
+  // ite x, (zext y), c -> zext (ite x, y, (trunc c))
+  if (arg3->op == Op::VALUE
+      && ((arg2->op == Op::SEXT
+	   && is_nbit_signed_value(arg3, arg2->args[0]->bitsize))
+	  || (arg2->op == Op::ZEXT
+	      && is_nbit_value(arg3, arg2->args[0]->bitsize))))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg3->value(), arg2->args[0]->bitsize);
+      Inst *new_inst1 =
+	create_inst(Op::ITE, arg1, arg2->args[0], new_const);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(arg2->op, new_inst1, arg2->args[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  // ite x, c, (sext y) -> sext (ite x, (trunc c), y)
+  // ite x, c, (zext y) -> zext (ite x, (trunc c), y)
+  if (arg2->op == Op::VALUE
+      && ((arg3->op == Op::SEXT
+	   && is_nbit_signed_value(arg2, arg3->args[0]->bitsize))
+	  || (arg3->op == Op::ZEXT
+	      && is_nbit_value(arg2, arg3->args[0]->bitsize))))
+    {
+      Inst *new_const =
+	inst->bb->value_inst(arg2->value(), arg3->args[0]->bitsize);
+      Inst *new_inst1 =
+	create_inst(Op::ITE, arg1, new_const, arg3->args[0]);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(arg3->op, new_inst1, arg3->args[1]);
+      new_inst2->insert_before(inst);
+      return new_inst2;
     }
 
   // Canonicalize ite doing min/max as
