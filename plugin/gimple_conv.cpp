@@ -180,6 +180,8 @@ struct Converter {
   void process_cfn_nan(gimple *stmt);
   void process_cfn_parity(gimple *stmt);
   void process_cfn_popcount(gimple *stmt);
+  void process_cfn_sat_add(gimple *stmt);
+  void process_cfn_sat_sub(gimple *stmt);
   void process_cfn_signbit(gimple *stmt);
   void process_cfn_sub_overflow(gimple *stmt);
   void process_cfn_reduc(gimple *stmt);
@@ -4940,6 +4942,54 @@ void Converter::process_cfn_popcount(gimple *stmt)
   tree2instruction.insert({lhs, res});
 }
 
+void Converter::process_cfn_sat_add(gimple *stmt)
+{
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      Inst *res;
+      Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      if (TYPE_UNSIGNED(elem_type))
+	{
+	  res = bb->build_inst(Op::ADD, elem1, elem2);
+	  Inst *cmp = bb->build_inst(Op::ULT, res, elem1);
+	  Inst *m1 = bb->value_inst(-1, res->bitsize);
+	  res = bb->build_inst(Op::ITE, cmp, m1, res);
+	}
+      else
+	{
+	  throw Not_implemented("SAT_ADD signed");
+	}
+      return {res, res_indef};
+    };
+  process_cfn_binary(stmt, gen_elem);
+}
+
+void Converter::process_cfn_sat_sub(gimple *stmt)
+{
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      Inst *res;
+      Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      if (TYPE_UNSIGNED(elem_type))
+	{
+	  res = bb->build_inst(Op::SUB, elem1, elem2);
+	  Inst *cmp = bb->build_inst(Op::ULT, elem1, res);
+	  Inst *zero = bb->value_inst(0, res->bitsize);
+	  res = bb->build_inst(Op::ITE, cmp, zero, res);
+	}
+      else
+	{
+	  throw Not_implemented("SAT_SUB signed");
+	}
+      return {res, res_indef};
+    };
+  process_cfn_binary(stmt, gen_elem);
+}
+
 void Converter::process_cfn_signbit(gimple *stmt)
 {
   Inst *arg1 = tree2inst(gimple_call_arg(stmt, 0));
@@ -5408,6 +5458,12 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BUILT_IN_POPCOUNTLL:
     case CFN_POPCOUNT:
       process_cfn_popcount(stmt);
+      break;
+    case CFN_SAT_ADD:
+      process_cfn_sat_add(stmt);
+      break;
+    case CFN_SAT_SUB:
+      process_cfn_sat_sub(stmt);
       break;
     case CFN_BUILT_IN_SIGNBIT:
     case CFN_BUILT_IN_SIGNBITF:
