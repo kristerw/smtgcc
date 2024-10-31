@@ -1583,6 +1583,44 @@ Inst *simplify_ite(Inst *inst)
       return new_inst;
     }
 
+  // For Boolean y: ite x, y, 0 -> and x, y
+  if (inst->bitsize == 1 && is_value_zero(arg3))
+    {
+      Inst *new_inst = create_inst(Op::AND, arg1, arg2);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // For Boolean y: ite x, y, 1 -> or (not x), y
+  if (inst->bitsize == 1 && is_value_m1(arg3))
+    {
+      Inst *new_inst1 = create_inst(Op::NOT, arg1);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::OR, new_inst1, arg2);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  // For Boolean y: ite x, 0, y -> and (not x), y
+  if (inst->bitsize == 1 && is_value_zero(arg2))
+    {
+      Inst *new_inst1 = create_inst(Op::NOT, arg1);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::AND, new_inst1, arg3);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  // For Boolean y: ite x, 1, y -> or x, y
+  if (inst->bitsize == 1 && is_value_m1(arg2))
+    {
+      Inst *new_inst = create_inst(Op::OR, arg1, arg3);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   // Canonicalize ite doing min/max as
   //   ite (x <= y) ? x : y   ; min
   //   ite (x <= y) ? y : x   ; max
