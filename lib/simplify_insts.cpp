@@ -1839,6 +1839,26 @@ Inst *simplify_ult(Inst *inst)
       && (arg2->args[0] == arg1 || arg2->args[1] == arg1))
     return inst->bb->value_inst(0, 1);
 
+  // ult c, (sext x) -> slt x, 0 when c == (1 << (x->bitsize)) - 1
+  if (arg2->op == Op::SEXT
+      && is_value_signed_max(arg1, arg2->args[0]->bitsize))
+    {
+      Inst *zero = inst->bb->value_inst(0, arg2->args[0]->bitsize);
+      Inst *new_inst = create_inst(Op::SLT, arg2->args[0], zero);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  // ult (sext x), c -> sle 0, x when c == (1 << (x->bitsize))
+  if (arg1->op == Op::SEXT
+      && is_value_signed_min(arg2, arg1->args[0]->bitsize))
+    {
+      Inst *zero = inst->bb->value_inst(0, arg1->args[0]->bitsize);
+      Inst *new_inst = create_inst(Op::SLE, zero, arg1->args[0]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   return inst;
 }
 

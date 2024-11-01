@@ -1,3 +1,5 @@
+#include <cassert>
+
 #include "smtgcc.h"
 
 namespace smtgcc {
@@ -55,9 +57,23 @@ bool is_value_signed_min(Inst *inst)
   return inst->op == Op::VALUE && inst->value() == smin;
 }
 
+bool is_value_signed_min(Inst *inst, uint32_t bitsize)
+{
+  assert(bitsize < 128);
+  __int128 smin = ((unsigned __int128)1) << (bitsize - 1);
+  smin = (smin << (128 - bitsize)) >> (128 - bitsize);
+  return inst->op == Op::VALUE && inst->signed_value() == smin;
+}
+
 bool is_value_signed_max(Inst *inst)
 {
   unsigned __int128 smax = (((unsigned __int128)1) << (inst->bitsize - 1)) - 1;
+  return inst->op == Op::VALUE && inst->value() == smax;
+}
+
+bool is_value_signed_max(Inst *inst, uint32_t bitsize)
+{
+  unsigned __int128 smax = (((unsigned __int128)1) << (bitsize - 1)) - 1;
   return inst->op == Op::VALUE && inst->value() == smax;
 }
 
