@@ -1404,6 +1404,32 @@ Inst *simplify_ssub_wraps(Inst *inst)
   return inst;
 }
 
+Inst *simplify_smul_wraps(Inst *inst)
+{
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+
+  // smul_wraps x, 0 -> false
+  if (is_value_zero(arg2))
+    return inst->bb->value_inst(0, 1);
+
+  // smul_wraps x, 1 -> false
+  if (is_value_one(arg2))
+    return inst->bb->value_inst(0, 1);
+
+  // smul_wraps x, -1 -> eq x, minint
+  if (is_value_m1(arg2))
+    {
+      unsigned __int128 minint = ((unsigned __int128)1) << (arg1->bitsize - 1);
+      Inst *minint_inst = inst->bb->value_inst(minint, arg1->bitsize);
+      Inst *new_inst = create_inst(Op::EQ, arg1, minint_inst);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
+  return inst;
+}
+
 Inst *simplify_sub(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
@@ -2411,6 +2437,9 @@ Inst *simplify_inst(Inst *inst)
       break;
     case Op::SHL:
       inst = simplify_shl(inst);
+      break;
+    case Op::SMUL_WRAPS:
+      inst = simplify_smul_wraps(inst);
       break;
     case Op::SSUB_WRAPS:
       inst = simplify_ssub_wraps(inst);
