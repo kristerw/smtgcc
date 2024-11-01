@@ -922,6 +922,41 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       add_ub(bb, translate.at(inst->args[0]));
       return;
     }
+  else if (inst->op == Op::UB_NAN)
+    {
+      // UB_NAN functions like the normal Op::UB and is used in src to
+      // constrain values in order to prevent spurious failure reports
+      // when a non-canonical NaN gets a different bit pattern in tgt.
+      // We can remove these if all uses are in floating-point instructions,
+      // as they always canonicalize NaNs, so the result is the same
+      // regardless of whether the input is canonical or not.
+      //
+      // TODO: This may cause a false positive for trivial functions where
+      // a NOP floating-point operation is eliminated. For example,
+      //    a = a + -0.0;
+      // We should check for these cases and keep them.
+      if (inst->args[0]->op == Op::IS_NONCANONICAL_NAN)
+	{
+	  bool safe_use = true;
+	  for (auto use : inst->args[0]->args[0]->used_by)
+	    {
+	      switch (use->iclass())
+		{
+		case Inst_class::funary:
+		case Inst_class::fcomparison:
+		case Inst_class::fbinary:
+		  break;
+		default:
+		  if (use != inst->args[0])
+		    safe_use = false;
+		}
+	    }
+	  if (safe_use)
+	    return;
+	}
+      add_ub(bb, translate.at(inst->args[0]));
+      return;
+    }
   else if (inst->op == Op::ASSERT)
     {
       add_assert(bb, translate.at(inst->args[0]));

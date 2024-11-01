@@ -435,7 +435,7 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
     }
   if (SCALAR_FLOAT_TYPE_P(type))
     {
-      bb->build_inst(Op::UB, bb->build_inst(Op::IS_NONCANONICAL_NAN, inst));
+      bb->build_inst(Op::UB_NAN, bb->build_inst(Op::IS_NONCANONICAL_NAN, inst));
       return;
     }
   if (INTEGRAL_TYPE_P(type) && inst->bitsize != bitsize_for_type(type))
