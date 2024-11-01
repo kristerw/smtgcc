@@ -1394,6 +1394,31 @@ Inst *simplify_ssub_wraps(Inst *inst)
   if (is_value_zero(arg2))
     return inst->bb->value_inst(0, 1);
 
+  // ssub_wraps x, c -> slt (minint + c), x when c > 0
+  // ssub_wraps x, c -> slt x, (maxint + c) when c < 0
+  if (arg2->op == Op::VALUE)
+    {
+      __int128 c = arg2->signed_value();
+      if (c > 0)
+	{
+	  unsigned __int128 minint =
+	    ((unsigned __int128)1) << (arg2->bitsize - 1);
+	  Inst *limit = inst->bb->value_inst(minint + c, arg1->bitsize);
+	  Inst *new_inst = create_inst(Op::SLT, arg1, limit);
+	  new_inst->insert_before(inst);
+	  return new_inst;
+	}
+      else
+	{
+	  unsigned __int128 maxint =
+	    (((unsigned __int128)1) << (arg1->bitsize - 1)) - 1;
+	  Inst *limit = inst->bb->value_inst(maxint + c, arg1->bitsize);
+	  Inst *new_inst = create_inst(Op::SLT, limit, arg1);
+	  new_inst->insert_before(inst);
+	  return new_inst;
+	}
+    }
+
   // ssub_wraps x, y is always false if x and y are zext/sext that expand
   // more than one bit, or constant that could have been extended in that
   // way. This is a common case for e.g. char/short arithmetic that is
