@@ -327,16 +327,6 @@ Inst *simplify_and(Inst *inst)
       return new_inst2;
     }
 
-  // and (eq x, y), (ne x, y) -> 0
-  // and (ne x, y), (eq x, y) -> 0
-  if (((arg1->op == Op::EQ && arg2->op == Op::NE)
-       || (arg1->op == Op::NE && arg2->op == Op::EQ))
-      && ((arg1->args[0] == arg2->args[0]
-	   && arg1->args[1] == arg2->args[1])
-	  || (arg1->args[0] == arg2->args[1]
-	      && arg1->args[1] == arg2->args[0])))
-    return inst->bb->value_inst(0, 1);
-
   // and (not x), x -> 0
   // and x, (not x) -> 0
   if (arg1->op == Op::NOT && arg1->args[0] == arg2)
@@ -1345,10 +1335,6 @@ Inst *simplify_sadd_wraps(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
-
-  // sadd_wraps 0, x -> false
-  if (is_value_zero(arg1))
-    return inst->bb->value_inst(0, 1);
 
   // sadd_wraps x, 0 -> false
   if (is_value_zero(arg2))
