@@ -169,20 +169,6 @@ Inst *cfold_eq(Inst *inst)
   return inst->bb->value_inst(arg1_val == arg2_val, 1);
 }
 
-Inst *cfold_uge(Inst *inst)
-{
-  unsigned __int128 arg1_val = inst->args[0]->value();
-  unsigned __int128 arg2_val = inst->args[1]->value();
-  return inst->bb->value_inst(arg1_val >= arg2_val, 1);
-}
-
-Inst *cfold_ugt(Inst *inst)
-{
-  unsigned __int128 arg1_val = inst->args[0]->value();
-  unsigned __int128 arg2_val = inst->args[1]->value();
-  return inst->bb->value_inst(arg1_val > arg2_val, 1);
-}
-
 Inst *cfold_ule(Inst *inst)
 {
   unsigned __int128 arg1_val = inst->args[0]->value();
@@ -195,26 +181,6 @@ Inst *cfold_ult(Inst *inst)
   unsigned __int128 arg1_val = inst->args[0]->value();
   unsigned __int128 arg2_val = inst->args[1]->value();
   return inst->bb->value_inst(arg1_val < arg2_val, 1);
-}
-
-Inst *cfold_sge(Inst *inst)
-{
-  uint32_t shift = 128 - inst->args[0]->bitsize;
-  __int128 arg1_val = inst->args[0]->value();
-  arg1_val = (arg1_val << shift) >> shift;
-  __int128 arg2_val = inst->args[1]->value();
-  arg2_val = (arg2_val << shift) >> shift;
-  return inst->bb->value_inst(arg1_val >= arg2_val, 1);
-}
-
-Inst *cfold_sgt(Inst *inst)
-{
-  uint32_t shift = 128 - inst->args[0]->bitsize;
-  __int128 arg1_val = inst->args[0]->value();
-  arg1_val = (arg1_val << shift) >> shift;
-  __int128 arg2_val = inst->args[1]->value();
-  arg2_val = (arg2_val << shift) >> shift;
-  return inst->bb->value_inst(arg1_val > arg2_val, 1);
 }
 
 Inst *cfold_sle(Inst *inst)
@@ -1175,28 +1141,6 @@ bool is_ext(Inst *inst)
   return false;
 }
 
-Inst *simplify_fge(Inst *inst)
-{
-  Inst *const arg1 = inst->args[0];
-  Inst *const arg2 = inst->args[1];
-
-  // fge x, y -> fle y, x
-  Inst *new_inst = create_inst(Op::FLE, arg2, arg1);
-  new_inst->insert_before(inst);
-  return new_inst;
-}
-
-Inst *simplify_fgt(Inst *inst)
-{
-  Inst *const arg1 = inst->args[0];
-  Inst *const arg2 = inst->args[1];
-
-  // fgt x, y -> flt y, x
-  Inst *new_inst = create_inst(Op::FLT, arg2, arg1);
-  new_inst->insert_before(inst);
-  return new_inst;
-}
-
 Inst *simplify_fne(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
@@ -1209,28 +1153,6 @@ Inst *simplify_fne(Inst *inst)
   Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
   new_inst2->insert_before(inst);
   return new_inst2;
-}
-
-Inst *simplify_sge(Inst *inst)
-{
-  Inst *const arg1 = inst->args[0];
-  Inst *const arg2 = inst->args[1];
-
-  // sge x, y -> sle y, x
-  Inst *new_inst = create_inst(Op::SLE, arg2, arg1);
-  new_inst->insert_before(inst);
-  return new_inst;
-}
-
-Inst *simplify_sgt(Inst *inst)
-{
-  Inst *const arg1 = inst->args[0];
-  Inst *const arg2 = inst->args[1];
-
-  // sgt x, y -> slt y, x
-  Inst *new_inst = create_inst(Op::SLT, arg2, arg1);
-  new_inst->insert_before(inst);
-  return new_inst;
 }
 
 Inst *simplify_sle(Inst *inst)
@@ -1680,28 +1602,6 @@ Inst *simplify_ite(Inst *inst)
     }
 
   return inst;
-}
-
-Inst *simplify_uge(Inst *inst)
-{
-  Inst *const arg1 = inst->args[0];
-  Inst *const arg2 = inst->args[1];
-
-  // uge x, y -> ule y, x
-  Inst *new_inst = create_inst(Op::ULE, arg2, arg1);
-  new_inst->insert_before(inst);
-  return new_inst;
-}
-
-Inst *simplify_ugt(Inst *inst)
-{
-  Inst *const arg1 = inst->args[0];
-  Inst *const arg2 = inst->args[1];
-
-  // ugt x, y -> ult y, x
-  Inst *new_inst = create_inst(Op::ULT, arg2, arg1);
-  new_inst->insert_before(inst);
-  return new_inst;
 }
 
 Inst *simplify_ule(Inst *inst)
@@ -2406,23 +2306,11 @@ Inst *constant_fold_inst(Inst *inst)
     case Op::SEXT:
       inst = cfold_sext(inst);
       break;
-    case Op::SGE:
-      inst = cfold_sge(inst);
-      break;
-    case Op::SGT:
-      inst = cfold_sgt(inst);
-      break;
     case Op::SLE:
       inst = cfold_sle(inst);
       break;
     case Op::SLT:
       inst = cfold_slt(inst);
-      break;
-    case Op::UGE:
-      inst = cfold_uge(inst);
-      break;
-    case Op::UGT:
-      inst = cfold_ugt(inst);
       break;
     case Op::ULE:
       inst = cfold_ule(inst);
@@ -2506,23 +2394,11 @@ Inst *simplify_inst(Inst *inst)
     case Op::U2F:
       inst = simplify_u2f(inst);
       break;
-    case Op::FGE:
-      inst = simplify_fge(inst);
-      break;
-    case Op::FGT:
-      inst = simplify_fgt(inst);
-      break;
     case Op::FNE:
       inst = simplify_fne(inst);
       break;
     case Op::SEXT:
       inst = simplify_sext(inst);
-      break;
-    case Op::SGE:
-      inst = simplify_sge(inst);
-      break;
-    case Op::SGT:
-      inst = simplify_sgt(inst);
       break;
     case Op::SLE:
       inst = simplify_sle(inst);
@@ -2541,12 +2417,6 @@ Inst *simplify_inst(Inst *inst)
       break;
     case Op::SUB:
       inst = simplify_sub(inst);
-      break;
-    case Op::UGE:
-      inst = simplify_uge(inst);
-      break;
-    case Op::UGT:
-      inst = simplify_ugt(inst);
       break;
     case Op::ULE:
       inst = simplify_ule(inst);

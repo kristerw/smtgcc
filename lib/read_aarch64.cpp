@@ -127,7 +127,7 @@ private:
   void process_f2i(bool is_unsigned);
   void process_f2f();
   void process_fmin_fmax(bool is_min);
-  void process_min_max(Op op);
+  void process_min_max(bool is_min, bool is_unsigned);
   void process_mul_op(Op op);
   void process_maddl(Op op);
   void process_msubl(Op op);
@@ -958,7 +958,7 @@ void Parser::store_ub_check(Inst *ptr, uint64_t size)
   // Otherwise, the  previous overflow check would have failed.
   Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
   Inst *offset = bb->build_extract_offset(last_addr);
-  Inst *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
+  Inst *out_of_bound = bb->build_inst(Op::ULE, mem_size, offset);
   bb->build_inst(Op::UB, out_of_bound);
 }
 
@@ -992,7 +992,7 @@ void Parser::load_ub_check(Inst *ptr, uint64_t size)
   // than are guaranteed to be available.
   Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
   Inst *offset = bb->build_extract_offset(ptr);
-  Inst *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
+  Inst *out_of_bound = bb->build_inst(Op::ULE, mem_size, offset);
   bb->build_inst(Op::UB, out_of_bound);
 }
 
@@ -1158,7 +1158,7 @@ void Parser::process_fcmp()
   Inst *z = bb->build_inst(Op::ITE, is_inf, cmp_z_inf, cmp_z);
   z = bb->build_inst(Op::ITE, any_is_nan, b0, z);
 
-  Inst *cmp_c = bb->build_inst(Op::FGE, arg1, arg2);
+  Inst *cmp_c = bb->build_inst(Op::FLE, arg2, arg1);
   Inst *cmp_c_inf = bb->build_inst(Op::NOT, cmp_n);
   Inst *c = bb->build_inst(Op::ITE, is_inf, cmp_c_inf, cmp_c);
   c = bb->build_inst(Op::ITE, any_is_nan, b1, c);
@@ -1219,7 +1219,11 @@ void Parser::process_fmin_fmax(bool is_min)
   get_end_of_line(6);
 
   Inst *is_nan = bb->build_inst(Op::IS_NAN, arg2);
-  Inst *cmp = bb->build_inst(is_min ? Op::FLT : Op::FGT, arg1, arg2);
+  Inst *cmp;
+  if (is_min)
+    cmp = bb->build_inst(Op::FLT, arg1, arg2);
+  else
+    cmp = bb->build_inst(Op::FLT, arg2, arg1);
   Inst *res1 = bb->build_inst(Op::ITE, cmp, arg1, arg2);
   Inst *res2 = bb->build_inst(Op::ITE, is_nan, arg1, res1);
   // 0.0 and -0.0 is equal as floating point values, and fmin(0.0, -0.0)
@@ -1230,13 +1234,17 @@ void Parser::process_fmin_fmax(bool is_min)
   Inst *is_zero1 = bb->build_inst(Op::FEQ, arg1, zero);
   Inst *is_zero2 = bb->build_inst(Op::FEQ, arg2, zero);
   Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
-  Inst *cmp2 = bb->build_inst(is_min ? Op::SLT : Op::SGT, arg1, arg2);
+  Inst *cmp2;
+  if (is_min)
+    cmp2 = bb->build_inst(Op::SLT, arg1, arg2);
+  else
+    cmp2 = bb->build_inst(Op::SLT, arg2, arg1);
   Inst *res3 = bb->build_inst(Op::ITE, cmp2, arg1, arg2);
   Inst *res = bb->build_inst(Op::ITE, is_zero, res3, res2);
   write_reg(dest, res);
 }
 
-void Parser::process_min_max(Op op)
+void Parser::process_min_max(bool is_min, bool is_unsigned)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1245,8 +1253,12 @@ void Parser::process_min_max(Op op)
   Inst *arg2 = get_reg_or_imm_value(5, arg1->bitsize);
   get_end_of_line(6);
 
-  Inst *cmp = bb->build_inst(op, arg1, arg2);
-  Inst *res = bb->build_inst(Op::ITE, cmp, arg1, arg2);
+  Inst *cmp = bb->build_inst(is_unsigned ? Op::ULT : Op::SLT, arg1, arg2);
+  Inst *res;
+  if (is_min)
+    res = bb->build_inst(Op::ITE, cmp, arg1, arg2);
+  else
+    res = bb->build_inst(Op::ITE, cmp, arg2, arg1);
   write_reg(dest, res);
 }
 
@@ -1358,7 +1370,7 @@ void Parser::process_abs()
 
   Inst *neg = bb->build_inst(Op::NEG, arg1);
   Inst *zero = bb->value_inst(0, arg1->bitsize);
-  Inst *cond = bb->build_inst(Op::SGE, arg1, zero);
+  Inst *cond = bb->build_inst(Op::SLE, zero, arg1);
   Inst *res = bb->build_inst(Op::ITE, cond, arg1, neg);
   write_reg(dest, res);
 }
@@ -2232,13 +2244,13 @@ void Parser::parse_function()
 
   // Data processing - integer minimum and maximum
   else if (name == "smax")
-    process_min_max(Op::SGE);
+    process_min_max(false, false);
   else if (name == "smin")
-    process_min_max(Op::SLT);
+    process_min_max(true, false);
   else if (name == "umax")
-    process_min_max(Op::UGE);
+    process_min_max(false, true);
   else if (name == "umin")
-    process_min_max(Op::ULT);
+    process_min_max(true, true);
 
   // Data processing - logical
   else if (name == "and")

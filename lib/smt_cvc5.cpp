@@ -163,23 +163,11 @@ void Converter::build_bv_comparison_smt(const Inst *inst)
     case Op::NE:
       inst2bool.insert({inst, solver.mkTerm(cvc5::DISTINCT, {arg1, arg2})});
       break;
-    case Op::SGE:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::BITVECTOR_SGE, {arg1, arg2})});
-      break;
-    case Op::SGT:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::BITVECTOR_SGT, {arg1, arg2})});
-      break;
     case Op::SLE:
       inst2bool.insert({inst, solver.mkTerm(cvc5::BITVECTOR_SLE, {arg1, arg2})});
       break;
     case Op::SLT:
       inst2bool.insert({inst, solver.mkTerm(cvc5::BITVECTOR_SLT, {arg1, arg2})});
-      break;
-    case Op::UGE:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::BITVECTOR_UGE, {arg1, arg2})});
-      break;
-    case Op::UGT:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::BITVECTOR_UGT, {arg1, arg2})});
       break;
     case Op::ULE:
       inst2bool.insert({inst, solver.mkTerm(cvc5::BITVECTOR_ULE, {arg1, arg2})});
@@ -224,18 +212,6 @@ void Converter::build_fp_comparison_smt(const Inst *inst)
       {
 	cvc5::Term eq = solver.mkTerm(cvc5::FLOATINGPOINT_EQ, {arg1, arg2});
 	inst2bool.insert({inst, solver.mkTerm(cvc5::NOT, {eq})});
-      }
-      break;
-    case Op::FGE:
-      {
-	cvc5::Term geq = solver.mkTerm(cvc5::FLOATINGPOINT_GEQ, {arg1, arg2});
-	inst2bool.insert({inst, geq});
-      }
-      break;
-    case Op::FGT:
-      {
-	cvc5::Term gt = solver.mkTerm(cvc5::FLOATINGPOINT_GT, {arg1, arg2});
-	inst2bool.insert({inst, gt});
       }
       break;
     case Op::FLE:

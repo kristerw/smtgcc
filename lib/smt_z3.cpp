@@ -176,23 +176,11 @@ void Converter::build_bv_comparison_smt(const Inst *inst)
     case Op::NE:
       inst2bool.insert({inst, arg1 != arg2});
       break;
-    case Op::SGE:
-      inst2bool.insert({inst, z3::sge(arg1, arg2)});
-      break;
-    case Op::SGT:
-      inst2bool.insert({inst, z3::sgt(arg1, arg2)});
-      break;
     case Op::SLE:
       inst2bool.insert({inst, z3::sle(arg1, arg2)});
       break;
     case Op::SLT:
       inst2bool.insert({inst, z3::slt(arg1, arg2)});
-      break;
-    case Op::UGE:
-      inst2bool.insert({inst, z3::uge(arg1, arg2)});
-      break;
-    case Op::UGT:
-      inst2bool.insert({inst, z3::ugt(arg1, arg2)});
       break;
     case Op::ULE:
       inst2bool.insert({inst, z3::ule(arg1, arg2)});
@@ -235,12 +223,6 @@ void Converter::build_fp_comparison_smt(const Inst *inst)
       break;
     case Op::FNE:
       inst2bool.insert({inst, !z3::fp_eq(arg1, arg2)});
-      break;
-    case Op::FGE:
-      inst2bool.insert({inst, arg1 >= arg2});
-      break;
-    case Op::FGT:
-      inst2bool.insert({inst, arg1 > arg2});
       break;
     case Op::FLE:
       inst2bool.insert({inst, arg1 <= arg2});

@@ -103,7 +103,7 @@ private:
   void get_left_paren(unsigned idx);
   void get_right_paren(unsigned idx);
   void get_end_of_line(unsigned idx);
-  void process_cond_branch(Op op);
+  void process_cond_branch(Op op, bool swap = false);
   Inst *gen_ctz(Inst *arg);
   Inst *gen_ffs(Inst *arg);
   Inst *gen_parity(Inst *arg);
@@ -120,7 +120,7 @@ private:
   void process_store(int size, LStype lstype = LStype::signed_ls);
   void process_funary(std::string_view name, Op op);
   void process_fbinary(std::string_view name, Op op);
-  void process_fcmp(std::string_view name, Op op);
+  void process_fcmp(std::string_view name, Op op, bool swap = false);
   void process_fcvt_i2f(uint32_t src_bitsize, uint32_t dest_bitsize,
 			bool is_unsigned);
   void process_fcvt_f2i(uint32_t src_bitsize, uint32_t dest_bitsize,
@@ -129,7 +129,7 @@ private:
   void process_fmin_fmax(uint32_t bitsize, bool is_min);
   void process_iunary(std::string_view name, Op op);
   void process_ibinary(std::string_view name, Op op);
-  void process_icmp(std::string_view name, Op op);
+  void process_icmp(std::string_view name, Op op, bool swap = false);
   void process_ishift(std::string_view name, Op op);
   void process_zba_sh_add(uint64_t shift_val, bool truncate_arg1);
 
@@ -592,7 +592,7 @@ void Parser::get_end_of_line(unsigned idx)
 				    line_number);
 }
 
-void Parser::process_cond_branch(Op op)
+void Parser::process_cond_branch(Op op, bool swap)
 {
   Inst *arg1 = get_reg_value(1);
   get_comma(2);
@@ -602,6 +602,8 @@ void Parser::process_cond_branch(Op op)
   get_end_of_line(6);
 
   Basic_block *false_bb = func->build_bb();
+  if (swap)
+    std::swap(arg1, arg2);
   Inst *cond = bb->build_inst(op, arg1, arg2);
   bb->build_br_inst(cond, true_bb, false_bb);
   bb = false_bb;
@@ -994,7 +996,7 @@ void Parser::store_ub_check(Inst *ptr, uint64_t size)
   // Otherwise, the  previous overflow check would have failed.
   Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
   Inst *offset = bb->build_extract_offset(last_addr);
-  Inst *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
+  Inst *out_of_bound = bb->build_inst(Op::ULE, mem_size, offset);
   bb->build_inst(Op::UB, out_of_bound);
 }
 
@@ -1028,7 +1030,7 @@ void Parser::load_ub_check(Inst *ptr, uint64_t size)
   // than are guaranteed to be available.
   Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, ptr_mem_id);
   Inst *offset = bb->build_extract_offset(ptr);
-  Inst *out_of_bound = bb->build_inst(Op::UGE, offset, mem_size);
+  Inst *out_of_bound = bb->build_inst(Op::ULE, mem_size, offset);
   bb->build_inst(Op::UB, out_of_bound);
 }
 
@@ -1146,7 +1148,7 @@ void Parser::process_fbinary(std::string_view name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void Parser::process_fcmp(std::string_view name, Op op)
+void Parser::process_fcmp(std::string_view name, Op op, bool swap)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1162,6 +1164,8 @@ void Parser::process_fcmp(std::string_view name, Op op)
       arg1 = bb->build_trunc(arg1, 32);
       arg2 = bb->build_trunc(arg2, 32);
     }
+  if (swap)
+    std::swap(arg1, arg2);
   Inst *res = bb->build_inst(op, arg1, arg2);
   res = bb->build_inst(Op::ZEXT, res, reg_bitsize);
   bb->build_inst(Op::WRITE, dest, res);
@@ -1241,7 +1245,11 @@ void Parser::process_fmin_fmax(uint32_t bitsize, bool is_min)
       arg2 = bb->build_trunc(arg2, 32);
     }
   Inst *is_nan = bb->build_inst(Op::IS_NAN, arg2);
-  Inst *cmp = bb->build_inst(is_min ? Op::FLT : Op::FGT, arg1, arg2);
+  Inst *cmp;
+  if (is_min)
+    cmp = bb->build_inst(Op::FLT, arg1, arg2);
+  else
+    cmp = bb->build_inst(Op::FLT, arg2, arg1);
   Inst *res1 = bb->build_inst(Op::ITE, cmp, arg1, arg2);
   Inst *res2 = bb->build_inst(Op::ITE, is_nan, arg1, res1);
   // 0.0 and -0.0 is equal as floating point values, and fmin(0.0, -0.0)
@@ -1252,7 +1260,11 @@ void Parser::process_fmin_fmax(uint32_t bitsize, bool is_min)
   Inst *is_zero1 = bb->build_inst(Op::FEQ, arg1, zero);
   Inst *is_zero2 = bb->build_inst(Op::FEQ, arg2, zero);
   Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
-  Inst *cmp2 = bb->build_inst(is_min ? Op::SLT : Op::SGT, arg1, arg2);
+  Inst *cmp2;
+  if (is_min)
+    cmp2 = bb->build_inst(Op::SLT, arg1, arg2);
+  else
+    cmp2 = bb->build_inst(Op::SLT, arg2, arg1);
   Inst *res3 = bb->build_inst(Op::ITE, cmp2, arg1, arg2);
   Inst *res = bb->build_inst(Op::ITE, is_zero, res3, res2);
   if (bitsize == 32)
@@ -1337,7 +1349,7 @@ void Parser::process_ishift(std::string_view name, Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void Parser::process_icmp(std::string_view name, Op op)
+void Parser::process_icmp(std::string_view name, Op op, bool swap)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -1363,6 +1375,8 @@ void Parser::process_icmp(std::string_view name, Op op)
       arg1 = bb->build_trunc(arg1, 32);
       arg2 = bb->build_trunc(arg2, 32);
     }
+  if (swap)
+    std::swap(arg1, arg2);
   Inst *res = bb->build_inst(op, arg1, arg2);
   res = bb->build_inst(Op::ZEXT, res, reg_bitsize);
   bb->build_inst(Op::WRITE, dest, res);
@@ -1447,9 +1461,9 @@ void Parser::parse_function()
 	   || name == "sltiu" || name == "sltiuw")
     process_icmp(name, Op::ULT);
   else if (name == "sgt" || name == "sgtw")
-    process_icmp(name, Op::SGT);
+    process_icmp(name, Op::SLT, true);
   else if (name == "sgtu" || name == "sgtuw")
-    process_icmp(name, Op::UGT);
+    process_icmp(name, Op::ULT, true);
   else if (name == "seqz" || name == "seqzw")
     {
       // Pseudo instruction.
@@ -1578,13 +1592,13 @@ void Parser::parse_function()
   else if (name == "bltu")
     process_cond_branch(Op::ULT);
   else if (name == "bge")
-    process_cond_branch(Op::SGE);
+    process_cond_branch(Op::SLE, true);
   else if (name == "bgeu")
-    process_cond_branch(Op::UGE);
+    process_cond_branch(Op::ULE, true);
   else if (name == "bgt")
-    process_cond_branch(Op::SGT);
+    process_cond_branch(Op::SLT, true);
   else if (name == "bgtu")
-    process_cond_branch(Op::UGT);
+    process_cond_branch(Op::ULT, true);
   else if (name == "j")
     {
       Basic_block *dest_bb = get_bb(1);
@@ -1637,9 +1651,9 @@ void Parser::parse_function()
   else if (name == "fle.s" || name == "fle.d")
     process_fcmp(name, Op::FLE);
   else if (name == "fgt.s" || name == "fgt.d")
-    process_fcmp(name, Op::FGT);
+    process_fcmp(name, Op::FLT, true);
   else if (name == "fge.s" || name == "fge.d")
-    process_fcmp(name, Op::FGE);
+    process_fcmp(name, Op::FLE, true);
   else if (name == "fsgnj.s")
     {
       Inst *dest = get_freg(1);
@@ -1913,7 +1927,7 @@ void Parser::parse_function()
       Inst *arg2 = get_reg_value(5);
       get_end_of_line(6);
 
-      Inst *cmp = bb->build_inst(Op::SGE, arg1, arg2);
+      Inst *cmp = bb->build_inst(Op::SLE, arg2, arg1);
       Inst *res = bb->build_inst(Op::ITE, cmp, arg1, arg2);
       bb->build_inst(Op::WRITE, dest, res);
     }
@@ -1926,7 +1940,7 @@ void Parser::parse_function()
       Inst *arg2 = get_reg_value(5);
       get_end_of_line(6);
 
-      Inst *cmp = bb->build_inst(Op::UGE, arg1, arg2);
+      Inst *cmp = bb->build_inst(Op::ULE, arg2, arg1);
       Inst *res = bb->build_inst(Op::ITE, cmp, arg1, arg2);
       bb->build_inst(Op::WRITE, dest, res);
     }

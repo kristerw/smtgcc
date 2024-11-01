@@ -12,23 +12,17 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 98> inst_info{{
+const std::array<Inst_info, 92> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
-  {"sge", Op::SGE, Inst_class::icomparison, true, false},
-  {"sgt", Op::SGT, Inst_class::icomparison, true, false},
   {"sle", Op::SLE, Inst_class::icomparison, true, false},
   {"slt", Op::SLT, Inst_class::icomparison, true, false},
-  {"uge", Op::UGE, Inst_class::icomparison, true, false},
-  {"ugt", Op::UGT, Inst_class::icomparison, true, false},
   {"ule", Op::ULE, Inst_class::icomparison, true, false},
   {"ult", Op::ULT, Inst_class::icomparison, true, false},
 
   // Floating-point comparison
   {"feq", Op::FEQ, Inst_class::fcomparison, true, true},
-  {"fge", Op::FGE, Inst_class::fcomparison, true, false},
-  {"fgt", Op::FGT, Inst_class::fcomparison, true, false},
   {"fle", Op::FLE, Inst_class::fcomparison, true, false},
   {"flt", Op::FLT, Inst_class::fcomparison, true, false},
   {"fne", Op::FNE, Inst_class::fcomparison, true, true},

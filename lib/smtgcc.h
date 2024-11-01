@@ -37,19 +37,13 @@ enum class Op : uint8_t {
   // Integer comparison
   EQ,
   NE,
-  SGE,
-  SGT,
   SLE,
   SLT,
-  UGE,
-  UGT,
   ULE,
   ULT,
 
   // Floating-point comparison
   FEQ,
-  FGE,
-  FGT,
   FLE,
   FLT,
   FNE,
@@ -183,7 +177,7 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 98> inst_info;
+extern const std::array<Inst_info, 92> inst_info;
 
 struct Module;
 struct Function;
