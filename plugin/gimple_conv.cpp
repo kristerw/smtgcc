@@ -4948,18 +4948,31 @@ void Converter::process_cfn_sat_add(gimple *stmt)
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
     {
-      Inst *res;
+      Inst *res = bb->build_inst(Op::ADD, elem1, elem2);
       Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
       if (TYPE_UNSIGNED(elem_type))
 	{
-	  res = bb->build_inst(Op::ADD, elem1, elem2);
 	  Inst *cmp = bb->build_inst(Op::ULT, res, elem1);
 	  Inst *m1 = bb->value_inst(-1, res->bitsize);
 	  res = bb->build_inst(Op::ITE, cmp, m1, res);
 	}
       else
 	{
-	  throw Not_implemented("SAT_ADD signed");
+	  Inst *zero = bb->value_inst(0, res->bitsize);
+	  Inst *is_neg_elem2 = bb->build_inst(Op::SLT, elem2, zero);
+	  Inst *is_pos_elem2 = bb->build_inst(Op::NOT, is_neg_elem2);
+	  Inst *is_neg_oflw = bb->build_inst(Op::SLT, elem1, res);
+	  is_neg_oflw = bb->build_inst(Op::AND, is_neg_oflw, is_neg_elem2);
+	  Inst *is_pos_oflw = bb->build_inst(Op::SLT, res, elem1);
+	  is_pos_oflw = bb->build_inst(Op::AND, is_pos_oflw, is_pos_elem2);
+	  unsigned __int128 maxint =
+	    (((unsigned __int128)1) << (res->bitsize - 1)) - 1;
+	  unsigned __int128 minint =
+	    ((unsigned __int128)1) << (res->bitsize - 1);
+	  Inst *maxint_inst = bb->value_inst(maxint, res->bitsize);
+	  Inst *minint_inst = bb->value_inst(minint, res->bitsize);
+	  res = bb->build_inst(Op::ITE, is_pos_oflw, maxint_inst, res);
+	  res = bb->build_inst(Op::ITE, is_neg_oflw, minint_inst, res);
 	}
       return {res, res_indef};
     };
@@ -4972,18 +4985,31 @@ void Converter::process_cfn_sat_sub(gimple *stmt)
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
     {
-      Inst *res;
+      Inst *res = bb->build_inst(Op::SUB, elem1, elem2);
       Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
       if (TYPE_UNSIGNED(elem_type))
 	{
-	  res = bb->build_inst(Op::SUB, elem1, elem2);
 	  Inst *cmp = bb->build_inst(Op::ULT, elem1, res);
 	  Inst *zero = bb->value_inst(0, res->bitsize);
 	  res = bb->build_inst(Op::ITE, cmp, zero, res);
 	}
       else
 	{
-	  throw Not_implemented("SAT_SUB signed");
+	  Inst *zero = bb->value_inst(0, res->bitsize);
+	  Inst *is_neg_elem2 = bb->build_inst(Op::SLT, elem2, zero);
+	  Inst *is_pos_elem2 = bb->build_inst(Op::NOT, is_neg_elem2);
+	  Inst *is_neg_oflw = bb->build_inst(Op::SLT, elem1, res);
+	  is_neg_oflw = bb->build_inst(Op::AND, is_neg_oflw, is_pos_elem2);
+	  Inst *is_pos_oflw = bb->build_inst(Op::SLT, res, elem1);
+	  is_pos_oflw = bb->build_inst(Op::AND, is_pos_oflw, is_neg_elem2);
+	  unsigned __int128 maxint =
+	    (((unsigned __int128)1) << (res->bitsize - 1)) - 1;
+	  unsigned __int128 minint =
+	    ((unsigned __int128)1) << (res->bitsize - 1);
+	  Inst *maxint_inst = bb->value_inst(maxint, res->bitsize);
+	  Inst *minint_inst = bb->value_inst(minint, res->bitsize);
+	  res = bb->build_inst(Op::ITE, is_pos_oflw, maxint_inst, res);
+	  res = bb->build_inst(Op::ITE, is_neg_oflw, minint_inst, res);
 	}
       return {res, res_indef};
     };
