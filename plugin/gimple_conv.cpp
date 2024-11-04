@@ -2282,7 +2282,8 @@ std::pair<Inst *, Inst *> Converter::process_unary_float(enum tree_code code, In
 	  unsigned __int128 v = ((unsigned __int128)1) << (arg1->bitsize - 1);
 	  Inst *inst = bb->value_inst(v, arg1->bitsize);
 	  inst = bb->build_inst(Op::XOR, arg1, inst);
-	  constrain_src_value(inst, arg1_type);
+	  Inst *is_ub = bb->build_inst(Op::IS_NONCANONICAL_NAN, inst);
+	  bb->build_inst(Op::UB, is_ub);
 	}
       return {bb->build_inst(Op::FNEG, arg1), res_indef};
     case PAREN_EXPR:
@@ -4277,15 +4278,18 @@ void Converter::process_cfn_copysign(gimple *stmt)
   Inst *res = bb->build_trunc(arg1, arg1->bitsize - 1);
   res = bb->build_inst(Op::CONCAT, signbit, res);
 
-  // SMT solvers has only one NaN value, so NEGATE_EXPR of NaN does not
-  // change the value. This leads to incorrect reports of miscompilations
-  // for transformations like -ABS_EXPR(x) -> .COPYSIGN(x, -1.0) because
-  // copysign has introduceed a non-canonical NaN.
-  // For now, treat copying the sign to NaN as always produce the original
-  // canonical NaN.
-  // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
-  Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
-  res = bb->build_inst(Op::ITE, is_nan, arg1, res);
+  if (state->arch == Arch::gimple)
+    {
+      // SMT solvers has only one NaN value, so NEGATE_EXPR of NaN does not
+      // change the value. This leads to incorrect reports of miscompilations
+      // for transformations like -ABS_EXPR(x) -> .COPYSIGN(x, -1.0) because
+      // copysign has introduceed a non-canonical NaN.
+      // For now, treat copying the sign to NaN as always produce the original
+      // canonical NaN.
+      // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
+      Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
+      res = bb->build_inst(Op::ITE, is_nan, arg1, res);
+    }
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
@@ -5369,11 +5373,14 @@ void Converter::process_cfn_xorsign(gimple *stmt)
   Inst *res = bb->build_trunc(arg1, arg1->bitsize - 1);
   res = bb->build_inst(Op::CONCAT, signbit, res);
 
-  // For now, treat copying the sign to NaN as always produce the original
-  // canonical NaN.
-  // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
-  Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
-  res = bb->build_inst(Op::ITE, is_nan, arg1, res);
+  if (state->arch == Arch::gimple)
+    {
+      // For now, treat copying the sign to NaN as always produce the original
+      // canonical NaN.
+      // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
+      Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
+      res = bb->build_inst(Op::ITE, is_nan, arg1, res);
+    }
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
