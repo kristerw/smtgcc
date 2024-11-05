@@ -4,9 +4,6 @@
 #include <map>
 #include <vector>
 
-#include "gcc-plugin.h"
-#include "tree.h"
-
 #include "smtgcc.h"
 
 enum class Arch {

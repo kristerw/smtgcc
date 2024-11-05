@@ -1,3 +1,6 @@
+#include "gcc-plugin.h"
+#include "tree.h"
+
 #include <cassert>
 
 #include "gimple_conv.h"

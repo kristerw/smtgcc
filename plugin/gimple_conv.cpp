@@ -1,12 +1,3 @@
-#include <algorithm>
-#include <cassert>
-#include <functional>
-#include <limits>
-#include <map>
-#include <set>
-#include <string>
-#include <vector>
-
 #include "gcc-plugin.h"
 #include "tree-pass.h"
 #include "tree.h"
@@ -25,6 +16,15 @@
 #include "ipa-prop.h"
 #include "value-query.h"
 #include "attribs.h"
+
+#include <algorithm>
+#include <cassert>
+#include <functional>
+#include <limits>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
 
 #include "smtgcc.h"
 #include "gimple_conv.h"
