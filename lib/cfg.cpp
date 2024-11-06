@@ -407,6 +407,19 @@ void simplify_cfg(Function *func)
 	  bb->build_br_inst(dest_bb);
 	}
 
+      // br (not x), .1, .2 -> br x, .2, .1
+      if (bb->last_inst->op == Op::BR
+	  && bb->last_inst->nof_args == 1
+	  && bb->last_inst->args[0]->op == Op::NOT)
+	{
+	  Inst *branch = bb->last_inst;
+	  Inst *cond = branch->args[0]->args[0];
+	  Basic_block *true_bb = branch->u.br3.false_bb;
+	  Basic_block *false_bb = branch->u.br3.true_bb;
+	  destroy_instruction(branch);
+	  bb->build_br_inst(cond, true_bb, false_bb);
+	}
+
       // Remove empty BBs ending in unconditional branch by letting the
       // predecessors call the successor.
       remove_empty_bb(bb);
