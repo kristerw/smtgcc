@@ -1685,6 +1685,42 @@ Inst *simplify_ite(Inst *inst)
       return new_inst2;
     }
 
+  // ite x, (not y), (not z) -> not (ite x, y, z)
+  if (arg2->op == Op::NOT && arg3->op == Op::NOT)
+    {
+      Inst *new_inst1 =
+	create_inst(Op::ITE, arg1, arg2->args[0], arg3->args[0]);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  // ite x, c, (not z) -> not (ite x, ~c, z)
+  if (arg2->op == Op::VALUE && arg3->op == Op::NOT)
+    {
+      Inst *new_c = inst->bb->value_inst(~arg2->value(), arg2->bitsize);
+      Inst *new_inst1 = create_inst(Op::ITE, arg1, new_c, arg3->args[0]);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  // ite x, (not y), c -> not (ite x, y, ~c)
+  if (arg2->op == Op::NOT && arg3->op == Op::VALUE)
+    {
+      Inst *new_c = inst->bb->value_inst(~arg3->value(), arg3->bitsize);
+      Inst *new_inst1 = create_inst(Op::ITE, arg1, arg2->args[0], new_c);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
   return inst;
 }
 
