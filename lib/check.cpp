@@ -147,7 +147,7 @@ class Converter {
   void convert(Basic_block *bb, Inst *inst, Function_role role);
 
   Inst *get_cmp_inst(const Cse_key& key);
-  Inst *get_inst(const Cse_key& key, bool may_add_insts = true);
+  Inst *get_inst(const Cse_key& key);
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   Inst *update_key2inst(Inst *inst);
   bool is_in_key2inst(Inst *inst);
@@ -175,35 +175,7 @@ public:
   Function *dest_func = nullptr;
 };
 
-Inst *Converter::get_cmp_inst(const Cse_key& key)
-{
-  Op op;
-  switch (key.op)
-    {
-    case Op::SLE:
-      op = Op::SLT;
-      break;
-    case Op::SLT:
-      op = Op::SLE;
-      break;
-    case Op::ULE:
-      op = Op::ULT;
-      break;
-    case Op::ULT:
-      op = Op::ULE;
-      break;
-    default:
-      return nullptr;
-    }
-
-  Cse_key tmp_key(op, key.arg2, key.arg1);
-  Inst *inst = get_inst(tmp_key, false);
-  if (inst)
-    return build_inst(Op::NOT, inst);
-  return nullptr;
-}
-
-Inst *Converter::get_inst(const Cse_key& key, bool may_add_insts)
+Inst *Converter::get_inst(const Cse_key& key)
 {
   auto I = key2inst.find(key);
   if (I != key2inst.end())
@@ -216,15 +188,6 @@ Inst *Converter::get_inst(const Cse_key& key, bool may_add_insts)
       I = key2inst.find(tmp_key);
       if (I != key2inst.end())
 	return I->second;
-    }
-
-  // Check if this is a negation of an existing comparison instruction.
-  if (may_add_insts
-      && inst_info[(int)key.op].iclass == Inst_class::icomparison)
-    {
-      Inst *inst = get_cmp_inst(key);
-      if (inst)
-	return inst;
     }
 
   return nullptr;
@@ -353,42 +316,6 @@ Inst *Converter::simplify(Inst *inst)
   return inst;
 }
 
-bool Converter::is_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
-{
-  if (arg1->op != Op::SLE && arg1->op != Op::SLT
-      && arg1->op != Op::ULE && arg1->op != Op::ULT)
-    return false;
-  if ((arg1->args[0] != arg2 && arg1->args[1] != arg3)
-      && (arg1->args[1] != arg2 && arg1->args[0] != arg3))
-    return false;
-  return true;
-}
-
-// min/max can be written with both < and <=. For an arg1 expressing one
-// of the two alternatives, check if we already have an instruction
-// using the other.
-Inst *Converter::cse_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
-{
-  Op op;
-  if (arg1->op == Op::SLE)
-    op = Op::SLT;
-  else if (arg1->op == Op::SLT)
-    op = Op::SLE;
-  else if (arg1->op == Op::ULE)
-    op = Op::ULT;
-  else if (arg1->op == Op::ULT)
-    op = Op::ULE;
-  else
-    assert(0);
-  const Cse_key cmp_key(op, arg1->args[0], arg1->args[1]);
-  Inst *cmp_inst = get_inst(cmp_key, false);
-  if (!cmp_inst)
-    return nullptr;
-
-  const Cse_key key(Op::ITE, cmp_inst, arg2, arg3);
-  return get_inst(key, false);
-}
-
 Inst *Converter::build_inst(Op op)
 {
   const Cse_key key(op);
@@ -433,8 +360,6 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
 {
   const Cse_key key(op, arg1, arg2, arg3);
   Inst *inst = get_inst(key);
-  if (!inst && op == Op::ITE && is_min_max(arg1, arg2, arg3))
-    inst = cse_min_max(arg1, arg2, arg3);
   if (!inst)
     {
       inst = dest_bb->build_inst(op, arg1, arg2, arg3);
