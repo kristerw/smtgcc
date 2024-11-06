@@ -1172,75 +1172,13 @@ Inst *simplify_sle(Inst *inst)
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // sle x, x -> true
-  if (arg1 == arg2)
-    return inst->bb->value_inst(1, 1);
-
-  // sle x, signed_max_val -> true
-  if (is_value_signed_max(arg2))
-    return inst->bb->value_inst(1, 1);
-
-  // sle signed_min_val, x -> true
-  if (is_value_signed_min(arg1))
-    return inst->bb->value_inst(1, 1);
-
-  // sle (zext x), (zext y) -> ule x, y
-  if (arg1->op == Op::ZEXT
-      && arg2->op == Op::ZEXT
-      && arg1->args[0]->bitsize == arg2->args[0]->bitsize)
-    {
-      Inst *new_inst = create_inst(Op::ULE, arg1->args[0], arg2->args[0]);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // sle (sext x), (sext y) -> sle x, y
-  if (arg1->op == Op::SEXT
-      && arg2->op == Op::SEXT
-      && arg1->args[0]->bitsize == arg2->args[0]->bitsize)
-    {
-      Inst *new_inst = create_inst(Op::SLE, arg1->args[0], arg2->args[0]);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // sle (sext x), c -> sle x, (trunc c) if (sext (trunc c)) == c
-  if (arg1->op == Op::SEXT
-      && arg2->op == Op::VALUE
-      && is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
-    {
-      Inst *new_const =
-	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
-      Inst *new_inst = create_inst(Op::SLE, arg1->args[0], new_const);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // sle c, (sext x) -> sle (trunc c), x if (sext (trunc c)) == c
-  if (arg1->op == Op::VALUE
-      && arg2->op == Op::SEXT
-      && is_nbit_signed_value(arg1, arg2->args[0]->bitsize))
-    {
-      Inst *new_const =
-	inst->bb->value_inst(arg1->value(), arg2->args[0]->bitsize);
-      Inst *new_inst = create_inst(Op::SLE, new_const, arg2->args[0]);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // sle (sext x), c -> true if (sext (trunc c)) != c
-  if (arg1->op == Op::SEXT
-      && arg2->op == Op::VALUE
-      && !is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
-    return inst->bb->value_inst(1, 1);
-
-  // sle c, (sext x) -> false if (sext (trunc c)) != c
-  if (arg1->op == Op::VALUE
-      && arg2->op == Op::SEXT
-      && !is_nbit_signed_value(arg1, arg2->args[0]->bitsize))
-    return inst->bb->value_inst(0, 1);
-
-  return inst;
+  // sle x, y -> not (slt y, x)
+  Inst *new_inst1 = create_inst(Op::SLT, arg2, arg1);
+  new_inst1->insert_before(inst);
+  new_inst1 = simplify_inst(new_inst1);
+  Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
+  new_inst2->insert_before(inst);
+  return new_inst2;
 }
 
 Inst *simplify_slt(Inst *inst)
@@ -1729,65 +1667,13 @@ Inst *simplify_ule(Inst *inst)
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // ule x, x -> true
-  if (arg1 == arg2)
-    return inst->bb->value_inst(1, 1);
-
-  // ule x, c -> true if c == the maximal possible value of x
-  if (is_value_m1(arg2))
-    return inst->bb->value_inst(1, 1);
-
-  // ule 0, x -> true
-  if (is_value_zero(arg1))
-    return inst->bb->value_inst(1, 1);
-
-  // ule (zext x), (zext y) -> ule x, y
-  if (arg1->op == Op::ZEXT
-      && arg2->op == Op::ZEXT
-      && arg1->args[0]->bitsize == arg2->args[0]->bitsize)
-    {
-      Inst *new_inst = create_inst(Op::ULE, arg1->args[0], arg2->args[0]);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // ule (zext x), c -> ule x, (trunc c) if (zext (trunc c)) == c
-  if (arg1->op == Op::ZEXT
-      && arg2->op == Op::VALUE
-      && is_nbit_value(arg2, arg1->args[0]->bitsize))
-    {
-      Inst *new_const =
-	inst->bb->value_inst(arg2->value(), arg1->args[0]->bitsize);
-      Inst *new_inst = create_inst(Op::ULE, arg1->args[0], new_const);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // ule c, (zext x) -> ule (trunc c), x if (zext (trunc c)) == c
-  if (arg1->op == Op::VALUE
-      && arg2->op == Op::ZEXT
-      && is_nbit_value(arg1, arg2->args[0]->bitsize))
-    {
-      Inst *new_const =
-	inst->bb->value_inst(arg1->value(), arg2->args[0]->bitsize);
-      Inst *new_inst = create_inst(Op::ULE, new_const, arg2->args[0]);
-      new_inst->insert_before(inst);
-      return new_inst;
-    }
-
-  // ule (zext x), c -> true if (zext (trunc c)) != c
-  if (arg1->op == Op::ZEXT
-      && arg2->op == Op::VALUE
-      && !is_nbit_value(arg2, arg1->args[0]->bitsize))
-    return inst->bb->value_inst(1, 1);
-
-  // ule c, (zext x) -> false if (zext (trunc c)) != c
-  if (arg1->op == Op::VALUE
-      && arg2->op == Op::ZEXT
-      && !is_nbit_value(arg1, arg2->args[0]->bitsize))
-    return inst->bb->value_inst(0, 1);
-
-  return inst;
+  // ule x, y -> not (ult y, x)
+  Inst *new_inst1 = create_inst(Op::ULT, arg2, arg1);
+  new_inst1->insert_before(inst);
+  new_inst1 = simplify_inst(new_inst1);
+  Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
+  new_inst2->insert_before(inst);
+  return new_inst2;
 }
 
 Inst *simplify_ult(Inst *inst)
