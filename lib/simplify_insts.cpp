@@ -1835,8 +1835,100 @@ Inst *simplify_memory(Inst *inst)
   return inst->bb->value_inst(addr, inst->bb->func->module->ptr_bits);
 }
 
+bool is_phi_ext(Inst *phi)
+{
+  Inst *ext = nullptr;
+  for (auto [inst, _] : phi->phi_args)
+    {
+      if (inst->op == Op::SEXT || inst->op == Op::ZEXT)
+	{
+	  ext = inst;
+	  break;
+	}
+    }
+  if (!ext)
+    return false;
+
+  // Check that all arguments are either a sign extension, a zero extension,
+  // or a constant that retains the same value when truncated and extended.
+  uint32_t bitsize = ext->args[0]->bitsize;
+  for (auto [inst, _] : phi->phi_args)
+    {
+      if (inst->op == Op::VALUE)
+	{
+	  if (ext->op == Op::SEXT && is_nbit_signed_value(inst, bitsize))
+	    ;
+	  else if (ext->op == Op::ZEXT && is_nbit_value(inst, bitsize))
+	    ;
+	  else
+	    return false;
+	}
+      else if (inst->op != ext->op || inst->args[0]->bitsize != bitsize)
+	return false;
+    }
+
+  return true;
+}
+
+bool is_phi_not(Inst *phi)
+{
+  bool found_not = false;
+  for (auto [inst, _] : phi->phi_args)
+    {
+      if (inst->op == Op::NOT)
+	found_not = true;
+      else if (inst->op != Op::VALUE)
+	return false;
+    }
+  return found_not;
+}
+
 Inst *simplify_phi(Inst *phi)
 {
+  // phi [ not x, .1 ],  [ c, .2 ] -> not phi [x, .1], [c', .2 ]
+  if (is_phi_not(phi))
+    {
+      Inst *new_phi = phi->bb->build_phi_inst(phi->bitsize);
+      for (auto [inst, bb] : phi->phi_args)
+	{
+	  if (inst->op == Op::NOT)
+	    inst = inst->args[0];
+	  else
+	    inst = bb->value_inst(~inst->value(), new_phi->bitsize);
+	  new_phi->add_phi_arg(inst, bb);
+	}
+      Inst *new_inst = create_inst(Op::NOT, new_phi);
+      new_inst->insert_before(phi->bb->first_inst);
+      return new_inst;
+    }
+
+  // phi [ sext x, .1 ],  [ c, .2 ] -> sext phi [x, .1], [c', .2 ]
+  // phi [ zext x, .1 ],  [ c, .2 ] -> zext phi [x, .1], [c', .2 ]
+  if (is_phi_ext(phi))
+    {
+      Inst *ext = nullptr;
+      for (auto [inst, _] : phi->phi_args)
+	{
+	  if (inst->op == Op::SEXT || inst->op == Op::ZEXT)
+	    {
+	      ext = inst;
+	      break;
+	    }
+	}
+      Inst *new_phi = phi->bb->build_phi_inst(ext->args[0]->bitsize);
+      for (auto [inst, bb] : phi->phi_args)
+	{
+	  if (inst->op == Op::SEXT || inst->op == Op::ZEXT)
+	    inst = inst->args[0];
+	  else
+	    inst = bb->value_inst(inst->value(), new_phi->bitsize);
+	  new_phi->add_phi_arg(inst, bb);
+	}
+      Inst *new_inst = create_inst(ext->op, new_phi, phi->bitsize);
+      new_inst->insert_before(phi->bb->first_inst);
+      return new_inst;
+    }
+
   // If phi only references itself or one other value it can be replaced by
   // that value, e.g. %2 = phi [ %1, .1] [ %2, .2] [%1, .3]
   Inst *inst = nullptr;
@@ -1850,7 +1942,6 @@ Inst *simplify_phi(Inst *phi)
 	    return phi;
 	}
     }
-
   return inst;
 }
 
@@ -2455,18 +2546,22 @@ void simplify_insts(Function *func)
 {
   for (Basic_block *bb : func->bbs)
     {
-      std::vector<Inst*> dead_phis;
-      for (auto phi : bb->phis)
+      if (!bb->phis.empty())
 	{
-	  Inst *res = simplify_phi(phi);
-	  if (res != phi)
-	    phi->replace_all_uses_with(res);
-	  if (phi->used_by.empty())
-	    dead_phis.push_back(phi);
-	}
-      for (auto phi : dead_phis)
-	{
-	  destroy(phi);
+	  std::vector<Inst*> dead_phis;
+	  for (uint64_t i = 0; i < bb->phis.size(); i++)
+	    {
+	      Inst *phi = bb->phis[i];
+	      Inst *res = simplify_phi(phi);
+	      if (res != phi)
+		phi->replace_all_uses_with(res);
+	      if (phi->used_by.empty())
+		dead_phis.push_back(phi);
+	    }
+	  for (auto phi : dead_phis)
+	    {
+	      destroy(phi);
+	    }
 	}
       for (Inst *inst = bb->first_inst; inst;)
 	{
