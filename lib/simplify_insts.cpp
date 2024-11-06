@@ -334,6 +334,17 @@ Inst *simplify_and(Inst *inst)
   if (arg2->op == Op::NOT && arg2->args[0] == arg1)
     return inst->bb->value_inst(0, inst->bitsize);
 
+  // and (not x), (not x) -> not (or x, y)
+  if (arg1->op == Op::NOT && arg2->op == Op::NOT)
+    {
+      Inst *new_inst1 = create_inst(Op::OR, arg1->args[0], arg2->args[0]);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
   // For Boolean x: and (sext x), 1 -> zext x
   if (is_boolean_sext(arg1) && is_value_one(arg2))
     {
@@ -791,6 +802,17 @@ Inst *simplify_or(Inst *inst)
     return inst->bb->value_inst(-1, inst->bitsize);
   if (arg2->op == Op::NOT && arg2->args[0] == arg1)
     return inst->bb->value_inst(-1, inst->bitsize);
+
+  // or (not x), (not x) -> not (and x, y)
+  if (arg1->op == Op::NOT && arg2->op == Op::NOT)
+    {
+      Inst *new_inst1 = create_inst(Op::AND, arg1->args[0], arg2->args[0]);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
 
   // For Boolean x: or (zext x), 1 -> 1
   if (arg1->op == Op::ZEXT
