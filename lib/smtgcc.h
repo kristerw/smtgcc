@@ -73,7 +73,6 @@ enum class Op : uint8_t {
   SRC_ASSERT,
   TGT_ASSERT,
   UB,
-  UB_NAN,
 
   // Floating-point unary
   FABS,
@@ -177,7 +176,7 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 92> inst_info;
+extern const std::array<Inst_info, 91> inst_info;
 
 struct Module;
 struct Function;

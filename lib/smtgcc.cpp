@@ -12,7 +12,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 92> inst_info{{
+const std::array<Inst_info, 91> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -52,7 +52,6 @@ const std::array<Inst_info, 92> inst_info{{
   {"src_assert", Op::SRC_ASSERT, Inst_class::iunary, false, false},
   {"tgt_assert", Op::TGT_ASSERT, Inst_class::iunary, false, false},
   {"ub", Op::UB, Inst_class::iunary, false, false},
-  {"ub_nan", Op::UB_NAN, Inst_class::iunary, false, false},
 
   // Floating-point unary
   {"fabs", Op::FABS, Inst_class::funary, true, false},
