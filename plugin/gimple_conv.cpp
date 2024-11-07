@@ -2172,6 +2172,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_int(enum tree_code c
     case CONVERT_EXPR:
     case NOP_EXPR:
       return type_convert(arg1, arg1_indef, arg1_prov, arg1_type, lhs_type);
+    case PAREN_EXPR:
+      return {arg1, arg1_indef, arg1_prov};
     default:
       break;
     }
