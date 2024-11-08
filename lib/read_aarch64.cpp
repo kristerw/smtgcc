@@ -178,6 +178,7 @@ private:
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   void process_vec_unary(Op op);
   void process_vec_binary(Op op);
+  void process_vec_movi();
   void process_vec_orr();
   void parse_vector_op();
   void parse_function();
@@ -2216,6 +2217,48 @@ void Parser::process_vec_binary(Op op)
   write_reg(dest, res);
 }
 
+void Parser::process_vec_movi()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  uint64_t value = get_imm(3)->value();
+  uint64_t shift = 0;
+  uint64_t m = 0;
+  if (tokens.size() > 4)
+    {
+      get_comma(4);
+      std::string_view lsl = get_name(5);
+      shift = get_imm(6)->value();
+      if (lsl == "lsl")
+	{
+	  if (shift != 0 && shift != 8 && shift != 16 && shift != 24)
+	    throw Parse_error("invalid shift value for orr", line_number);
+	}
+      else if (lsl == "msl")
+	{
+	  if (shift == 8)
+	    m = 0xff;
+	  else if (shift == 16)
+	    m = 0xffff;
+	  else
+	    throw Parse_error("invalid shift value for orr", line_number);
+	}
+      else
+	throw Parse_error("expected lsl/msl for shift", line_number);
+      get_end_of_line(7);
+    }
+  else
+    get_end_of_line(4);
+  Inst *arg1 = bb->value_inst((value << shift) | m, elem_bitsize);
+
+  Inst *res = arg1;
+  for (uint32_t i = 1; i < nof_elem; i++)
+    {
+      res = bb->build_inst(Op::CONCAT, arg1, res);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_orr()
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -2290,6 +2333,8 @@ void Parser::parse_vector_op()
     process_vec_unary(Op::FNEG);
   else if (name == "fsub")
     process_vec_binary(Op::FSUB);
+  else if (name == "movi")
+    process_vec_movi();
   else if (name == "mul")
     process_vec_binary(Op::MUL);
   else if (name == "neg")
