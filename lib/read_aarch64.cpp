@@ -88,6 +88,7 @@ private:
   unsigned __int128 get_hex_or_integer(unsigned idx);
   Inst *get_reg(unsigned idx);
   Inst *get_freg(unsigned idx);
+  std::tuple<Inst *, uint32_t, uint32_t> get_vreg(unsigned idx);
   uint32_t get_reg_size(unsigned idx);
   bool is_vector_op();
   bool is_freg(unsigned idx);
@@ -95,6 +96,7 @@ private:
   Inst *get_reg_value(unsigned idx);
   Inst *get_reg_or_imm_value(unsigned idx, uint32_t bitsize);
   Inst *get_freg_value(unsigned idx);
+  Inst *get_vreg_value(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
   std::string_view get_name(unsigned idx);
@@ -173,6 +175,9 @@ private:
   void process_bfxil();
   void process_ubfx(Op op);
   void process_ubfiz(Op op);
+  Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
+  void process_vec_unary(Op op);
+  void process_vec_binary(Op op);
   void parse_vector_op();
   void parse_function();
 
@@ -472,6 +477,55 @@ Inst *Parser::get_freg_value(unsigned idx)
 {
   Inst *inst = bb->build_inst(Op::READ, get_freg(idx));
   return bb->build_trunc(inst, get_reg_size(idx));
+}
+
+std::tuple<Inst *, uint32_t, uint32_t> Parser::get_vreg(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+
+  if (tokens[idx].kind != Lexeme::name
+      || tokens[idx].size < 4
+      || buf[tokens[idx].pos] != 'v'
+      || !isdigit(buf[tokens[idx].pos + 1]))
+    throw Parse_error("expected a vector register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  uint32_t value = buf[tokens[idx].pos + 1] - '0';
+  uint32_t pos = 2;
+  if (isdigit(buf[tokens[idx].pos + pos]))
+    value = value * 10 + (buf[tokens[idx].pos + pos++] - '0');
+  if (value > 31)
+    throw Parse_error("expected a vector register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  Inst *reg = rstate->registers[Aarch64RegIdx::v0 + value];
+  std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
+  if (suffix == ".2d")
+    return {reg, 2, 64};
+  if (suffix == ".2s")
+    return {reg, 2, 32};
+  if (suffix == ".4s")
+    return {reg, 4, 32};
+  if (suffix == ".4h")
+    return {reg, 4, 16};
+  if (suffix == ".8h")
+    return {reg, 8, 16};
+  if (suffix == ".8b")
+    return {reg, 8, 8};
+  if (suffix == ".16b")
+    return {reg, 16, 8};
+
+  throw Parse_error("expected a vector register instead of "
+		    + std::string(token_string(tokens[idx])), line_number);
+}
+
+Inst *Parser::get_vreg_value(unsigned idx, uint32_t nof_elem,
+			     uint32_t elem_bitsize)
+{
+  auto [dest, dest_nof_elem, dest_elem_bitsize] = get_vreg(idx);
+  if (nof_elem != dest_nof_elem || elem_bitsize != dest_elem_bitsize)
+    throw Parse_error("expected same arg vector size as dest", line_number);
+  Inst *inst = bb->build_inst(Op::READ, dest);
+  return bb->build_trunc(inst, nof_elem * elem_bitsize);
 }
 
 uint32_t Parser::get_reg_size(unsigned idx)
@@ -2080,12 +2134,92 @@ void Parser::process_ccmp(bool is_ccmn)
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
 }
 
+Inst *Parser::extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx)
+{
+  if (idx == 0 && inst->bitsize == elem_bitsize)
+    return inst;
+  assert(inst->bitsize % elem_bitsize == 0);
+  Inst *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
+  Inst *low = bb->value_inst(idx * elem_bitsize, 32);
+  return bb->build_inst(Op::EXTRACT, inst, high, low);
+}
+
+void Parser::process_vec_unary(Op op)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_end_of_line(4);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, elem1);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_binary(Op op)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, elem1, elem2);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::parse_vector_op()
 {
   std::string_view name = get_name(0);
 
-  throw Parse_error("unhandled vector instruction: "s + std::string(name),
-		    line_number);
+  if (name == "add")
+    process_vec_binary(Op::ADD);
+  else if (name == "and")
+    process_vec_binary(Op::AND);
+  else if (name == "eor")
+    process_vec_binary(Op::XOR);
+  else if (name == "fadd")
+    process_vec_binary(Op::FADD);
+  else if (name == "fdiv")
+    process_vec_binary(Op::FDIV);
+  else if (name == "fmul")
+    process_vec_binary(Op::FMUL);
+  else if (name == "fneg")
+    process_vec_unary(Op::FNEG);
+  else if (name == "fsub")
+    process_vec_binary(Op::FSUB);
+  else if (name == "mul")
+    process_vec_binary(Op::MUL);
+  else if (name == "neg")
+    process_vec_unary(Op::NEG);
+  else if (name == "not")
+    process_vec_unary(Op::NOT);
+  else if (name == "orr")
+    process_vec_binary(Op::OR);
+  else if (name == "sub")
+    process_vec_binary(Op::SUB);
+  else
+    throw Parse_error("unhandled vector instruction: "s + std::string(name),
+		      line_number);
 }
 
 void Parser::parse_function()
