@@ -178,6 +178,7 @@ private:
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   void process_vec_unary(Op op);
   void process_vec_binary(Op op);
+  void process_vec_orr();
   void parse_vector_op();
   void parse_function();
 
@@ -576,7 +577,7 @@ uint32_t Parser::get_reg_size(unsigned idx)
 
 bool Parser::is_vector_op()
 {
-  if (tokens.size() < 2 && tokens[1].kind != Lexeme::name)
+  if (tokens.size() < 2 || tokens[1].kind != Lexeme::name)
     return false;
   if (buf[tokens[1].pos] != 'v')
     return false;
@@ -2215,6 +2216,60 @@ void Parser::process_vec_binary(Op op)
   write_reg(dest, res);
 }
 
+void Parser::process_vec_orr()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1;
+  Inst *arg2;
+  if (tokens.size() >= 4
+      && tokens[3].kind == Lexeme::name
+      && buf[tokens[1].pos] == 'v')
+    {
+      arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+      get_comma(4);
+      arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+      get_end_of_line(6);
+    }
+  else
+    {
+      arg1 = get_vreg_value(1, nof_elem, elem_bitsize);
+      uint64_t value = get_imm(3)->value();
+      uint64_t shift = 0;
+      if (tokens.size() > 4)
+	{
+	  get_comma(4);
+	  std::string_view lsl = get_name(5);
+	  if (lsl != "lsl")
+	    throw Parse_error("expected lsl for shift", line_number);
+	  shift = get_imm(6)->value();
+	  if (shift != 0 && shift != 8 && shift != 16 && shift != 24)
+	    throw Parse_error("invalid shift value for orr", line_number);
+	  get_end_of_line(7);
+	}
+      else
+	get_end_of_line(4);
+      arg2 = bb->value_inst(value << shift, elem_bitsize);
+    }
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2;
+      if (arg2->bitsize == elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = bb->build_inst(Op::OR, elem1, elem2);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::parse_vector_op()
 {
   std::string_view name = get_name(0);
@@ -2242,7 +2297,7 @@ void Parser::parse_vector_op()
   else if (name == "not")
     process_vec_unary(Op::NOT);
   else if (name == "orr")
-    process_vec_binary(Op::OR);
+    process_vec_orr();
   else if (name == "sub")
     process_vec_binary(Op::SUB);
   else
