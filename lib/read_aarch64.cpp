@@ -1258,8 +1258,22 @@ void Parser::process_f2i(bool is_unsigned)
   uint32_t dest_bitsize = get_reg_size(1);
   get_comma(2);
   Inst *arg1 = get_reg_value(3);
-  get_end_of_line(4);
+  Inst *arg2 = nullptr;
+  if (tokens.size() > 4)
+    {
+      get_comma(4);
+      arg2 = get_imm(5);
+      get_end_of_line(6);
+    }
+  else
+    get_end_of_line(4);
 
+  if (arg2)
+    {
+      Inst *scale = bb->value_inst(1ull << arg2->value(), 64);
+      scale = bb->build_inst(Op::U2F, scale, arg1->bitsize);
+      arg1 = bb->build_inst(Op::FMUL, arg1, scale);
+    }
   Op op = is_unsigned ? Op::F2U : Op::F2S;
   Inst *res = bb->build_inst(op, arg1, dest_bitsize);
   write_reg(dest, res);
