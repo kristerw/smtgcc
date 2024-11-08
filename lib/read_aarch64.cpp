@@ -1231,10 +1231,24 @@ void Parser::process_i2f(bool is_unsigned)
   uint32_t dest_bitsize = get_reg_size(1);
   get_comma(2);
   Inst *arg1 = get_reg_value(3);
-  get_end_of_line(4);
+  Inst *arg2 = nullptr;
+  if (tokens.size() > 4)
+    {
+      get_comma(4);
+      arg2 = get_imm(5);
+      get_end_of_line(6);
+    }
+  else
+    get_end_of_line(4);
 
   Op op = is_unsigned ? Op::U2F : Op::S2F;
   Inst *res = bb->build_inst(op, arg1, dest_bitsize);
+  if (arg2)
+    {
+      Inst *scale = bb->value_inst(1ull << arg2->value(), 64);
+      scale = bb->build_inst(Op::U2F, scale, dest_bitsize);
+      res = bb->build_inst(Op::FDIV, res, scale);
+    }
   write_reg(dest, res);
 }
 
