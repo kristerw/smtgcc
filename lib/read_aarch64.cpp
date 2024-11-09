@@ -92,6 +92,7 @@ private:
   uint32_t get_reg_size(unsigned idx);
   bool is_vector_op();
   bool is_freg(unsigned idx);
+  bool is_vreg(unsigned idx);
   Inst *get_imm(unsigned idx);
   Inst *get_reg_value(unsigned idx);
   Inst *get_reg_or_imm_value(unsigned idx, uint32_t bitsize);
@@ -149,6 +150,7 @@ private:
   Inst *process_arg_shift(unsigned idx, Inst *arg);
   Inst *process_arg_ext(unsigned idx, Inst *arg, uint32_t bitsize);
   Inst *process_last_arg(unsigned idx, uint32_t bitsize);
+  Inst *process_last_scalar_vec_arg(unsigned idx, uint32_t elem_bitsize);
   void process_binary(Op op, bool perform_not = false);
   void process_cls();
   void process_clz();
@@ -178,6 +180,7 @@ private:
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   void process_vec_unary(Op op);
   void process_vec_binary(Op op);
+  void process_vec_dup();
   void process_vec_movi();
   void process_vec_orr();
   void parse_vector_op();
@@ -578,20 +581,7 @@ uint32_t Parser::get_reg_size(unsigned idx)
 
 bool Parser::is_vector_op()
 {
-  if (tokens.size() < 2 || tokens[1].kind != Lexeme::name)
-    return false;
-  if (buf[tokens[1].pos] != 'v')
-    return false;
-
-  if (isdigit(buf[tokens[1].pos + 1]))
-    {
-      if ((buf[tokens[1].pos + 2] == '.')
-	  || (isdigit(buf[tokens[1].pos + 2])
-	      && buf[tokens[1].pos + 3] == '.'))
-	return true;
-    }
-
-  return false;
+  return is_vreg(1);
 }
 
 bool Parser::is_freg(unsigned idx)
@@ -611,6 +601,24 @@ bool Parser::is_freg(unsigned idx)
 	  || buf[tokens[idx].pos] == 'h'
 	  || buf[tokens[idx].pos] == 'b'))
       return true;
+
+  return false;
+}
+
+bool Parser::is_vreg(unsigned idx)
+{
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::name)
+    return false;
+  if (buf[tokens[idx].pos] != 'v')
+    return false;
+
+  if (isdigit(buf[tokens[idx].pos + 1]))
+    {
+      if ((buf[tokens[idx].pos + 2] == '.')
+	  || (isdigit(buf[tokens[idx].pos + 2])
+	      && buf[tokens[idx].pos + 3] == '.'))
+	return true;
+    }
 
   return false;
 }
@@ -1725,6 +1733,51 @@ Inst *Parser::process_last_arg(unsigned idx, uint32_t bitsize)
   return arg;
 }
 
+Inst *Parser::process_last_scalar_vec_arg(unsigned idx, uint32_t elem_bitsize)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+
+  if (tokens[idx].kind != Lexeme::name
+      || tokens[idx].size < 4
+      || buf[tokens[idx].pos] != 'v'
+      || !isdigit(buf[tokens[idx].pos + 1]))
+    throw Parse_error("expected a vector register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  uint32_t value = buf[tokens[idx].pos + 1] - '0';
+  uint32_t pos = 2;
+  if (isdigit(buf[tokens[idx].pos + pos]))
+    value = value * 10 + (buf[tokens[idx].pos + pos++] - '0');
+  if (value > 31)
+    throw Parse_error("expected a vector register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  Inst *reg = rstate->registers[Aarch64RegIdx::v0 + value];
+  std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
+  uint32_t bitsize;
+  if (suffix == ".d")
+    bitsize = 64;
+  if (suffix == ".s")
+    bitsize = 32;
+  if (suffix == ".h")
+    bitsize = 16;
+  if (suffix == ".b")
+    bitsize = 8;
+  else if (elem_bitsize != bitsize)
+    throw Parse_error("expected same arg vector size as dest", line_number);
+  uint32_t nof_elem = 128 / elem_bitsize;
+  idx++;
+
+  get_left_bracket(idx++);
+  uint32_t elem_idx = get_imm(idx++)->value();
+  if (elem_idx >= nof_elem)
+    throw Parse_error("elem index out of range", line_number);
+  get_right_bracket(idx++);
+  get_end_of_line(idx);
+
+  Inst *inst = bb->build_inst(Op::READ, reg);
+  return extract_vec_elem(inst, elem_bitsize, elem_idx);
+}
+
 void Parser::process_binary(Op op, bool perform_not)
 {
   Inst *dest = get_reg(1);
@@ -2217,6 +2270,28 @@ void Parser::process_vec_binary(Op op)
   write_reg(dest, res);
 }
 
+void Parser::process_vec_dup()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1;
+  if (is_vreg(3))
+    arg1 = process_last_scalar_vec_arg(3, elem_bitsize);
+  else
+    {
+      arg1 = get_reg_value(3);
+      arg1 = bb->build_trunc(arg1, elem_bitsize);
+      get_end_of_line(4);
+    }
+
+  Inst *res = arg1;
+  for (uint32_t i = 1; i < nof_elem; i++)
+    {
+      res = bb->build_inst(Op::CONCAT, arg1, res);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_movi()
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -2265,9 +2340,7 @@ void Parser::process_vec_orr()
   get_comma(2);
   Inst *arg1;
   Inst *arg2;
-  if (tokens.size() >= 4
-      && tokens[3].kind == Lexeme::name
-      && buf[tokens[1].pos] == 'v')
+  if (is_vreg(3))
     {
       arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
       get_comma(4);
@@ -2321,6 +2394,8 @@ void Parser::parse_vector_op()
     process_vec_binary(Op::ADD);
   else if (name == "and")
     process_vec_binary(Op::AND);
+  else if (name == "dup")
+    process_vec_dup();
   else if (name == "eor")
     process_vec_binary(Op::XOR);
   else if (name == "fadd")
