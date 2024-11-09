@@ -2253,14 +2253,24 @@ void Parser::process_vec_binary(Op op)
   get_comma(2);
   Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
   get_comma(4);
-  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
-  get_end_of_line(6);
+  Inst *arg2;
+  if (tokens.size() > 6)
+    arg2 = process_last_scalar_vec_arg(5, elem_bitsize);
+  else
+    {
+      arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+      get_end_of_line(6);
+    }
 
   Inst *res = nullptr;
   for (uint32_t i = 0; i < nof_elem; i++)
     {
       Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
-      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *elem2;
+      if (arg2->bitsize == elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
       Inst *inst = bb->build_inst(op, elem1, elem2);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
