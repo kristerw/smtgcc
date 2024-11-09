@@ -130,14 +130,12 @@ private:
   void process_f2i(bool is_unsigned);
   void process_f2f();
   void process_fmin_fmax(bool is_min);
-  void process_min_max(bool is_min, bool is_unsigned);
   void process_mul_op(Op op);
   void process_maddl(Op op);
   void process_msubl(Op op);
   void process_mnegl(Op op);
   void process_mull(Op op);
   void process_mulh(Op op);
-  void process_abs();
   void process_adrp();
   void process_adc();
   void process_adcs();
@@ -146,15 +144,16 @@ private:
   void process_ngc();
   void process_ngcs();
   void process_movk();
+  void process_smov();
+  void process_umov();
   void process_unary(Op op);
+  void process_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
   Inst *process_arg_shift(unsigned idx, Inst *arg);
   Inst *process_arg_ext(unsigned idx, Inst *arg, uint32_t bitsize);
   Inst *process_last_arg(unsigned idx, uint32_t bitsize);
-  Inst *process_last_scalar_vec_arg(unsigned idx, uint32_t elem_bitsize);
+  Inst *process_last_scalar_vec_arg(unsigned idx);
   void process_binary(Op op, bool perform_not = false);
-  void process_cls();
-  void process_clz();
-  void process_rbit();
+  void process_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_rev();
   void process_rev(uint32_t bitsize);
   Inst *gen_sub_cond_flags(Inst *arg1, Inst *arg2);
@@ -179,7 +178,11 @@ private:
   void process_ubfiz(Op op);
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   void process_vec_unary(Op op);
+  void process_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
   void process_vec_binary(Op op);
+  void process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_rev(uint32_t bitsize);
   void process_vec_dup();
   void process_vec_movi();
   void process_vec_orr();
@@ -829,6 +832,43 @@ Inst *Parser::build_cond(Cond_code cc)
   throw Parse_error("unhandled condition code", line_number);
 }
 
+Inst *gen_abs(Basic_block *bb, Inst *elem1)
+{
+  Inst *neg = bb->build_inst(Op::NEG, elem1);
+  Inst *zero = bb->value_inst(0, elem1->bitsize);
+  Inst *cond = bb->build_inst(Op::SLE, zero, elem1);
+  return bb->build_inst(Op::ITE, cond, elem1, neg);
+}
+
+Inst *gen_smin(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *cmp = bb->build_inst(Op::SLT, elem1, elem2);
+  return bb->build_inst(Op::ITE, cmp, elem1, elem2);
+}
+
+Inst *gen_umin(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *cmp = bb->build_inst(Op::ULT, elem1, elem2);
+  return bb->build_inst(Op::ITE, cmp, elem1, elem2);
+}
+
+Inst *gen_smax(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *cmp = bb->build_inst(Op::SLT, elem1, elem2);
+  return bb->build_inst(Op::ITE, cmp, elem2, elem1);
+}
+
+Inst *gen_umax(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *cmp = bb->build_inst(Op::ULT, elem1, elem2);
+  return bb->build_inst(Op::ITE, cmp, elem2, elem1);
+}
+
+Inst *gen_add(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::ADD, elem1, elem2);
+}
+
 void Parser::process_cond_branch(Cond_code cc)
 {
   Basic_block *true_bb = get_bb(1);
@@ -1336,24 +1376,6 @@ void Parser::process_fmin_fmax(bool is_min)
   write_reg(dest, res);
 }
 
-void Parser::process_min_max(bool is_min, bool is_unsigned)
-{
-  Inst *dest = get_reg(1);
-  get_comma(2);
-  Inst *arg1 = get_reg_value(3);
-  get_comma(4);
-  Inst *arg2 = get_reg_or_imm_value(5, arg1->bitsize);
-  get_end_of_line(6);
-
-  Inst *cmp = bb->build_inst(is_unsigned ? Op::ULT : Op::SLT, arg1, arg2);
-  Inst *res;
-  if (is_min)
-    res = bb->build_inst(Op::ITE, cmp, arg1, arg2);
-  else
-    res = bb->build_inst(Op::ITE, cmp, arg2, arg1);
-  write_reg(dest, res);
-}
-
 void Parser::process_mul_op(Op op)
 {
   Inst *dest = get_reg(1);
@@ -1450,20 +1472,6 @@ void Parser::process_mulh(Op op)
   arg2 = bb->build_inst(op, arg2, 128);
   Inst *res = bb->build_inst(Op::MUL, arg1, arg2);
   res = bb->build_inst(Op::EXTRACT, res, 127, 64);
-  write_reg(dest, res);
-}
-
-void Parser::process_abs()
-{
-  Inst *dest = get_reg(1);
-  get_comma(2);
-  Inst *arg1 = get_reg_value(3);
-  get_end_of_line(4);
-
-  Inst *neg = bb->build_inst(Op::NEG, arg1);
-  Inst *zero = bb->value_inst(0, arg1->bitsize);
-  Inst *cond = bb->build_inst(Op::SLE, zero, arg1);
-  Inst *res = bb->build_inst(Op::ITE, cond, arg1, neg);
   write_reg(dest, res);
 }
 
@@ -1614,6 +1622,27 @@ void Parser::process_movk()
   write_reg(dest, res);
 }
 
+void Parser::process_smov()
+{
+  Inst *dest = get_reg(1);
+  uint32_t dest_bitsize = get_reg_size(1);
+  get_comma(2);
+  Inst *arg1 = process_last_scalar_vec_arg(3);
+
+  if (arg1->bitsize != dest_bitsize)
+    arg1 = bb->build_inst(Op::SEXT, arg1, dest_bitsize);
+  write_reg(dest, arg1);
+}
+
+void Parser::process_umov()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = process_last_scalar_vec_arg(3);
+
+  write_reg(dest, arg1);
+}
+
 void Parser::process_unary(Op op)
 {
   Inst *dest = get_reg(1);
@@ -1622,6 +1651,17 @@ void Parser::process_unary(Op op)
   Inst *arg1 = process_last_arg(3, is_w_reg ? 32 : 64);
 
   Inst *res = bb->build_inst(op, arg1);
+  write_reg(dest, res);
+}
+
+void Parser::process_unary(Inst*(*gen_elem)(Basic_block*, Inst*))
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  bool is_w_reg = buf[tokens[1].pos] == 'w';
+  Inst *arg1 = process_last_arg(3, is_w_reg ? 32 : 64);
+
+  Inst *res = gen_elem(bb, arg1);
   write_reg(dest, res);
 }
 
@@ -1733,7 +1773,7 @@ Inst *Parser::process_last_arg(unsigned idx, uint32_t bitsize)
   return arg;
 }
 
-Inst *Parser::process_last_scalar_vec_arg(unsigned idx, uint32_t elem_bitsize)
+Inst *Parser::process_last_scalar_vec_arg(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
@@ -1753,17 +1793,15 @@ Inst *Parser::process_last_scalar_vec_arg(unsigned idx, uint32_t elem_bitsize)
 		      + std::string(token_string(tokens[idx])), line_number);
   Inst *reg = rstate->registers[Aarch64RegIdx::v0 + value];
   std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
-  uint32_t bitsize;
+  uint32_t elem_bitsize;
   if (suffix == ".d")
-    bitsize = 64;
+    elem_bitsize = 64;
   if (suffix == ".s")
-    bitsize = 32;
+    elem_bitsize = 32;
   if (suffix == ".h")
-    bitsize = 16;
+    elem_bitsize = 16;
   if (suffix == ".b")
-    bitsize = 8;
-  else if (elem_bitsize != bitsize)
-    throw Parse_error("expected same arg vector size as dest", line_number);
+    elem_bitsize = 8;
   uint32_t nof_elem = 128 / elem_bitsize;
   idx++;
 
@@ -1789,6 +1827,18 @@ void Parser::process_binary(Op op, bool perform_not)
   if (perform_not)
     arg2 = bb->build_inst(Op::NOT, arg2);
   Inst *res = bb->build_inst(op, arg1, arg2);
+  write_reg(dest, res);
+}
+
+void Parser::process_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  Inst *arg2 = process_last_arg(5, arg1->bitsize);
+
+  Inst *res = gen_elem(bb, arg1, arg2);
   write_reg(dest, res);
 }
 
@@ -1941,39 +1991,6 @@ void Parser::process_extr()
   Inst *lshift = bb->build_inst(Op::SUB, bs, shift);
   Inst *shl = bb->build_inst(Op::SHL, arg1, lshift);
   Inst *res = bb->build_inst(Op::OR, lshr, shl);
-  write_reg(dest, res);
-}
-
-void Parser::process_cls()
-{
-  Inst *dest = get_reg(1);
-  get_comma(2);
-  Inst *arg1 = get_reg_value(3);
-  get_end_of_line(4);
-
-  Inst *res = gen_clrsb(bb, arg1);
-  write_reg(dest, res);
-}
-
-void Parser::process_clz()
-{
-  Inst *dest = get_reg(1);
-  get_comma(2);
-  Inst *arg1 = get_reg_value(3);
-  get_end_of_line(4);
-
-  Inst *res = gen_clz(bb, arg1);
-  write_reg(dest, res);
-}
-
-void Parser::process_rbit()
-{
-  Inst *dest = get_reg(1);
-  get_comma(2);
-  Inst *arg1 = get_reg_value(3);
-  get_end_of_line(4);
-
-  Inst *res = gen_bitreverse(bb, arg1);
   write_reg(dest, res);
 }
 
@@ -2247,6 +2264,26 @@ void Parser::process_vec_unary(Op op)
   write_reg(dest, res);
 }
 
+void Parser::process_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*))
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_end_of_line(4);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = gen_elem(bb, elem1);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_binary(Op op)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -2255,7 +2292,7 @@ void Parser::process_vec_binary(Op op)
   get_comma(4);
   Inst *arg2;
   if (tokens.size() > 6)
-    arg2 = process_last_scalar_vec_arg(5, elem_bitsize);
+    arg2 = process_last_scalar_vec_arg(5);
   else
     {
       arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
@@ -2280,13 +2317,85 @@ void Parser::process_vec_binary(Op op)
   write_reg(dest, res);
 }
 
+void Parser::process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = gen_elem(bb, elem1, elem2);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  auto [_, nof_elem, elem_bitsize] = get_vreg(3);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_end_of_line(4);
+
+  Inst *res = extract_vec_elem(arg1, elem_bitsize, 0);
+  for (uint32_t i = 1; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      res = gen_elem(bb, res, elem1);
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_rev(uint32_t bitsize)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_end_of_line(4);
+
+  assert(arg1->bitsize >= bitsize);
+  assert(arg1->bitsize % bitsize == 0);
+  assert(bitsize >= elem_bitsize);
+  assert(bitsize % elem_bitsize == 0);
+  uint32_t nof_elem1 = arg1->bitsize / bitsize;
+  uint32_t nof_elem2 = bitsize / elem_bitsize;
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem1; i++)
+    {
+      Inst *elem = extract_vec_elem(arg1, bitsize, i);
+      Inst *inst = bb->build_trunc(elem, elem_bitsize);
+      for (uint32_t j = 1; j < nof_elem2; j++)
+	{
+	  Inst *inst2 = extract_vec_elem(elem, elem_bitsize, j);
+	  inst = bb->build_inst(Op::CONCAT, inst, inst2);
+	}
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_dup()
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
   get_comma(2);
   Inst *arg1;
   if (is_vreg(3))
-    arg1 = process_last_scalar_vec_arg(3, elem_bitsize);
+    arg1 = process_last_scalar_vec_arg(3);
   else
     {
       arg1 = get_reg_value(3);
@@ -2400,7 +2509,9 @@ void Parser::parse_vector_op()
 {
   std::string_view name = get_name(0);
 
-  if (name == "add")
+  if (name == "abs")
+    process_vec_unary(gen_abs);
+  else if (name == "add")
     process_vec_binary(Op::ADD);
   else if (name == "and")
     process_vec_binary(Op::AND);
@@ -2408,6 +2519,8 @@ void Parser::parse_vector_op()
     process_vec_dup();
   else if (name == "eor")
     process_vec_binary(Op::XOR);
+  else if (name == "fabs")
+    process_vec_unary(Op::FABS);
   else if (name == "fadd")
     process_vec_binary(Op::FADD);
   else if (name == "fdiv")
@@ -2428,8 +2541,30 @@ void Parser::parse_vector_op()
     process_vec_unary(Op::NOT);
   else if (name == "orr")
     process_vec_orr();
+  else if (name == "smin")
+    process_vec_binary(gen_smin);
+  else if (name == "smax")
+    process_vec_binary(gen_smax);
   else if (name == "sub")
     process_vec_binary(Op::SUB);
+  else if (name == "umin")
+    process_vec_binary(gen_umin);
+  else if (name == "umax")
+    process_vec_binary(gen_umax);
+  else if (name == "cls")
+    process_vec_unary(gen_clrsb);
+  else if (name == "clz")
+    process_vec_unary(gen_clz);
+  else if (name == "rev16")
+    process_vec_rev(16);
+  else if (name == "rev32")
+    process_vec_rev(32);
+  else if (name == "rev64")
+    process_vec_rev(64);
+  else if (name == "rbit")
+    process_vec_unary(gen_bitreverse);
+  else if (name == "mov")
+    process_vec_unary(Op::MOV);
   else
     throw Parse_error("unhandled vector instruction: "s + std::string(name),
 		      line_number);
@@ -2591,13 +2726,13 @@ void Parser::parse_function()
 
   // Data processing - integer minimum and maximum
   else if (name == "smax")
-    process_min_max(false, false);
+    process_binary(gen_smax);
   else if (name == "smin")
-    process_min_max(true, false);
+    process_binary(gen_smin);
   else if (name == "umax")
-    process_min_max(false, true);
+    process_binary(gen_umax);
   else if (name == "umin")
-    process_min_max(true, true);
+    process_binary(gen_umin);
 
   // Data processing - logical
   else if (name == "and")
@@ -2629,7 +2764,7 @@ void Parser::parse_function()
 
   // Data processing - absolute value
   else if (name == "abs")
-    process_abs();
+    process_unary(gen_abs);
 
   // Data processing - address calculation
   else if (name == "adrp")
@@ -2701,18 +2836,20 @@ void Parser::parse_function()
 
   // Data processing - bit operations
   else if (name == "cls")
-    process_cls();
+    process_unary(gen_clrsb);
   else if (name == "clz")
-    process_clz();
+    process_unary(gen_clz);
   // cnt
   else if (name == "rbit")
-    process_rbit();
+    process_unary(gen_bitreverse);
   else if (name == "rev")
     process_rev();
   else if (name == "rev16")
     process_rev(16);
   else if (name == "rev32")
     process_rev(32);
+  else if (name == "rev64")
+    process_rev(64);
 
   // Data processing - conditional select
   else if (name == "csel")
@@ -2751,35 +2888,50 @@ void Parser::parse_function()
     process_ext(Op::ZEXT, 32);
 
   // Data processing - SIMD and floating point
-  // TODO:
-  else if (name == "fmov")
-    process_unary(Op::MOV);
-  else if (name == "fneg")
-    process_unary(Op::FNEG);
+  else if (name == "addv")
+    process_vec_reduc(gen_add);
+  else if (name == "fabs")
+    process_unary(Op::FABS);
   else if (name == "fadd")
     process_binary(Op::FADD);
-  else if (name == "fsub")
-    process_binary(Op::FSUB);
-  else if (name == "fmul")
-    process_binary(Op::FMUL);
-  else if (name == "fdiv")
-    process_binary(Op::FDIV);
-  else if (name == "scvtf")
-    process_i2f(false);
-  else if (name == "ucvtf")
-    process_i2f(true);
+  else if (name == "fcmp" || name == "fcmpe")
+    process_fcmp();
+  else if (name == "fcvt")
+    process_f2f();
   else if (name == "fcvtzs")
     process_f2i(false);
   else if (name == "fcvtzu")
     process_f2i(true);
-  else if (name == "fcvt")
-    process_f2f();
-  else if (name == "fcmp" || name == "fcmpe")
-    process_fcmp();
-  else if (name == "fminnm")
-    process_fmin_fmax(true);
+  else if (name == "fdiv")
+    process_binary(Op::FDIV);
   else if (name == "fmaxnm")
     process_fmin_fmax(false);
+  else if (name == "fminnm")
+    process_fmin_fmax(true);
+  else if (name == "fmov")
+    process_unary(Op::MOV);
+  else if (name == "fmul")
+    process_binary(Op::FMUL);
+  else if (name == "fneg")
+    process_unary(Op::FNEG);
+  else if (name == "fsub")
+    process_binary(Op::FSUB);
+  else if (name == "scvtf")
+    process_i2f(false);
+  else if (name == "smaxv")
+    process_vec_reduc(gen_smax);
+  else if (name == "sminv")
+    process_vec_reduc(gen_smin);
+  else if (name == "smov")
+    process_smov();
+  else if (name == "ucvtf")
+    process_i2f(true);
+  else if (name == "umaxv")
+    process_vec_reduc(gen_umax);
+  else if (name == "uminv")
+    process_vec_reduc(gen_umin);
+  else if (name == "umov")
+    process_umov();
 
   else
     throw Parse_error("unhandled instruction: "s + std::string(name),
