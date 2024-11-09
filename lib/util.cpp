@@ -129,6 +129,19 @@ Inst *gen_clrsb(Basic_block *bb, Inst *arg)
   return inst;
 }
 
+Inst *gen_popcount(Basic_block *bb, Inst *arg)
+{
+  Inst *bit = bb->build_extract_bit(arg, 0);
+  Inst *inst = bb->build_inst(Op::ZEXT, bit, arg->bitsize);
+  for (uint32_t i = 1; i < arg->bitsize; i++)
+    {
+      bit = bb->build_extract_bit(arg, i);
+      Inst *ext = bb->build_inst(Op::ZEXT, bit, arg->bitsize);
+      inst = bb->build_inst(Op::ADD, inst, ext);
+    }
+  return inst;
+}
+
 Inst *gen_bswap(Basic_block *bb, Inst *arg)
 {
   Inst *inst = bb->build_trunc(arg, 8);

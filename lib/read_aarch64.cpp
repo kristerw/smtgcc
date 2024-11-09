@@ -13,6 +13,10 @@ using namespace smtgcc;
 namespace smtgcc {
 namespace {
 
+enum class SIMD_cond {
+  FEQ, FGE, FGT, FLE, FLT, EQ, GE, GT, HI, HS, LE, LT
+};
+
 struct Parser {
   Parser(aarch64_state *rstate) : rstate{rstate} {}
 
@@ -89,6 +93,7 @@ private:
   Inst *get_reg(unsigned idx);
   Inst *get_freg(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_vreg(unsigned idx);
+  std::tuple<Inst *, uint32_t, uint32_t> get_scalar_vreg(unsigned idx);
   uint32_t get_reg_size(unsigned idx);
   bool is_vector_op();
   bool is_freg(unsigned idx);
@@ -126,6 +131,7 @@ private:
   void process_store(uint32_t trunc_size = 0);
   void process_stp();
   void process_fcmp();
+  void process_fccmp();
   void process_i2f(bool is_unsigned);
   void process_f2i(bool is_unsigned);
   void process_f2f();
@@ -154,6 +160,8 @@ private:
   Inst *process_last_scalar_vec_arg(unsigned idx);
   void process_binary(Op op, bool perform_not = false);
   void process_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_simd_compare(SIMD_cond op);
+  void process_sshr();
   void process_rev();
   void process_rev(uint32_t bitsize);
   Inst *gen_sub_cond_flags(Inst *arg1, Inst *arg2);
@@ -179,13 +187,18 @@ private:
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   void process_vec_unary(Op op);
   void process_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
-  void process_vec_binary(Op op);
+  void process_vec_binary(Op op, bool perform_not = false);
   void process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_simd_compare(SIMD_cond op);
+  void process_vec_ins();
   void process_vec_rev(uint32_t bitsize);
   void process_vec_dup();
-  void process_vec_movi();
+  void process_vec_movi(bool invert = false);
   void process_vec_orr();
+  void process_vec_zip1();
+  void process_vec_zip2();
   void parse_vector_op();
   void parse_function();
 
@@ -526,6 +539,47 @@ std::tuple<Inst *, uint32_t, uint32_t> Parser::get_vreg(unsigned idx)
 		    + std::string(token_string(tokens[idx])), line_number);
 }
 
+std::tuple<Inst *, uint32_t, uint32_t> Parser::get_scalar_vreg(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+
+  if (tokens[idx].kind != Lexeme::name
+      || tokens[idx].size < 4
+      || buf[tokens[idx].pos] != 'v'
+      || !isdigit(buf[tokens[idx].pos + 1]))
+    throw Parse_error("expected a vector register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  uint32_t value = buf[tokens[idx].pos + 1] - '0';
+  uint32_t pos = 2;
+  if (isdigit(buf[tokens[idx].pos + pos]))
+    value = value * 10 + (buf[tokens[idx].pos + pos++] - '0');
+  if (value > 31)
+    throw Parse_error("expected a vector register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  Inst *reg = rstate->registers[Aarch64RegIdx::v0 + value];
+  std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
+  uint32_t elem_bitsize;
+  if (suffix == ".d")
+    elem_bitsize = 64;
+  if (suffix == ".s")
+    elem_bitsize = 32;
+  if (suffix == ".h")
+    elem_bitsize = 16;
+  if (suffix == ".b")
+    elem_bitsize = 8;
+  uint32_t nof_elem = 128 / elem_bitsize;
+  idx++;
+
+  get_left_bracket(idx++);
+  uint32_t elem_idx = get_imm(idx++)->value();
+  if (elem_idx >= nof_elem)
+    throw Parse_error("elem index out of range", line_number);
+  get_right_bracket(idx);
+
+  return {reg, elem_bitsize, elem_idx};
+}
+
 Inst *Parser::get_vreg_value(unsigned idx, uint32_t nof_elem,
 			     uint32_t elem_bitsize)
 {
@@ -840,6 +894,14 @@ Inst *gen_abs(Basic_block *bb, Inst *elem1)
   return bb->build_inst(Op::ITE, cond, elem1, neg);
 }
 
+Inst *gen_cmtst(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *inst = bb->build_inst(Op::AND, elem1, elem2);
+  Inst *zero = bb->value_inst(0, elem1->bitsize);
+  Inst *cmp = bb->build_inst(Op::NE, inst, zero);
+  return bb->build_inst(Op::SEXT, cmp, elem1->bitsize);
+}
+
 Inst *gen_smin(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   Inst *cmp = bb->build_inst(Op::SLT, elem1, elem2);
@@ -867,6 +929,51 @@ Inst *gen_umax(Basic_block *bb, Inst *elem1, Inst *elem2)
 Inst *gen_add(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   return bb->build_inst(Op::ADD, elem1, elem2);
+}
+
+Inst *gen_simd_compare(Basic_block *bb, Inst *elem1, Inst *elem2, SIMD_cond op)
+{
+  Inst *cond;
+  switch (op)
+    {
+    case SIMD_cond::EQ:
+      cond = bb->build_inst(Op::EQ, elem1, elem2);
+      break;
+    case SIMD_cond::GE:
+      cond = bb->build_inst(Op::SLE, elem2, elem1);
+      break;
+    case SIMD_cond::GT:
+      cond = bb->build_inst(Op::SLT, elem2, elem1);
+      break;
+    case SIMD_cond::HI:
+      cond = bb->build_inst(Op::ULT, elem2, elem1);
+      break;
+    case SIMD_cond::HS:
+      cond = bb->build_inst(Op::ULE, elem2, elem1);
+      break;
+    case SIMD_cond::LE:
+      cond = bb->build_inst(Op::SLE, elem1, elem2);
+      break;
+    case SIMD_cond::LT:
+      cond = bb->build_inst(Op::SLT, elem1, elem2);
+      break;
+    case SIMD_cond::FEQ:
+      cond = bb->build_inst(Op::FEQ, elem1, elem2);
+      break;
+    case SIMD_cond::FGE:
+      cond = bb->build_inst(Op::FLE, elem2, elem1);
+      break;
+    case SIMD_cond::FGT:
+      cond = bb->build_inst(Op::FLT, elem2, elem1);
+      break;
+    case SIMD_cond::FLE:
+      cond = bb->build_inst(Op::FLE, elem1, elem2);
+      break;
+    case SIMD_cond::FLT:
+      cond = bb->build_inst(Op::FLT, elem1, elem2);
+      break;
+    }
+  return bb->build_inst(Op::SEXT, cond, elem1->bitsize);
 }
 
 void Parser::process_cond_branch(Cond_code cc)
@@ -1268,6 +1375,63 @@ void Parser::process_fcmp()
   c = bb->build_inst(Op::ITE, any_is_nan, b1, c);
 
   Inst *v = any_is_nan;
+
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
+}
+
+void Parser::process_fccmp()
+{
+  Inst *arg1 = get_freg_value(1);
+  get_comma(2);
+  Inst *arg2 = get_freg_value(3);
+  get_comma(4);
+  Inst *arg3 = get_imm(5);
+  get_comma(6);
+  Cond_code cc = get_cc(7);
+  get_end_of_line(8);
+
+  Inst *b0 = bb->value_inst(0, 1);
+  Inst *b1 = bb->value_inst(1, 1);
+
+  Inst *is_inf1 = bb->build_inst(Op::IS_INF, arg1);
+  Inst *is_inf2 = bb->build_inst(Op::IS_INF, arg2);
+  Inst *is_inf = bb->build_inst(Op::AND, is_inf1, is_inf2);
+
+  Inst *is_nan1 = bb->build_inst(Op::IS_NAN, arg1);
+  Inst *is_nan2 = bb->build_inst(Op::IS_NAN, arg2);
+  Inst *any_is_nan = bb->build_inst(Op::OR, is_nan1, is_nan2);
+
+  Inst *cmp_n = bb->build_inst(Op::FLT, arg1, arg2);
+  Inst *n1 = bb->build_inst(Op::ITE, any_is_nan, b0, cmp_n);
+
+  Inst *cmp_z = bb->build_inst(Op::FEQ, arg1, arg2);
+  Inst *cmp_z_inf = bb->build_inst(Op::EQ, arg1, arg2);
+  Inst *z1 = bb->build_inst(Op::ITE, is_inf, cmp_z_inf, cmp_z);
+  z1 = bb->build_inst(Op::ITE, any_is_nan, b0, z1);
+
+  Inst *cmp_c = bb->build_inst(Op::FLE, arg2, arg1);
+  Inst *cmp_c_inf = bb->build_inst(Op::NOT, cmp_n);
+  Inst *c1 = bb->build_inst(Op::ITE, is_inf, cmp_c_inf, cmp_c);
+  c1 = bb->build_inst(Op::ITE, any_is_nan, b1, c1);
+
+  Inst *v1 = any_is_nan;
+
+  uint32_t flags = arg3->value();
+  assert(flags < 16);
+
+  Inst *n2 = bb->value_inst((flags & 8) != 0, 1);
+  Inst *z2 = bb->value_inst((flags & 4) != 0, 1);
+  Inst *c2 = bb->value_inst((flags & 2) != 0, 1);
+  Inst *v2 = bb->value_inst((flags & 1) != 0, 1);
+
+  Inst *cond = build_cond(cc);
+  Inst *n = bb->build_inst(Op::ITE, cond, n1, n2);
+  Inst *z = bb->build_inst(Op::ITE, cond, z1, z2);
+  Inst *c = bb->build_inst(Op::ITE, cond, c1, c2);
+  Inst *v = bb->build_inst(Op::ITE, cond, v1, v2);
 
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
@@ -1775,42 +1939,8 @@ Inst *Parser::process_last_arg(unsigned idx, uint32_t bitsize)
 
 Inst *Parser::process_last_scalar_vec_arg(unsigned idx)
 {
-  if (tokens.size() <= idx)
-    throw Parse_error("expected more arguments", line_number);
-
-  if (tokens[idx].kind != Lexeme::name
-      || tokens[idx].size < 4
-      || buf[tokens[idx].pos] != 'v'
-      || !isdigit(buf[tokens[idx].pos + 1]))
-    throw Parse_error("expected a vector register instead of "
-		      + std::string(token_string(tokens[idx])), line_number);
-  uint32_t value = buf[tokens[idx].pos + 1] - '0';
-  uint32_t pos = 2;
-  if (isdigit(buf[tokens[idx].pos + pos]))
-    value = value * 10 + (buf[tokens[idx].pos + pos++] - '0');
-  if (value > 31)
-    throw Parse_error("expected a vector register instead of "
-		      + std::string(token_string(tokens[idx])), line_number);
-  Inst *reg = rstate->registers[Aarch64RegIdx::v0 + value];
-  std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
-  uint32_t elem_bitsize;
-  if (suffix == ".d")
-    elem_bitsize = 64;
-  if (suffix == ".s")
-    elem_bitsize = 32;
-  if (suffix == ".h")
-    elem_bitsize = 16;
-  if (suffix == ".b")
-    elem_bitsize = 8;
-  uint32_t nof_elem = 128 / elem_bitsize;
-  idx++;
-
-  get_left_bracket(idx++);
-  uint32_t elem_idx = get_imm(idx++)->value();
-  if (elem_idx >= nof_elem)
-    throw Parse_error("elem index out of range", line_number);
-  get_right_bracket(idx++);
-  get_end_of_line(idx);
+  auto [reg, elem_bitsize, elem_idx] = get_scalar_vreg(idx);
+  get_end_of_line(idx + 4);
 
   Inst *inst = bb->build_inst(Op::READ, reg);
   return extract_vec_elem(inst, elem_bitsize, elem_idx);
@@ -1839,6 +1969,31 @@ void Parser::process_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
   Inst *arg2 = process_last_arg(5, arg1->bitsize);
 
   Inst *res = gen_elem(bb, arg1, arg2);
+  write_reg(dest, res);
+}
+
+void Parser::process_simd_compare(SIMD_cond op)
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  Inst *arg2 = process_last_arg(5, arg1->bitsize);
+
+  Inst *res = gen_simd_compare(bb, arg1, arg2, op);
+  write_reg(dest, res);
+}
+
+void Parser::process_sshr()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_imm(5);
+
+  arg2 = bb->build_trunc(arg2, arg1->bitsize);
+  Inst *res = bb->build_inst(Op::ASHR, arg1, arg2);
   write_reg(dest, res);
 }
 
@@ -2284,7 +2439,7 @@ void Parser::process_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*))
   write_reg(dest, res);
 }
 
-void Parser::process_vec_binary(Op op)
+void Parser::process_vec_binary(Op op, bool perform_not)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
   get_comma(2);
@@ -2308,6 +2463,8 @@ void Parser::process_vec_binary(Op op)
 	elem2 = arg2;
       else
 	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      if (perform_not)
+	elem2 = bb->build_inst(Op::NOT, elem2);
       Inst *inst = bb->build_inst(op, elem1, elem2);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
@@ -2353,6 +2510,104 @@ void Parser::process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
     {
       Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
       res = gen_elem(bb, res, elem1);
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i += 2)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(arg1, elem_bitsize, i + 1);
+      Inst *inst = gen_elem(bb, elem1, elem2);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  for (uint32_t i = 0; i < nof_elem; i += 2)
+    {
+      Inst *elem1 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i + 1);
+      Inst *inst = gen_elem(bb, elem1, elem2);
+      res = bb->build_inst(Op::CONCAT, inst, res);
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_simd_compare(SIMD_cond op)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2;
+  if (is_vreg(5))
+    arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  else
+    {
+      arg2 = get_imm(5);
+      if (arg2->value() != 0)
+	throw Parse_error("expected 0", line_number);
+      arg2 = bb->build_trunc(arg2, elem_bitsize);
+    }
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2;
+      if (arg2->bitsize == elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = gen_simd_compare(bb, elem1, elem2, op);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_ins()
+{
+  auto [dest, elem_bitsize, elem_idx] = get_scalar_vreg(1);
+  get_comma(5);
+  Inst *arg1;
+  if (is_vreg(6))
+    arg1 = process_last_scalar_vec_arg(6);
+  else
+    {
+      arg1 = get_reg_value(6);
+      arg1 = bb->build_trunc(arg1, elem_bitsize);
+      get_end_of_line(7);
+    }
+
+  Inst *orig = bb->build_inst(Op::READ, dest);
+  uint32_t nof_elem = orig->bitsize / elem_bitsize;
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem;
+      if (i == elem_idx)
+	elem = arg1;
+      else
+	elem = extract_vec_elem(orig, elem_bitsize, i);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, elem, res);
+      else
+	res = elem;
     }
   write_reg(dest, res);
 }
@@ -2411,7 +2666,7 @@ void Parser::process_vec_dup()
   write_reg(dest, res);
 }
 
-void Parser::process_vec_movi()
+void Parser::process_vec_movi(bool invert)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
   get_comma(2);
@@ -2426,7 +2681,7 @@ void Parser::process_vec_movi()
       if (lsl == "lsl")
 	{
 	  if (shift != 0 && shift != 8 && shift != 16 && shift != 24)
-	    throw Parse_error("invalid shift value for orr", line_number);
+	    throw Parse_error("invalid shift value for movi", line_number);
 	}
       else if (lsl == "msl")
 	{
@@ -2435,7 +2690,7 @@ void Parser::process_vec_movi()
 	  else if (shift == 16)
 	    m = 0xffff;
 	  else
-	    throw Parse_error("invalid shift value for orr", line_number);
+	    throw Parse_error("invalid shift value for movi", line_number);
 	}
       else
 	throw Parse_error("expected lsl/msl for shift", line_number);
@@ -2443,7 +2698,10 @@ void Parser::process_vec_movi()
     }
   else
     get_end_of_line(4);
-  Inst *arg1 = bb->value_inst((value << shift) | m, elem_bitsize);
+  value = (value << shift) | m;
+  if (invert)
+    value = ~value;
+  Inst *arg1 = bb->value_inst(value, elem_bitsize);
 
   Inst *res = arg1;
   for (uint32_t i = 1; i < nof_elem; i++)
@@ -2505,6 +2763,52 @@ void Parser::process_vec_orr()
   write_reg(dest, res);
 }
 
+void Parser::process_vec_zip1()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem/2; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, elem1, res);
+      else
+	res = elem1;
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      res = bb->build_inst(Op::CONCAT, elem2, res);
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_zip2()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = nof_elem/2; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, elem1, res);
+      else
+	res = elem1;
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      res = bb->build_inst(Op::CONCAT, elem2, res);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::parse_vector_op()
 {
   std::string_view name = get_name(0);
@@ -2513,8 +2817,28 @@ void Parser::parse_vector_op()
     process_vec_unary(gen_abs);
   else if (name == "add")
     process_vec_binary(Op::ADD);
+  else if (name == "addp")
+    process_vec_pairwise(gen_add);
   else if (name == "and")
     process_vec_binary(Op::AND);
+  else if (name == "cmeq")
+    process_vec_simd_compare(SIMD_cond::EQ);
+  else if (name == "cmhs")
+    process_vec_simd_compare(SIMD_cond::HS);
+  else if (name == "cmge")
+    process_vec_simd_compare(SIMD_cond::GE);
+  else if (name == "cmhi")
+    process_vec_simd_compare(SIMD_cond::HI);
+  else if (name == "cmgt")
+    process_vec_simd_compare(SIMD_cond::GT);
+  else if (name == "cmle")
+    process_vec_simd_compare(SIMD_cond::LE);
+  else if (name == "cmlt")
+    process_vec_simd_compare(SIMD_cond::LT);
+  else if (name == "cmtst")
+    process_vec_binary(gen_cmtst);
+  else if (name == "cnt")
+    process_vec_unary(gen_popcount);
   else if (name == "dup")
     process_vec_dup();
   else if (name == "eor")
@@ -2523,6 +2847,16 @@ void Parser::parse_vector_op()
     process_vec_unary(Op::FABS);
   else if (name == "fadd")
     process_vec_binary(Op::FADD);
+  else if (name == "fcmeq")
+    process_vec_simd_compare(SIMD_cond::FEQ);
+  else if (name == "fcmge")
+    process_vec_simd_compare(SIMD_cond::FGE);
+  else if (name == "fcmgt")
+    process_vec_simd_compare(SIMD_cond::FGT);
+  else if (name == "fcmle")
+    process_vec_simd_compare(SIMD_cond::FLE);
+  else if (name == "fcmlt")
+    process_vec_simd_compare(SIMD_cond::FLT);
   else if (name == "fdiv")
     process_vec_binary(Op::FDIV);
   else if (name == "fmul")
@@ -2531,26 +2865,40 @@ void Parser::parse_vector_op()
     process_vec_unary(Op::FNEG);
   else if (name == "fsub")
     process_vec_binary(Op::FSUB);
+  else if (name == "ins")
+    process_vec_ins();
   else if (name == "movi")
     process_vec_movi();
   else if (name == "mul")
     process_vec_binary(Op::MUL);
+  else if (name == "mvni")
+    process_vec_movi(true);
   else if (name == "neg")
     process_vec_unary(Op::NEG);
   else if (name == "not")
     process_vec_unary(Op::NOT);
+  else if (name == "orn")
+    process_vec_binary(Op::OR, true);
   else if (name == "orr")
     process_vec_orr();
   else if (name == "smin")
     process_vec_binary(gen_smin);
+  else if (name == "sminp")
+    process_vec_pairwise(gen_smin);
   else if (name == "smax")
     process_vec_binary(gen_smax);
+  else if (name == "smaxp")
+    process_vec_pairwise(gen_smax);
   else if (name == "sub")
     process_vec_binary(Op::SUB);
   else if (name == "umin")
     process_vec_binary(gen_umin);
+  else if (name == "uminp")
+    process_vec_pairwise(gen_umin);
   else if (name == "umax")
     process_vec_binary(gen_umax);
+  else if (name == "umaxp")
+    process_vec_pairwise(gen_umax);
   else if (name == "cls")
     process_vec_unary(gen_clrsb);
   else if (name == "clz")
@@ -2565,6 +2913,10 @@ void Parser::parse_vector_op()
     process_vec_unary(gen_bitreverse);
   else if (name == "mov")
     process_vec_unary(Op::MOV);
+  else if (name == "zip1")
+    process_vec_zip1();
+  else if (name == "zip2")
+    process_vec_zip2();
   else
     throw Parse_error("unhandled vector instruction: "s + std::string(name),
 		      line_number);
@@ -2839,7 +3191,6 @@ void Parser::parse_function()
     process_unary(gen_clrsb);
   else if (name == "clz")
     process_unary(gen_clz);
-  // cnt
   else if (name == "rbit")
     process_unary(gen_bitreverse);
   else if (name == "rev")
@@ -2887,51 +3238,97 @@ void Parser::parse_function()
   else if (name == "uxtw")
     process_ext(Op::ZEXT, 32);
 
-  // Data processing - SIMD and floating point
-  else if (name == "addv")
-    process_vec_reduc(gen_add);
-  else if (name == "fabs")
-    process_unary(Op::FABS);
-  else if (name == "fadd")
-    process_binary(Op::FADD);
-  else if (name == "fcmp" || name == "fcmpe")
-    process_fcmp();
+  // Floating-point move
+  else if (name == "fmov")
+    process_unary(Op::MOV);
+
+  // Floating-point conversion
   else if (name == "fcvt")
     process_f2f();
   else if (name == "fcvtzs")
     process_f2i(false);
   else if (name == "fcvtzu")
     process_f2i(true);
+  else if (name == "scvtf")
+    process_i2f(false);
+  else if (name == "ucvtf")
+    process_i2f(true);
+
+  // Floatin-point arithmetic (one source)
+  else if (name == "fabs")
+    process_unary(Op::FABS);
+  else if (name == "fneg")
+    process_unary(Op::FNEG);
+
+  // Floatin-point arithmetic (two sources)
+  else if (name == "fadd")
+    process_binary(Op::FADD);
   else if (name == "fdiv")
     process_binary(Op::FDIV);
+  else if (name == "fmul")
+    process_binary(Op::FMUL);
+  else if (name == "fsub")
+    process_binary(Op::FSUB);
+
+  // Floating-point minimum and maximum
   else if (name == "fmaxnm")
     process_fmin_fmax(false);
   else if (name == "fminnm")
     process_fmin_fmax(true);
-  else if (name == "fmov")
-    process_unary(Op::MOV);
-  else if (name == "fmul")
-    process_binary(Op::FMUL);
-  else if (name == "fneg")
-    process_unary(Op::FNEG);
-  else if (name == "fsub")
-    process_binary(Op::FSUB);
-  else if (name == "scvtf")
-    process_i2f(false);
+
+  // Floating-point comparison
+  else if (name == "fcmp" || name == "fcmpe")
+    process_fcmp();
+  else if (name == "fccmp" || name == "fccmpe")
+    process_fccmp();
+
+  // SIMD compare
+  else if (name == "cmeq")
+    process_simd_compare(SIMD_cond::EQ);
+  else if (name == "cmhs")
+    process_simd_compare(SIMD_cond::HS);
+  else if (name == "cmge")
+    process_simd_compare(SIMD_cond::GE);
+  else if (name == "cmhi")
+    process_simd_compare(SIMD_cond::HI);
+  else if (name == "cmgt")
+    process_simd_compare(SIMD_cond::GT);
+  else if (name == "cmle")
+    process_simd_compare(SIMD_cond::LE);
+  else if (name == "cmlt")
+    process_simd_compare(SIMD_cond::LT);
+  else if (name == "fcmeq")
+    process_simd_compare(SIMD_cond::FEQ);
+  else if (name == "fcmge")
+    process_simd_compare(SIMD_cond::FGE);
+  else if (name == "fcmgt")
+    process_simd_compare(SIMD_cond::FGT);
+  else if (name == "fcmle")
+    process_simd_compare(SIMD_cond::FLE);
+  else if (name == "fcmlt")
+    process_simd_compare(SIMD_cond::FLT);
+
+  // SIMD move
+  else if (name == "smov")
+    process_smov();
+  else if (name == "umov")
+    process_umov();
+
+  // SIMD shift
+  else if (name == "sshr")
+    process_sshr();
+
+  // SIMD reduce
+  else if (name == "addv")
+    process_vec_reduc(gen_add);
   else if (name == "smaxv")
     process_vec_reduc(gen_smax);
   else if (name == "sminv")
     process_vec_reduc(gen_smin);
-  else if (name == "smov")
-    process_smov();
-  else if (name == "ucvtf")
-    process_i2f(true);
   else if (name == "umaxv")
     process_vec_reduc(gen_umax);
   else if (name == "uminv")
     process_vec_reduc(gen_umin);
-  else if (name == "umov")
-    process_umov();
 
   else
     throw Parse_error("unhandled instruction: "s + std::string(name),
