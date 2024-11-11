@@ -191,6 +191,14 @@ private:
   void process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_extend(Op, bool high = false);
+  void process_vec_bif();
+  void process_vec_bit();
+  void process_vec_bsl();
+  void process_vec_ext();
+  void process_vec_shl();
+  void process_vec_mla(Op op = Op::ADD);
+  void process_vec_uzp(bool odd);
   void process_vec_simd_compare(SIMD_cond op);
   void process_vec_ins();
   void process_vec_rev(uint32_t bitsize);
@@ -884,6 +892,26 @@ Inst *Parser::build_cond(Cond_code cc)
     }
 
   throw Parse_error("unhandled condition code", line_number);
+}
+
+Inst *gen_s2f(Basic_block *bb, Inst *elem1)
+{
+  return bb->build_inst(Op::S2F, elem1, elem1->bitsize);
+}
+
+Inst *gen_u2f(Basic_block *bb, Inst *elem1)
+{
+  return bb->build_inst(Op::U2F, elem1, elem1->bitsize);
+}
+
+Inst *gen_f2s(Basic_block *bb, Inst *elem1)
+{
+  return bb->build_inst(Op::F2S, elem1, elem1->bitsize);
+}
+
+Inst *gen_f2u(Basic_block *bb, Inst *elem1)
+{
+  return bb->build_inst(Op::F2U, elem1, elem1->bitsize);
 }
 
 Inst *gen_abs(Basic_block *bb, Inst *elem1)
@@ -2544,6 +2572,31 @@ void Parser::process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
   write_reg(dest, res);
 }
 
+void Parser::process_vec_extend(Op op, bool high)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1;
+  if (high)
+    arg1 = get_vreg_value(3, nof_elem * 2, elem_bitsize / 2);
+  else
+    arg1 = get_vreg_value(3, nof_elem, elem_bitsize / 2);
+  get_end_of_line(4);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      uint32_t idx = high ? i + nof_elem : i;
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize / 2, idx);
+      Inst *inst = bb->build_inst(op, elem1, elem_bitsize);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_simd_compare(SIMD_cond op)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -2809,6 +2862,204 @@ void Parser::process_vec_zip2()
   write_reg(dest, res);
 }
 
+void Parser::process_vec_bif()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  Inst *orig = get_vreg_value(1, nof_elem, elem_bitsize);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem0 = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      elem2 = bb->build_inst(Op::NOT, elem2);
+      Inst *inst = bb->build_inst(Op::XOR, elem0, elem1);
+      inst = bb->build_inst(Op::AND, inst, elem2);
+      inst = bb->build_inst(Op::XOR, inst, elem0);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_bit()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  Inst *orig = get_vreg_value(1, nof_elem, elem_bitsize);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem0 = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = bb->build_inst(Op::XOR, elem0, elem1);
+      inst = bb->build_inst(Op::AND, inst, elem2);
+      inst = bb->build_inst(Op::XOR, inst, elem0);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_bsl()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  Inst *orig = get_vreg_value(1, nof_elem, elem_bitsize);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem0 = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = bb->build_inst(Op::XOR, elem1, elem2);
+      inst = bb->build_inst(Op::AND, inst, elem0);
+      inst = bb->build_inst(Op::XOR, inst, elem2);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_ext()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_comma(6);
+  Inst *arg3 = get_imm(7);
+  get_end_of_line(8);
+
+  Inst *res = nullptr;
+  assert((8 * arg3->value()) % elem_bitsize  == 0);
+  uint32_t offset = 8 * arg3->value() / elem_bitsize;
+  for (uint32_t i = offset; i < nof_elem; i++)
+    {
+      Inst *inst = extract_vec_elem(arg1, elem_bitsize, i);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  for (uint32_t i = 0; i < offset; i++)
+    {
+      Inst *inst = extract_vec_elem(arg2, elem_bitsize, i);
+      res = bb->build_inst(Op::CONCAT, inst, res);
+    }
+
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_shl()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_imm(5);
+  get_end_of_line(6);
+
+  Inst *elem2 = bb->build_trunc(arg2, elem_bitsize);
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = bb->build_inst(Op::SHL, elem1, elem2);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_mla(Op op)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  Inst *orig = get_vreg_value(1, nof_elem, elem_bitsize);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2;
+  if (tokens.size() > 6)
+    arg2 = process_last_scalar_vec_arg(5);
+  else
+    {
+      arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+      get_end_of_line(6);
+    }
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem0 = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2;
+      if (arg2->bitsize == elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = bb->build_inst(Op::MUL, elem1, elem2);
+      inst = bb->build_inst(op, elem0, inst);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_uzp(bool odd)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem / 2; i++)
+    {
+      Inst *inst = extract_vec_elem(arg1, elem_bitsize, 2 * i + odd);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  for (uint32_t i = 0; i < nof_elem / 2; i++)
+    {
+      Inst *inst = extract_vec_elem(arg2, elem_bitsize, 2 * i + odd);
+      res = bb->build_inst(Op::CONCAT, inst, res);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::parse_vector_op()
 {
   std::string_view name = get_name(0);
@@ -2821,16 +3072,26 @@ void Parser::parse_vector_op()
     process_vec_pairwise(gen_add);
   else if (name == "and")
     process_vec_binary(Op::AND);
+  else if (name == "bif")
+    process_vec_bif();
+  else if (name == "bit")
+    process_vec_bit();
+  else if (name == "bsl")
+    process_vec_bsl();
+  else if (name == "cls")
+    process_vec_unary(gen_clrsb);
+  else if (name == "clz")
+    process_vec_unary(gen_clz);
   else if (name == "cmeq")
     process_vec_simd_compare(SIMD_cond::EQ);
-  else if (name == "cmhs")
-    process_vec_simd_compare(SIMD_cond::HS);
   else if (name == "cmge")
     process_vec_simd_compare(SIMD_cond::GE);
-  else if (name == "cmhi")
-    process_vec_simd_compare(SIMD_cond::HI);
   else if (name == "cmgt")
     process_vec_simd_compare(SIMD_cond::GT);
+  else if (name == "cmhi")
+    process_vec_simd_compare(SIMD_cond::HI);
+  else if (name == "cmhs")
+    process_vec_simd_compare(SIMD_cond::HS);
   else if (name == "cmle")
     process_vec_simd_compare(SIMD_cond::LE);
   else if (name == "cmlt")
@@ -2843,6 +3104,8 @@ void Parser::parse_vector_op()
     process_vec_dup();
   else if (name == "eor")
     process_vec_binary(Op::XOR);
+  else if (name == "ext")
+    process_vec_ext();
   else if (name == "fabs")
     process_vec_unary(Op::FABS);
   else if (name == "fadd")
@@ -2857,6 +3120,10 @@ void Parser::parse_vector_op()
     process_vec_simd_compare(SIMD_cond::FLE);
   else if (name == "fcmlt")
     process_vec_simd_compare(SIMD_cond::FLT);
+  else if (name == "fcvtzs")
+    process_vec_unary(gen_f2s);
+  else if (name == "fcvtzu")
+    process_vec_unary(gen_f2u);
   else if (name == "fdiv")
     process_vec_binary(Op::FDIV);
   else if (name == "fmul")
@@ -2867,10 +3134,18 @@ void Parser::parse_vector_op()
     process_vec_binary(Op::FSUB);
   else if (name == "ins")
     process_vec_ins();
+  else if (name == "mla")
+    process_vec_mla();
+  else if (name == "mls")
+    process_vec_mla(Op::SUB);
+  else if (name == "mov")
+    process_vec_unary(Op::MOV);
   else if (name == "movi")
     process_vec_movi();
   else if (name == "mul")
     process_vec_binary(Op::MUL);
+  else if (name == "mvn")
+    process_vec_unary(Op::NOT);
   else if (name == "mvni")
     process_vec_movi(true);
   else if (name == "neg")
@@ -2881,38 +3156,50 @@ void Parser::parse_vector_op()
     process_vec_binary(Op::OR, true);
   else if (name == "orr")
     process_vec_orr();
-  else if (name == "smin")
-    process_vec_binary(gen_smin);
-  else if (name == "sminp")
-    process_vec_pairwise(gen_smin);
-  else if (name == "smax")
-    process_vec_binary(gen_smax);
-  else if (name == "smaxp")
-    process_vec_pairwise(gen_smax);
-  else if (name == "sub")
-    process_vec_binary(Op::SUB);
-  else if (name == "umin")
-    process_vec_binary(gen_umin);
-  else if (name == "uminp")
-    process_vec_pairwise(gen_umin);
-  else if (name == "umax")
-    process_vec_binary(gen_umax);
-  else if (name == "umaxp")
-    process_vec_pairwise(gen_umax);
-  else if (name == "cls")
-    process_vec_unary(gen_clrsb);
-  else if (name == "clz")
-    process_vec_unary(gen_clz);
+  else if (name == "rbit")
+    process_vec_unary(gen_bitreverse);
   else if (name == "rev16")
     process_vec_rev(16);
   else if (name == "rev32")
     process_vec_rev(32);
   else if (name == "rev64")
     process_vec_rev(64);
-  else if (name == "rbit")
-    process_vec_unary(gen_bitreverse);
-  else if (name == "mov")
-    process_vec_unary(Op::MOV);
+  else if (name == "scvtf")
+    process_vec_unary(gen_s2f);
+  else if (name == "shl")
+    process_vec_shl();
+  else if (name == "smax")
+    process_vec_binary(gen_smax);
+  else if (name == "smaxp")
+    process_vec_pairwise(gen_smax);
+  else if (name == "smin")
+    process_vec_binary(gen_smin);
+  else if (name == "sminp")
+    process_vec_pairwise(gen_smin);
+  else if (name == "sub")
+    process_vec_binary(Op::SUB);
+  else if (name == "sxtl")
+    process_vec_extend(Op::SEXT);
+  else if (name == "sxtl2")
+    process_vec_extend(Op::SEXT, true);
+  else if (name == "ucvtf")
+    process_vec_unary(gen_u2f);
+  else if (name == "umax")
+    process_vec_binary(gen_umax);
+  else if (name == "umaxp")
+    process_vec_pairwise(gen_umax);
+  else if (name == "umin")
+    process_vec_binary(gen_umin);
+  else if (name == "uminp")
+    process_vec_pairwise(gen_umin);
+  else if (name == "uxtl")
+    process_vec_extend(Op::ZEXT);
+  else if (name == "uxtl2")
+    process_vec_extend(Op::ZEXT, true);
+  else if (name == "uzp1")
+    process_vec_uzp(false);
+  else if (name == "uzp2")
+    process_vec_uzp(true);
   else if (name == "zip1")
     process_vec_zip1();
   else if (name == "zip2")
