@@ -119,6 +119,7 @@ private:
   void process_cbz(bool is_cbnz = false);
   void process_tbz(bool is_cbnz = false);
   void process_csel(Op op = Op::MOV);
+  void process_fcsel();
   void process_cset(Op op = Op::ZEXT);
   void process_cinc();
   void process_call();
@@ -161,7 +162,7 @@ private:
   void process_binary(Op op, bool perform_not = false);
   void process_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_simd_compare(SIMD_cond op);
-  void process_sshr();
+  void process_simd_shift(Op op);
   void process_rev();
   void process_rev(uint32_t bitsize);
   Inst *gen_sub_cond_flags(Inst *arg1, Inst *arg2);
@@ -179,6 +180,7 @@ private:
   void process_ext(Op op, uint32_t src_bitsize);
   void process_shift(Op op);
   void process_ror();
+  void process_dup();
   void process_extr();
   void process_bfi();
   void process_bfxil();
@@ -957,6 +959,27 @@ Inst *gen_umax(Basic_block *bb, Inst *elem1, Inst *elem2)
 Inst *gen_add(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   return bb->build_inst(Op::ADD, elem1, elem2);
+}
+
+Inst *gen_fnmul(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *res = bb->build_inst(Op::FMUL, elem1, elem2);
+  return bb->build_inst(Op::FNEG, res);
+}
+
+Inst *gen_sqxtn(Basic_block *bb, Inst *elem1)
+{
+  __int128 smax_val = (((__int128)1) << (elem1->bitsize / 2 - 1)) - 1;
+  __int128 smin_val = ((__int128)-1) << (elem1->bitsize / 2 - 1);
+  Inst *smax1 = bb->value_inst(smax_val, elem1->bitsize);
+  Inst *smax2 = bb->value_inst(smax_val, elem1->bitsize / 2);
+  Inst *smin1 = bb->value_inst(smin_val, elem1->bitsize);
+  Inst *smin2 = bb->value_inst(smin_val, elem1->bitsize / 2);
+  Inst *res = bb->build_trunc(elem1, elem1->bitsize / 2);
+  Inst *cmp1 = bb->build_inst(Op::SLT, elem1, smin1);
+  Inst *cmp2 = bb->build_inst(Op::SLT, smax1, elem1);
+  res = bb->build_inst(Op::ITE, cmp1, smin2, res);
+  return bb->build_inst(Op::ITE, cmp2, smax2, res);
 }
 
 Inst *gen_simd_compare(Basic_block *bb, Inst *elem1, Inst *elem2, SIMD_cond op)
@@ -2012,7 +2035,7 @@ void Parser::process_simd_compare(SIMD_cond op)
   write_reg(dest, res);
 }
 
-void Parser::process_sshr()
+void Parser::process_simd_shift(Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -2021,7 +2044,7 @@ void Parser::process_sshr()
   Inst *arg2 = get_imm(5);
 
   arg2 = bb->build_trunc(arg2, arg1->bitsize);
-  Inst *res = bb->build_inst(Op::ASHR, arg1, arg2);
+  Inst *res = bb->build_inst(op, arg1, arg2);
   write_reg(dest, res);
 }
 
@@ -2695,6 +2718,15 @@ void Parser::process_vec_rev(uint32_t bitsize)
 	res = inst;
     }
   write_reg(dest, res);
+}
+
+void Parser::process_dup()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = process_last_scalar_vec_arg(3);
+
+  write_reg(dest, arg1);
 }
 
 void Parser::process_vec_dup()
@@ -3541,19 +3573,21 @@ void Parser::parse_function()
   else if (name == "ucvtf")
     process_i2f(true);
 
-  // Floatin-point arithmetic (one source)
+  // Floating-point arithmetic (one source)
   else if (name == "fabs")
     process_unary(Op::FABS);
   else if (name == "fneg")
     process_unary(Op::FNEG);
 
-  // Floatin-point arithmetic (two sources)
+  // Floating-point arithmetic (two sources)
   else if (name == "fadd")
     process_binary(Op::FADD);
   else if (name == "fdiv")
     process_binary(Op::FDIV);
   else if (name == "fmul")
     process_binary(Op::FMUL);
+  else if (name == "fnmul")
+    process_binary(gen_fnmul);
   else if (name == "fsub")
     process_binary(Op::FSUB);
 
@@ -3568,6 +3602,10 @@ void Parser::parse_function()
     process_fcmp();
   else if (name == "fccmp" || name == "fccmpe")
     process_fccmp();
+
+  // Floating-point conditional select
+  else if (name == "fcsel")
+    process_csel();
 
   // SIMD compare
   else if (name == "cmeq")
@@ -3596,6 +3634,10 @@ void Parser::parse_function()
     process_simd_compare(SIMD_cond::FLT);
 
   // SIMD move
+  else if (name == "dup")
+    process_dup();
+  else if (name == "movi")
+    process_unary(Op::MOV);
   else if (name == "smov")
     process_smov();
   else if (name == "umov")
@@ -3603,7 +3645,9 @@ void Parser::parse_function()
 
   // SIMD shift
   else if (name == "sshr")
-    process_sshr();
+    process_simd_shift(Op::ASHR);
+  else if (name == "ushr")
+    process_simd_shift(Op::LSHR);
 
   // SIMD reduce
   else if (name == "addv")
@@ -3616,6 +3660,14 @@ void Parser::parse_function()
     process_vec_reduc(gen_umax);
   else if (name == "uminv")
     process_vec_reduc(gen_umin);
+
+  // SIMD pairwise arithmetic
+  else if (name == "addp")
+    process_vec_reduc(gen_add);
+
+  // SIMD unary
+  else if (name == "sqxtn")
+    process_unary(gen_sqxtn);
 
   else
     throw Parse_error("unhandled instruction: "s + std::string(name),
