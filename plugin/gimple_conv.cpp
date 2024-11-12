@@ -272,6 +272,8 @@ void check_type(tree type)
   // unused structures/arrays.
   if (DECIMAL_FLOAT_TYPE_P(type))
     throw Not_implemented("check_type: DECIMAL_FLOAT_TYPE");
+  else if (type == bfloat16_type_node)
+    throw Not_implemented("check_type: bfloat16");
   else if (VECTOR_TYPE_P(type) || TREE_CODE(type) == COMPLEX_TYPE)
     check_type(TREE_TYPE(type));
   else if (FLOAT_TYPE_P(type))
