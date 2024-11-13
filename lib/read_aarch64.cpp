@@ -191,9 +191,10 @@ private:
   void process_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
   void process_vec_binary(Op op, bool perform_not = false);
   void process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_widen_binary(Op op, Op widen_op, bool high);
   void process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
-  void process_vec_extend(Op, bool high = false);
+  void process_vec_widen(Op, bool high = false);
   void process_vec_bif();
   void process_vec_bit();
   void process_vec_bsl();
@@ -2548,6 +2549,44 @@ void Parser::process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
   write_reg(dest, res);
 }
 
+void Parser::process_vec_widen_binary(Op op, Op widen_op, bool high)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  uint32_t src_elem_bitsize = elem_bitsize / 2;
+  uint32_t src_nof_elem = high ? 2 * nof_elem : nof_elem;
+  Inst *arg1 = get_vreg_value(3, src_nof_elem, src_elem_bitsize);
+  get_comma(4);
+  Inst *arg2;
+  if (tokens.size() > 6)
+    arg2 = process_last_scalar_vec_arg(5);
+  else
+    {
+      arg2 = get_vreg_value(5, src_nof_elem, src_elem_bitsize);
+      get_end_of_line(6);
+    }
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      uint32_t idx = high ? i + nof_elem : i;
+      Inst *elem1 = extract_vec_elem(arg1, src_elem_bitsize, idx);
+      Inst *elem2;
+      if (arg2->bitsize == src_elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, src_elem_bitsize, idx);
+      elem1 = bb->build_inst(widen_op, elem1, elem_bitsize);
+      elem2 = bb->build_inst(widen_op, elem2, elem_bitsize);
+      Inst *inst = bb->build_inst(op, elem1, elem2);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
 {
   Inst *dest = get_reg(1);
@@ -2595,7 +2634,7 @@ void Parser::process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
   write_reg(dest, res);
 }
 
-void Parser::process_vec_extend(Op op, bool high)
+void Parser::process_vec_widen(Op op, bool high)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
   get_comma(2);
@@ -3208,12 +3247,16 @@ void Parser::parse_vector_op()
     process_vec_binary(gen_smin);
   else if (name == "sminp")
     process_vec_pairwise(gen_smin);
+  else if (name == "smull")
+    process_vec_widen_binary(Op::MUL, Op::SEXT, false);
+  else if (name == "smull2")
+    process_vec_widen_binary(Op::MUL, Op::SEXT, true);
   else if (name == "sub")
     process_vec_binary(Op::SUB);
   else if (name == "sxtl")
-    process_vec_extend(Op::SEXT);
+    process_vec_widen(Op::SEXT);
   else if (name == "sxtl2")
-    process_vec_extend(Op::SEXT, true);
+    process_vec_widen(Op::SEXT, true);
   else if (name == "ucvtf")
     process_vec_unary(gen_u2f);
   else if (name == "umax")
@@ -3224,10 +3267,14 @@ void Parser::parse_vector_op()
     process_vec_binary(gen_umin);
   else if (name == "uminp")
     process_vec_pairwise(gen_umin);
+  else if (name == "umull")
+    process_vec_widen_binary(Op::MUL, Op::ZEXT, false);
+  else if (name == "umull2")
+    process_vec_widen_binary(Op::MUL, Op::ZEXT, true);
   else if (name == "uxtl")
-    process_vec_extend(Op::ZEXT);
+    process_vec_widen(Op::ZEXT);
   else if (name == "uxtl2")
-    process_vec_extend(Op::ZEXT, true);
+    process_vec_widen(Op::ZEXT, true);
   else if (name == "uzp1")
     process_vec_uzp(false);
   else if (name == "uzp2")
