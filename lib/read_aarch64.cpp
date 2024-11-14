@@ -192,6 +192,7 @@ private:
   void process_vec_binary(Op op, bool perform_not = false);
   void process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_widen_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op, bool high);
+  void process_vec_widen_binary_add(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op, bool high);
   void process_vec_widen2_binary(Op op, Op widen_op, bool high);
   void process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
@@ -2607,6 +2608,47 @@ void Parser::process_vec_widen_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst
   write_reg(dest, res);
 }
 
+void Parser::process_vec_widen_binary_add(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op, bool high)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  Inst *orig = get_vreg_value(1, nof_elem, elem_bitsize);
+  get_comma(2);
+  uint32_t src_elem_bitsize = elem_bitsize / 2;
+  uint32_t src_nof_elem = high ? 2 * nof_elem : nof_elem;
+  Inst *arg1 = get_vreg_value(3, src_nof_elem, src_elem_bitsize);
+  get_comma(4);
+  Inst *arg2;
+  if (tokens.size() > 6)
+    arg2 = process_last_scalar_vec_arg(5);
+  else
+    {
+      arg2 = get_vreg_value(5, src_nof_elem, src_elem_bitsize);
+      get_end_of_line(6);
+    }
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      uint32_t idx = high ? i + nof_elem : i;
+      Inst *elem0 = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *elem1 = extract_vec_elem(arg1, src_elem_bitsize, idx);
+      Inst *elem2;
+      if (arg2->bitsize == src_elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, src_elem_bitsize, idx);
+      elem1 = bb->build_inst(widen_op, elem1, elem_bitsize);
+      elem2 = bb->build_inst(widen_op, elem2, elem_bitsize);
+      Inst *inst = gen_elem(bb, elem1, elem2);
+      inst = bb->build_inst(Op::ADD, inst, elem0);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_widen2_binary(Op op, Op widen_op, bool high)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -3306,6 +3348,10 @@ void Parser::parse_vector_op()
     process_vec_binary(gen_smin);
   else if (name == "sminp")
     process_vec_pairwise(gen_smin);
+  else if (name == "smlal")
+    process_vec_widen_binary_add(gen_mul, Op::SEXT, false);
+  else if (name == "smlal2")
+    process_vec_widen_binary_add(gen_mul, Op::SEXT, true);
   else if (name == "smull")
     process_vec_widen_binary(gen_mul, Op::SEXT, false);
   else if (name == "smull2")
@@ -3346,6 +3392,10 @@ void Parser::parse_vector_op()
     process_vec_binary(gen_umin);
   else if (name == "uminp")
     process_vec_pairwise(gen_umin);
+  else if (name == "umlal")
+    process_vec_widen_binary_add(gen_mul, Op::ZEXT, false);
+  else if (name == "umlal2")
+    process_vec_widen_binary_add(gen_mul, Op::ZEXT, true);
   else if (name == "umull")
     process_vec_widen_binary(gen_mul, Op::ZEXT, false);
   else if (name == "umull2")
