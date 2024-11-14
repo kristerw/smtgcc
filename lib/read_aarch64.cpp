@@ -191,7 +191,7 @@ private:
   void process_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
   void process_vec_binary(Op op, bool perform_not = false);
   void process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
-  void process_vec_widen_binary(Op op, Op widen_op, bool high);
+  void process_vec_widen_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op, bool high);
   void process_vec_widen2_binary(Op op, Op widen_op, bool high);
   void process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
@@ -961,6 +961,25 @@ Inst *gen_umax(Basic_block *bb, Inst *elem1, Inst *elem2)
 Inst *gen_add(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   return bb->build_inst(Op::ADD, elem1, elem2);
+}
+
+Inst *gen_sub(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::SUB, elem1, elem2);
+}
+
+Inst *gen_mul(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::MUL, elem1, elem2);
+}
+
+Inst *gen_abd(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *inst = bb->build_inst(Op::SUB, elem1, elem2);
+  Inst *neg_inst = bb->build_inst(Op::NEG, inst);
+  Inst *zero = bb->value_inst(0, inst->bitsize);
+  Inst *cmp = bb->build_inst(Op::SLT, inst, zero);
+  return bb->build_inst(Op::ITE, cmp, neg_inst, inst);
 }
 
 Inst *gen_fnmul(Basic_block *bb, Inst *elem1, Inst *elem2)
@@ -2550,7 +2569,7 @@ void Parser::process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
   write_reg(dest, res);
 }
 
-void Parser::process_vec_widen_binary(Op op, Op widen_op, bool high)
+void Parser::process_vec_widen_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op, bool high)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
   get_comma(2);
@@ -2579,7 +2598,7 @@ void Parser::process_vec_widen_binary(Op op, Op widen_op, bool high)
 	elem2 = extract_vec_elem(arg2, src_elem_bitsize, idx);
       elem1 = bb->build_inst(widen_op, elem1, elem_bitsize);
       elem2 = bb->build_inst(widen_op, elem2, elem_bitsize);
-      Inst *inst = bb->build_inst(op, elem1, elem2);
+      Inst *inst = gen_elem(bb, elem1, elem2);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
@@ -3263,10 +3282,14 @@ void Parser::parse_vector_op()
     process_vec_rev(32);
   else if (name == "rev64")
     process_vec_rev(64);
+  else if (name == "sabdl")
+    process_vec_widen_binary(gen_abd, Op::SEXT, false);
+  else if (name == "sabdl2")
+    process_vec_widen_binary(gen_abd, Op::SEXT, true);
   else if (name == "saddl")
-    process_vec_widen_binary(Op::ADD, Op::SEXT, false);
+    process_vec_widen_binary(gen_add, Op::SEXT, false);
   else if (name == "saddl2")
-    process_vec_widen_binary(Op::ADD, Op::SEXT, true);
+    process_vec_widen_binary(gen_add, Op::SEXT, true);
   else if (name == "saddw")
     process_vec_widen2_binary(Op::ADD, Op::SEXT, false);
   else if (name == "saddw2")
@@ -3284,13 +3307,13 @@ void Parser::parse_vector_op()
   else if (name == "sminp")
     process_vec_pairwise(gen_smin);
   else if (name == "smull")
-    process_vec_widen_binary(Op::MUL, Op::SEXT, false);
+    process_vec_widen_binary(gen_mul, Op::SEXT, false);
   else if (name == "smull2")
-    process_vec_widen_binary(Op::MUL, Op::SEXT, true);
+    process_vec_widen_binary(gen_mul, Op::SEXT, true);
   else if (name == "ssubl")
-    process_vec_widen_binary(Op::SUB, Op::SEXT, false);
+    process_vec_widen_binary(gen_sub, Op::SEXT, false);
   else if (name == "ssubl2")
-    process_vec_widen_binary(Op::SUB, Op::SEXT, true);
+    process_vec_widen_binary(gen_sub, Op::SEXT, true);
   else if (name == "ssubw")
     process_vec_widen2_binary(Op::SUB, Op::SEXT, false);
   else if (name == "ssubw2")
@@ -3301,10 +3324,14 @@ void Parser::parse_vector_op()
     process_vec_widen(Op::SEXT);
   else if (name == "sxtl2")
     process_vec_widen(Op::SEXT, true);
+  else if (name == "uabdl")
+    process_vec_widen_binary(gen_abd, Op::ZEXT, false);
+  else if (name == "uabdl2")
+    process_vec_widen_binary(gen_abd, Op::ZEXT, true);
   else if (name == "uaddl")
-    process_vec_widen_binary(Op::ADD, Op::ZEXT, false);
+    process_vec_widen_binary(gen_add, Op::ZEXT, false);
   else if (name == "uaddl2")
-    process_vec_widen_binary(Op::ADD, Op::ZEXT, true);
+    process_vec_widen_binary(gen_add, Op::ZEXT, true);
   else if (name == "uaddw")
     process_vec_widen2_binary(Op::ADD, Op::ZEXT, false);
   else if (name == "uaddw2")
@@ -3320,13 +3347,13 @@ void Parser::parse_vector_op()
   else if (name == "uminp")
     process_vec_pairwise(gen_umin);
   else if (name == "umull")
-    process_vec_widen_binary(Op::MUL, Op::ZEXT, false);
+    process_vec_widen_binary(gen_mul, Op::ZEXT, false);
   else if (name == "umull2")
-    process_vec_widen_binary(Op::MUL, Op::ZEXT, true);
+    process_vec_widen_binary(gen_mul, Op::ZEXT, true);
   else if (name == "usubl")
-    process_vec_widen_binary(Op::SUB, Op::ZEXT, false);
+    process_vec_widen_binary(gen_sub, Op::ZEXT, false);
   else if (name == "usubl2")
-    process_vec_widen_binary(Op::SUB, Op::ZEXT, true);
+    process_vec_widen_binary(gen_sub, Op::ZEXT, true);
   else if (name == "usubw")
     process_vec_widen2_binary(Op::SUB, Op::ZEXT, false);
   else if (name == "usubw2")
