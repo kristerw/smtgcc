@@ -3324,6 +3324,10 @@ void Parser::parse_vector_op()
     process_vec_rev(32);
   else if (name == "rev64")
     process_vec_rev(64);
+  else if (name == "sabal")
+    process_vec_widen_binary_add(gen_abd, Op::SEXT, false);
+  else if (name == "sabal2")
+    process_vec_widen_binary_add(gen_abd, Op::SEXT, true);
   else if (name == "sabdl")
     process_vec_widen_binary(gen_abd, Op::SEXT, false);
   else if (name == "sabdl2")
@@ -3370,6 +3374,10 @@ void Parser::parse_vector_op()
     process_vec_widen(Op::SEXT);
   else if (name == "sxtl2")
     process_vec_widen(Op::SEXT, true);
+  else if (name == "uabal")
+    process_vec_widen_binary_add(gen_abd, Op::ZEXT, false);
+  else if (name == "uabal2")
+    process_vec_widen_binary_add(gen_abd, Op::ZEXT, true);
   else if (name == "uabdl")
     process_vec_widen_binary(gen_abd, Op::ZEXT, false);
   else if (name == "uabdl2")
