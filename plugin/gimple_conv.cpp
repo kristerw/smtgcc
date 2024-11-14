@@ -192,6 +192,7 @@ struct Converter {
   void process_cfn_vcond(gimple *stmt);
   void process_cfn_vcond_mask(gimple *stmt);
   void process_cfn_vec_convert(gimple *stmt);
+  void process_cfn_vec_widen(gimple *stmt, Op op, bool high);
   void process_cfn_xorsign(gimple *stmt);
   void process_gimple_call_combined_fn(gimple *stmt);
   void process_gimple_call(gimple *stmt);
@@ -5277,6 +5278,61 @@ void Converter::process_cfn_vec_convert(gimple *stmt)
   tree2instruction.insert({lhs, inst});
 }
 
+void Converter::process_cfn_vec_widen(gimple *stmt, Op op, bool high)
+{
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
+
+  tree elem_type = TREE_TYPE(arg1_type);
+  uint32_t elem_bitsize = bitsize_for_type(elem_type);
+  uint32_t nof_elem = (bitsize_for_type(arg1_type) / elem_bitsize) / 2;
+
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+  tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
+  assert(bitsize_for_type(lhs_elem_type) == 2 * elem_bitsize);
+
+  Inst *res = nullptr;
+  Inst *res_indef = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      uint32_t idx = high ? i + nof_elem : i;
+      Inst *elem1 = extract_vec_elem(bb, arg1, elem_bitsize, idx);
+      elem1 = type_convert(elem1, elem_type, lhs_elem_type);
+      Inst *elem2 = extract_vec_elem(bb, arg2, elem_bitsize, idx);
+      elem2 = type_convert(elem2, elem_type, lhs_elem_type);
+      Inst *inst = bb->build_inst(op, elem1, elem2);
+
+      Inst *elem1_indef = nullptr;
+      if (arg1_indef)
+	elem1_indef = extract_vec_elem(bb, arg1_indef, elem_bitsize, idx);
+      Inst *elem2_indef = nullptr;
+      if (arg2_indef)
+	elem2_indef = extract_vec_elem(bb, arg2_indef, elem_bitsize, idx);
+      Inst *indef = get_res_indef(elem1_indef, elem2_indef, lhs_elem_type);
+
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+      if (indef)
+	{
+	  if (res_indef)
+	    res_indef = bb->build_inst(Op::CONCAT, indef, res_indef);
+	  else
+	    res_indef = indef;
+	}
+    }
+  constrain_range(bb, lhs, res);
+  tree2instruction.insert({lhs, res});
+  if (res_indef)
+    tree2indef.insert({lhs, res_indef});
+}
+
 void Converter::process_cfn_uaddc(gimple *stmt)
 {
   tree lhs = gimple_call_lhs(stmt);
@@ -5564,6 +5620,18 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_VEC_CONVERT:
       process_cfn_vec_convert(stmt);
+      break;
+    case CFN_VEC_WIDEN_MINUS_HI:
+      process_cfn_vec_widen(stmt, Op::SUB, true);
+      break;
+    case CFN_VEC_WIDEN_MINUS_LO:
+      process_cfn_vec_widen(stmt, Op::SUB, false);
+      break;
+    case CFN_VEC_WIDEN_PLUS_HI:
+      process_cfn_vec_widen(stmt, Op::ADD, true);
+      break;
+    case CFN_VEC_WIDEN_PLUS_LO:
+      process_cfn_vec_widen(stmt, Op::ADD, false);
       break;
     case CFN_XORSIGN:
       process_cfn_xorsign(stmt);
