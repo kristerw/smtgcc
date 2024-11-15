@@ -4133,28 +4133,24 @@ void Converter::process_cfn_bswap(gimple *stmt)
 
 void Converter::process_cfn_clrsb(gimple *stmt)
 {
-  tree lhs = gimple_call_lhs(stmt);
-  if (!lhs)
-    return;
-  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
-    throw Not_implemented("process_cfn_clrsb: vector type");
-  auto [arg, arg_indef] = tree2inst_indef(gimple_call_arg(stmt, 0));
-  Inst *res_indef = get_res_indef(arg_indef, TREE_TYPE(lhs));
-  assert(arg->bitsize > 1);
-  int bitsize = bitsize_for_type(TREE_TYPE(lhs));
-  Inst *signbit = bb->build_extract_bit(arg, arg->bitsize - 1);
-  Inst *inst = bb->value_inst(arg->bitsize - 1, bitsize);
-  for (unsigned i = 0; i < arg->bitsize - 1; i++)
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, tree lhs_elem_type)
+    -> std::pair<Inst *, Inst *>
     {
-      Inst *bit = bb->build_extract_bit(arg, i);
-      Inst *cmp = bb->build_inst(Op::NE, bit, signbit);
-      Inst *val = bb->value_inst(arg->bitsize - i - 2, bitsize);
-      inst = bb->build_inst(Op::ITE, cmp, val, inst);
-    }
-  constrain_range(bb, lhs, inst);
-  tree2instruction.insert({lhs, inst});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+      int bitsize = bitsize_for_type(lhs_elem_type);
+      Inst *signbit = bb->build_extract_bit(elem1, elem1->bitsize - 1);
+      Inst *inst = bb->value_inst(elem1->bitsize - 1, bitsize);
+      for (unsigned i = 0; i < elem1->bitsize - 1; i++)
+	{
+	  Inst *bit = bb->build_extract_bit(elem1, i);
+	  Inst *cmp = bb->build_inst(Op::NE, bit, signbit);
+	  Inst *val = bb->value_inst(elem1->bitsize - i - 2, bitsize);
+	  inst = bb->build_inst(Op::ITE, cmp, val, inst);
+	}
+      Inst *indef = get_res_indef(elem1_indef, lhs_elem_type);
+      return {inst, indef};
+    };
+  process_cfn_unary(stmt, gen_elem);
 }
 
 void Converter::process_cfn_clz(gimple *stmt)
@@ -5597,6 +5593,7 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BUILT_IN_CLRSB:
     case CFN_BUILT_IN_CLRSBL:
     case CFN_BUILT_IN_CLRSBLL:
+    case CFN_CLRSB:
       process_cfn_clrsb(stmt);
       break;
     case CFN_BUILT_IN_CLZ:
