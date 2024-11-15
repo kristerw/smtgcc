@@ -882,6 +882,8 @@ uint8_t Converter::padding_at_offset(tree type, uint64_t offset)
     {
       tree elem_type = TREE_TYPE(type);
       uint64_t elem_size = bytesize_for_type(elem_type);
+      if (elem_size == 0)
+	throw Not_implemented("padding_at_offset: zero-sized array element");
       return padding_at_offset(elem_type, offset % elem_size);
     }
   if (TREE_CODE(type) == RECORD_TYPE)
