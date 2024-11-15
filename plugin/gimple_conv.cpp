@@ -4981,24 +4981,23 @@ void Converter::process_cfn_parity(gimple *stmt)
 
 void Converter::process_cfn_popcount(gimple *stmt)
 {
-  tree lhs = gimple_call_lhs(stmt);
-  if (!lhs)
-    return;
-  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
-    throw Not_implemented("process_cfn_popcount: vector type");
-  Inst *arg = tree2inst(gimple_call_arg(stmt, 0));
-  int bitwidth = arg->bitsize;
-  int lhs_bitwidth = TYPE_PRECISION(TREE_TYPE(lhs));
-  Inst *bit = bb->build_extract_bit(arg, 0);
-  Inst *res = bb->build_inst(Op::ZEXT, bit, lhs_bitwidth);
-  for (int i = 1; i < bitwidth; i++)
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, tree lhs_elem_type)
+    -> std::pair<Inst *, Inst *>
     {
-      bit = bb->build_extract_bit(arg, i);
-      Inst *ext = bb->build_inst(Op::ZEXT, bit, lhs_bitwidth);
-      res = bb->build_inst(Op::ADD, res, ext);
-    }
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
+      int bitsize = bitsize_for_type(lhs_elem_type);
+      Inst *bit = bb->build_extract_bit(elem1, 0);
+      Inst *res = bb->build_inst(Op::ZEXT, bit, bitsize);
+      for (uint32_t i = 1; i < elem1->bitsize; i++)
+	{
+	  bit = bb->build_extract_bit(elem1, i);
+	  Inst *ext = bb->build_inst(Op::ZEXT, bit, bitsize);
+	  res = bb->build_inst(Op::ADD, res, ext);
+	}
+      Inst *res_indef = get_res_indef(elem1_indef, lhs_elem_type);
+      return {res, res_indef};
+    };
+  process_cfn_unary(stmt, gen_elem);
 }
 
 void Converter::process_cfn_sat_add(gimple *stmt)
