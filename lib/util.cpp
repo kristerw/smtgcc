@@ -115,6 +115,18 @@ Inst *gen_clz(Basic_block *bb, Inst *arg)
   return inst;
 }
 
+Inst *gen_ctz(Basic_block *bb, Inst *arg)
+{
+  Inst *inst = bb->value_inst(arg->bitsize, arg->bitsize);
+  for (int i = arg->bitsize - 1; i >= 0; i--)
+    {
+      Inst *bit = bb->build_extract_bit(arg, i);
+      Inst *val = bb->value_inst(i, arg->bitsize);
+      inst = bb->build_inst(Op::ITE, bit, val, inst);
+    }
+  return inst;
+}
+
 Inst *gen_clrsb(Basic_block *bb, Inst *arg)
 {
   Inst *signbit = bb->build_extract_bit(arg, arg->bitsize - 1);

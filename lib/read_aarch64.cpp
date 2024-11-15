@@ -3761,6 +3761,10 @@ void Parser::parse_function()
     process_unary(gen_clrsb);
   else if (name == "clz")
     process_unary(gen_clz);
+  else if (name == "cnt")
+    process_unary(gen_popcount);
+  else if (name == "ctz")
+    process_unary(gen_ctz);
   else if (name == "rbit")
     process_unary(gen_bitreverse);
   else if (name == "rev")

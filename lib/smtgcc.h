@@ -563,6 +563,7 @@ bool is_value_pow2(Inst *inst);
 Inst *gen_bitreverse(Basic_block *bb, Inst *arg);
 Inst *gen_clz(Basic_block *bb, Inst *arg);
 Inst *gen_clrsb(Basic_block *bb, Inst *arg);
+Inst *gen_ctz(Basic_block *bb,  Inst *arg);
 Inst *gen_popcount(Basic_block *bb, Inst *arg);
 Inst *gen_bswap(Basic_block *bb, Inst *arg);
 

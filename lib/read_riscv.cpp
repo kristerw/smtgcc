@@ -104,7 +104,6 @@ private:
   void get_right_paren(unsigned idx);
   void get_end_of_line(unsigned idx);
   void process_cond_branch(Op op, bool swap = false);
-  Inst *gen_ctz(Inst *arg);
   Inst *gen_ffs(Inst *arg);
   Inst *gen_parity(Inst *arg);
   Inst *gen_popcount(Inst *arg);
@@ -609,18 +608,6 @@ void Parser::process_cond_branch(Op op, bool swap)
   bb = false_bb;
 }
 
-Inst *Parser::gen_ctz(Inst *arg)
-{
-  Inst *inst = bb->value_inst(arg->bitsize, 32);
-  for (int i = arg->bitsize - 1; i >= 0; i--)
-    {
-      Inst *bit = bb->build_extract_bit(arg, i);
-      Inst *val = bb->value_inst(i, 32);
-      inst = bb->build_inst(Op::ITE, bit, val, inst);
-    }
-  return inst;
-}
-
 Inst *Parser::gen_ffs(Inst *arg)
 {
   Inst *inst = bb->value_inst(0, 32);
@@ -764,7 +751,6 @@ void Parser::process_call()
     {
       Inst *arg = read_arg(10 + 0, 64);
       Inst *res = gen_clrsb(bb, arg);
-      res = bb->build_inst(Op::SEXT, res, 64);
       write_retval(res);
       return;
     }
@@ -782,7 +768,6 @@ void Parser::process_call()
       Inst *ub = bb->build_inst(Op::EQ, arg, zero);
       bb->build_inst(Op::UB, ub);
       Inst *res = gen_clz(bb, arg);
-      res = bb->build_inst(Op::SEXT, res, 64);
       write_retval(res);
       return;
     }
@@ -802,8 +787,7 @@ void Parser::process_call()
       Inst *zero = bb->value_inst(0, arg->bitsize);
       Inst *ub = bb->build_inst(Op::EQ, arg, zero);
       bb->build_inst(Op::UB, ub);
-      Inst *res = gen_ctz(arg);
-      res = bb->build_inst(Op::SEXT, res, 64);
+      Inst *res = gen_ctz(bb, arg);
       write_retval(res);
       return;
     }
@@ -813,7 +797,7 @@ void Parser::process_call()
       Inst *zero = bb->value_inst(0, arg->bitsize);
       Inst *ub = bb->build_inst(Op::EQ, arg, zero);
       bb->build_inst(Op::UB, ub);
-      Inst *res = gen_ctz(arg);
+      Inst *res = gen_ctz(bb, arg);
       write_retval(res);
       return;
     }
@@ -1898,7 +1882,7 @@ void Parser::parse_function()
       bool has_w_suffix = name[name.length() - 1] == 'w';
       if (has_w_suffix)
 	arg1 = bb->build_trunc(arg1, 32);
-      Inst *res = gen_ctz(arg1);
+      Inst *res = gen_ctz(bb, arg1);
       if (reg_bitsize == 64)
 	res = bb->build_inst(Op::SEXT, res, reg_bitsize);
       bb->build_inst(Op::WRITE, dest, res);
