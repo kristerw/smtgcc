@@ -105,11 +105,11 @@ Inst *gen_bitreverse(Basic_block *bb, Inst *arg)
 
 Inst *gen_clz(Basic_block *bb, Inst *arg)
 {
-  Inst *inst = bb->value_inst(arg->bitsize, 32);
+  Inst *inst = bb->value_inst(arg->bitsize, arg->bitsize);
   for (unsigned i = 0; i < arg->bitsize; i++)
     {
       Inst *bit = bb->build_extract_bit(arg, i);
-      Inst *val = bb->value_inst(arg->bitsize - i - 1, 32);
+      Inst *val = bb->value_inst(arg->bitsize - i - 1, arg->bitsize);
       inst = bb->build_inst(Op::ITE, bit, val, inst);
     }
   return inst;
@@ -118,12 +118,12 @@ Inst *gen_clz(Basic_block *bb, Inst *arg)
 Inst *gen_clrsb(Basic_block *bb, Inst *arg)
 {
   Inst *signbit = bb->build_extract_bit(arg, arg->bitsize - 1);
-  Inst *inst = bb->value_inst(arg->bitsize - 1, 32);
+  Inst *inst = bb->value_inst(arg->bitsize - 1, arg->bitsize);
   for (unsigned i = 0; i < arg->bitsize - 1; i++)
     {
       Inst *bit = bb->build_extract_bit(arg, i);
       Inst *cmp = bb->build_inst(Op::NE, bit, signbit);
-      Inst *val = bb->value_inst(arg->bitsize - i - 2, 32);
+      Inst *val = bb->value_inst(arg->bitsize - i - 2, arg->bitsize);
       inst = bb->build_inst(Op::ITE, cmp, val, inst);
     }
   return inst;
