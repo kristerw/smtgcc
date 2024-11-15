@@ -210,6 +210,7 @@ private:
   void process_vec_ins();
   void process_vec_rev(uint32_t bitsize);
   void process_vec_dup();
+  void process_vec_mov();
   void process_vec_movi(bool invert = false);
   void process_vec_orr();
   void process_vec_zip1();
@@ -2930,6 +2931,14 @@ void Parser::process_vec_dup()
   write_reg(dest, res);
 }
 
+void Parser::process_vec_mov()
+{
+  if (tokens.size() > 3 && tokens[2].kind == Lexeme::left_bracket)
+    process_vec_ins();
+  else
+    process_vec_unary(Op::MOV);
+}
+
 void Parser::process_vec_movi(bool invert)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -3350,7 +3359,7 @@ void Parser::parse_vector_op()
   else if (name == "mls")
     process_vec_mla(Op::SUB);
   else if (name == "mov")
-    process_vec_unary(Op::MOV);
+    process_vec_mov();
   else if (name == "movi")
     process_vec_movi();
   else if (name == "mul")
