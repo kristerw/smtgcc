@@ -153,6 +153,7 @@ struct Converter {
   void process_constructor(tree lhs, tree rhs);
   void process_gimple_assign(gimple *stmt);
   void process_gimple_asm(gimple *stmt);
+  void process_cfn_unary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, tree)>& gen_elem);
   void process_cfn_binary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem);
   void process_cfn_add_overflow(gimple *stmt);
   void process_cfn_bit_andn(gimple *stmt);
@@ -3927,6 +3928,67 @@ void Converter::process_cfn_binary(gimple *stmt, const std::function<std::pair<I
     tree2indef.insert({lhs, res_indef});
 }
 
+void Converter::process_cfn_unary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, tree)>& gen_elem)
+{
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+
+  uint32_t nof_elem;
+  uint32_t elem_bitsize;
+  tree elem_type;
+  if (VECTOR_TYPE_P(arg1_type))
+    {
+      elem_type = TREE_TYPE(arg1_type);
+      elem_bitsize = bitsize_for_type(elem_type);
+      nof_elem = bitsize_for_type(arg1_type) / elem_bitsize;
+    }
+  else
+    {
+      elem_type = arg1_type;
+      elem_bitsize = arg1->bitsize;
+      nof_elem = 1;
+    }
+
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+  assert(VECTOR_TYPE_P(TREE_TYPE(lhs)) == VECTOR_TYPE_P(arg1_type));
+  tree lhs_elem_type = TREE_TYPE(lhs);
+  if (VECTOR_TYPE_P(arg1_type))
+    {
+      lhs_elem_type = TREE_TYPE(lhs_elem_type);
+    }
+
+  Inst *res = nullptr;
+  Inst *res_indef = nullptr;
+  for (uint32_t j = 0; j < nof_elem; j++)
+    {
+      Inst *elem1 = extract_vec_elem(bb, arg1, elem_bitsize, j);
+      Inst *elem1_indef = nullptr;
+      if (arg1_indef)
+	elem1_indef = extract_vec_elem(bb, arg1_indef, elem_bitsize, j);
+
+      auto [inst, indef] = gen_elem(elem1, elem1_indef, lhs_elem_type);
+
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+      if (indef)
+	{
+	  if (res_indef)
+	    res_indef = bb->build_inst(Op::CONCAT, indef, res_indef);
+	  else
+	    res_indef = indef;
+	}
+    }
+  constrain_range(bb, lhs, res);
+  tree2instruction.insert({lhs, res});
+  if (res_indef)
+    tree2indef.insert({lhs, res_indef});
+}
+
 void Converter::process_cfn_add_overflow(gimple *stmt)
 {
   tree arg1_expr = gimple_call_arg(stmt, 0);
@@ -5025,17 +5087,17 @@ void Converter::process_cfn_sat_sub(gimple *stmt)
 
 void Converter::process_cfn_signbit(gimple *stmt)
 {
-  Inst *arg1 = tree2inst(gimple_call_arg(stmt, 0));
-  tree lhs = gimple_call_lhs(stmt);
-  if (!lhs)
-    return;
-  if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
-    throw Not_implemented("process_cfn_signbit: vector type");
-  Inst *signbit = bb->build_extract_bit(arg1, arg1->bitsize - 1);
-  uint32_t bitsize = bitsize_for_type(TREE_TYPE(lhs));
-  Inst *inst = bb->build_inst(Op::ZEXT, signbit, bitsize);
-  constrain_range(bb, lhs, inst);
-  tree2instruction.insert({lhs, inst});
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, tree lhs_elem_type)
+    -> std::pair<Inst *, Inst *>
+    {
+      Inst *signbit = bb->build_extract_bit(elem1, elem1->bitsize - 1);
+      uint32_t bitsize = bitsize_for_type(lhs_elem_type);
+      Inst *inst = bb->build_inst(Op::ZEXT, signbit, bitsize);
+      Inst *indef = get_res_indef(elem1_indef, lhs_elem_type);
+      return {inst, indef};
+    };
+  process_cfn_unary(stmt, gen_elem);
 }
 
 void Converter::process_cfn_sub_overflow(gimple *stmt)
@@ -5618,6 +5680,7 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BUILT_IN_SIGNBIT:
     case CFN_BUILT_IN_SIGNBITF:
     case CFN_BUILT_IN_SIGNBITL:
+    case CFN_SIGNBIT:
       process_cfn_signbit(stmt);
       break;
     case CFN_BUILT_IN_TRAP:
