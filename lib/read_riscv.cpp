@@ -1651,12 +1651,6 @@ void Parser::parse_function()
       Inst *signbit = bb->build_extract_bit(arg2, 31);
       Inst *res = bb->build_trunc(arg1, 31);
       res = bb->build_inst(Op::CONCAT, signbit, res);
-      // For now, treat copying the sign to NaN as always producing the
-      // original canonical NaN in order to be consistent with how it is
-      // handled in the GIMPLE converter.
-      // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
-      Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
-      res = bb->build_inst(Op::ITE, is_nan, arg1, res);
       Inst *m1 = bb->value_m1_inst(32);
       res = bb->build_inst(Op::CONCAT, m1, res);
       bb->build_inst(Op::WRITE, dest, res);
@@ -1673,12 +1667,6 @@ void Parser::parse_function()
       Inst *signbit = bb->build_extract_bit(arg2, arg2->bitsize - 1);
       Inst *res = bb->build_trunc(arg1, arg1->bitsize - 1);
       res = bb->build_inst(Op::CONCAT, signbit, res);
-      // For now, treat copying the sign to NaN as always producing the
-      // original canonical NaN in order to be consistent with how it is
-      // handled in the GIMPLE converter.
-      // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
-      Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
-      res = bb->build_inst(Op::ITE, is_nan, arg1, res);
       bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "fcvt.s.w")
