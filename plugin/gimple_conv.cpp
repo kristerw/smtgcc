@@ -5535,32 +5535,27 @@ void Converter::process_cfn_usubc(gimple *stmt)
 
 void Converter::process_cfn_xorsign(gimple *stmt)
 {
-  Inst *arg1 = tree2inst(gimple_call_arg(stmt, 0));
-  Inst *arg2 = tree2inst(gimple_call_arg(stmt, 1));
-  Inst *signbit1 = bb->build_extract_bit(arg1, arg1->bitsize - 1);
-  Inst *signbit2 = bb->build_extract_bit(arg2, arg2->bitsize - 1);
-  Inst *signbit = bb->build_inst(Op::XOR, signbit1, signbit2);
-  Inst *res = bb->build_trunc(arg1, arg1->bitsize - 1);
-  res = bb->build_inst(Op::CONCAT, signbit, res);
-
-  if (state->arch == Arch::gimple)
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
     {
-      // For now, treat copying the sign to NaN as always produce the original
-      // canonical NaN.
-      // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
-      Inst *is_nan = bb->build_inst(Op::IS_NAN, arg1);
-      res = bb->build_inst(Op::ITE, is_nan, arg1, res);
-    }
-
-  tree lhs = gimple_call_lhs(stmt);
-  if (lhs)
-    {
-      if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
-	throw Not_implemented("process_cfn_: vector type");
-      constrain_src_value(res, TREE_TYPE(lhs));
-      constrain_range(bb, lhs, res);
-      tree2instruction.insert({lhs, res});
-    }
+      Inst *signbit1 = bb->build_extract_bit(elem1, elem1->bitsize - 1);
+      Inst *signbit2 = bb->build_extract_bit(elem2, elem2->bitsize - 1);
+      Inst *signbit = bb->build_inst(Op::XOR, signbit1, signbit2);
+      Inst *res = bb->build_trunc(elem1, elem1->bitsize - 1);
+      res = bb->build_inst(Op::CONCAT, signbit, res);
+      if (state->arch == Arch::gimple)
+	{
+	  // For now, treat copying the sign to NaN as always produce the
+	  // original canonical NaN.
+	  // TODO: Remove this when Op::IS_NONCANONICAL_NAN is removed.
+	  Inst *is_nan = bb->build_inst(Op::IS_NAN, elem1);
+	  res = bb->build_inst(Op::ITE, is_nan, elem1, res);
+	}
+      Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      return {res, res_indef};
+    };
+  process_cfn_binary(stmt, gen_elem);
 }
 
 void Converter::process_gimple_call_combined_fn(gimple *stmt)
