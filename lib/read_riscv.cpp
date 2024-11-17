@@ -1856,8 +1856,8 @@ void Parser::parse_function()
       if (has_w_suffix)
 	arg1 = bb->build_trunc(arg1, 32);
       Inst *res = gen_clz(bb, arg1);
-      if (reg_bitsize == 64)
-	res = bb->build_inst(Op::SEXT, res, reg_bitsize);
+      if (reg_bitsize == 64 && res->bitsize < reg_bitsize)
+	res = bb->build_inst(Op::ZEXT, res, reg_bitsize);
       bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "ctz" || name == "ctzw")
@@ -1871,8 +1871,8 @@ void Parser::parse_function()
       if (has_w_suffix)
 	arg1 = bb->build_trunc(arg1, 32);
       Inst *res = gen_ctz(bb, arg1);
-      if (reg_bitsize == 64)
-	res = bb->build_inst(Op::SEXT, res, reg_bitsize);
+      if (reg_bitsize == 64 && res->bitsize < reg_bitsize)
+	res = bb->build_inst(Op::ZEXT, res, reg_bitsize);
       bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "cpop" || name == "cpopw")
@@ -1886,8 +1886,8 @@ void Parser::parse_function()
       if (has_w_suffix)
 	arg1 = bb->build_trunc(arg1, 32);
       Inst *res = gen_popcount(arg1);
-      if (reg_bitsize == 64)
-	res = bb->build_inst(Op::SEXT, res, reg_bitsize);
+      if (reg_bitsize == 64 && res->bitsize < reg_bitsize)
+	res = bb->build_inst(Op::ZEXT, res, reg_bitsize);
       bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "max")
