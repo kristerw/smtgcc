@@ -235,8 +235,8 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
   if (TREE_CODE(ret_type) == RECORD_TYPE
       && flatten_struct(rstate, ret_type, elems, nof_r, nof_f))
     {
-      uint32_t reg_nbr = 10;
-      uint32_t freg_nbr = 10;
+      uint32_t reg_nbr = RiscvRegIdx::x10;
+      uint32_t freg_nbr = RiscvRegIdx::f10;
       Inst *retval = nullptr;
       for (auto [fld, fld_bitoffset] : elems)
 	{
@@ -244,7 +244,7 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
 	  uint64_t type_bitsize = bitsize_for_type(type);
 	  Inst *value = nullptr;
 	  if (SCALAR_FLOAT_TYPE_P(type))
-	    value = bb->build_inst(Op::READ, rstate->fregisters[freg_nbr++]);
+	    value = bb->build_inst(Op::READ, rstate->registers[freg_nbr++]);
 	  else if (INTEGRAL_TYPE_P(type))
 	    value = bb->build_inst(Op::READ, rstate->registers[reg_nbr++]);
 	  else if (COMPLEX_FLOAT_TYPE_P(type))
@@ -255,10 +255,10 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
 		     || elt_bitsize == 32
 		     || elt_bitsize == 64);
 	      Inst *real =
-		bb->build_inst(Op::READ, rstate->fregisters[10]);
+		bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f10]);
 	      real = bb->build_trunc(real, elt_bitsize);
 	      Inst *imag =
-		bb->build_inst(Op::READ, rstate->fregisters[11]);
+		bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f11]);
 	      imag = bb->build_trunc(imag, elt_bitsize);
 	      value =
 		bb->build_ret_inst(bb->build_inst(Op::CONCAT, imag, real));
@@ -293,9 +293,11 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
     {
       uint64_t elt_bitsize = ret_bitsize / 2;
       assert(elt_bitsize == 16 || elt_bitsize == 32 || elt_bitsize == 64);
-      Inst *real = bb->build_inst(Op::READ, rstate->fregisters[10]);
+      Inst *real =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f10]);
       real = bb->build_trunc(real, elt_bitsize);
-      Inst *imag = bb->build_inst(Op::READ, rstate->fregisters[11]);
+      Inst *imag =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f11]);
       imag = bb->build_trunc(imag, elt_bitsize);
       bb->build_ret_inst(bb->build_inst(Op::CONCAT, imag, real));
       return;
@@ -303,7 +305,7 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
   if (SCALAR_FLOAT_TYPE_P(ret_type) && ret_bitsize <= rstate->freg_bitsize)
     {
       Inst *retval =
-	bb->build_inst(Op::READ, rstate->fregisters[10]);
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f10]);
       if (ret_bitsize < retval->bitsize)
 	retval = bb->build_trunc(retval, ret_bitsize);
       bb->build_ret_inst(retval);
@@ -314,11 +316,11 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
   if (ret_bitsize <= 2 * rstate->reg_bitsize)
     {
       Inst *retval =
-	bb->build_inst(Op::READ, rstate->registers[10]);
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::x10]);
       if (retval->bitsize < ret_bitsize)
 	{
 	  Inst *inst =
-	    bb->build_inst(Op::READ, rstate->registers[11]);
+	    bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::x11]);
 	  retval = bb->build_inst(Op::CONCAT, inst, retval);
 	}
       if (ret_bitsize < retval->bitsize)
@@ -390,7 +392,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
   for (int i = 0; i < 32; i++)
     {
       Inst *reg = bb->build_inst(Op::REGISTER, rstate.freg_bitsize);
-      rstate.fregisters.push_back(reg);
+      rstate.registers.push_back(reg);
     }
 
   // Create MEMORY instructions for the global variables we saw in the
@@ -412,10 +414,10 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
   Inst *stack = bb->build_inst(Op::MEMORY, id, mem_size, flags);
   Inst *size = bb->value_inst(stack_size, stack->bitsize);
   stack = bb->build_inst(Op::ADD, stack, size);
-  bb->build_inst(Op::WRITE, rstate.registers[2], stack);
+  bb->build_inst(Op::WRITE, rstate.registers[RiscvRegIdx::x2], stack);
 
-  uint32_t reg_nbr = 10;
-  uint32_t freg_nbr = 10;
+  uint32_t reg_nbr = RiscvRegIdx::x10;
+  uint32_t freg_nbr = RiscvRegIdx::f10;
 
   build_return(&rstate, src_func, fun, &reg_nbr);
 
@@ -448,7 +450,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 	{
 	  // Ensure the stack is aligned when writing values wider than
 	  // one register.
-	  if (reg_nbr > 17
+	  if (reg_nbr > RiscvRegIdx::x17
 	       && (*arg_regs).regs[0]
 	       && (*arg_regs).regs[1]
 	       && (stack_values.size() & 1))
@@ -456,7 +458,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 
 	  if ((*arg_regs).regs[0])
 	    {
-	      if (reg_nbr > 17)
+	      if (reg_nbr > RiscvRegIdx::x17)
 		stack_values.push_back((*arg_regs).regs[0]);
 	      else
 		{
@@ -466,7 +468,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 	    }
 	  if ((*arg_regs).regs[1])
 	    {
-	      if (reg_nbr > 17)
+	      if (reg_nbr > RiscvRegIdx::x17)
 		stack_values.push_back((*arg_regs).regs[1]);
 	      else
 		{
@@ -477,7 +479,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 
 	  // Ensure the stack is aligned when writing floating-point values
 	  // wider than one register.
-	  if (reg_nbr > 17
+	  if (reg_nbr > RiscvRegIdx::x17
 	       && (*arg_regs).fregs[0]
 	       && (*arg_regs).fregs[1]
 	       && (stack_values.size() & 1))
@@ -485,21 +487,21 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 
 	  if ((*arg_regs).fregs[0])
 	    {
-	      if (freg_nbr > 17)
+	      if (freg_nbr > RiscvRegIdx::f17)
 		stack_values.push_back((*arg_regs).fregs[0]);
 	      else
 		{
-		  Inst *reg = rstate.fregisters[freg_nbr++];
+		  Inst *reg = rstate.registers[freg_nbr++];
 		  bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[0]);
 		}
 	    }
 	  if ((*arg_regs).fregs[1])
 	    {
-	      if (freg_nbr > 17)
+	      if (freg_nbr > RiscvRegIdx::f17)
 		stack_values.push_back((*arg_regs).fregs[1]);
 	      else
 		{
-		  Inst *reg = rstate.fregisters[freg_nbr++];
+		  Inst *reg = rstate.registers[freg_nbr++];
 		  bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[1]);
 		}
 	    }
@@ -519,7 +521,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
       uint32_t size = stack_values.size() * reg_size;
       size = (size + 15) & ~15;   // Keep the stack 16-bytes aligned.
       Inst *size_inst = bb->value_inst(size, rstate.reg_bitsize);
-      Inst *sp_reg = rstate.registers[2];
+      Inst *sp_reg = rstate.registers[RiscvRegIdx::x2];
       Inst *sp = bb->build_inst(Op::READ, sp_reg);
       sp = bb->build_inst(Op::SUB, sp, size_inst);
       bb->build_inst(Op::WRITE, sp_reg, sp);

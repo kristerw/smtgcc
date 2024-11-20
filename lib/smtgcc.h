@@ -512,9 +512,76 @@ struct aarch64_state {
 Function *parse_aarch64(std::string const& file_name, aarch64_state *state);
 
 // read_riscv.cpp
+struct RiscvRegIdx {
+  static constexpr uint64_t x0 = 0;
+  static constexpr uint64_t x1 = 1;
+  static constexpr uint64_t x2 = 2;
+  static constexpr uint64_t x3 = 3;
+  static constexpr uint64_t x4 = 4;
+  static constexpr uint64_t x5 = 5;
+  static constexpr uint64_t x6 = 6;
+  static constexpr uint64_t x7 = 7;
+  static constexpr uint64_t x8 = 8;
+  static constexpr uint64_t x9 = 9;
+  static constexpr uint64_t x10 = 10;
+  static constexpr uint64_t x11 = 11;
+  static constexpr uint64_t x12 = 12;
+  static constexpr uint64_t x13 = 13;
+  static constexpr uint64_t x14 = 14;
+  static constexpr uint64_t x15 = 15;
+  static constexpr uint64_t x16 = 16;
+  static constexpr uint64_t x17 = 17;
+  static constexpr uint64_t x18 = 18;
+  static constexpr uint64_t x19 = 19;
+  static constexpr uint64_t x20 = 20;
+  static constexpr uint64_t x21 = 21;
+  static constexpr uint64_t x22 = 22;
+  static constexpr uint64_t x23 = 23;
+  static constexpr uint64_t x24 = 24;
+  static constexpr uint64_t x25 = 25;
+  static constexpr uint64_t x26 = 26;
+  static constexpr uint64_t x27 = 27;
+  static constexpr uint64_t x28 = 28;
+  static constexpr uint64_t x29 = 29;
+  static constexpr uint64_t x30 = 30;
+  static constexpr uint64_t x31 = 31;
+
+  static constexpr uint64_t f0 = 32;
+  static constexpr uint64_t f1 = 33;
+  static constexpr uint64_t f2 = 34;
+  static constexpr uint64_t f3 = 35;
+  static constexpr uint64_t f4 = 36;
+  static constexpr uint64_t f5 = 37;
+  static constexpr uint64_t f6 = 38;
+  static constexpr uint64_t f7 = 39;
+  static constexpr uint64_t f8 = 40;
+  static constexpr uint64_t f9 = 41;
+  static constexpr uint64_t f10 = 42;
+  static constexpr uint64_t f11 = 43;
+  static constexpr uint64_t f12 = 44;
+  static constexpr uint64_t f13 = 45;
+  static constexpr uint64_t f14 = 46;
+  static constexpr uint64_t f15 = 47;
+  static constexpr uint64_t f16 = 48;
+  static constexpr uint64_t f17 = 49;
+  static constexpr uint64_t f18 = 50;
+  static constexpr uint64_t f19 = 51;
+  static constexpr uint64_t f20 = 52;
+  static constexpr uint64_t f21 = 53;
+  static constexpr uint64_t f22 = 54;
+  static constexpr uint64_t f23 = 55;
+  static constexpr uint64_t f24 = 56;
+  static constexpr uint64_t f25 = 57;
+  static constexpr uint64_t f26 = 58;
+  static constexpr uint64_t f27 = 50;
+  static constexpr uint64_t f28 = 60;
+  static constexpr uint64_t f29 = 61;
+  static constexpr uint64_t f30 = 62;
+  static constexpr uint64_t f31 = 63;
+};
+
 struct riscv_state {
   std::vector<Inst *> registers;
-  std::vector<Inst *> fregisters;
 
   // The memory instruction corresponding to each symbol.
   std::map<std::string, Inst *> sym_name2mem;

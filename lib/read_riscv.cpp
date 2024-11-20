@@ -338,11 +338,11 @@ Inst *Parser::get_reg(unsigned idx)
   if (tokens[idx].size == 2
       && buf[tokens[idx].pos + 0] == 's'
       && buf[tokens[idx].pos + 1] == 'p')
-    return rstate->registers[2];
+    return rstate->registers[RiscvRegIdx::x2];
   if (tokens[idx].size == 2
       && buf[tokens[idx].pos + 0] == 'r'
       && buf[tokens[idx].pos + 1] == 'a')
-    return rstate->registers[1];
+    return rstate->registers[RiscvRegIdx::x1];
   if (tokens[idx].kind != Lexeme::name
       || (buf[tokens[idx].pos] != 'a'
 	  && buf[tokens[idx].pos] != 's'
@@ -354,20 +354,20 @@ Inst *Parser::get_reg(unsigned idx)
   if (tokens[idx].size == 3)
     value = value * 10 + (buf[tokens[idx].pos + 2] - '0');
   if (buf[tokens[idx].pos] == 'a')
-    return rstate->registers[10 + value];
+    return rstate->registers[RiscvRegIdx::x10 + value];
   else if (buf[tokens[idx].pos] == 's')
     {
       if (value < 2)
-	return rstate->registers[8 + value];
+	return rstate->registers[RiscvRegIdx::x8 + value];
       else
-	return rstate->registers[18 - 2 + value];
+	return rstate->registers[RiscvRegIdx::x18 + (value - 2)];
     }
   else if (buf[tokens[idx].pos] == 't')
     {
       if (value < 3)
-	return rstate->registers[5 + value];
+	return rstate->registers[RiscvRegIdx::x5 + value];
       else
-	return rstate->registers[28 - 3 + value];
+	return rstate->registers[RiscvRegIdx::x28 + (value - 3)];
     }
   else
     throw Parse_error("expected a register instead of "
@@ -402,24 +402,24 @@ Inst *Parser::get_freg(unsigned idx)
       if (c == 's')
 	{
 	  if (value == 0)
-	    return rstate->fregisters[8];
+	    return rstate->registers[RiscvRegIdx::f8];
 	  else if (value == 1)
-	    return rstate->fregisters[9];
+	    return rstate->registers[RiscvRegIdx::f9];
 	  else
-	    return rstate->fregisters[16 + value];
+	    return rstate->registers[RiscvRegIdx::f16 + value];
 	}
       else if (c == 't')
 	{
 	  if (value <= 7)
-	    return rstate->fregisters[value];
+	    return rstate->registers[RiscvRegIdx::f0 + value];
 	  else
-	    return rstate->fregisters[value + 20];
+	    return rstate->registers[RiscvRegIdx::f20 + value];
 	}
       else
-	return rstate->fregisters[10 + value];
+	return rstate->registers[RiscvRegIdx::f10 + value];
     }
   else
-    return rstate->fregisters[value];
+    return rstate->registers[RiscvRegIdx::f0 + value];
 }
 
 Inst *Parser::get_hilo_addr(const Token& tok)
@@ -691,21 +691,21 @@ void Parser::write_retval(Inst *retval)
       if (retval->bitsize == 32)
 	retval = bb->build_inst(Op::SEXT, retval, 64);
       assert(retval->bitsize == 64);
-      bb->build_inst(Op::WRITE, rstate->registers[10 + 0], retval);
+      bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::x10], retval);
     }
   else
     {
       assert(reg_bitsize == 32);
       if (retval->bitsize == 32)
-	bb->build_inst(Op::WRITE, rstate->registers[10 + 0], retval);
+	bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::x10], retval);
       else
 	{
 	  assert(retval->bitsize == 64);
 	  Inst *a0 = bb->build_trunc(retval, reg_bitsize);
 	  Inst *a1 = bb->build_inst(Op::EXTRACT, retval, 2 * reg_bitsize - 1,
 				    reg_bitsize);
-	  bb->build_inst(Op::WRITE, rstate->registers[10 + 0], a0);
-	  bb->build_inst(Op::WRITE, rstate->registers[10 + 1], a1);
+	  bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::x10], a0);
+	  bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::x11], a1);
 	}
     }
 }
@@ -717,8 +717,8 @@ void Parser::process_call()
 
   if (name == "__ashldi3" && reg_bitsize == 32)
     {
-      Inst *arg1 = read_arg(10 + 0, 64);
-      Inst *arg2 = read_arg(10 + 2, 32);
+      Inst *arg1 = read_arg(RiscvRegIdx::x10, 64);
+      Inst *arg2 = read_arg(RiscvRegIdx::x12, 32);
       arg2 = bb->build_inst(Op::ZEXT, arg2, 64);
       Inst *res = bb->build_inst(Op::SHL, arg1, arg2);
       write_retval(res);
@@ -726,8 +726,8 @@ void Parser::process_call()
     }
   if (name == "__ashrdi3" && reg_bitsize == 32)
     {
-      Inst *arg1 = read_arg(10 + 0, 64);
-      Inst *arg2 = read_arg(10 + 2, 32);
+      Inst *arg1 = read_arg(RiscvRegIdx::x10, 64);
+      Inst *arg2 = read_arg(RiscvRegIdx::x12, 32);
       arg2 = bb->build_inst(Op::ZEXT, arg2, 64);
       Inst *res = bb->build_inst(Op::ASHR, arg1, arg2);
       write_retval(res);
@@ -735,35 +735,35 @@ void Parser::process_call()
     }
   if (name == "__bswapdi2")
     {
-      Inst *arg = read_arg(10 + 0, 64);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 64);
       Inst *res = gen_bswap(bb, arg);
       write_retval(res);
       return;
     }
   if (name == "__bswapsi2")
     {
-      Inst *arg = read_arg(10 + 0, 32);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 32);
       Inst *res = gen_bswap(bb, arg);
       write_retval(res);
       return;
     }
   if (name == "__clrsbdi2")
     {
-      Inst *arg = read_arg(10 + 0, 64);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 64);
       Inst *res = gen_clrsb(bb, arg);
       write_retval(res);
       return;
     }
   if (name == "__clrsbsi2" && reg_bitsize == 32)
     {
-      Inst *arg = read_arg(10 + 0, 32);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 32);
       Inst *res = gen_clrsb(bb, arg);
       write_retval(res);
       return;
     }
   if (name == "__clzdi2")
     {
-      Inst *arg = read_arg(10 + 0, 64);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 64);
       Inst *zero = bb->value_inst(0, arg->bitsize);
       Inst *ub = bb->build_inst(Op::EQ, arg, zero);
       bb->build_inst(Op::UB, ub);
@@ -773,7 +773,7 @@ void Parser::process_call()
     }
   if (name == "__clzsi2" && reg_bitsize == 32)
     {
-      Inst *arg = read_arg(10 + 0, 32);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 32);
       Inst *zero = bb->value_inst(0, arg->bitsize);
       Inst *ub = bb->build_inst(Op::EQ, arg, zero);
       bb->build_inst(Op::UB, ub);
@@ -783,7 +783,7 @@ void Parser::process_call()
     }
   if (name == "__ctzdi2")
     {
-      Inst *arg = read_arg(10 + 0, 64);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 64);
       Inst *zero = bb->value_inst(0, arg->bitsize);
       Inst *ub = bb->build_inst(Op::EQ, arg, zero);
       bb->build_inst(Op::UB, ub);
@@ -793,7 +793,7 @@ void Parser::process_call()
     }
   if (name == "__ctzsi2" && reg_bitsize == 32)
     {
-      Inst *arg = read_arg(10 + 0, 32);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 32);
       Inst *zero = bb->value_inst(0, arg->bitsize);
       Inst *ub = bb->build_inst(Op::EQ, arg, zero);
       bb->build_inst(Op::UB, ub);
@@ -803,23 +803,23 @@ void Parser::process_call()
     }
   if (name == "__divdi3" && reg_bitsize == 32)
     {
-      Inst *arg1 = read_arg(10 + 0, 64);
-      Inst *arg2 = read_arg(10 + 2, 64);
+      Inst *arg1 = read_arg(RiscvRegIdx::x10, 64);
+      Inst *arg2 = read_arg(RiscvRegIdx::x12, 64);
       Inst *res = gen_sdiv(arg1, arg2);
       write_retval(res);
       return;
     }
   if (name == "__udivdi3" && reg_bitsize == 32)
     {
-      Inst *arg1 = read_arg(10 + 0, 64);
-      Inst *arg2 = read_arg(10 + 2, 64);
+      Inst *arg1 = read_arg(RiscvRegIdx::x10, 64);
+      Inst *arg2 = read_arg(RiscvRegIdx::x12, 64);
       Inst *res = gen_udiv(arg1, arg2);
       write_retval(res);
       return;
     }
   if (name == "__ffsdi2")
     {
-      Inst *arg = read_arg(10 + 0, 64);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 64);
       Inst *res = gen_ffs(arg);
       res = bb->build_inst(Op::SEXT, res, 64);
       write_retval(res);
@@ -827,14 +827,15 @@ void Parser::process_call()
     }
   if (name == "__ffssi2" || name == "ffs")
     {
-      Inst *arg = read_arg(10 + 0, 32);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 32);
       Inst *res = gen_ffs(arg);
       write_retval(res);
       return;
     }
   if (name == "__fixsfdi" && reg_bitsize == 32)
     {
-      Inst *arg1 = bb->build_inst(Op::READ, rstate->fregisters[10 + 0]);
+      Inst *arg1 =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f10]);
       arg1 = bb->build_trunc(arg1, 32);
       Inst *res = bb->build_inst(Op::F2S, arg1, 64);
       write_retval(res);
@@ -842,7 +843,8 @@ void Parser::process_call()
     }
   if (name == "__fixunssfdi" && reg_bitsize == 32)
     {
-      Inst *arg1 = bb->build_inst(Op::READ, rstate->fregisters[10 + 0]);
+      Inst *arg1 =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f10]);
       arg1 = bb->build_trunc(arg1, 32);
       Inst *res = bb->build_inst(Op::F2U, arg1, 64);
       write_retval(res);
@@ -850,54 +852,55 @@ void Parser::process_call()
     }
   if (name == "__fixdfdi" && reg_bitsize == 32)
     {
-      Inst *arg1 = bb->build_inst(Op::READ, rstate->fregisters[10 + 0]);
+      Inst *arg1 =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f10]);
       Inst *res = bb->build_inst(Op::F2S, arg1, 64);
       write_retval(res);
       return;
     }
   if (name == "__fixunsdfdi" && reg_bitsize == 32)
     {
-      Inst *arg1 = bb->build_inst(Op::READ, rstate->fregisters[10 + 0]);
+      Inst *arg1 = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f10]);
       Inst *res = bb->build_inst(Op::F2U, arg1, 64);
       write_retval(res);
       return;
     }
   if (name == "__floatdisf" && reg_bitsize == 32)
     {
-      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *arg1 = read_arg(RiscvRegIdx::x10, 64);
       Inst *res = bb->build_inst(Op::S2F, arg1, 32);
       Inst *m1 = bb->value_m1_inst(32);
       res = bb->build_inst(Op::CONCAT, m1, res);
-      bb->build_inst(Op::WRITE, rstate->fregisters[10 + 0], res);
+      bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::f10], res);
       return;
     }
   if (name == "__floatundisf" && reg_bitsize == 32)
     {
-      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *arg1 = read_arg(RiscvRegIdx::x10, 64);
       Inst *res = bb->build_inst(Op::U2F, arg1, 32);
       Inst *m1 = bb->value_m1_inst(32);
       res = bb->build_inst(Op::CONCAT, m1, res);
-      bb->build_inst(Op::WRITE, rstate->fregisters[10 + 0], res);
+      bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::f10], res);
       return;
     }
   if (name == "__floatdidf" && reg_bitsize == 32)
     {
-      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *arg1 = read_arg(RiscvRegIdx::x10, 64);
       Inst *res = bb->build_inst(Op::S2F, arg1, 64);
-      bb->build_inst(Op::WRITE, rstate->fregisters[10 + 0], res);
+      bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::f10], res);
       return;
     }
   if (name == "__floatundidf" && reg_bitsize == 32)
     {
-      Inst *arg1 = read_arg(10 + 0, 64);
+      Inst *arg1 = read_arg(RiscvRegIdx::x10, 64);
       Inst *res = bb->build_inst(Op::U2F, arg1, 64);
-      bb->build_inst(Op::WRITE, rstate->fregisters[10 + 0], res);
+      bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::f10], res);
       return;
     }
   if (name == "__lshrdi3" && reg_bitsize == 32)
     {
-      Inst *arg1 = read_arg(10 + 0, 64);
-      Inst *arg2 = read_arg(10 + 2, 32);
+      Inst *arg1 = read_arg(RiscvRegIdx::x10, 64);
+      Inst *arg2 = read_arg(RiscvRegIdx::x12, 32);
       arg2 = bb->build_inst(Op::ZEXT, arg2, 64);
       Inst *res = bb->build_inst(Op::LSHR, arg1, arg2);
       write_retval(res);
@@ -905,15 +908,15 @@ void Parser::process_call()
     }
   if (name == "__moddi3" && reg_bitsize == 32)
     {
-      Inst *arg1 = read_arg(10 + 0, 64);
-      Inst *arg2 = read_arg(10 + 2, 64);
+      Inst *arg1 = read_arg(RiscvRegIdx::x10, 64);
+      Inst *arg2 = read_arg(RiscvRegIdx::x12, 64);
       Inst *res = bb->build_inst(Op::SREM, arg1, arg2);
       write_retval(res);
       return;
     }
   if (name == "__popcountdi2")
     {
-      Inst *arg = read_arg(10 + 0, 64);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 64);
       Inst *res = gen_popcount(arg);
       res = bb->build_inst(Op::SEXT, res, 64);
       write_retval(res);
@@ -921,29 +924,29 @@ void Parser::process_call()
     }
   if (name == "__popcountsi2" && reg_bitsize == 32)
     {
-      Inst *arg = read_arg(10 + 0, 32);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 32);
       Inst *res = gen_popcount(arg);
       write_retval(res);
       return;
     }
   if (name == "__paritydi2")
     {
-      Inst *arg = read_arg(10 + 0, 64);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 64);
       Inst *res = gen_parity(arg);
       write_retval(res);
       return;
     }
   if (name == "__paritysi2" && reg_bitsize == 32)
     {
-      Inst *arg = read_arg(10 + 0, 32);
+      Inst *arg = read_arg(RiscvRegIdx::x10, 32);
       Inst *res = gen_parity(arg);
       write_retval(res);
       return;
     }
   if (name == "__umoddi3" && reg_bitsize == 32)
     {
-      Inst *arg1 = read_arg(10 + 0, 64);
-      Inst *arg2 = read_arg(10 + 2, 64);
+      Inst *arg1 = read_arg(RiscvRegIdx::x10, 64);
+      Inst *arg2 = read_arg(RiscvRegIdx::x12, 64);
       Inst *res = bb->build_inst(Op::UREM, arg1, arg2);
       write_retval(res);
       return;
