@@ -13,6 +13,11 @@ using namespace smtgcc;
 namespace smtgcc {
 namespace {
 
+enum class Cond_code {
+  EQ, NE, SLT, ULT, SLE, ULE, SGT, UGT, SGE, UGE,
+  FEQ, FNE, FLT, FLE, FGT, FGE
+};
+
 struct Parser {
   Parser(riscv_state *rstate) : rstate{rstate} {}
 
@@ -88,14 +93,17 @@ private:
   unsigned __int128 get_hex(const char *p);
 
   unsigned __int128 get_hex_or_integer(unsigned idx);
+  bool is_reg_x0(unsigned idx);
   Inst *get_reg(unsigned idx);
   Inst *get_freg(unsigned idx);
+  Inst *get_vreg(unsigned idx);
   Inst *get_hilo_addr(const Token& tok);
   Inst *get_hi(unsigned idx);
   Inst *get_lo(unsigned idx);
   Inst *get_imm(unsigned idx);
   Inst *get_reg_value(unsigned idx);
   Inst *get_freg_value(unsigned idx);
+  Inst *get_vreg_value(unsigned idx);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
   std::string_view get_name(unsigned idx);
@@ -131,6 +139,53 @@ private:
   void process_icmp(std::string_view name, Op op, bool swap = false);
   void process_ishift(std::string_view name, Op op);
   void process_zba_sh_add(uint64_t shift_val, bool truncate_arg1);
+  Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
+  Inst *change_prec(Inst *inst, uint32_t bitsize);
+  void process_vsetvli(bool arg1_is_imm);
+  void process_vle(uint32_t elem_bitsize);
+  void process_vse(uint32_t elem_bitsize);
+  Inst *gen_vec_unary(Op op, Inst *orig, Inst *arg1, Inst *mask,
+		      uint32_t elem_bitsize);
+  void process_vec_unary(Op op);
+  void process_vec_unary_vi(Op op);
+  void process_vec_unary_vx(Op op);
+  Inst *gen_vec_binary(Op op, Inst *orig, Inst *arg1, Inst *arg2, Inst *mask,
+		       uint32_t elem_bitsize);
+  void process_vec_binary(Op op);
+  void process_vec_binary_vi(Op op);
+  void process_vec_binary_vx(Op op);
+  Inst *gen_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Inst *orig,
+		       Inst *arg1, Inst *arg2, Inst *mask,
+		       uint32_t elem_bitsize);
+  void process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_binary_vi(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_binary_vx(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_mask_unary(Op op);
+  void process_vec_mask_set(bool value);
+  void process_vec_mask_binary(Op op);
+  void process_vec_mask_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  Inst *gen_vec_reduc(Op op, Inst *orig, Inst *arg1, Inst *arg2, Inst *mask,
+		      uint32_t elem_bitsize);
+  void process_vec_reduc(Op op);
+  Inst *gen_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Inst *orig,
+		      Inst *arg1, Inst *arg2, Inst *mask,
+		      uint32_t elem_bitsize);
+  void process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  Inst *gen_vmerge(Inst *orig, Inst *arg1, Inst *arg2, Inst *arg3,
+		   uint32_t elem_bitsize);
+  void process_vmerge();
+  void process_vmerge_vi();
+  void process_vmerge_vx();
+  Inst *gen_vec_cmp(Cond_code ccode, Inst *orig, Inst *arg1, Inst *arg2,
+		    uint32_t elem_bitsize);
+  void process_vec_cmp(Cond_code ccode);
+  void process_vec_cmp_vi(Cond_code ccode);
+  void process_vec_cmp_vx(Cond_code ccode);
+  Inst *gen_vid(Inst *orig, uint32_t elem_bitsize);
+  void process_vid();
+  void process_vmv_xs();
+  Inst *gen_vmv_sx(Inst *orig, Inst *arg1, uint32_t elem_bitsize);
+  void process_vmv_sx();
 
   void parse_function();
 
@@ -300,6 +355,23 @@ unsigned __int128 Parser::get_hex(const char *p)
   return value;
 }
 
+bool Parser::is_reg_x0(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  if (tokens[idx].size == 4
+      && buf[tokens[idx].pos + 0] == 'z'
+      && buf[tokens[idx].pos + 1] == 'e'
+      && buf[tokens[idx].pos + 2] == 'r'
+      && buf[tokens[idx].pos + 3] == 'o')
+    return true;
+  if (tokens[idx].size == 2
+      && buf[tokens[idx].pos + 0] == 'x'
+      && buf[tokens[idx].pos + 1] == '0')
+    return true;
+  return false;
+}
+
 unsigned __int128 Parser::get_hex_or_integer(unsigned idx)
 {
   if (tokens.size() <= idx)
@@ -380,13 +452,13 @@ Inst *Parser::get_freg(unsigned idx)
     throw Parse_error("expected more arguments", line_number);
   int pos = tokens[idx].pos;
   if (buf[pos] != 'f')
-    throw Parse_error("expected a floating point register", line_number);
+    throw Parse_error("expected a floating-point register", line_number);
   pos++;
   bool is_pseudo_reg = false;
   if (!isdigit(buf[pos]))
     {
       if (buf[pos] != 'a' && buf[pos] != 's' && buf[pos] != 't')
-	throw Parse_error("invalid floating point register "
+	throw Parse_error("invalid floating-point register "
 			  + std::string(token_string(tokens[idx])),
 			  line_number);
       is_pseudo_reg = true;
@@ -420,6 +492,34 @@ Inst *Parser::get_freg(unsigned idx)
     }
   else
     return rstate->registers[RiscvRegIdx::f0 + value];
+}
+
+Inst *Parser::get_vreg(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  int pos = tokens[idx].pos;
+  if (tokens[idx].size == 4
+      && buf[pos] == 'v'
+      && buf[pos + 1] == '0'
+      && buf[pos + 2] == '.'
+      && buf[pos + 3] == 't')
+    return rstate->registers[RiscvRegIdx::v0];
+  if (tokens[idx].size != 2 && tokens[idx].size != 3)
+    throw Parse_error("expected a vector register", line_number);
+  if (buf[pos] != 'v')
+    throw Parse_error("expected a vector register", line_number);
+  pos++;
+  if (!isdigit(buf[pos]))
+    throw Parse_error("expected a digit", line_number);
+  uint32_t value = buf[pos] - '0';
+  if (tokens[idx].size == 3)
+    {
+      if (!isdigit(buf[pos + 1]))
+	throw Parse_error("expected a digit", line_number);
+      value = value * 10 + (buf[pos + 1] - '0');
+    }
+  return rstate->registers[RiscvRegIdx::v0 + value];
 }
 
 Inst *Parser::get_hilo_addr(const Token& tok)
@@ -519,6 +619,11 @@ Inst *Parser::get_reg_value(unsigned idx)
 Inst *Parser::get_freg_value(unsigned idx)
 {
   return bb->build_inst(Op::READ, get_freg(idx));
+}
+
+Inst *Parser::get_vreg_value(unsigned idx)
+{
+  return bb->build_inst(Op::READ, get_vreg(idx));
 }
 
 Basic_block *Parser::get_bb(unsigned idx)
@@ -1239,7 +1344,7 @@ void Parser::process_fmin_fmax(uint32_t bitsize, bool is_min)
     cmp = bb->build_inst(Op::FLT, arg2, arg1);
   Inst *res1 = bb->build_inst(Op::ITE, cmp, arg1, arg2);
   Inst *res2 = bb->build_inst(Op::ITE, is_nan, arg1, res1);
-  // 0.0 and -0.0 is equal as floating point values, and fmin(0.0, -0.0)
+  // 0.0 and -0.0 is equal as floating-point values, and fmin(0.0, -0.0)
   // may return eiter of them. But we treat them as 0.0 > -0.0 here,
   // otherwise we will report miscompilations when GCC switch the order
   // of the arguments.
@@ -1383,6 +1488,1233 @@ void Parser::process_zba_sh_add(uint64_t shift_val, bool truncate_arg1)
   Inst *shift = bb->value_inst(shift_val, reg_bitsize);
   Inst *res = bb->build_inst(Op::SHL, arg1, shift);
   res = bb->build_inst(Op::ADD, res, arg2);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+Inst *Parser::extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx)
+{
+  if (idx == 0 && inst->bitsize == elem_bitsize)
+    return inst;
+  assert(inst->bitsize % elem_bitsize == 0);
+  Inst *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
+  Inst *low = bb->value_inst(idx * elem_bitsize, 32);
+  return bb->build_inst(Op::EXTRACT, inst, high, low);
+}
+
+Inst *Parser::change_prec(Inst *inst, uint32_t bitsize)
+{
+  if (inst->bitsize < bitsize)
+    return bb->build_inst(Op::SEXT, inst, bitsize);
+  if (inst->bitsize > bitsize)
+    return bb->build_trunc(inst, bitsize);
+  return inst;
+}
+
+Inst *gen_rsub(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::SUB, elem2, elem1);
+}
+
+Inst *gen_smin(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *cmp = bb->build_inst(Op::SLT, elem1, elem2);
+  return bb->build_inst(Op::ITE, cmp, elem1, elem2);
+}
+
+Inst *gen_umin(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *cmp = bb->build_inst(Op::ULT, elem1, elem2);
+  return bb->build_inst(Op::ITE, cmp, elem1, elem2);
+}
+
+Inst *gen_smax(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *cmp = bb->build_inst(Op::SLT, elem1, elem2);
+  return bb->build_inst(Op::ITE, cmp, elem2, elem1);
+}
+
+Inst *gen_umax(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *cmp = bb->build_inst(Op::ULT, elem1, elem2);
+  return bb->build_inst(Op::ITE, cmp, elem2, elem1);
+}
+
+Inst *gen_mulh(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  elem1 = bb->build_inst(Op::SEXT, elem1, 2 * elem1->bitsize);
+  elem2 = bb->build_inst(Op::SEXT, elem2, 2 * elem2->bitsize);
+  Inst *res = bb->build_inst(Op::MUL, elem1, elem2);
+  return bb->build_inst(Op::EXTRACT, res, res->bitsize - 1, res->bitsize / 2);
+}
+
+Inst *gen_mulhu(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  elem1 = bb->build_inst(Op::ZEXT, elem1, 2 * elem1->bitsize);
+  elem2 = bb->build_inst(Op::ZEXT, elem2, 2 * elem2->bitsize);
+  Inst *res = bb->build_inst(Op::MUL, elem1, elem2);
+  return bb->build_inst(Op::EXTRACT, res, res->bitsize - 1, res->bitsize / 2);
+}
+
+Inst *gen_mulhsu(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  elem1 = bb->build_inst(Op::SEXT, elem1, 2 * elem1->bitsize);
+  elem2 = bb->build_inst(Op::ZEXT, elem2, 2 * elem2->bitsize);
+  Inst *res = bb->build_inst(Op::MUL, elem1, elem2);
+  return bb->build_inst(Op::EXTRACT, res, res->bitsize - 1, res->bitsize / 2);
+}
+
+Inst *gen_nand(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::NOT, bb->build_inst(Op::AND, elem1, elem2));
+}
+
+Inst *gen_andn(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  elem2 = bb->build_inst(Op::NOT, elem2);
+  return bb->build_inst(Op::AND, elem1, elem2);
+}
+
+Inst *gen_nor(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::NOT, bb->build_inst(Op::OR, elem1, elem2));
+}
+
+Inst *gen_orn(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  elem2 = bb->build_inst(Op::NOT, elem2);
+  return bb->build_inst(Op::OR, elem1, elem2);
+}
+
+Inst *gen_xnor(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::NOT, bb->build_inst(Op::XOR, elem1, elem2));
+}
+
+void Parser::process_vsetvli(bool arg1_is_imm)
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1;
+  if (arg1_is_imm)
+    arg1 = get_imm(3);
+  else
+    arg1 = get_reg_value(3);
+  get_comma(4);
+
+  std::string_view arg2 = get_name(5);
+  get_comma(6);
+  std::string_view arg3 = get_name(7);
+  get_comma(8);
+  std::string_view arg4 = get_name(9);
+  get_comma(10);
+  std::string_view arg5 = get_name(11);
+  get_end_of_line(12);
+
+  Inst *vsew = nullptr;
+  uint32_t nof_vec_elem;
+  if (arg2 == "e8")
+    {
+      vsew = bb->value_inst(0, 3);
+      nof_vec_elem = rstate->vreg_bitsize / 8;
+    }
+  else if (arg2 == "e16")
+    {
+      vsew = bb->value_inst(1, 3);
+      nof_vec_elem = rstate->vreg_bitsize / 16;
+    }
+  else if (arg2 == "e32")
+    {
+      vsew = bb->value_inst(2, 3);
+      nof_vec_elem = rstate->vreg_bitsize / 32;
+    }
+  else if (arg2 == "e64")
+    {
+      vsew = bb->value_inst(3, 3);
+      nof_vec_elem = rstate->vreg_bitsize / 64;
+    }
+  else
+    throw Parse_error("invalid SEW", line_number);
+
+  if (arg3 != "m1" && arg3 != "mf2" && arg3 != "mf4" && arg3 != "mf8")
+    throw Parse_error("vsetvli: only m1/mf* are implemented", line_number);
+  if (arg4 != "ta" && arg4 != "tu")
+    throw Parse_error("expected ta or tu", line_number);
+  if (arg5 != "ma" && arg5 != "mu")
+    throw Parse_error("expected ma or mu", line_number);
+
+  bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::vsew], vsew);
+  Inst *vlmax = bb->value_inst(nof_vec_elem, arg1->bitsize);
+  if (is_reg_x0(3))
+    {
+      if (is_reg_x0(0))
+	{
+	  // Keep existing vl. I.e. nothing to do here.
+	}
+      else
+	{
+	  bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::vl], vlmax);
+	  bb->build_inst(Op::WRITE, dest, vlmax);
+	}
+    }
+  else
+    {
+      Inst *cmp = bb->build_inst(Op::ULT, vlmax, arg1);
+      Inst *vl = bb->build_inst(Op::ITE, cmp, vlmax, arg1);
+      bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::vl], vl);
+      bb->build_inst(Op::WRITE, dest, vl);
+    }
+}
+
+void Parser::process_vle(uint32_t elem_bitsize)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  unsigned __int128 offset = get_hex_or_integer(3);
+  if (offset)
+    throw Parse_error("only 0 is implemented", line_number);
+  get_left_paren(4);
+  Inst *ptr = get_reg_value(5);
+  get_right_paren(6);
+  get_end_of_line(7);
+
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  Inst *value = nullptr;
+  uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem_offset_inst =
+	bb->value_inst(i * elem_bitsize / 8, ptr->bitsize);
+      Inst *elem_ptr = bb->build_inst(Op::ADD, ptr, elem_offset_inst);
+      Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      for (uint32_t j = 0; j < elem_bitsize / 8; j++)
+	{
+	  Inst *offset_inst = bb->value_inst(j, ptr->bitsize);
+	  Inst *addr = bb->build_inst(Op::ADD, elem_ptr, offset_inst);
+	  Inst *loaded_byte = bb->build_inst(Op::LOAD, addr);
+	  Inst *orig_byte = extract_vec_elem(orig_elem, 8, j);
+	  Inst *byte = bb->build_inst(Op::ITE, cmp, loaded_byte, orig_byte);
+	  if (value)
+	    value = bb->build_inst(Op::CONCAT, byte, value);
+	  else
+	    value = byte;
+	}
+    }
+  bb->build_inst(Op::WRITE, dest, value);
+}
+
+void Parser::process_vse(uint32_t elem_bitsize)
+{
+  Inst *value = get_vreg_value(1);
+  get_comma(2);
+  unsigned __int128 offset = get_hex_or_integer(3);
+  if (offset)
+    throw Parse_error("only 0 is implemented", line_number);
+  get_left_paren(4);
+  Inst *ptr = get_reg_value(5);
+  get_right_paren(6);
+  get_end_of_line(7);
+
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Basic_block *true_bb = func->build_bb();
+      Basic_block *false_bb = func->build_bb();
+      Inst *i_inst = bb->value_inst(i, vl->bitsize);
+      Inst *cmp = bb->build_inst(Op::ULT, i_inst, vl);
+      bb->build_br_inst(cmp, true_bb, false_bb);
+      bb = true_bb;
+
+      Inst *elem_offset_inst =
+	bb->value_inst(i * elem_bitsize / 8, ptr->bitsize);
+      Inst *elem_ptr = bb->build_inst(Op::ADD, ptr, elem_offset_inst);
+      Inst *elem = extract_vec_elem(value, elem_bitsize, i);
+      for (uint32_t j = 0; j < elem_bitsize / 8; j++)
+	{
+	  Inst *offset_inst = bb->value_inst(j, ptr->bitsize);
+	  Inst *addr = bb->build_inst(Op::ADD, elem_ptr, offset_inst);
+	  Inst *byte = extract_vec_elem(elem, 8, j);
+	  bb->build_inst(Op::STORE, addr, byte);
+	}
+      bb->build_br_inst(false_bb);
+      bb = false_bb;
+    }
+}
+
+Inst *Parser::gen_vec_unary(Op op, Inst *orig, Inst *arg1, Inst *mask,
+			    uint32_t elem_bitsize)
+{
+  Inst *res = nullptr;
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1;
+      if (arg1->bitsize == elem_bitsize)
+	elem1 = arg1;
+      else
+	elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, elem1);
+      Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      if (mask)
+	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
+      inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  return res;
+}
+
+void Parser::process_vec_unary(Op op)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  Inst *mask = nullptr;
+  if (tokens.size() > 4)
+    {
+      get_comma(4);
+      mask = get_vreg_value(5);
+      get_end_of_line(6);
+    }
+  else
+    get_end_of_line(4);
+
+  Inst *res8 = gen_vec_unary(op, orig, arg1, mask, 8);
+  Inst *res16 = gen_vec_unary(op, orig, arg1, mask, 16);
+  Inst *res32 = gen_vec_unary(op, orig, arg1, mask, 32);
+  Inst *res64 = gen_vec_unary(op, orig, arg1, mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_unary_vi(Op op)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  unsigned __int128 arg1 = get_hex_or_integer(3);
+  Inst *mask = nullptr;
+  if (tokens.size() > 4)
+    {
+      get_comma(4);
+      mask = get_vreg_value(5);
+      get_end_of_line(6);
+    }
+  else
+    get_end_of_line(4);
+
+  Inst *imm8 = bb->value_inst(arg1, 8);
+  Inst *imm16 = bb->value_inst(arg1, 16);
+  Inst *imm32 = bb->value_inst(arg1, 32);
+  Inst *imm64 = bb->value_inst(arg1, 64);
+  Inst *res8 = gen_vec_unary(op, orig, imm8, mask, 8);
+  Inst *res16 = gen_vec_unary(op, orig, imm16, mask, 16);
+  Inst *res32 = gen_vec_unary(op, orig, imm32, mask, 32);
+  Inst *res64 = gen_vec_unary(op, orig, imm64, mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_unary_vx(Op op)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  Inst *mask = nullptr;
+  if (tokens.size() > 4)
+    {
+      get_comma(4);
+      mask = get_vreg_value(5);
+      get_end_of_line(6);
+    }
+  else
+    get_end_of_line(4);
+
+  Inst *res8 = gen_vec_unary(op, orig, change_prec(arg1, 8), mask, 8);
+  Inst *res16 = gen_vec_unary(op, orig, change_prec(arg1, 16), mask, 16);
+  Inst *res32 = gen_vec_unary(op, orig, change_prec(arg1, 32), mask, 32);
+  Inst *res64 = gen_vec_unary(op, orig, change_prec(arg1, 64), mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+Inst *Parser::gen_vec_binary(Op op, Inst *orig, Inst *arg1, Inst *arg2,
+			     Inst *mask, uint32_t elem_bitsize)
+{
+  Inst *res = nullptr;
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2;
+      if (arg2->bitsize == elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, elem1, elem2);
+      Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      if (mask)
+	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
+      inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  return res;
+}
+
+void Parser::process_vec_binary(Op op)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
+
+  Inst *res8 = gen_vec_binary(op, orig, arg1, arg2, mask, 8);
+  Inst *res16 = gen_vec_binary(op, orig, arg1, arg2, mask, 16);
+  Inst *res32 = gen_vec_binary(op, orig, arg1, arg2, mask, 32);
+  Inst *res64 = gen_vec_binary(op, orig, arg1, arg2, mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_binary_vi(Op op)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  unsigned __int128 arg2 = get_hex_or_integer(5);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
+
+  Inst *imm8 = bb->value_inst(arg2, 8);
+  Inst *imm16 = bb->value_inst(arg2, 16);
+  Inst *imm32 = bb->value_inst(arg2, 32);
+  Inst *imm64 = bb->value_inst(arg2, 64);
+  Inst *res8 = gen_vec_binary(op, orig, arg1, imm8, mask, 8);
+  Inst *res16 = gen_vec_binary(op, orig, arg1, imm16, mask, 16);
+  Inst *res32 = gen_vec_binary(op, orig, arg1, imm32, mask, 32);
+  Inst *res64 = gen_vec_binary(op, orig, arg1, imm64, mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_binary_vx(Op op)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_reg_value(5);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
+
+  Inst *res8 = gen_vec_binary(op, orig, arg1, change_prec(arg2, 8), mask, 8);
+  Inst *res16 = gen_vec_binary(op, orig, arg1, change_prec(arg2, 16), mask, 16);
+  Inst *res32 = gen_vec_binary(op, orig, arg1, change_prec(arg2, 32), mask, 32);
+  Inst *res64 = gen_vec_binary(op, orig, arg1, change_prec(arg2, 64), mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+Inst *Parser::gen_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
+			     Inst *orig, Inst *arg1, Inst *arg2, Inst *mask,
+			     uint32_t elem_bitsize)
+{
+  Inst *res = nullptr;
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2;
+      if (arg2->bitsize == elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = gen_elem(bb, elem1, elem2);
+      Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      if (mask)
+	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
+      inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  return res;
+}
+
+void Parser::process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
+
+  Inst *res8 = gen_vec_binary(gen_elem, orig, arg1, arg2, mask, 8);
+  Inst *res16 = gen_vec_binary(gen_elem, orig, arg1, arg2, mask, 16);
+  Inst *res32 = gen_vec_binary(gen_elem, orig, arg1, arg2, mask, 32);
+  Inst *res64 = gen_vec_binary(gen_elem, orig, arg1, arg2, mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_binary_vi(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  unsigned __int128 arg2 = get_hex_or_integer(5);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
+
+  Inst *imm8 = bb->value_inst(arg2, 8);
+  Inst *imm16 = bb->value_inst(arg2, 16);
+  Inst *imm32 = bb->value_inst(arg2, 32);
+  Inst *imm64 = bb->value_inst(arg2, 64);
+  Inst *res8 = gen_vec_binary(gen_elem, orig, arg1, imm8, mask, 8);
+  Inst *res16 = gen_vec_binary(gen_elem, orig, arg1, imm16, mask, 16);
+  Inst *res32 = gen_vec_binary(gen_elem, orig, arg1, imm32, mask, 32);
+  Inst *res64 = gen_vec_binary(gen_elem, orig, arg1, imm64, mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_binary_vx(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_reg_value(5);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
+
+  Inst *res8 =
+    gen_vec_binary(gen_elem, orig, arg1, change_prec(arg2, 8), mask, 8);
+  Inst *res16 =
+    gen_vec_binary(gen_elem, orig, arg1, change_prec(arg2, 16), mask, 16);
+  Inst *res32 =
+    gen_vec_binary(gen_elem, orig, arg1, change_prec(arg2, 32), mask, 32);
+  Inst *res64 =
+    gen_vec_binary(gen_elem, orig, arg1, change_prec(arg2, 64), mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_mask_unary(Op op)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_end_of_line(4);
+
+  Inst *res = nullptr;
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  for (uint32_t i = 0; i < rstate->vreg_bitsize; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, 1, i);
+      Inst *inst = bb->build_inst(op, elem1);
+      Inst *orig_elem = extract_vec_elem(orig, 1, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_mask_set(bool value)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_end_of_line(2);
+
+  Inst *res = nullptr;
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  for (uint32_t i = 0; i < rstate->vreg_bitsize; i++)
+    {
+      Inst *inst = bb->value_inst(value, 1);
+      Inst *orig_elem = extract_vec_elem(orig, 1, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_mask_binary(Op op)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  for (uint32_t i = 0; i < rstate->vreg_bitsize; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, 1, i);
+      Inst *elem2 = extract_vec_elem(arg2, 1, i);
+      Inst *inst = bb->build_inst(op, elem1, elem2);
+      Inst *orig_elem = extract_vec_elem(orig, 1, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_mask_binary(Inst*(*gen_elem)(Basic_block*, Inst*,
+						      Inst*))
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  for (uint32_t i = 0; i < rstate->vreg_bitsize; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, 1, i);
+      Inst *elem2 = extract_vec_elem(arg2, 1, i);
+      Inst *inst = gen_elem(bb, elem1, elem2);
+      Inst *orig_elem = extract_vec_elem(orig, 1, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+Inst *Parser::gen_vec_reduc(Op op, Inst *orig, Inst *arg1, Inst *arg2,
+			    Inst *mask, uint32_t elem_bitsize)
+{
+  Inst *res = extract_vec_elem(arg2, elem_bitsize, 0);
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, res, elem1);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      if (mask)
+	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
+      res = bb->build_inst(Op::ITE, cmp, inst, res);
+    }
+  for (uint32_t i = 1; i < nof_elem; i++)
+    {
+      Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+      res = bb->build_inst(Op::CONCAT, orig_elem, res);
+    }
+  return res;
+}
+
+void Parser::process_vec_reduc(Op op)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
+
+  Inst *res8 = gen_vec_reduc(op, orig, arg1, arg2, mask, 8);
+  Inst *res16 = gen_vec_reduc(op, orig, arg1, arg2, mask, 16);
+  Inst *res32 = gen_vec_reduc(op, orig, arg1, arg2, mask, 32);
+  Inst *res64 = gen_vec_reduc(op, orig, arg1, arg2, mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+Inst *Parser::gen_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
+			    Inst *orig, Inst *arg1, Inst *arg2, Inst *mask,
+			    uint32_t elem_bitsize)
+{
+  Inst *res = extract_vec_elem(arg2, elem_bitsize, 0);
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = gen_elem(bb, res, elem1);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      if (mask)
+	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
+      res = bb->build_inst(Op::ITE, cmp, inst, res);
+    }
+  for (uint32_t i = 1; i < nof_elem; i++)
+    {
+      Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+      res = bb->build_inst(Op::CONCAT, orig_elem, res);
+    }
+  return res;
+}
+
+void Parser::process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
+
+  Inst *res8 = gen_vec_reduc(gen_elem, orig, arg1, arg2, mask, 8);
+  Inst *res16 = gen_vec_reduc(gen_elem, orig, arg1, arg2, mask, 16);
+  Inst *res32 = gen_vec_reduc(gen_elem, orig, arg1, arg2, mask, 32);
+  Inst *res64 = gen_vec_reduc(gen_elem, orig, arg1, arg2, mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+Inst *Parser::gen_vmerge(Inst *orig, Inst *arg1, Inst *arg2, Inst *arg3,
+			 uint32_t elem_bitsize)
+{
+  Inst *res = nullptr;
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2;
+      if (arg2->bitsize == elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *elem3 = extract_vec_elem(arg3, 1, i);
+      Inst *inst = bb->build_inst(Op::ITE, elem3, elem2, elem1);
+      Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  return res;
+}
+
+void Parser::process_vmerge()
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5);
+  get_comma(6);
+  Inst *arg3 = get_vreg_value(7);
+  get_end_of_line(8);
+
+  Inst *res8 = gen_vmerge(orig, arg1, arg2, arg3, 8);
+  Inst *res16 = gen_vmerge(orig, arg1, arg2, arg3, 16);
+  Inst *res32 = gen_vmerge(orig, arg1, arg2, arg3, 32);
+  Inst *res64 = gen_vmerge(orig, arg1, arg2, arg3, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vmerge_vi()
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  unsigned __int128 arg2 = get_hex_or_integer(5);
+  get_comma(6);
+  Inst *arg3 = get_vreg_value(7);
+  get_end_of_line(8);
+
+  Inst *imm8 = bb->value_inst(arg2, 8);
+  Inst *imm16 = bb->value_inst(arg2, 16);
+  Inst *imm32 = bb->value_inst(arg2, 32);
+  Inst *imm64 = bb->value_inst(arg2, 64);
+  Inst *res8 = gen_vmerge(orig, arg1, imm8, arg3, 8);
+  Inst *res16 = gen_vmerge(orig, arg1, imm16, arg3, 16);
+  Inst *res32 = gen_vmerge(orig, arg1, imm32, arg3, 32);
+  Inst *res64 = gen_vmerge(orig, arg1, imm64, arg3, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vmerge_vx()
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_reg_value(5);
+  get_comma(6);
+  Inst *arg3 = get_vreg_value(7);
+  get_end_of_line(8);
+
+  Inst *res8 = gen_vmerge(orig, arg1, change_prec(arg2, 8), arg3, 8);
+  Inst *res16 = gen_vmerge(orig, arg1, change_prec(arg2, 16), arg3, 16);
+  Inst *res32 = gen_vmerge(orig, arg1, change_prec(arg2, 32), arg3, 32);
+  Inst *res64 = gen_vmerge(orig, arg1, change_prec(arg2, 64), arg3, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+Inst *Parser::gen_vec_cmp(Cond_code ccode, Inst *orig, Inst *arg1, Inst *arg2,
+			  uint32_t elem_bitsize)
+{
+  Op op;
+  bool inv = false;
+  bool swap = false;
+  switch (ccode)
+    {
+    case Cond_code::EQ:
+      op = Op::EQ;
+      break;
+    case Cond_code::NE:
+      op = Op::EQ;
+      inv = true;
+      break;
+    case Cond_code::SLT:
+      op = Op::SLT;
+      break;
+    case Cond_code::ULT:
+      op = Op::ULT;
+      break;
+    case Cond_code::SLE:
+      op = Op::SLT;
+      swap = true;
+      inv = true;
+      break;
+    case Cond_code::ULE:
+      op = Op::ULT;
+      swap = true;
+      inv = true;
+      break;
+    case Cond_code::SGT:
+      op = Op::SLT;
+      swap = true;
+      break;
+    case Cond_code::UGT:
+      op = Op::ULT;
+      swap = true;
+      break;
+    case Cond_code::SGE:
+      op = Op::SLT;
+      inv = true;
+      break;
+    case Cond_code::UGE:
+      op = Op::ULT;
+      inv = true;
+      break;
+    case Cond_code::FEQ:
+      op = Op::FEQ;
+      break;
+    case Cond_code::FNE:
+      op = Op::FNE;
+      break;
+    case Cond_code::FLT:
+      op = Op::FLT;
+      break;
+    case Cond_code::FLE:
+      op = Op::FLE;
+      break;
+    case Cond_code::FGT:
+      op = Op::FLT;
+      swap = true;
+      break;
+    case Cond_code::FGE:
+      op = Op::FLE;
+      swap = true;
+      break;
+    default:
+      throw Not_implemented("gen_vec_cmp: Invalid ccode");
+    }
+
+  Inst *res = nullptr;
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2;
+      if (arg2->bitsize == elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      if (swap)
+	std::swap(elem1, elem2);
+      Inst *inst = bb->build_inst(op, elem1, elem2);
+      if (inv)
+	inst = bb->build_inst(Op::NOT, inst);
+      Inst *orig_elem = extract_vec_elem(orig, 1, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  Inst *tail = bb->build_inst(Op::EXTRACT, orig, orig->bitsize - 1, nof_elem);
+  return bb->build_inst(Op::CONCAT, tail, res);
+}
+
+void Parser::process_vec_cmp(Cond_code ccode)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5);
+  get_end_of_line(6);
+
+  Inst *res8 = gen_vec_cmp(ccode, orig, arg1, arg2, 8);
+  Inst *res16 = gen_vec_cmp(ccode, orig, arg1, arg2, 16);
+  Inst *res32 = gen_vec_cmp(ccode, orig, arg1, arg2, 32);
+  Inst *res64 = gen_vec_cmp(ccode, orig, arg1, arg2, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_cmp_vi(Cond_code ccode)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  unsigned __int128 arg2 = get_hex_or_integer(5);
+  get_end_of_line(6);
+
+  Inst *imm8 = bb->value_inst(arg2, 8);
+  Inst *imm16 = bb->value_inst(arg2, 16);
+  Inst *imm32 = bb->value_inst(arg2, 32);
+  Inst *imm64 = bb->value_inst(arg2, 64);
+  Inst *res8 = gen_vec_cmp(ccode, orig, arg1, imm8, 8);
+  Inst *res16 = gen_vec_cmp(ccode, orig, arg1, imm16, 16);
+  Inst *res32 = gen_vec_cmp(ccode, orig, arg1, imm32, 32);
+  Inst *res64 = gen_vec_cmp(ccode, orig, arg1, imm64, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_cmp_vx(Cond_code ccode)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_reg_value(5);
+  get_end_of_line(6);
+
+  Inst *res8 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 8), 8);
+  Inst *res16 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 16), 16);
+  Inst *res32 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 32), 32);
+  Inst *res64 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 64), 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+Inst *Parser::gen_vid(Inst *orig, uint32_t elem_bitsize)
+{
+  Inst *res = nullptr;
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *inst = bb->value_inst(i, elem_bitsize);
+      Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  return res;
+}
+
+void Parser::process_vid()
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_end_of_line(2);
+
+  Inst *res8 = gen_vid(orig, 8);
+  Inst *res16 = gen_vid(orig, 16);
+  Inst *res32 = gen_vid(orig, 32);
+  Inst *res64 = gen_vid(orig, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vmv_xs()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_end_of_line(4);
+
+  Inst *res8 = change_prec(bb->build_trunc(arg1, 8), dest->bitsize);
+  Inst *res16 = change_prec(bb->build_trunc(arg1, 16), dest->bitsize);
+  Inst *res32 = change_prec(bb->build_trunc(arg1, 32), dest->bitsize);
+  Inst *res64 = change_prec(bb->build_trunc(arg1, 64), dest->bitsize);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+Inst *Parser::gen_vmv_sx(Inst *orig, Inst *arg1, uint32_t elem_bitsize)
+{
+  Inst *res = change_prec(arg1, elem_bitsize);
+  uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  for (uint32_t i = 1; i < nof_elem; i++)
+    {
+      Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+      res = bb->build_inst(Op::CONCAT, orig_elem, res);
+    }
+  return res;
+}
+
+void Parser::process_vmv_sx()
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_end_of_line(4);
+
+  Inst *res8 = gen_vmv_sx(orig, arg1, 8);
+  Inst *res16 = gen_vmv_sx(orig, arg1, 16);
+  Inst *res32 = gen_vmv_sx(orig, arg1, 32);
+  Inst *res64 = gen_vmv_sx(orig, arg1, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
   bb->build_inst(Op::WRITE, dest, res);
 }
 
@@ -2156,6 +3488,326 @@ void Parser::parse_function()
       res = bb->build_inst(Op::OR, arg1, res);
       bb->build_inst(Op::WRITE, dest, res);
     }
+
+  //
+  // Vector instructions
+  //
+
+  // Configuration-setting instructions
+  else if (name == "vsetivli")
+    process_vsetvli(true);
+  else if (name == "vsetvli")
+    process_vsetvli(false);
+
+  // Loads and stores
+  else if (name == "vle8.v")
+    process_vle(8);
+  else if (name == "vle16.v")
+    process_vle(16);
+  else if (name == "vle32.v")
+    process_vle(32);
+  else if (name == "vle64.v")
+    process_vle(64);
+  else if (name == "vse8.v")
+    process_vse(8);
+  else if (name == "vse16.v")
+    process_vse(16);
+  else if (name == "vse32.v")
+    process_vse(32);
+  else if (name == "vse64.v")
+    process_vse(64);
+
+  // Integer arithmetic - add and subtract
+  else if (name == "vadd.vv")
+    process_vec_binary(Op::ADD);
+  else if (name == "vadd.vx")
+    process_vec_binary_vx(Op::ADD);
+  else if (name == "vadd.vi")
+    process_vec_binary_vi(Op::ADD);
+  else if (name == "vsub.vv")
+    process_vec_binary(Op::SUB);
+  else if (name == "vsub.vx")
+    process_vec_binary_vx(Op::SUB);
+  else if (name == "vrsub.vx")
+    process_vec_binary_vx(gen_rsub);
+  else if (name == "vrsub.vi")
+    process_vec_binary_vi(gen_rsub);
+  else if (name == "vneg.v")
+    process_vec_unary(Op::NEG);
+
+  // Integer arithmetic - widening add and subtract
+
+  // Integer arithmetic - extension
+
+  // Integer arithmetic - bitwise logical
+  else if (name == "vand.vv")
+    process_vec_binary(Op::AND);
+  else if (name == "vand.vx")
+    process_vec_binary_vx(Op::AND);
+  else if (name == "vand.vi")
+    process_vec_binary_vi(Op::AND);
+  else if (name == "vor.vv")
+    process_vec_binary(Op::OR);
+  else if (name == "vor.vx")
+    process_vec_binary_vx(Op::OR);
+  else if (name == "vor.vi")
+    process_vec_binary_vi(Op::OR);
+  else if (name == "vxor.vv")
+    process_vec_binary(Op::XOR);
+  else if (name == "vxor.vx")
+    process_vec_binary_vx(Op::XOR);
+  else if (name == "vxor.vi")
+    process_vec_binary_vi(Op::XOR);
+  else if (name == "vnot.v")
+    process_vec_unary(Op::NOT);
+
+  // Integer arithmetic - shift instructions
+  else if (name == "vsll.vv")
+    process_vec_binary(Op::SHL);
+  else if (name == "vsll.vx")
+    process_vec_binary_vx(Op::SHL);
+  else if (name == "vsll.vi")
+    process_vec_binary_vi(Op::SHL);
+  else if (name == "vsrl.vv")
+    process_vec_binary(Op::LSHR);
+  else if (name == "vsrl.vx")
+    process_vec_binary_vx(Op::LSHR);
+  else if (name == "vsrl.vi")
+    process_vec_binary_vi(Op::LSHR);
+  else if (name == "vsra.vv")
+    process_vec_binary(Op::ASHR);
+  else if (name == "vsra.vx")
+    process_vec_binary_vx(Op::ASHR);
+  else if (name == "vsra.vi")
+    process_vec_binary_vi(Op::ASHR);
+
+  // Integer arithmetic - narrowing shift instructions
+
+  // Integer arithmetic - compare
+  else if (name == "vmseq.vv")
+    process_vec_cmp(Cond_code::EQ);
+  else if (name == "vmseq.vx")
+    process_vec_cmp_vx(Cond_code::EQ);
+  else if (name == "vmseq.vi")
+    process_vec_cmp_vi(Cond_code::EQ);
+  else if (name == "vmsne.vv")
+    process_vec_cmp(Cond_code::NE);
+  else if (name == "vmsne.vx")
+    process_vec_cmp_vx(Cond_code::NE);
+  else if (name == "vmsne.vi")
+    process_vec_cmp_vi(Cond_code::NE);
+  else if (name == "vmsltu.vv")
+    process_vec_cmp(Cond_code::ULT);
+  else if (name == "vmsltu.vx")
+    process_vec_cmp_vx(Cond_code::ULT);
+  else if (name == "vmsltu.vi")
+    process_vec_cmp_vi(Cond_code::ULT);
+  else if (name == "vmslt.vv")
+    process_vec_cmp(Cond_code::SLT);
+  else if (name == "vmslt.vx")
+    process_vec_cmp_vx(Cond_code::SLT);
+  else if (name == "vmslt.vi")
+    process_vec_cmp_vi(Cond_code::SLT);
+  else if (name == "vmsleu.vv")
+    process_vec_cmp(Cond_code::ULE);
+  else if (name == "vmsleu.vx")
+    process_vec_cmp_vx(Cond_code::ULE);
+  else if (name == "vmsleu.vi")
+    process_vec_cmp_vi(Cond_code::ULE);
+  else if (name == "vmsle.vv")
+    process_vec_cmp(Cond_code::SLE);
+  else if (name == "vmsle.vx")
+    process_vec_cmp_vx(Cond_code::SLE);
+  else if (name == "vmsle.vi")
+    process_vec_cmp_vi(Cond_code::SLE);
+  else if (name == "vmsgtu.vv")
+    process_vec_cmp(Cond_code::UGT);
+  else if (name == "vmsgtu.vx")
+    process_vec_cmp_vx(Cond_code::UGT);
+  else if (name == "vmsgtu.vi")
+    process_vec_cmp_vi(Cond_code::UGT);
+  else if (name == "vmsgt.vv")
+    process_vec_cmp(Cond_code::SGT);
+  else if (name == "vmsgt.vx")
+    process_vec_cmp_vx(Cond_code::SGT);
+  else if (name == "vmsgt.vi")
+    process_vec_cmp_vi(Cond_code::SGT);
+  else if (name == "vmsgeu.vv")
+    process_vec_cmp(Cond_code::UGE);
+  else if (name == "vmsgeu.vx")
+    process_vec_cmp_vx(Cond_code::UGE);
+  else if (name == "vmsgeu.vi")
+    process_vec_cmp_vi(Cond_code::UGE);
+  else if (name == "vmsge.vv")
+    process_vec_cmp(Cond_code::SGE);
+  else if (name == "vmsge.vx")
+    process_vec_cmp_vx(Cond_code::SGE);
+  else if (name == "vmsge.vi")
+    process_vec_cmp_vi(Cond_code::SGE);
+
+  // Integer arithmetic - min/max
+  else if (name == "vminu.vv")
+    process_vec_binary(gen_umin);
+  else if (name == "vminu.vx")
+    process_vec_binary_vx(gen_umin);
+  else if (name == "vmin.vv")
+    process_vec_binary(gen_smin);
+  else if (name == "vmin.vx")
+    process_vec_binary_vx(gen_smin);
+  else if (name == "vmaxu.vv")
+    process_vec_binary(gen_umax);
+  else if (name == "vmaxu.vx")
+    process_vec_binary_vx(gen_umax);
+  else if (name == "vmax.vv")
+    process_vec_binary(gen_smax);
+  else if (name == "vmax.vx")
+    process_vec_binary_vx(gen_smax);
+
+  // Integer arithmetic - multiply
+  else if (name == "vmul.vv")
+    process_vec_binary(Op::MUL);
+  else if (name == "vmul.vx")
+    process_vec_binary_vx(Op::MUL);
+  else if (name == "vmulh.vv")
+    process_vec_binary(gen_mulh);
+  else if (name == "vmulh.vx")
+    process_vec_binary_vx(gen_mulh);
+  else if (name == "vmulhu.vv")
+    process_vec_binary(gen_mulhu);
+  else if (name == "vmulhu.vx")
+    process_vec_binary_vx(gen_mulhu);
+  else if (name == "vmulhsu.vv")
+    process_vec_binary(gen_mulhsu);
+  else if (name == "vmulhsu.vx")
+    process_vec_binary_vx(gen_mulhsu);
+
+  // Integer arithmetic - divide
+  else if (name == "vdiv.vv")
+    process_vec_binary(Op::SDIV);
+  else if (name == "vdiv.vx")
+    process_vec_binary_vx(Op::SDIV);
+  else if (name == "vdivu.vv")
+    process_vec_binary(Op::UDIV);
+  else if (name == "vdivu.vx")
+    process_vec_binary_vx(Op::UDIV);
+  else if (name == "vremu.vv")
+    process_vec_binary(Op::UREM);
+  else if (name == "vremu.vx")
+    process_vec_binary_vx(Op::UREM);
+  else if (name == "vrem.vv")
+    process_vec_binary(Op::SREM);
+  else if (name == "vrem.vx")
+    process_vec_binary_vx(Op::SREM);
+
+  // Integer arithmetic - widening multiply
+
+  // Integer arithmetic - multiply add
+
+  // Integer arithmetic - widening multiply add
+
+  // Integer arithmetic - merge
+  else if (name == "vmerge.vvm")
+    process_vmerge();
+  else if (name == "vmerge.vxm")
+    process_vmerge_vx();
+  else if (name == "vmerge.vim")
+    process_vmerge_vi();
+
+  // Integer arithmetic - move
+  else if (name == "vmv.v.v")
+    process_vec_unary(Op::MOV);
+  else if (name == "vmv.v.x")
+    process_vec_unary_vx(Op::MOV);
+  else if (name == "vmv.v.i")
+    process_vec_unary_vi(Op::MOV);
+
+  // Floating-point - add/subtract
+  else if (name == "vfadd.vv")
+    process_vec_binary(Op::FADD);
+  else if (name == "vfsub.vv")
+    process_vec_binary(Op::FSUB);
+
+  // Floating-point - multiply/divide
+  else if (name == "vfmul.vv")
+    process_vec_binary(Op::FMUL);
+  else if (name == "vfdiv.vv")
+    process_vec_binary(Op::FDIV);
+
+  // Floating-point - compare
+  else if (name == "vmfeq.vv")
+    process_vec_cmp(Cond_code::FEQ);
+  else if (name == "vmfeq.vf")
+    process_vec_cmp_vx(Cond_code::FEQ);
+  else if (name == "vmfne.vv")
+    process_vec_cmp(Cond_code::FNE);
+  else if (name == "vmfne.vf")
+    process_vec_cmp_vx(Cond_code::FNE);
+  else if (name == "vmflt.vv")
+    process_vec_cmp(Cond_code::FLT);
+  else if (name == "vmflt.vf")
+    process_vec_cmp_vx(Cond_code::FLT);
+  else if (name == "vmfle.vv")
+    process_vec_cmp(Cond_code::FLE);
+  else if (name == "vmfle.vf")
+    process_vec_cmp_vx(Cond_code::FLE);
+  else if (name == "vmfgt.vv")
+    process_vec_cmp(Cond_code::FGT);
+  else if (name == "vmfgt.vf")
+    process_vec_cmp_vx(Cond_code::FGT);
+  else if (name == "vmfge.vv")
+    process_vec_cmp(Cond_code::FGE);
+  else if (name == "vmfge.vf")
+    process_vec_cmp_vx(Cond_code::FGE);
+
+  // Vector reduction operations
+  else if (name == "vredsum.vs")
+    process_vec_reduc(Op::ADD);
+  else if (name == "vredmaxu.vs")
+    process_vec_reduc(gen_umax);
+  else if (name == "vredmax.vs")
+    process_vec_reduc(gen_smax);
+  else if (name == "vredminu.vs")
+    process_vec_reduc(gen_umin);
+  else if (name == "vredmin.vs")
+    process_vec_reduc(gen_smin);
+  else if (name == "vredand.vs")
+    process_vec_reduc(Op::AND);
+  else if (name == "vredor.vs")
+    process_vec_reduc(Op::OR);
+  else if (name == "vredxor.vs")
+    process_vec_reduc(Op::XOR);
+
+  // Vector mask instructions
+  else if (name == "vmand.mm")
+    process_vec_mask_binary(Op::AND);
+  else if (name == "vmnand.mm")
+    process_vec_mask_binary(gen_nand);
+  else if (name == "vmandn.mm")
+    process_vec_mask_binary(gen_andn);
+  else if (name == "vmxor.mm")
+    process_vec_mask_binary(Op::XOR);
+  else if (name == "vmor.mm")
+    process_vec_mask_binary(Op::OR);
+  else if (name == "vmnor.mm")
+    process_vec_mask_binary(gen_nor);
+  else if (name == "vmorn.mm")
+    process_vec_mask_binary(gen_orn);
+  else if (name == "vmxnor.mm")
+    process_vec_mask_binary(gen_xnor);
+  else if (name == "vmclr.m")
+    process_vec_mask_set(false);
+  else if (name == "vmset.m")
+    process_vec_mask_set(true);
+  else if (name == "vmnot.m")
+    process_vec_mask_unary(Op::NOT);
+  else if (name == "vid.v")
+    process_vid();
+
+  // Vector permutation instructions
+  else if (name == "vmv.x.s")
+    process_vmv_xs();
+  else if (name == "vmv.s.x")
+    process_vmv_sx();
 
   else
     throw Parse_error("unhandled instruction: "s + std::string(name),

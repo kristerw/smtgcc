@@ -578,6 +578,42 @@ struct RiscvRegIdx {
   static constexpr uint64_t f29 = 61;
   static constexpr uint64_t f30 = 62;
   static constexpr uint64_t f31 = 63;
+
+  static constexpr uint64_t v0 = 64;
+  static constexpr uint64_t v1 = 65;
+  static constexpr uint64_t v2 = 66;
+  static constexpr uint64_t v3 = 67;
+  static constexpr uint64_t v4 = 68;
+  static constexpr uint64_t v5 = 69;
+  static constexpr uint64_t v6 = 70;
+  static constexpr uint64_t v7 = 71;
+  static constexpr uint64_t v8 = 72;
+  static constexpr uint64_t v9 = 73;
+  static constexpr uint64_t v10 = 74;
+  static constexpr uint64_t v11 = 75;
+  static constexpr uint64_t v12 = 76;
+  static constexpr uint64_t v13 = 77;
+  static constexpr uint64_t v14 = 78;
+  static constexpr uint64_t v15 = 79;
+  static constexpr uint64_t v16 = 80;
+  static constexpr uint64_t v17 = 81;
+  static constexpr uint64_t v18 = 82;
+  static constexpr uint64_t v19 = 83;
+  static constexpr uint64_t v20 = 84;
+  static constexpr uint64_t v21 = 85;
+  static constexpr uint64_t v22 = 86;
+  static constexpr uint64_t v23 = 87;
+  static constexpr uint64_t v24 = 88;
+  static constexpr uint64_t v25 = 89;
+  static constexpr uint64_t v26 = 90;
+  static constexpr uint64_t v27 = 91;
+  static constexpr uint64_t v28 = 92;
+  static constexpr uint64_t v29 = 93;
+  static constexpr uint64_t v30 = 94;
+  static constexpr uint64_t v31 = 95;
+
+  static constexpr uint64_t vsew = 96;
+  static constexpr uint64_t vl = 97;
 };
 
 struct riscv_state {
@@ -593,6 +629,7 @@ struct riscv_state {
   Basic_block *exit_bb;
   uint32_t reg_bitsize;
   uint32_t freg_bitsize;
+  uint32_t vreg_bitsize;
   std::vector<MemoryObject> memory_objects;
 };
 Function *parse_riscv(std::string const& file_name, riscv_state *state);

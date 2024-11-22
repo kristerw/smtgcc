@@ -501,7 +501,7 @@ Inst *Parser::get_freg(unsigned idx)
       || !isdigit(buf[tokens[idx].pos + 1])
       || (tokens[idx].size == 3 && !isdigit(buf[tokens[idx].pos + 2]))
       || tokens[idx].size > 3)
-    throw Parse_error("expected a floating point register instead of "
+    throw Parse_error("expected a floating-point register instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
 
   uint32_t value = buf[tokens[idx].pos + 1] - '0';
@@ -649,7 +649,7 @@ uint32_t Parser::get_reg_size(unsigned idx)
 	return 8;
     }
 
-  throw Parse_error("expected a floating point register", line_number);
+  throw Parse_error("expected a floating-point register", line_number);
 }
 
 bool Parser::is_vector_op()
@@ -1598,7 +1598,7 @@ void Parser::process_fmin_fmax(bool is_min)
     cmp = bb->build_inst(Op::FLT, arg2, arg1);
   Inst *res1 = bb->build_inst(Op::ITE, cmp, arg1, arg2);
   Inst *res2 = bb->build_inst(Op::ITE, is_nan, arg1, res1);
-  // 0.0 and -0.0 is equal as floating point values, and fmin(0.0, -0.0)
+  // 0.0 and -0.0 is equal as floating-point values, and fmin(0.0, -0.0)
   // may return eiter of them. But we treat them as 0.0 > -0.0 here,
   // otherwise we will report miscompilations when GCC switch the order
   // of the arguments.

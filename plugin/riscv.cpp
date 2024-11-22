@@ -369,6 +369,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
   riscv_state rstate;
   rstate.reg_bitsize = TARGET_64BIT ? 64 : 32;
   rstate.freg_bitsize = 64;
+  rstate.vreg_bitsize = 128;
   rstate.module = module;
   rstate.memory_objects = state->memory_objects;
   rstate.func_name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl));
@@ -394,6 +395,19 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
       Inst *reg = bb->build_inst(Op::REGISTER, rstate.freg_bitsize);
       rstate.registers.push_back(reg);
     }
+
+  // Registers v0-v31.
+  for (int i = 0; i < 32; i++)
+    {
+      Inst *reg = bb->build_inst(Op::REGISTER, rstate.vreg_bitsize);
+      rstate.registers.push_back(reg);
+    }
+
+  // vtype
+  rstate.registers.push_back(bb->build_inst(Op::REGISTER, 3));
+
+  // vl
+  rstate.registers.push_back(bb->build_inst(Op::REGISTER, rstate.reg_bitsize));
 
   // Create MEMORY instructions for the global variables we saw in the
   // GIMPLE IR.
