@@ -6255,8 +6255,7 @@ void Converter::init_var(tree decl, Inst *mem_inst)
 	  if (padding)
 	    entry_bb->build_inst(Op::SET_MEM_INDEF, ptr,
 				 entry_bb->value_inst(padding, 8));
-	  if (padding != 255)
-	    entry_bb->build_inst(Op::STORE, ptr, zero);
+	  entry_bb->build_inst(Op::STORE, ptr, zero);
 	}
     }
 
