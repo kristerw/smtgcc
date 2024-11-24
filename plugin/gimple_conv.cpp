@@ -6114,15 +6114,26 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
     {
       tree elem_type = TREE_TYPE(type);
       uint64_t elem_size = bytesize_for_type(elem_type);
+      Inst *elm_size = bb->value_inst(elem_size, mem_inst->bitsize);
       unsigned HOST_WIDE_INT idx;
       tree index;
       tree value;
       FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(initial), idx, index, value)
 	{
-	  if (index && TREE_CODE(index) == RANGE_EXPR)
+	  assert(index);
+	  if (TREE_CODE(index) == RANGE_EXPR)
 	    throw Not_implemented("init_var: RANGE_EXPR");
-	  uint64_t offset = idx * elem_size;
-	  Inst *off = entry_bb->value_inst(offset, mem_inst->bitsize);
+	  Inst *indx = tree2inst(index);
+	  if (indx->bitsize < mem_inst->bitsize)
+	    {
+	      if (TYPE_UNSIGNED(TREE_TYPE(index)))
+		indx = bb->build_inst(Op::ZEXT, indx, mem_inst->bitsize);
+	      else
+		indx = bb->build_inst(Op::SEXT, indx, mem_inst->bitsize);
+	    }
+	  else if (indx->bitsize > mem_inst->bitsize)
+	    indx = bb->build_trunc(indx, mem_inst->bitsize);
+	  Inst *off = bb->build_inst(Op::MUL, indx, elm_size);
 	  Inst *ptr = entry_bb->build_inst(Op::ADD, mem_inst, off);
 	  init_var_values(value, ptr);
 	}
