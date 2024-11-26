@@ -151,6 +151,7 @@ private:
   void process_ngc();
   void process_ngcs();
   void process_movk();
+  void process_fmov();
   void process_smov();
   void process_umov();
   void process_unary(Op op);
@@ -1860,6 +1861,14 @@ void Parser::process_movk()
       res = bb->build_inst(Op::CONCAT, res, inst);
     }
   write_reg(dest, res);
+}
+
+void Parser::process_fmov()
+{
+  if (tokens.size() > 4 && tokens[4].kind == Lexeme::left_bracket)
+    process_umov();
+  else
+    process_unary(Op::MOV);
 }
 
 void Parser::process_smov()
@@ -3823,7 +3832,7 @@ void Parser::parse_function()
 
   // Floating-point move
   else if (name == "fmov")
-    process_unary(Op::MOV);
+    process_fmov();
 
   // Floating-point conversion
   else if (name == "fcvt")
