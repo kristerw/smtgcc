@@ -33,6 +33,7 @@ struct Parser {
     lo12,
     comma,
     plus,
+    minus,
     exclamation,
     left_bracket,
     right_bracket,
@@ -304,7 +305,6 @@ void Parser::lex_name(void)
   pos++;
   while (isalnum(buf[pos])
 	 || buf[pos] == '_'
-	 || buf[pos] == '-'
 	 || buf[pos] == '.'
 	 || buf[pos] == '$')
     pos++;
@@ -1175,6 +1175,12 @@ Inst *Parser::process_address(unsigned idx)
 	      Inst *offset2 = get_reg_or_imm_value(idx++, ptr->bitsize);
 	      offset = bb->build_inst(Op::ADD, offset, offset2);
 	    }
+	  else if (tokens.size() > idx && tokens[idx].kind == Lexeme::minus)
+	    {
+	      idx++;
+	      Inst *offset2 = get_reg_or_imm_value(idx++, ptr->bitsize);
+	      offset = bb->build_inst(Op::SUB, offset, offset2);
+	    }
 	  offset = bb->build_trunc(offset, 12);
 	  offset = bb->build_inst(Op::ZEXT, offset, ptr->bitsize);
 	}
@@ -1727,6 +1733,12 @@ void Parser::process_adrp()
       ptr = bb->build_inst(Op::ADD, ptr, offset);
       get_end_of_line(6);
     }
+  else if (tokens.size() > 4 && tokens[4].kind == Lexeme::minus)
+    {
+      Inst *offset = get_reg_or_imm_value(5, ptr->bitsize);
+      ptr = bb->build_inst(Op::SUB, ptr, offset);
+      get_end_of_line(6);
+    }
   else
     get_end_of_line(4);
 
@@ -1998,6 +2010,12 @@ Inst *Parser::process_last_arg(unsigned idx, uint32_t bitsize)
 	  idx++;
 	  Inst *offset = get_reg_or_imm_value(idx++, arg->bitsize);
 	  arg = bb->build_inst(Op::ADD, arg, offset);
+	}
+      else if (tokens.size() > idx && tokens[idx].kind == Lexeme::minus)
+	{
+	  idx++;
+	  Inst *offset = get_reg_or_imm_value(idx++, arg->bitsize);
+	  arg = bb->build_inst(Op::SUB, arg, offset);
 	}
       arg = bb->build_trunc(arg, 12);
       arg = bb->build_inst(Op::ZEXT, arg, bitsize);
@@ -3955,7 +3973,14 @@ void Parser::lex_line(void)
       skip_space_and_comments();
       if (buf[pos] == '\n' || buf[pos] == ';')
 	break;
-      if (isdigit(buf[pos]) || buf[pos] == '-')
+      if (buf[pos] == '-'
+	  && !tokens.empty()
+	  && tokens.back().kind != Lexeme::comma)
+	{
+	  tokens.emplace_back(Lexeme::minus, pos, 1);
+	  pos++;
+	}
+      else if (isdigit(buf[pos]) || buf[pos] == '-')
 	lex_hex_or_integer();
       else if (is_lo12())
 	{
@@ -3975,6 +4000,16 @@ void Parser::lex_line(void)
 	}
       else if (buf[pos] == '.' && buf[pos + 1] == 'L' && isdigit(buf[pos + 2]))
 	lex_label_or_label_def();
+      else if (buf[pos] == '.' && tokens.empty())
+	{
+	  lex_name();
+	  // The assembler directives have a different grammar than the
+	  // assembler instructions. But we are not using the arguments,
+	  // so just skip the content for now.
+	  while (buf[pos] != '\n' && buf[pos] != ';')
+	    pos++;
+	  break;
+	}
       else if (isalpha(buf[pos]) || buf[pos] == '_' || buf[pos] == '.')
 	lex_name();
       else if (buf[pos] == ',')
