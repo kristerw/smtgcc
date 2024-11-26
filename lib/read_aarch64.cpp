@@ -3550,6 +3550,15 @@ void Parser::parse_function()
     ;
   else if (name.starts_with(".p2align"))
     ;
+  else if (name == ".section")
+    {
+      if (tokens.size() > 1)
+	{
+	  if (get_name(1) == "__patchable_function_entries")
+	    throw Not_implemented("attribue patchable_function_entry");
+	}
+      throw Parse_error(".section in the middle of a function", line_number);
+    }
 
   else if (is_vector_op())
     parse_vector_op();
@@ -4003,6 +4012,12 @@ void Parser::lex_line(void)
       else if (buf[pos] == '.' && tokens.empty())
 	{
 	  lex_name();
+	  if (get_name(0) == ".section")
+	    {
+	      skip_space_and_comments();
+	      lex_name();
+	    }
+
 	  // The assembler directives have a different grammar than the
 	  // assembler instructions. But we are not using the arguments,
 	  // so just skip the content for now.
