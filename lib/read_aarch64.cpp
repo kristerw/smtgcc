@@ -206,6 +206,7 @@ private:
   void process_vec_ext();
   void process_vec_shrn(bool high);
   void process_vec_shift(Op op);
+  void process_vec_shift_acc(Op op);
   void process_vec_widen_shift(Op op, Op widen_op, bool high);
   void process_vec_mla(Op op = Op::ADD);
   void process_vec_uzp(bool odd);
@@ -3343,6 +3344,32 @@ void Parser::process_vec_shift(Op op)
   write_reg(dest, res);
 }
 
+void Parser::process_vec_shift_acc(Op op)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  Inst *orig = get_vreg_value(1, nof_elem, elem_bitsize);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_imm(5);
+  get_end_of_line(6);
+
+  Inst *elem2 = bb->build_trunc(arg2, elem_bitsize);
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem0 = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, elem1, elem2);
+      inst = bb->build_inst(Op::ADD,elem0, inst);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_widen_shift(Op op, Op widen_op, bool high)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -3594,6 +3621,8 @@ void Parser::parse_vector_op()
     process_vec_widen_shift(Op::SHL, Op::SEXT, true);
   else if (name == "sshr")
     process_vec_shift(Op::ASHR);
+  else if (name == "ssra")
+    process_vec_shift_acc(Op::ASHR);
   else if (name == "ssubl")
     process_vec_widen_binary(gen_sub, Op::SEXT, false);
   else if (name == "ssubl2")
@@ -3656,6 +3685,8 @@ void Parser::parse_vector_op()
     process_vec_widen_shift(Op::SHL, Op::ZEXT, true);
   else if (name == "ushr")
     process_vec_shift(Op::LSHR);
+  else if (name == "usra")
+    process_vec_shift_acc(Op::LSHR);
   else if (name == "usubl")
     process_vec_widen_binary(gen_sub, Op::ZEXT, false);
   else if (name == "usubl2")
