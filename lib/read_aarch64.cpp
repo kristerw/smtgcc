@@ -218,6 +218,8 @@ private:
   void process_vec_orr();
   void process_vec_zip1();
   void process_vec_zip2();
+  void process_vec_trn1();
+  void process_vec_trn2();
   void parse_vector_op();
   void parse_function();
 
@@ -3113,6 +3115,52 @@ void Parser::process_vec_zip2()
   write_reg(dest, res);
 }
 
+void Parser::process_vec_trn1()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem/2; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, 2 * i);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, elem1, res);
+      else
+	res = elem1;
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, 2 * i);
+      res = bb->build_inst(Op::CONCAT, elem2, res);
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_trn2()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem/2; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, 2 * i + 1);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, elem1, res);
+      else
+	res = elem1;
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, 2 * i + 1);
+      res = bb->build_inst(Op::CONCAT, elem2, res);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_bif()
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -3560,6 +3608,10 @@ void Parser::parse_vector_op()
     process_vec_widen(Op::SEXT);
   else if (name == "sxtl2")
     process_vec_widen(Op::SEXT, true);
+  else if (name == "trn1")
+    process_vec_trn1();
+  else if (name == "trn2")
+    process_vec_trn2();
   else if (name == "uabal")
     process_vec_widen_binary_add(gen_abd, Op::ZEXT, false);
   else if (name == "uabal2")
