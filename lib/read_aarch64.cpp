@@ -3479,6 +3479,10 @@ void Parser::parse_vector_op()
     process_vec_widen_binary(gen_mul, Op::SEXT, false);
   else if (name == "smull2")
     process_vec_widen_binary(gen_mul, Op::SEXT, true);
+  else if (name == "shll")
+    process_vec_widen_shift(Op::SHL, Op::ZEXT, false);
+  else if (name == "shll2")
+    process_vec_widen_shift(Op::SHL, Op::ZEXT, true);
   else if (name == "sshll")
     process_vec_widen_shift(Op::SHL, Op::SEXT, false);
   else if (name == "sshll2")
