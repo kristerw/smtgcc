@@ -205,7 +205,7 @@ private:
   void process_vec_bit();
   void process_vec_bsl();
   void process_vec_ext();
-  void process_vec_shl();
+  void process_vec_shift(Op op);
   void process_vec_mla(Op op = Op::ADD);
   void process_vec_uzp(bool odd);
   void process_vec_simd_compare(SIMD_cond op);
@@ -3222,7 +3222,7 @@ void Parser::process_vec_ext()
   write_reg(dest, res);
 }
 
-void Parser::process_vec_shl()
+void Parser::process_vec_shift(Op op)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
   get_comma(2);
@@ -3236,7 +3236,7 @@ void Parser::process_vec_shl()
   for (uint32_t i = 0; i < nof_elem; i++)
     {
       Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
-      Inst *inst = bb->build_inst(Op::SHL, elem1, elem2);
+      Inst *inst = bb->build_inst(op, elem1, elem2);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
@@ -3434,7 +3434,7 @@ void Parser::parse_vector_op()
   else if (name == "scvtf")
     process_vec_unary(gen_s2f);
   else if (name == "shl")
-    process_vec_shl();
+    process_vec_shift(Op::SHL);
   else if (name == "smax")
     process_vec_binary(gen_smax);
   else if (name == "smaxp")
@@ -3451,6 +3451,8 @@ void Parser::parse_vector_op()
     process_vec_widen_binary(gen_mul, Op::SEXT, false);
   else if (name == "smull2")
     process_vec_widen_binary(gen_mul, Op::SEXT, true);
+  else if (name == "sshr")
+    process_vec_shift(Op::ASHR);
   else if (name == "ssubl")
     process_vec_widen_binary(gen_sub, Op::SEXT, false);
   else if (name == "ssubl2")
@@ -3503,6 +3505,8 @@ void Parser::parse_vector_op()
     process_vec_widen_binary(gen_mul, Op::ZEXT, false);
   else if (name == "umull2")
     process_vec_widen_binary(gen_mul, Op::ZEXT, true);
+  else if (name == "ushr")
+    process_vec_shift(Op::LSHR);
   else if (name == "usubl")
     process_vec_widen_binary(gen_sub, Op::ZEXT, false);
   else if (name == "usubl2")
