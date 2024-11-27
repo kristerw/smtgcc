@@ -137,7 +137,6 @@ private:
   void process_i2f(bool is_unsigned);
   void process_f2i(bool is_unsigned);
   void process_f2f();
-  void process_fmin_fmax(bool is_min);
   void process_mul_op(Op op);
   void process_maddl(Op op);
   void process_msubl(Op op);
@@ -994,6 +993,44 @@ Inst *gen_fnmul(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::FNEG, res);
 }
 
+Inst *gen_fmin_fmax(Basic_block *bb, Inst *elem1, Inst *elem2, bool is_min)
+{
+  Inst *is_nan = bb->build_inst(Op::IS_NAN, elem2);
+  Inst *cmp;
+  if (is_min)
+    cmp = bb->build_inst(Op::FLT, elem1, elem2);
+  else
+    cmp = bb->build_inst(Op::FLT, elem2, elem1);
+  Inst *res1 = bb->build_inst(Op::ITE, cmp, elem1, elem2);
+  Inst *res2 = bb->build_inst(Op::ITE, is_nan, elem1, res1);
+  // 0.0 and -0.0 is equal as floating-point values, and fmin(0.0, -0.0)
+  // may return eiter of them. But we treat them as 0.0 > -0.0 here,
+  // otherwise we will report miscompilations when GCC switch the order
+  // of the arguments.
+  Inst *zero = bb->value_inst(0, elem1->bitsize);
+  Inst *is_zero1 = bb->build_inst(Op::FEQ, elem1, zero);
+  Inst *is_zero2 = bb->build_inst(Op::FEQ, elem2, zero);
+  Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
+  Inst *cmp2;
+  if (is_min)
+    cmp2 = bb->build_inst(Op::SLT, elem1, elem2);
+  else
+    cmp2 = bb->build_inst(Op::SLT, elem2, elem1);
+  Inst *res3 = bb->build_inst(Op::ITE, cmp2, elem1, elem2);
+  Inst *res = bb->build_inst(Op::ITE, is_zero, res3, res2);
+  return res;
+}
+
+Inst *gen_fmin(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return gen_fmin_fmax(bb, elem1, elem2, true);
+}
+
+Inst *gen_fmax(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return gen_fmin_fmax(bb, elem1, elem2, false);
+}
+
 Inst *gen_sqxtn(Basic_block *bb, Inst *elem1)
 {
   __int128 smax_val = (((__int128)1) << (elem1->bitsize / 2 - 1)) - 1;
@@ -1586,41 +1623,6 @@ void Parser::process_f2f()
   get_end_of_line(4);
 
   Inst *res = bb->build_inst(Op::FCHPREC, arg1, dest_bitsize);
-  write_reg(dest, res);
-}
-
-void Parser::process_fmin_fmax(bool is_min)
-{
-  Inst *dest = get_reg(1);
-  get_comma(2);
-  Inst *arg1 = get_reg_value(3);
-  get_comma(4);
-  Inst *arg2 = get_reg_or_imm_value(5, arg1->bitsize);
-  get_end_of_line(6);
-
-  Inst *is_nan = bb->build_inst(Op::IS_NAN, arg2);
-  Inst *cmp;
-  if (is_min)
-    cmp = bb->build_inst(Op::FLT, arg1, arg2);
-  else
-    cmp = bb->build_inst(Op::FLT, arg2, arg1);
-  Inst *res1 = bb->build_inst(Op::ITE, cmp, arg1, arg2);
-  Inst *res2 = bb->build_inst(Op::ITE, is_nan, arg1, res1);
-  // 0.0 and -0.0 is equal as floating-point values, and fmin(0.0, -0.0)
-  // may return eiter of them. But we treat them as 0.0 > -0.0 here,
-  // otherwise we will report miscompilations when GCC switch the order
-  // of the arguments.
-  Inst *zero = bb->value_inst(0, arg1->bitsize);
-  Inst *is_zero1 = bb->build_inst(Op::FEQ, arg1, zero);
-  Inst *is_zero2 = bb->build_inst(Op::FEQ, arg2, zero);
-  Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
-  Inst *cmp2;
-  if (is_min)
-    cmp2 = bb->build_inst(Op::SLT, arg1, arg2);
-  else
-    cmp2 = bb->build_inst(Op::SLT, arg2, arg1);
-  Inst *res3 = bb->build_inst(Op::ITE, cmp2, arg1, arg2);
-  Inst *res = bb->build_inst(Op::ITE, is_zero, res3, res2);
   write_reg(dest, res);
 }
 
@@ -3401,6 +3403,10 @@ void Parser::parse_vector_op()
     process_vec_unary(gen_f2u);
   else if (name == "fdiv")
     process_vec_binary(Op::FDIV);
+  else if (name == "fmaxnm")
+    process_vec_binary(gen_fmax);
+  else if (name == "fminnm")
+    process_vec_binary(gen_fmin);
   else if (name == "fmul")
     process_vec_binary(Op::FMUL);
   else if (name == "fneg")
@@ -3937,9 +3943,9 @@ void Parser::parse_function()
 
   // Floating-point minimum and maximum
   else if (name == "fmaxnm")
-    process_fmin_fmax(false);
+    process_binary(gen_fmax);
   else if (name == "fminnm")
-    process_fmin_fmax(true);
+    process_binary(gen_fmin);
 
   // Floating-point comparison
   else if (name == "fcmp" || name == "fcmpe")
