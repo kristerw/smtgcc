@@ -37,6 +37,8 @@ struct Parser {
     exclamation,
     left_bracket,
     right_bracket,
+    left_brace,
+    right_brace,
     left_paren,
     right_paren
   };
@@ -113,6 +115,8 @@ private:
   void get_exclamation(unsigned idx);
   void get_left_bracket(unsigned idx);
   void get_right_bracket(unsigned idx);
+  void get_left_brace(unsigned idx);
+  void get_right_brace(unsigned idx);
   void get_end_of_line(unsigned idx);
   void write_reg(Inst *reg, Inst *value);
   Inst *build_cond(Cond_code cc);
@@ -222,6 +226,7 @@ private:
   void process_vec_zip2();
   void process_vec_trn1();
   void process_vec_trn2();
+  void process_vec_tbl();
   void parse_vector_op();
   void parse_function();
 
@@ -808,6 +813,24 @@ void Parser::get_right_bracket(unsigned idx)
   assert(idx > 0);
   if (tokens.size() <= idx || tokens[idx].kind != Lexeme::right_bracket)
     throw Parse_error("expected a ']' after "
+		      + std::string(token_string(tokens[idx - 1])),
+		      line_number);
+}
+
+void Parser::get_left_brace(unsigned idx)
+{
+  assert(idx > 0);
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::left_brace)
+    throw Parse_error("expected a '{' after "
+		      + std::string(token_string(tokens[idx - 1])),
+		      line_number);
+}
+
+void Parser::get_right_brace(unsigned idx)
+{
+  assert(idx > 0);
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::right_brace)
+    throw Parse_error("expected a '}' after "
 		      + std::string(token_string(tokens[idx - 1])),
 		      line_number);
 }
@@ -3163,6 +3186,39 @@ void Parser::process_vec_trn2()
   write_reg(dest, res);
 }
 
+void Parser::process_vec_tbl()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  if (elem_bitsize != 8 || nof_elem != 16)
+    throw Parse_error("expected element size 8", line_number);
+  get_comma(2);
+  get_left_brace(3);
+  Inst *arg1 = get_vreg_value(4, nof_elem, elem_bitsize);
+  get_right_brace(5);
+  get_comma(6);
+  Inst *arg2 = get_vreg_value(7, nof_elem, elem_bitsize);
+  get_end_of_line(8);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *idx = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = bb->value_inst(0, elem_bitsize);
+      for (uint32_t j = 0; j < nof_elem; j++)
+	{
+	  Inst *elem_idx = bb->value_inst(j, elem_bitsize);
+	  Inst *elem = extract_vec_elem(arg1, elem_bitsize, j);
+	  Inst *cmp = bb->build_inst(Op::EQ, idx, elem_idx);
+	  inst = bb->build_inst(Op::ITE, cmp, elem, inst);
+	}
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_bif()
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -3680,6 +3736,8 @@ void Parser::parse_vector_op()
     process_vec_widen(Op::SEXT);
   else if (name == "sxtl2")
     process_vec_widen(Op::SEXT, true);
+  else if (name == "tbl")
+    process_vec_tbl();
   else if (name == "trn1")
     process_vec_trn1();
   else if (name == "trn2")
@@ -4291,6 +4349,16 @@ void Parser::lex_line(void)
       else if (buf[pos] == ')')
 	{
 	  tokens.emplace_back(Lexeme::right_paren, pos, 1);
+	  pos++;
+	}
+      else if (buf[pos] == '{')
+	{
+	  tokens.emplace_back(Lexeme::left_brace, pos, 1);
+	  pos++;
+	}
+      else if (buf[pos] == '}')
+	{
+	  tokens.emplace_back(Lexeme::right_brace, pos, 1);
 	  pos++;
 	}
       else
