@@ -530,7 +530,6 @@ Inst *Parser::get_hilo_addr(const Token& tok)
   int pos = tok.pos + 4;
   while (isalnum(buf[pos])
 	 || buf[pos] == '_'
-	 || buf[pos] == '-'
 	 || buf[pos] == '.')
     pos++;
   std::string sym_name(&buf[tok.pos + 4], pos - (tok.pos + 4));
@@ -556,6 +555,21 @@ Inst *Parser::get_hilo_addr(const Token& tok)
 	}
       Inst *value_inst = bb->value_inst(value, addr->bitsize);
       addr = bb->build_inst(Op::ADD, addr, value_inst);
+    }
+  else if (buf[pos] == '-')
+    {
+      pos++;
+      assert(isdigit(buf[pos]));
+      uint64_t value = 0;
+      while (isdigit(buf[pos]))
+	{
+	  value = value * 10 + (buf[pos] - '0');
+	  if (value > std::numeric_limits<uint64_t>::max())
+	    throw Parse_error("too large decimal integer value", line_number);
+	  pos++;
+	}
+      Inst *value_inst = bb->value_inst(value, addr->bitsize);
+      addr = bb->build_inst(Op::SUB, addr, value_inst);
     }
   assert(buf[pos] == ')');
   return addr;
