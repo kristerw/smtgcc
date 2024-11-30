@@ -2752,6 +2752,15 @@ void Parser::parse_function()
   std::string_view name = get_name(0);
   if (name.starts_with(".cfi"))
     ;
+  else if (name == ".section")
+    {
+      if (tokens.size() > 1)
+	{
+	  if (get_name(1) == "__patchable_function_entries")
+	    throw Not_implemented("attribue patchable_function_entry");
+	}
+      throw Parse_error(".section in the middle of a function", line_number);
+    }
   else if (name == "add" || name == "addw" || name == "addi" || name == "addiw")
     process_ibinary(name, Op::ADD);
   else if (name == "mul" || name == "mulw")
@@ -3840,6 +3849,22 @@ void Parser::lex_line(void)
 	lex_hex_or_integer();
       else if (buf[pos] == '.' && buf[pos + 1] == 'L' )
 	lex_label_or_label_def();
+      else if (buf[pos] == '.' && tokens.empty())
+	{
+	  lex_name();
+	  if (get_name(0) == ".section")
+	    {
+	      skip_space_and_comments();
+	      lex_name();
+	    }
+
+	  // The assembler directives have a different grammar than the
+	  // assembler instructions. But we are not using the arguments,
+	  // so just skip the content for now.
+	  while (buf[pos] != '\n' && buf[pos] != ';')
+	    pos++;
+	  break;
+	}
       else if (isalpha(buf[pos]) || buf[pos] == '_' || buf[pos] == '.')
 	lex_name();
       else if (buf[pos] == '%' && buf[pos + 1] == 'l' && buf[pos + 2] == 'o')
