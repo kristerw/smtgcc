@@ -3882,6 +3882,7 @@ std::optional<std::string_view> Parser::parse_label_def()
       pos++;
       return label;
     }
+  skip_line();
   return {};
 }
 
@@ -4243,8 +4244,9 @@ void Parser::parse_rodata()
 	      continue;
 	    }
 	}
+      else
+	skip_line();
 
-      skip_line();
       parser_state = state::global;
     }
 }
