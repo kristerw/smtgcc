@@ -2,6 +2,7 @@
 #include <set>
 
 #include "gcc-plugin.h"
+#include "plugin-version.h"
 #include "tree-pass.h"
 #include "tree.h"
 #include "cgraph.h"
@@ -234,10 +235,12 @@ static void pass_execution(void *event_data, void *data)
 
 int
 plugin_init(struct plugin_name_args *plugin_info,
-	    [[maybe_unused]] struct plugin_gcc_version *version)
+	    struct plugin_gcc_version *version)
 {
-  const char * const plugin_name = plugin_info->base_name;
+  if (!plugin_default_version_check(version, &gcc_version))
+    return 1;
 
+  const char * const plugin_name = plugin_info->base_name;
   my_plugin *mp = new my_plugin;
   register_callback(plugin_name, PLUGIN_PASS_EXECUTION, pass_execution, (void*)mp);
 

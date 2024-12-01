@@ -1,6 +1,7 @@
 #include <cassert>
 
 #include "gcc-plugin.h"
+#include "plugin-version.h"
 #include "tree-pass.h"
 #include "context.h"
 #include "tree.h"
@@ -226,10 +227,12 @@ static void finish(void *, void *data)
 
 int
 plugin_init(struct plugin_name_args *plugin_info,
-	    [[maybe_unused]] struct plugin_gcc_version *version)
+	    struct plugin_gcc_version *version)
 {
-  const char * const plugin_name = plugin_info->base_name;
+  if (!plugin_default_version_check(version, &gcc_version))
+    return 1;
 
+  const char * const plugin_name = plugin_info->base_name;
   struct register_pass_info tv_pass_info;
   struct tv_pass *my_pass = new tv_pass(g);
   tv_pass_info.pass = my_pass;
