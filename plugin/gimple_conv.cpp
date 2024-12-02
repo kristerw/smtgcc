@@ -6120,20 +6120,25 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
       tree value;
       FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(initial), idx, index, value)
 	{
-	  assert(index);
-	  if (TREE_CODE(index) == RANGE_EXPR)
-	    throw Not_implemented("init_var: RANGE_EXPR");
-	  Inst *indx = tree2inst(index);
-	  if (indx->bitsize < mem_inst->bitsize)
+	  Inst *off;
+	  if (index)
 	    {
-	      if (TYPE_UNSIGNED(TREE_TYPE(index)))
-		indx = bb->build_inst(Op::ZEXT, indx, mem_inst->bitsize);
-	      else
-		indx = bb->build_inst(Op::SEXT, indx, mem_inst->bitsize);
+	      if (TREE_CODE(index) == RANGE_EXPR)
+		throw Not_implemented("init_var: RANGE_EXPR");
+	      Inst *indx = tree2inst(index);
+	      if (indx->bitsize < mem_inst->bitsize)
+		{
+		  if (TYPE_UNSIGNED(TREE_TYPE(index)))
+		    indx = bb->build_inst(Op::ZEXT, indx, mem_inst->bitsize);
+		  else
+		    indx = bb->build_inst(Op::SEXT, indx, mem_inst->bitsize);
+		}
+	      else if (indx->bitsize > mem_inst->bitsize)
+		indx = bb->build_trunc(indx, mem_inst->bitsize);
+	      off = bb->build_inst(Op::MUL, indx, elm_size);
 	    }
-	  else if (indx->bitsize > mem_inst->bitsize)
-	    indx = bb->build_trunc(indx, mem_inst->bitsize);
-	  Inst *off = bb->build_inst(Op::MUL, indx, elm_size);
+	  else
+	    off = entry_bb->value_inst(idx * elem_size, mem_inst->bitsize);
 	  Inst *ptr = entry_bb->build_inst(Op::ADD, mem_inst, off);
 	  init_var_values(value, ptr);
 	}
