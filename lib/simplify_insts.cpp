@@ -2319,10 +2319,10 @@ Inst *simplify_over_ite_arg(Inst *inst)
 	std::swap(arg1, arg2);
       auto [cond, val1, val2] = get_const_ite(arg1);
       if (cond
-	  && (val1->value() == 0
-	      || val2->value() == 0
-	      || val1->signed_value() == -1
-	      || val2->signed_value() == -1))
+	  && (is_value_zero(val1)
+	      || is_value_zero(val2)
+	      || is_value_m1(val1)
+	      || is_value_m1(val2)))
 	{
 	  val1 = create_inst(inst->op, val1, arg2);
 	  val1->insert_before(inst);
