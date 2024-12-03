@@ -212,7 +212,8 @@ private:
   void process_vec_shift(Op op);
   void process_vec_shift_acc(Op op);
   void process_vec_widen_shift(Op op, Op widen_op, bool high);
-  void process_vec_high_narrow(Op op, bool high);
+  void process_vec_narrow(Op op, bool high);
+  void process_vec_binary_high_narrow(Op op, bool high);
   void process_vec_xtn(bool high);
   void process_vec_mla(Op op = Op::ADD);
   void process_vec_uzp(bool odd);
@@ -3455,7 +3456,49 @@ void Parser::process_vec_widen_shift(Op op, Op widen_op, bool high)
   write_reg(dest, res);
 }
 
-void Parser::process_vec_high_narrow(Op op, bool high)
+void Parser::process_vec_narrow(Op op, bool high)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  Inst *orig = get_vreg_value(1, nof_elem, elem_bitsize);
+  get_comma(2);
+  uint32_t src_elem_bitsize = elem_bitsize * 2;
+  uint32_t src_nof_elem = high ? nof_elem / 2 : nof_elem;
+  Inst *arg1 = get_vreg_value(3, src_nof_elem, src_elem_bitsize);
+  get_end_of_line(4);
+
+  Inst *res = nullptr;
+  if (high)
+    {
+      for (uint32_t i = 0; i < src_nof_elem; i++)
+	{
+	  Inst *inst = extract_vec_elem(orig, elem_bitsize, i);
+	  if (res)
+	    res = bb->build_inst(Op::CONCAT, inst, res);
+	  else
+	    res = inst;
+	}
+    }
+  for (uint32_t i = 0; i < src_nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, src_elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, elem1, elem_bitsize);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  if (!high)
+    {
+      for (uint32_t i = 0; i < src_nof_elem; i++)
+	{
+	  Inst *inst = bb->value_inst(0, elem_bitsize);
+	  res = bb->build_inst(Op::CONCAT, inst, res);
+	}
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_binary_high_narrow(Op op, bool high)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
   Inst *orig = get_vreg_value(1, nof_elem, elem_bitsize);
@@ -3500,6 +3543,7 @@ void Parser::process_vec_high_narrow(Op op, bool high)
     }
   write_reg(dest, res);
 }
+
 
 void Parser::process_vec_xtn(bool high)
 {
@@ -3614,9 +3658,9 @@ void Parser::parse_vector_op()
   else if (name == "add")
     process_vec_binary(Op::ADD);
   else if (name == "addhn")
-    process_vec_high_narrow(Op::ADD, false);
+    process_vec_binary_high_narrow(Op::ADD, false);
   else if (name == "addhn2")
-    process_vec_high_narrow(Op::ADD, true);
+    process_vec_binary_high_narrow(Op::ADD, true);
   else if (name == "addp")
     process_vec_pairwise(gen_add);
   else if (name == "and")
@@ -3673,6 +3717,10 @@ void Parser::parse_vector_op()
     process_vec_widen(Op::FCHPREC, false);
   else if (name == "fcvtl2")
     process_vec_widen(Op::FCHPREC, true);
+  else if (name == "fcvtn")
+    process_vec_narrow(Op::FCHPREC, false);
+  else if (name == "fcvtn2")
+    process_vec_narrow(Op::FCHPREC, true);
   else if (name == "fcvtzs")
     process_vec_unary(gen_f2s);
   else if (name == "fcvtzu")
@@ -3788,9 +3836,9 @@ void Parser::parse_vector_op()
   else if (name == "sub")
     process_vec_binary(Op::SUB);
   else if (name == "subhn")
-    process_vec_high_narrow(Op::SUB, false);
+    process_vec_binary_high_narrow(Op::SUB, false);
   else if (name == "subhn2")
-    process_vec_high_narrow(Op::SUB, true);
+    process_vec_binary_high_narrow(Op::SUB, true);
   else if (name == "sxtl")
     process_vec_widen(Op::SEXT);
   else if (name == "sxtl2")
