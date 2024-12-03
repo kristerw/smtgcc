@@ -3669,6 +3669,10 @@ void Parser::parse_vector_op()
     process_vec_simd_compare(SIMD_cond::FLE);
   else if (name == "fcmlt")
     process_vec_simd_compare(SIMD_cond::FLT);
+  else if (name == "fcvtl")
+    process_vec_widen(Op::FCHPREC, false);
+  else if (name == "fcvtl2")
+    process_vec_widen(Op::FCHPREC, true);
   else if (name == "fcvtzs")
     process_vec_unary(gen_f2s);
   else if (name == "fcvtzu")
