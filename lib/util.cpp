@@ -53,35 +53,44 @@ bool is_value_one(Inst *inst)
 
 bool is_value_signed_min(Inst *inst)
 {
+  if (inst->op != Op::VALUE)
+    return false;
   unsigned __int128 smin = ((unsigned __int128)1) << (inst->bitsize - 1);
-  return inst->op == Op::VALUE && inst->value() == smin;
+  return inst->value() == smin;
 }
 
 bool is_value_signed_min(Inst *inst, uint32_t bitsize)
 {
-  assert(bitsize < 128);
+  if (inst->op != Op::VALUE)
+    return false;
   __int128 smin = ((unsigned __int128)1) << (bitsize - 1);
   smin = (smin << (128 - bitsize)) >> (128 - bitsize);
-  return inst->op == Op::VALUE && inst->signed_value() == smin;
+  return inst->signed_value() == smin;
 }
 
 bool is_value_signed_max(Inst *inst)
 {
+  if (inst->op != Op::VALUE)
+    return false;
   unsigned __int128 smax = (((unsigned __int128)1) << (inst->bitsize - 1)) - 1;
-  return inst->op == Op::VALUE && inst->value() == smax;
+  return inst->value() == smax;
 }
 
 bool is_value_signed_max(Inst *inst, uint32_t bitsize)
 {
+  if (inst->op != Op::VALUE)
+    return false;
   unsigned __int128 smax = (((unsigned __int128)1) << (bitsize - 1)) - 1;
-  return inst->op == Op::VALUE && inst->value() == smax;
+  return inst->value() == smax;
 }
 
 bool is_value_m1(Inst *inst)
 {
+  if (inst->op != Op::VALUE)
+    return false;
   unsigned __int128 m1 = ~((unsigned __int128)0);
   m1 = (m1 << (128 - inst->bitsize)) >> (128 - inst->bitsize);
-  return inst->op == Op::VALUE && inst->value() == m1;
+  return inst->value() == m1;
 }
 
 bool is_value_pow2(Inst *inst)
