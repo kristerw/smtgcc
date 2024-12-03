@@ -1089,6 +1089,40 @@ Inst *gen_fmax(Basic_block *bb, Inst *elem1, Inst *elem2)
   return gen_fmin_fmax(bb, elem1, elem2, false);
 }
 
+Inst *gen_sshl(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *zero = bb->value_inst(0, 8);
+  elem2 = bb->build_trunc(elem2, 8);
+  Inst *is_rshift = bb->build_inst(Op::SLT, elem2, zero);
+  Inst *lshift = elem2;
+  Inst *rshift = bb->build_inst(Op::NEG, elem2);
+  if (elem1->bitsize > elem2->bitsize)
+    {
+      lshift = bb->build_inst(Op::ZEXT, elem2, elem1->bitsize);
+      rshift = bb->build_inst(Op::ZEXT, rshift, elem1->bitsize);
+    }
+  lshift = bb->build_inst(Op::SHL, elem1, lshift);
+  rshift = bb->build_inst(Op::ASHR, elem1, rshift);
+  return bb->build_inst(Op::ITE, is_rshift, rshift, lshift);
+}
+
+Inst *gen_ushl(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *zero = bb->value_inst(0, 8);
+  elem2 = bb->build_trunc(elem2, 8);
+  Inst *is_rshift = bb->build_inst(Op::SLT, elem2, zero);
+  Inst *lshift = elem2;
+  Inst *rshift = bb->build_inst(Op::NEG, elem2);
+  if (elem1->bitsize > elem2->bitsize)
+    {
+      lshift = bb->build_inst(Op::ZEXT, elem2, elem1->bitsize);
+      rshift = bb->build_inst(Op::ZEXT, rshift, elem1->bitsize);
+    }
+  lshift = bb->build_inst(Op::SHL, elem1, lshift);
+  rshift = bb->build_inst(Op::LSHR, elem1, rshift);
+  return bb->build_inst(Op::ITE, is_rshift, rshift, lshift);
+}
+
 Inst *gen_sqxtn(Basic_block *bb, Inst *elem1)
 {
   __int128 smax_val = (((__int128)1) << (elem1->bitsize / 2 - 1)) - 1;
@@ -3911,6 +3945,8 @@ void Parser::parse_vector_op()
     process_vec_widen_shift(Op::SHL, Op::ZEXT, false);
   else if (name == "shll2")
     process_vec_widen_shift(Op::SHL, Op::ZEXT, true);
+  else if (name == "sshl")
+    process_vec_binary(gen_sshl);
   else if (name == "sshll")
     process_vec_widen_shift(Op::SHL, Op::SEXT, false);
   else if (name == "sshll2")
@@ -3981,6 +4017,8 @@ void Parser::parse_vector_op()
     process_vec_widen_binary(gen_mul, Op::ZEXT, false);
   else if (name == "umull2")
     process_vec_widen_binary(gen_mul, Op::ZEXT, true);
+  else if (name == "ushl")
+    process_vec_binary(gen_ushl);
   else if (name == "ushll")
     process_vec_widen_shift(Op::SHL, Op::ZEXT, false);
   else if (name == "ushll2")
