@@ -95,6 +95,7 @@ private:
   unsigned __int128 get_hex_or_integer(unsigned idx);
   Inst *get_reg(unsigned idx);
   Inst *get_freg(unsigned idx);
+  std::tuple<uint64_t, uint32_t, uint32_t> get_vreg_(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_vreg(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_scalar_vreg(unsigned idx);
   uint32_t get_reg_size(unsigned idx);
@@ -106,6 +107,7 @@ private:
   Inst *get_reg_or_imm_value(unsigned idx, uint32_t bitsize);
   Inst *get_freg_value(unsigned idx);
   Inst *get_vreg_value(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
+  uint64_t get_vreg_idx(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
   std::string_view get_name(unsigned idx);
@@ -113,6 +115,7 @@ private:
   Cond_code get_cc(unsigned idx);
   void get_comma(unsigned idx);
   void get_exclamation(unsigned idx);
+  void get_minus(unsigned idx);
   void get_left_bracket(unsigned idx);
   void get_right_bracket(unsigned idx);
   void get_left_brace(unsigned idx);
@@ -530,7 +533,7 @@ Inst *Parser::get_freg_value(unsigned idx)
   return bb->build_trunc(inst, get_reg_size(idx));
 }
 
-std::tuple<Inst *, uint32_t, uint32_t> Parser::get_vreg(unsigned idx)
+std::tuple<uint64_t, uint32_t, uint32_t> Parser::get_vreg_(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
@@ -548,25 +551,31 @@ std::tuple<Inst *, uint32_t, uint32_t> Parser::get_vreg(unsigned idx)
   if (value > 31)
     throw Parse_error("expected a vector register instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
-  Inst *reg = rstate->registers[Aarch64RegIdx::v0 + value];
+  uint64_t reg_idx = Aarch64RegIdx::v0 + value;
   std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
   if (suffix == ".2d")
-    return {reg, 2, 64};
+    return {reg_idx, 2, 64};
   if (suffix == ".2s")
-    return {reg, 2, 32};
+    return {reg_idx, 2, 32};
   if (suffix == ".4s")
-    return {reg, 4, 32};
+    return {reg_idx, 4, 32};
   if (suffix == ".4h")
-    return {reg, 4, 16};
+    return {reg_idx, 4, 16};
   if (suffix == ".8h")
-    return {reg, 8, 16};
+    return {reg_idx, 8, 16};
   if (suffix == ".8b")
-    return {reg, 8, 8};
+    return {reg_idx, 8, 8};
   if (suffix == ".16b")
-    return {reg, 16, 8};
+    return {reg_idx, 16, 8};
 
   throw Parse_error("expected a vector register instead of "
 		    + std::string(token_string(tokens[idx])), line_number);
+}
+
+std::tuple<Inst *, uint32_t, uint32_t> Parser::get_vreg(unsigned idx)
+{
+  auto [reg_idx, nof_elem, elem_bitsize] = get_vreg_(idx);
+  return {rstate->registers[reg_idx], nof_elem, elem_bitsize};
 }
 
 std::tuple<Inst *, uint32_t, uint32_t> Parser::get_scalar_vreg(unsigned idx)
@@ -618,6 +627,15 @@ Inst *Parser::get_vreg_value(unsigned idx, uint32_t nof_elem,
     throw Parse_error("expected same arg vector size as dest", line_number);
   Inst *inst = bb->build_inst(Op::READ, dest);
   return bb->build_trunc(inst, nof_elem * elem_bitsize);
+}
+
+uint64_t Parser::get_vreg_idx(unsigned idx, uint32_t nof_elem,
+			      uint32_t elem_bitsize)
+{
+  auto [reg_idx, dest_nof_elem, dest_elem_bitsize] = get_vreg_(idx);
+  if (nof_elem != dest_nof_elem || elem_bitsize != dest_elem_bitsize)
+    throw Parse_error("expected same arg vector size as dest", line_number);
+  return reg_idx;
 }
 
 uint32_t Parser::get_reg_size(unsigned idx)
@@ -798,6 +816,15 @@ void Parser::get_exclamation(unsigned idx)
   assert(idx > 0);
   if (tokens.size() <= idx || tokens[idx].kind != Lexeme::exclamation)
     throw Parse_error("expected a '!' after "
+		      + std::string(token_string(tokens[idx - 1])),
+		      line_number);
+}
+
+void Parser::get_minus(unsigned idx)
+{
+  assert(idx > 0);
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::minus)
+    throw Parse_error("expected a '-' after "
 		      + std::string(token_string(tokens[idx - 1])),
 		      line_number);
 }
@@ -3195,19 +3222,46 @@ void Parser::process_vec_tbl()
   if (elem_bitsize != 8 || nof_elem != 16)
     throw Parse_error("expected element size 8", line_number);
   get_comma(2);
-  get_left_brace(3);
-  Inst *arg1 = get_vreg_value(4, nof_elem, elem_bitsize);
-  get_right_brace(5);
-  get_comma(6);
-  Inst *arg2 = get_vreg_value(7, nof_elem, elem_bitsize);
-  get_end_of_line(8);
+  Inst *arg1, *arg2;
+  if (tokens.size() == 8)
+    {
+      get_left_brace(3);
+      arg1 = get_vreg_value(4, nof_elem, elem_bitsize);
+      get_right_brace(5);
+      get_comma(6);
+      arg2 = get_vreg_value(7, nof_elem, elem_bitsize);
+      get_end_of_line(8);
+    }
+  else
+    {
+      get_left_brace(3);
+      uint64_t start_idx = get_vreg_idx(4, nof_elem, elem_bitsize);
+      get_minus(5);
+      uint64_t end_idx = get_vreg_idx(6, nof_elem, elem_bitsize);
+      get_right_brace(7);
+      get_comma(8);
+      arg2 = get_vreg_value(9, nof_elem, elem_bitsize);
+      get_end_of_line(10);
+
+      assert(start_idx >= Aarch64RegIdx::v0);
+      assert(start_idx < end_idx);
+      assert(end_idx <= Aarch64RegIdx::v31);
+      assert(nof_elem * elem_bitsize == 128);
+      arg1 = bb->build_inst(Op::READ, rstate->registers[start_idx]);
+      for (uint64_t i = start_idx + 1; i <= end_idx; i++)
+	{
+	  Inst *inst = bb->build_inst(Op::READ, rstate->registers[i]);
+	  arg1 = bb->build_inst(Op::CONCAT, inst, arg1);
+	}
+    }
 
   Inst *res = nullptr;
+  uint32_t arg1_nof_elem = arg1->bitsize / elem_bitsize;
   for (uint32_t i = 0; i < nof_elem; i++)
     {
       Inst *idx = extract_vec_elem(arg2, elem_bitsize, i);
       Inst *inst = bb->value_inst(0, elem_bitsize);
-      for (uint32_t j = 0; j < nof_elem; j++)
+      for (uint32_t j = 0; j < arg1_nof_elem; j++)
 	{
 	  Inst *elem_idx = bb->value_inst(j, elem_bitsize);
 	  Inst *elem = extract_vec_elem(arg1, elem_bitsize, j);
