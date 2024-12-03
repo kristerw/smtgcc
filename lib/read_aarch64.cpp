@@ -204,6 +204,7 @@ private:
   void process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_widen(Op, bool high = false);
+  void process_vec_bic();
   void process_vec_bif();
   void process_vec_bit();
   void process_vec_bsl();
@@ -3221,6 +3222,43 @@ void Parser::process_vec_tbl()
   write_reg(dest, res);
 }
 
+void Parser::process_vec_bic()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1, *arg2;
+  if (is_vreg(3))
+    {
+      arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+      get_comma(4);
+      arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+      get_end_of_line(6);
+    }
+  else
+    {
+      arg1 = get_vreg_value(1, nof_elem, elem_bitsize);
+      arg2 = process_last_arg(3, elem_bitsize);
+    }
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2;
+      if (arg2->bitsize == elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      elem2 = bb->build_inst(Op::NOT, elem2);
+      Inst *inst = bb->build_inst(Op::AND, elem1, elem2);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_bif()
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -3665,6 +3703,8 @@ void Parser::parse_vector_op()
     process_vec_pairwise(gen_add);
   else if (name == "and")
     process_vec_binary(Op::AND);
+  else if (name == "bic")
+    process_vec_bic();
   else if (name == "bif")
     process_vec_bif();
   else if (name == "bit")
