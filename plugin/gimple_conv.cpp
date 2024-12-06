@@ -5082,11 +5082,22 @@ void Converter::process_cfn_signbit(gimple *stmt)
     [this](Inst *elem1, Inst *elem1_indef, tree lhs_elem_type)
     -> std::pair<Inst *, Inst *>
     {
-      Inst *signbit = bb->build_extract_bit(elem1, elem1->bitsize - 1);
+      Inst *res_indef = get_res_indef(elem1_indef, lhs_elem_type);
+      Inst *res;
       uint32_t bitsize = bitsize_for_type(lhs_elem_type);
-      Inst *inst = bb->build_inst(Op::ZEXT, signbit, bitsize);
-      Inst *indef = get_res_indef(elem1_indef, lhs_elem_type);
-      return {inst, indef};
+      if (bitsize >= elem1->bitsize)
+	{
+	  assert(bitsize <= 128);
+	  unsigned __int128 mask =
+	    ((unsigned __int128)1) << (elem1->bitsize - 1);
+	  Inst *mask_inst = bb->value_inst(mask, elem1->bitsize);
+	  res = bb->build_inst(Op::AND, elem1, mask_inst);
+	}
+      else
+	res = bb->build_extract_bit(elem1, elem1->bitsize - 1);
+      if (res->bitsize < bitsize)
+	res = bb->build_inst(Op::ZEXT, res, bitsize);
+      return {res, res_indef};
     };
   process_cfn_unary(stmt, gen_elem);
 }
