@@ -20,6 +20,7 @@ class Converter {
   std::map<const Inst *, z3::expr> inst2bool;
 
   z3::expr ite(z3::expr c, z3::expr a, z3::expr b);
+  z3::expr get_value(unsigned __int128 value, uint32_t bitsize);
   Z3_sort fp_sort(uint32_t bitsize);
   void build_bv_comparison_smt(const Inst *inst);
   void build_fp_comparison_smt(const Inst *inst);
@@ -75,6 +76,19 @@ z3::expr Converter::ite(z3::expr c, z3::expr a, z3::expr b)
   if (z3::eq(a, b))
     return a;
   return z3::ite(c, a, b);
+}
+
+z3::expr Converter::get_value(unsigned __int128 value, uint32_t bitsize)
+{
+  uint64_t low = value;
+  uint64_t high = value >> 64;
+  if (bitsize > 64)
+    {
+      z3::expr lo = ctx.bv_val(low, 64);
+      z3::expr hi = ctx.bv_val(high, bitsize - 64);
+      return z3::concat(hi, lo).simplify();
+    }
+  return ctx.bv_val(low, bitsize);
 }
 
 z3::expr Converter::inst_as_array(const Inst *inst)
@@ -635,18 +649,38 @@ void Converter::build_conversion_smt(const Inst *inst)
     {
     case Op::SEXT:
       {
-	z3::expr arg = inst_as_bv(inst->args[0]);
 	uint32_t arg_bitsize = inst->args[0]->bitsize;
 	assert(arg_bitsize < inst->bitsize);
-	inst2bv.insert({inst, z3::sext(arg, inst->bitsize - arg_bitsize)});
+	if (arg_bitsize == 1 && inst->bitsize <= 128)
+	  {
+	    z3::expr arg = inst_as_bool(inst->args[0]);
+	    z3::expr zero = get_value(0, inst->bitsize);
+	    z3::expr m1 = get_value(-1, inst->bitsize);
+	    inst2bv.insert({inst, ite(arg, m1, zero)});
+	  }
+	else
+	  {
+	    z3::expr arg = inst_as_bv(inst->args[0]);
+	    inst2bv.insert({inst, z3::sext(arg, inst->bitsize - arg_bitsize)});
+	  }
       }
       break;
     case Op::ZEXT:
       {
-	z3::expr arg = inst_as_bv(inst->args[0]);
 	uint32_t arg_bitsize = inst->args[0]->bitsize;
 	assert(arg_bitsize < inst->bitsize);
-	inst2bv.insert({inst, z3::zext(arg, inst->bitsize - arg_bitsize)});
+	if (arg_bitsize == 1 && inst->bitsize <= 128)
+	  {
+	    z3::expr arg = inst_as_bool(inst->args[0]);
+	    z3::expr zero = get_value(0, inst->bitsize);
+	    z3::expr one = get_value(1, inst->bitsize);
+	    inst2bv.insert({inst, ite(arg, one, zero)});
+	  }
+	else
+	  {
+	    z3::expr arg = inst_as_bv(inst->args[0]);
+	    inst2bv.insert({inst, z3::zext(arg, inst->bitsize - arg_bitsize)});
+	  }
       }
       break;
     case Op::F2U:
@@ -705,22 +739,9 @@ void Converter::build_special_smt(const Inst *inst)
       assert(inst->nof_args == 0);
       break;
     case Op::VALUE:
-      {
-	uint64_t low = inst->value();
-	uint64_t high = inst->value() >> 64;
-	if (inst->bitsize > 64)
-	  {
-	    z3::expr lo = ctx.bv_val(low, 64);
-	    z3::expr hi = ctx.bv_val(high, inst->bitsize - 64);
-	    inst2bv.insert({inst, z3::concat(hi, lo).simplify()});
-	  }
-	else
-	  {
-	    inst2bv.insert({inst, ctx.bv_val(low, inst->bitsize)});
-	    if (inst->bitsize == 1)
-	      inst2bool.insert({inst, ctx.bool_val(low != 0)});
-	  }
-      }
+      inst2bv.insert({inst, get_value(inst->value(), inst->bitsize)});
+      if (inst->bitsize == 1)
+	inst2bool.insert({inst, ctx.bool_val(inst->value())});
       break;
     default:
       throw Not_implemented("build_special_smt: "s + inst->name());
