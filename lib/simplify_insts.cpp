@@ -1659,6 +1659,38 @@ Inst *simplify_ite(Inst *inst)
       return new_inst2;
     }
 
+  // ite (slt (neg x), x), x, (neg x) -> abs(x)
+  if (arg1->op == Op::SLT
+      && arg1->args[0] == arg3
+      && arg1->args[1] == arg2
+      && arg3->op == Op::NEG
+      && arg3->args[0] == arg2)
+    {
+      Inst *zero = inst->bb->value_inst(0, inst->bitsize);
+      Inst *new_inst1 = create_inst(Op::SLT, arg2, zero);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::ITE, new_inst1, arg3, arg2);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  // ite (slt x, (neg x)), (neg x), x -> abs(x)
+  if (arg1->op == Op::SLT
+      && arg1->args[0] == arg3
+      && arg1->args[1] == arg2
+      && arg2->op == Op::NEG
+      && arg2->args[0] == arg3)
+    {
+      Inst *zero = inst->bb->value_inst(0, inst->bitsize);
+      Inst *new_inst1 = create_inst(Op::SLT, arg3, zero);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::ITE, new_inst1, arg2, arg3);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
   return inst;
 }
 
