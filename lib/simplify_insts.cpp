@@ -2341,7 +2341,7 @@ Inst *simplify_over_ite_arg(Inst *inst)
   // It makes sense to transform some binary instructions even if the other
   // argument is not constant. For example, AND if one of the ITE values
   // is 0 or -1.
-  if (inst->op == Op::AND)
+  if (inst->op == Op::AND || inst->op == Op::OR)
     {
       Inst *arg1 = inst->args[0];
       Inst *arg2 = inst->args[1];
@@ -2355,6 +2355,59 @@ Inst *simplify_over_ite_arg(Inst *inst)
 	      || is_value_zero(val2)
 	      || is_value_m1(val1)
 	      || is_value_m1(val2)))
+	{
+	  val1 = create_inst(inst->op, val1, arg2);
+	  val1->insert_before(inst);
+	  val1 = simplify_inst(val1);
+	  val2 = create_inst(inst->op, val2, arg2);
+	  val2->insert_before(inst);
+	  val2 = simplify_inst(val2);
+	  Inst *ite = create_inst(Op::ITE, cond, val1, val2);
+	  ite->insert_before(inst);
+	  ite = simplify_inst(ite);
+	  return ite;
+	}
+    }
+  if (inst->op == Op::ADD || inst->op == Op::SADD_WRAPS)
+    {
+      Inst *arg1 = inst->args[0];
+      Inst *arg2 = inst->args[1];
+      if (arg1->op != Op::ITE
+	  && !is_boolean_sext(arg1)
+	  && !is_boolean_zext(arg1))
+	std::swap(arg1, arg2);
+      auto [cond, val1, val2] = get_const_ite(arg1);
+      if (cond
+	  && (is_value_zero(val1) || is_value_zero(val2)))
+	{
+	  val1 = create_inst(inst->op, val1, arg2);
+	  val1->insert_before(inst);
+	  val1 = simplify_inst(val1);
+	  val2 = create_inst(inst->op, val2, arg2);
+	  val2->insert_before(inst);
+	  val2 = simplify_inst(val2);
+	  Inst *ite = create_inst(Op::ITE, cond, val1, val2);
+	  ite->insert_before(inst);
+	  ite = simplify_inst(ite);
+	  return ite;
+	}
+    }
+  if (inst->op == Op::MUL || inst->op == Op::SMUL_WRAPS)
+    {
+      Inst *arg1 = inst->args[0];
+      Inst *arg2 = inst->args[1];
+      if (arg1->op != Op::ITE
+	  && !is_boolean_sext(arg1)
+	  && !is_boolean_zext(arg1))
+	std::swap(arg1, arg2);
+      auto [cond, val1, val2] = get_const_ite(arg1);
+      if (cond
+	  && (is_value_zero(val1)
+	      || is_value_zero(val2)
+	      || is_value_m1(val1)
+	      || is_value_m1(val2)
+	      || is_value_one(val1)
+	      || is_value_one(val2)))
 	{
 	  val1 = create_inst(inst->op, val1, arg2);
 	  val1->insert_before(inst);
