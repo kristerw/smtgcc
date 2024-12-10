@@ -1423,6 +1423,28 @@ Inst *simplify_smul_wraps(Inst *inst)
       return new_inst;
     }
 
+  // smul_wraps x, c ->  or (lt x, minint / c), (lt maxint / c, x)
+  if (arg2->op == Op::VALUE)
+    {
+      __int128 maxint = (((unsigned __int128)1) << (arg1->bitsize - 1)) - 1;
+      __int128 minint = ((unsigned __int128)1) << (arg1->bitsize - 1);
+      minint = (minint << (128 - arg1->bitsize)) >> (128 - arg1->bitsize);
+      __int128 value = arg2->signed_value();
+      Inst *hi = inst->bb->value_inst(maxint / value, arg2->bitsize);
+      Inst *lo = inst->bb->value_inst(minint / value, arg2->bitsize);
+      if (value < 0)
+	std::swap(hi, lo);
+      Inst *new_inst1 = create_inst(Op::SLT, arg1, lo);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::SLT, hi, arg1);
+      new_inst2->insert_before(inst);
+      new_inst2 = simplify_inst(new_inst2);
+      Inst *new_inst3 = create_inst(Op::OR, new_inst1, new_inst2);
+      new_inst3->insert_before(inst);
+      return new_inst3;
+    }
+
   return inst;
 }
 
