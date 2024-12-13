@@ -881,34 +881,6 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 
   std::string warning;
 
-  // Check that tgt does not have UB that is not in src.
-  assert(conv.src_common_ub == conv.tgt_common_ub);
-  if (conv.src_unique_ub != conv.tgt_unique_ub
-      && !(conv.tgt_unique_ub->op == Op::VALUE
-	   && conv.tgt_unique_ub->value() == 0))
-  {
-    z3::solver solver(ctx);
-    solver.add(!src_common_ub_expr);
-    solver.add(!src_unique_ub_expr);
-    solver.add(tgt_unique_ub_expr);
-    uint64_t start_time = get_time();
-    Solver_result solver_result = run_solver(solver, "UB");
-    stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-    if (solver_result.status == Result_status::incorrect)
-      {
-	assert(solver_result.message);
-	std::string msg = *solver_result.message;
-	add_print(msg, conv, solver);
-	Solver_result result = {Result_status::incorrect, msg};
-	return std::pair<SStats, Solver_result>(stats, result);
-      }
-    if (solver_result.status == Result_status::unknown)
-      {
-	assert(solver_result.message);
-	warning = warning + *solver_result.message;
-      }
-  }
-
   // Check that the returned value (if any) is the same for src and tgt.
   if (conv.src_retval != conv.tgt_retval
       || conv.src_retval_indef != conv.tgt_retval_indef)
@@ -1025,6 +997,34 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 	msg = msg + "tgt *.ptr: " + tgt_byte.to_string() + "\n";
 	msg = msg + "src indef: " + src_indef.to_string() + "\n";
 	msg = msg + "tgt indef: " + tgt_indef.to_string() + "\n";
+	add_print(msg, conv, solver);
+	Solver_result result = {Result_status::incorrect, msg};
+	return std::pair<SStats, Solver_result>(stats, result);
+      }
+    if (solver_result.status == Result_status::unknown)
+      {
+	assert(solver_result.message);
+	warning = warning + *solver_result.message;
+      }
+  }
+
+  // Check that tgt does not have UB that is not in src.
+  assert(conv.src_common_ub == conv.tgt_common_ub);
+  if (conv.src_unique_ub != conv.tgt_unique_ub
+      && !(conv.tgt_unique_ub->op == Op::VALUE
+	   && conv.tgt_unique_ub->value() == 0))
+  {
+    z3::solver solver(ctx);
+    solver.add(!src_common_ub_expr);
+    solver.add(!src_unique_ub_expr);
+    solver.add(tgt_unique_ub_expr);
+    uint64_t start_time = get_time();
+    Solver_result solver_result = run_solver(solver, "UB");
+    stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
+    if (solver_result.status == Result_status::incorrect)
+      {
+	assert(solver_result.message);
+	std::string msg = *solver_result.message;
 	add_print(msg, conv, solver);
 	Solver_result result = {Result_status::incorrect, msg};
 	return std::pair<SStats, Solver_result>(stats, result);
