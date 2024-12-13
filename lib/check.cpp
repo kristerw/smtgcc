@@ -384,6 +384,9 @@ Converter::Converter(Module *m, bool run_simplify_inst)
 
 void Converter::add_ub(Basic_block *bb, Inst *cond)
 {
+  if (cond->op == Op::VALUE && cond->value() == 0)
+    return;
+
   // It is more effective to split Op::OR into two elements to better handle
   // cases where, for example, one of the arguments is common to both src
   // and tgt.
@@ -416,9 +419,103 @@ void Converter::add_assert(Basic_block *bb, Inst *cond)
 std::map<Inst *, std::vector<Inst *>, Inst_comp> Converter::prepare_ub(Function *func)
 {
   Inst_comp comp;
+  Inst *b1 = value_inst(1, 1);
+
+  // Remove all other UB checks if we have one that is always UB.
+  for (auto bb : func->bbs)
+    {
+      std::vector<Inst *>& ub_vec = bb2ub[bb];
+      auto it = std::find(ub_vec.begin(), ub_vec.end(), b1);
+      if (it != ub_vec.end())
+	{
+	  ub_vec.clear();
+	  ub_vec.push_back(b1);
+	}
+    }
+
+  // Eliminate duplicate UB conditions and keep the instructions sorted.
+  for (auto bb : func->bbs)
+    {
+      std::vector<Inst *>& ub_vec = bb2ub[bb];
+      std::sort(ub_vec.begin(), ub_vec.end(), comp);
+      ub_vec.erase(std::unique(ub_vec.begin(), ub_vec.end()), ub_vec.end());
+    }
+
+  // Remove UB that has already been checked on all paths to this BB.
+  {
+    std::map<Basic_block*,std::set<Inst*, Inst_comp>> bb2checked_ub;
+    for (auto bb : func->bbs)
+      {
+	std::vector<Inst *>& ub_vec = bb2ub[bb];
+
+	// Find the UB checks that are performed on all paths to this BB.
+	std::set<Inst *, Inst_comp> checked_ub;
+	if (bb->preds.size() == 1)
+	  {
+	    checked_ub = bb2checked_ub.at(bb->preds[0]);
+	  }
+	else if (bb->preds.size() > 1)
+	  {
+	    bool always_ub = true;
+	    for (auto pred : bb->preds)
+	      {
+		std::set<Inst*, Inst_comp>& pred_set = bb2checked_ub.at(pred);
+		if (pred_set.contains(b1))
+		  {
+		    continue;
+		  }
+		if (always_ub)
+		  {
+		    // This is the first predecessor to handle.
+		    always_ub = false;
+		    checked_ub = pred_set;
+		  }
+		else
+		  {
+		    std::set<Inst*, Inst_comp> tmp;
+		    std::set_intersection(pred_set.begin(), pred_set.end(),
+					  checked_ub.begin(), checked_ub.end(),
+					  std::inserter(tmp, tmp.begin()));
+		    checked_ub = tmp;
+		  }
+	      }
+	    if (always_ub)
+	      {
+		assert(checked_ub.empty());
+		checked_ub.insert(b1);
+	      }
+	  }
+
+	// Remove UB that are already checked by the predecessor BBs.
+	if (checked_ub.contains(b1))
+	  {
+	    // All predecessors are always UB, so the UB in this
+	    // BB does not affect the result.
+	    ub_vec.clear();
+	  }
+	else
+	  {
+	    std::vector<Inst*> tmp;
+	    std::set_difference(ub_vec.begin(), ub_vec.end(),
+				checked_ub.begin(), checked_ub.end(),
+				std::back_inserter(tmp));
+	    ub_vec = tmp;
+	  }
+
+	// Add the UB checks from this BB.
+	checked_ub.insert(ub_vec.begin(), ub_vec.end());
+	if (checked_ub.size() > 1 && checked_ub.contains(b1))
+	  {
+	    checked_ub.clear();
+	    checked_ub.insert(b1);
+	  }
+	bb2checked_ub.insert({bb, checked_ub});
+      }
+  }
+
   std::map<Inst *, std::vector<Inst *>, Inst_comp> bbcond2ub;
 
-  // Merge the UB from the basic blocks having the same condition.
+  // Merge the UB from the basic blocks with the same path condition.
   for (auto bb : func->bbs)
     {
       if (!bb2ub.contains(bb))
@@ -429,10 +526,9 @@ std::map<Inst *, std::vector<Inst *>, Inst_comp> Converter::prepare_ub(Function 
       cond_ub.insert(cond_ub.end(), bb_ub.begin(), bb_ub.end());
     }
 
-  // Generate the UB condition for the function.
-  for (auto& [cond, ub_vec] : bbcond2ub)
+  // Eliminate duplicated UB, and keep the instructions sorted.
+  for (auto& [_, ub_vec] : bbcond2ub)
     {
-      // Eliminate duplicated UB conditions.
       std::sort(ub_vec.begin(), ub_vec.end(), comp);
       ub_vec.erase(std::unique(ub_vec.begin(), ub_vec.end()), ub_vec.end());
     }
