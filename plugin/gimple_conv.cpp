@@ -1087,19 +1087,26 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	tree type = TREE_TYPE(expr);
 	check_type(type);
 	int nof_bytes = GET_MODE_SIZE(SCALAR_FLOAT_TYPE_MODE(type));
-	assert(nof_bytes <= 16);
-	long buf[4];
-	real_to_target(buf, TREE_REAL_CST_PTR(expr), TYPE_MODE(type));
-	union {
-	  uint32_t buf[4];
-	  unsigned __int128 i;
-	} u;
-	// real_to_target saves 32 bits in each long, so we copy the
-	// values to a uint32_t array to get rid of the extra bits.
-	// TODO: Big endian.
-	for (int i = 0; i < 4; i++)
-	  u.buf[i] = buf[i];
-	return {bb->value_inst(u.i, TYPE_PRECISION(type)), nullptr, nullptr};
+	Inst *res;
+	if (REAL_VALUE_ISNAN(TREE_REAL_CST(expr)))
+	  res = bb->build_inst(Op::NAN, TYPE_PRECISION(type));
+	else
+	  {
+	    assert(nof_bytes <= 16);
+	    long buf[4];
+	    real_to_target(buf, TREE_REAL_CST_PTR(expr), TYPE_MODE(type));
+	    union {
+	      uint32_t buf[4];
+	      unsigned __int128 i;
+	    } u;
+	    // real_to_target saves 32 bits in each long, so we copy the
+	    // values to a uint32_t array to get rid of the extra bits.
+	    // TODO: Big endian.
+	    for (int i = 0; i < 4; i++)
+	      u.buf[i] = buf[i];
+	    res = bb->value_inst(u.i, TYPE_PRECISION(type));
+	  }
+	return {res, nullptr, nullptr};
       }
     case VECTOR_CST:
       {

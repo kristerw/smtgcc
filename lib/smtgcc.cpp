@@ -756,7 +756,7 @@ Inst *Basic_block::build_inst(Op op, Inst *arg)
 
 Inst *Basic_block::build_inst(Op op, uint32_t arg_val)
 {
-  assert(op == Op::REGISTER);
+  assert(op == Op::REGISTER || op == Op::NAN);
   Inst *arg = value_inst(arg_val, 32);
   Inst *inst = create_inst(op, arg);
   insert_last(inst);
