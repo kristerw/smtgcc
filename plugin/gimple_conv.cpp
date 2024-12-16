@@ -139,7 +139,6 @@ struct Converter {
   Inst *process_binary_complex(enum tree_code code, Inst *arg1, Inst *arg2, tree lhs_type);
   Inst *process_binary_complex_cmp(enum tree_code code, Inst *arg1, Inst *arg2, tree lhs_type, tree arg1_type);
   std::pair<Inst *, Inst *> process_binary_bool(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type);
-  Inst *process_binary_int(enum tree_code code, bool is_unsigned, Inst *arg1, Inst *arg2, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
   std::tuple<Inst *, Inst *, Inst *> process_binary_int(enum tree_code code, bool is_unsigned, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, Inst *arg2, Inst *arg2_indef, Inst *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
   Inst *process_binary_scalar(enum tree_code code, Inst *arg1, Inst *arg2, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
   std::tuple<Inst *, Inst *, Inst *> process_binary_scalar(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, Inst *arg2, Inst *arg2_indef, Inst *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
@@ -190,7 +189,6 @@ struct Converter {
   void process_cfn_uaddc(gimple *stmt);
   void process_cfn_unreachable(gimple *stmt);
   void process_cfn_usubc(gimple *stmt);
-  void process_cfn_vcond(gimple *stmt);
   void process_cfn_vcond_mask(gimple *stmt);
   void process_cfn_vec_convert(gimple *stmt);
   void process_cfn_vec_widen(gimple *stmt, Op op, bool high);
@@ -2650,11 +2648,6 @@ std::pair<Inst *, Inst *> Converter::process_binary_bool(enum tree_code code, In
   assert(lhs->bitsize == precision);
   assert(!lhs_indef || lhs_indef->bitsize == precision);
   return {lhs, lhs_indef};
-}
-
-Inst *Converter::process_binary_int(enum tree_code code, bool is_unsigned, Inst *arg1, Inst *arg2, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow)
-{
-  return std::get<0>(process_binary_int(code, is_unsigned, arg1, nullptr, nullptr, arg2, nullptr, nullptr, lhs_type, arg1_type, arg2_type, ignore_overflow));
 }
 
 std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code code, bool is_unsigned, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, Inst *arg2, Inst *arg2_indef, Inst *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow)
@@ -5243,85 +5236,6 @@ void Converter::process_cfn_trap(gimple *)
   bb->build_inst(Op::UB, bb->value_inst(1, 1));
 }
 
-void Converter::process_cfn_vcond(gimple *stmt)
-{
-  tree arg1_expr = gimple_call_arg(stmt, 0);
-  tree arg1_type = TREE_TYPE(arg1_expr);
-  tree arg1_elem_type = TREE_TYPE(arg1_type);
-  tree arg2_expr = gimple_call_arg(stmt, 1);
-  tree arg2_type = TREE_TYPE(arg2_expr);
-  tree arg2_elem_type = TREE_TYPE(arg2_type);
-  tree arg3_expr = gimple_call_arg(stmt, 2);
-  tree arg3_type = TREE_TYPE(arg3_expr);
-  tree arg3_elem_type = TREE_TYPE(arg3_type);
-  tree arg4_expr = gimple_call_arg(stmt, 3);
-  tree arg5_expr = gimple_call_arg(stmt, 4);
-  tree lhs = gimple_call_lhs(stmt);
-
-  Inst *arg1 = tree2inst(arg1_expr);
-  Inst *arg2 = tree2inst(arg2_expr);
-  auto [arg3, arg3_indef] = tree2inst_indef(arg3_expr);
-  auto [arg4, arg4_indef] = tree2inst_indef(arg4_expr);
-  if (arg3_indef || arg4_indef)
-    {
-      if (!arg3_indef)
-	arg3_indef = bb->value_inst(0, arg3->bitsize);
-      if (!arg4_indef)
-	arg4_indef = bb->value_inst(0, arg4->bitsize);
-    }
-  assert(arg1->bitsize == arg2->bitsize);
-  assert(arg3->bitsize == arg4->bitsize);
-
-  enum tree_code code = (enum tree_code)get_int_cst_val(arg5_expr);
-  bool is_unsigned = gimple_call_combined_fn(stmt) == CFN_VCONDU;
-
-  uint32_t elem_bitsize1 = bitsize_for_type(arg1_elem_type);
-  uint32_t elem_bitsize3 = bitsize_for_type(arg3_elem_type);
-
-  Inst *res = nullptr;
-  uint32_t nof_elt = bitsize_for_type(arg1_type) / elem_bitsize1;
-  for (uint64_t i = 0; i < nof_elt; i++)
-    {
-      Inst *a1 = extract_vec_elem(bb, arg1, elem_bitsize1, i);
-      Inst *a2 = extract_vec_elem(bb, arg2, elem_bitsize1, i);
-      Inst *a3 = extract_vec_elem(bb, arg3, elem_bitsize3, i);
-      Inst *a4 = extract_vec_elem(bb, arg4, elem_bitsize3, i);
-
-      Inst *cond;
-      if (FLOAT_TYPE_P(arg1_elem_type))
-	{
-	  Inst *cond_indef;
-	  std::tie(cond, cond_indef) =
-	    process_binary_float(code, a1, nullptr, a2, nullptr,
-				 boolean_type_node);
-	}
-      else
-	cond = process_binary_int(code, is_unsigned, a1, a2,
-				  boolean_type_node, arg1_elem_type,
-				  arg2_elem_type);
-      Inst *inst = bb->build_inst(Op::ITE, cond, a3, a4);
-      if (res)
-	res = bb->build_inst(Op::CONCAT, inst, res);
-      else
-	res = inst;
-
-      if (arg3_indef)
-	{
-	  Inst *a3_indef = extract_vec_elem(bb, arg3_indef, elem_bitsize3, i);
-	  Inst *a4_indef = extract_vec_elem(bb, arg4_indef, elem_bitsize3, i);
-	  Inst *indef = bb->build_inst(Op::ITE, cond, a3_indef, a4_indef);
-	  Inst *zero = bb->value_inst(0, indef->bitsize);
-	  Inst *cmp = bb->build_inst(Op::NE, indef, zero);
-	  bb->build_inst(Op::UB, cmp);
-	}
-    }
-  if (lhs)
-    {
-      constrain_range(bb, lhs, res);
-      tree2instruction.insert({lhs, res});
-    }
-}
-
 void Converter::process_cfn_vcond_mask(gimple *stmt)
 {
   tree arg1_expr = gimple_call_arg(stmt, 0);
@@ -5758,10 +5672,6 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_USUBC:
       process_cfn_usubc(stmt);
-      break;
-    case CFN_VCOND:
-    case CFN_VCONDU:
-      process_cfn_vcond(stmt);
       break;
     case CFN_VCOND_MASK:
       process_cfn_vcond_mask(stmt);
