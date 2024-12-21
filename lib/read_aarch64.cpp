@@ -205,6 +205,7 @@ private:
   void process_vec_widen_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op);
   void process_vec_widen2_binary(Op op, Op widen_op, bool high);
   void process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_reducl(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op op);
   void process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_widen(Op, bool high = false);
   void process_vec_bic();
@@ -2867,6 +2868,25 @@ void Parser::process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
   write_reg(dest, res);
 }
 
+void Parser::process_vec_reducl(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op op)
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  auto [_, nof_elem, elem_bitsize] = get_vreg(3);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_end_of_line(4);
+
+  Inst *res = extract_vec_elem(arg1, elem_bitsize, 0);
+  res = bb->build_inst(op, res, 2 * elem_bitsize);
+  for (uint32_t i = 1; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      elem1 = bb->build_inst(op, elem1, 2 * elem_bitsize);
+      res = gen_elem(bb, res, elem1);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -4480,10 +4500,14 @@ void Parser::parse_function()
   // SIMD reduce
   else if (name == "addv")
     process_vec_reduc(gen_add);
+  else if (name == "saddlv")
+    process_vec_reducl(gen_add, Op::SEXT);
   else if (name == "smaxv")
     process_vec_reduc(gen_smax);
   else if (name == "sminv")
     process_vec_reduc(gen_smin);
+  else if (name == "uaddlv")
+    process_vec_reducl(gen_add, Op::ZEXT);
   else if (name == "umaxv")
     process_vec_reduc(gen_umax);
   else if (name == "uminv")
