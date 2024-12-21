@@ -154,6 +154,7 @@ struct Converter {
   void process_gimple_asm(gimple *stmt);
   void process_cfn_unary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, tree)>& gen_elem);
   void process_cfn_binary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem);
+  void process_cfn_abd(gimple *stmt);
   void process_cfn_add_overflow(gimple *stmt);
   void process_cfn_bit_andn(gimple *stmt);
   void process_cfn_bit_iorn(gimple *stmt);
@@ -4003,6 +4004,28 @@ void Converter::process_cfn_unary(gimple *stmt, const std::function<std::pair<In
     tree2indef.insert({lhs, res_indef});
 }
 
+void Converter::process_cfn_abd(gimple *stmt)
+{
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      Op op = TYPE_UNSIGNED(elem_type) ? Op::ZEXT : Op::SEXT;
+      Inst *sub = bb->build_inst(Op::SUB, elem1, elem2);
+      Inst *neg_sub = bb->build_inst(Op::NEG, sub);
+      Inst *eelem1 = bb->build_inst(op, elem1, elem1->bitsize + 1);
+      Inst *eelem2 = bb->build_inst(op, elem2, elem2->bitsize + 1);
+      Inst *esub = bb->build_inst(Op::SUB, eelem1, eelem2);
+      Inst *zero = bb->value_inst(0, esub->bitsize);
+      Inst *cmp = bb->build_inst(Op::SLT, esub, zero);
+      Inst *res = bb->build_inst(Op::ITE, cmp, neg_sub, sub);
+      res = bb->build_trunc(res, elem1->bitsize);
+      Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      return {res, res_indef};
+    };
+  process_cfn_binary(stmt, gen_elem);
+}
+
 void Converter::process_cfn_add_overflow(gimple *stmt)
 {
   tree arg1_expr = gimple_call_arg(stmt, 0);
@@ -5506,6 +5529,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
 {
   switch (gimple_call_combined_fn(stmt))
     {
+    case CFN_ABD:
+      process_cfn_abd(stmt);
+      break;
     case CFN_ADD_OVERFLOW:
       process_cfn_add_overflow(stmt);
       break;
