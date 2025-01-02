@@ -475,7 +475,8 @@ std::map<Inst *, std::vector<Inst *>, Inst_comp> Converter::prepare_ub(Function 
 		    std::set<Inst*, Inst_comp> tmp;
 		    std::set_intersection(pred_set.begin(), pred_set.end(),
 					  checked_ub.begin(), checked_ub.end(),
-					  std::inserter(tmp, tmp.begin()));
+					  std::inserter(tmp, tmp.begin()),
+					  comp);
 		    checked_ub = tmp;
 		  }
 	      }
@@ -498,7 +499,7 @@ std::map<Inst *, std::vector<Inst *>, Inst_comp> Converter::prepare_ub(Function 
 	    std::vector<Inst*> tmp;
 	    std::set_difference(ub_vec.begin(), ub_vec.end(),
 				checked_ub.begin(), checked_ub.end(),
-				std::back_inserter(tmp));
+				std::back_inserter(tmp), comp);
 	    ub_vec = tmp;
 	  }
 
