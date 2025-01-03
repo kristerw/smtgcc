@@ -1471,6 +1471,15 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
     }
 
   Solver_result result = {Result_status::correct, {}};
+
+  Cache cache(converter.dest_func);
+  if (std::optional<Solver_result> result_cache = cache.get())
+    {
+      if (config.verbose > 0)
+	fprintf(stderr, "SMTGCC: Using cached result\n");
+      return *result_cache;
+    }
+
 #if 0
   auto [stats_cvc5, result_cvc5] = check_refine_cvc5(converter.dest_func);
   stats.cvc5 = stats_cvc5;
@@ -1483,6 +1492,8 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
   if (result_z3.status != Result_status::correct)
     result = result_z3;
 #endif
+
+  cache.set(result);
 
   if (config.verbose > 0)
     {

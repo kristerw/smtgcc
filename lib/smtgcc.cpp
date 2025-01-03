@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cinttypes>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <set>
 #include <time.h>
@@ -143,20 +144,20 @@ Inst_info_validator inst_info_validator;
 
 Config::Config()
 {
-  verbose = 0;
-  char *p = getenv("SMTGCC_VERBOSE");
-  if (p)
+  if (char *p = getenv("SMTGCC_VERBOSE"))
     verbose = atoi(p);
 
-  timeout = 120000;
-  p = getenv("SMTGCC_TIMEOUT");
-  if (p)
+  if (char *p = getenv("SMTGCC_TIMEOUT"))
     timeout = atoi(p);
 
-  memory_limit = 10 * 1024;
-  p = getenv("SMTGCC_MEMORY_LIMIT");
-  if (p)
+  if (char *p = getenv("SMTGCC_MEMORY_LIMIT"))
     memory_limit = atoi(p);
+
+  if (char *p = getenv("SMTGCC_CACHE"))
+    {
+      if (!strcmp(p, "redis"))
+	redis_cache = true;
+    }
 }
 
 Config config;

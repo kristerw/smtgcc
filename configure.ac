@@ -37,6 +37,18 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM([[
 	      [LIBS=$save_LIBS
                AC_MSG_RESULT([no])])
 
+AC_MSG_CHECKING([for -lhiredis])
+save_LIBS=$LIBS
+LIBS="-lhiredis $LIBS"
+AC_LINK_IFELSE([AC_LANG_PROGRAM([[
+          #include <hiredis/hiredis.h>
+	]], [[
+          redisConnect("", 0);
+	]])], [AC_DEFINE([HAVE_HIREDIS], [1], [Define to 1 if you have hiredis.])
+               AC_MSG_RESULT([yes])],
+	      [LIBS=$save_LIBS
+               AC_MSG_RESULT([no])])
+
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT()

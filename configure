@@ -2773,6 +2773,40 @@ fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam \
     conftest$ac_exeext conftest.$ac_ext
 
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for -lhiredis" >&5
+printf %s "checking for -lhiredis... " >&6; }
+save_LIBS=$LIBS
+LIBS="-lhiredis $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+          #include <hiredis/hiredis.h>
+
+int
+main (void)
+{
+
+          redisConnect("", 0);
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_cxx_try_link "$LINENO"
+then :
+
+printf "%s\n" "#define HAVE_HIREDIS 1" >>confdefs.h
+
+               { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+else $as_nop
+  LIBS=$save_LIBS
+               { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+
 ac_config_headers="$ac_config_headers config.h"
 
 ac_config_files="$ac_config_files Makefile"

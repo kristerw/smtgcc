@@ -324,13 +324,15 @@ struct Module {
 struct Config
 {
   Config();
-  int verbose;
+  int verbose = 0;
 
   // SMT solver timeout in ms.
-  int timeout;
+  int timeout = 120000;
 
   // SMT solver memory limit in megabytes.
-  int memory_limit;
+  int memory_limit = 10 * 1024;
+
+  bool redis_cache = false;
 };
 
 extern Config config;
@@ -375,6 +377,18 @@ struct SStats {
 };
 
 uint64_t get_time();
+
+// cache.cpp
+struct Cache
+{
+  Cache(Function *func);
+  std::optional<Solver_result> get();
+  void set(Solver_result result);
+
+private:
+  std::string key;
+  std::string hash(Function *func);
+};
 
 // cfg.cpp
 void clear_dominance(Function *func);

@@ -171,3 +171,4 @@ smtgcc-check-refine has the same limitations as smtgcc-tv.
  * `SMTGCC_VERBOSE` — Print debug information while running. Valid value 0-2, higher value prints more information (Default: 0)
  * `SMTGCC_TIMEOUT` — SMT solver timeout (Default: 120000)
  * `SMTGCC_MEMORY_LIMIT` — SMT solver memory use limit in megabytes (Default: 10240)
+ * `SMTGCC_CACHE` — Set to "redis" to use a Redis database to cache SMT queries. (Default: not caching)
