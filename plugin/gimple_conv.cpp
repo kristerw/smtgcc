@@ -1406,7 +1406,15 @@ Addr Converter::process_array_ref(tree expr, bool is_mem_access)
 	  max_inst = bb->value_inst(max_val, idx->bitsize);
 	}
     }
-  if (max_inst)
+
+  // Check that the index is within range. If the array has no max index,
+  // we instead check that it fits within the memory.
+  // Note: The C++ frontend sets max to -1 for zero-sized arrays, so we
+  // treat -1 as no max index.
+  // TODO: We may want to make the checks more robust, for example, by
+  // checking that the max index is consistent with the size in memory
+  // and fits within the offset instead of checking if it is -1.
+  if (max_inst && !is_value_m1(max_inst))
     {
       Inst *cond = bb->build_inst(Op::ULT, max_inst, idx);
       bb->build_inst(Op::UB, cond);
