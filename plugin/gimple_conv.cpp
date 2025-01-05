@@ -144,6 +144,7 @@ struct Converter {
   std::tuple<Inst *, Inst *, Inst *> process_binary_scalar(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, Inst *arg2, Inst *arg2_indef, Inst *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
   std::pair<Inst *, Inst *> process_binary_vec(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
   std::pair<Inst *, Inst *> process_widen_sum_vec(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type);
+  std::pair<Inst *, Inst *> process_widen_mult_evenodd(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type, bool is_odd);
   Inst *process_ternary(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree arg1_type, tree arg2_type, tree arg3_type);
   Inst *process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree lhs_type, tree arg1_type, tree arg2_type, tree arg3_type);
   std::pair<Inst *, Inst *> process_vec_cond(Inst *arg1, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type);
@@ -3185,6 +3186,12 @@ std::pair<Inst *, Inst *> Converter::process_binary_vec(enum tree_code code, Ins
   if (code == WIDEN_SUM_EXPR)
     return process_widen_sum_vec(arg1, arg1_indef, arg2, arg2_indef,
 				 lhs_type, arg1_type, arg2_type);
+  if (code == VEC_WIDEN_MULT_EVEN_EXPR)
+    return process_widen_mult_evenodd(arg1, arg1_indef, arg2, arg2_indef,
+				      lhs_type, arg1_type, arg2_type, false);
+  if (code == VEC_WIDEN_MULT_ODD_EXPR)
+    return process_widen_mult_evenodd(arg1, arg1_indef, arg2, arg2_indef,
+				      lhs_type, arg1_type, arg2_type, true);
   assert(VECTOR_TYPE_P(lhs_type));
   assert(VECTOR_TYPE_P(arg1_type));
   tree lhs_elem_type = TREE_TYPE(lhs_type);
@@ -3322,6 +3329,49 @@ std::pair<Inst *, Inst *> Converter::process_widen_sum_vec(Inst *arg1, Inst *arg
 	}
     }
   return {arg2, arg2_indef};
+}
+
+std::pair<Inst *, Inst *> Converter::process_widen_mult_evenodd(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type, bool is_odd)
+{
+  assert(VECTOR_TYPE_P(lhs_type));
+  assert(VECTOR_TYPE_P(arg1_type));
+  tree lhs_elem_type = TREE_TYPE(lhs_type);
+  tree arg1_elem_type = TREE_TYPE(arg1_type);
+  tree arg2_elem_type = TREE_TYPE(arg2_type);
+
+  uint32_t elem_bitsize = bitsize_for_type(arg1_elem_type);
+  uint32_t nof_elt = bitsize_for_type(arg1_type) / elem_bitsize;
+
+  Inst *res = nullptr;
+  Inst *res_indef = nullptr;
+  for (uint64_t i = is_odd; i < nof_elt; i += 2)
+    {
+      Inst *a1_indef = nullptr;
+      Inst *a2_indef = nullptr;
+      Inst *a1 = extract_vec_elem(bb, arg1, elem_bitsize, i);
+      if (arg1_indef)
+	a1_indef = extract_vec_elem(bb, arg1_indef, elem_bitsize, i);
+      Inst *a2 = extract_vec_elem(bb, arg2, elem_bitsize, i);
+      if (arg2_indef)
+	a2_indef = extract_vec_elem(bb, arg2_indef, elem_bitsize, i);
+      auto [inst, inst_indef, _] =
+	process_binary_scalar(WIDEN_MULT_EXPR, a1, a1_indef, nullptr,
+			      a2, a2_indef, nullptr,
+			      lhs_elem_type, arg1_elem_type, arg2_elem_type);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+
+      if (arg1_indef || arg2_indef)
+	{
+	  if (res_indef)
+	    res_indef = bb->build_inst(Op::CONCAT, inst_indef, res_indef);
+	  else
+	    res_indef = inst_indef;
+	}
+    }
+  return {res, res_indef};
 }
 
 Inst *Converter::process_ternary(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree arg1_type, tree arg2_type, tree arg3_type)
