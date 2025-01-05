@@ -6839,8 +6839,8 @@ Function *Converter::process_function()
       }
     bb = func->bbs[0];
 
-    process_variables();
     process_func_args();
+    process_variables();
 
     // GCC assumes that __builtin functions have the specified semantics
     // (see GCC PR 112949), so in practice, it is undefined behavior to
