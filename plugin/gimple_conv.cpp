@@ -167,6 +167,7 @@ struct Converter {
   void process_cfn_ctz(gimple *stmt);
   void process_cfn_divmod(gimple *stmt);
   void process_cfn_expect(gimple *stmt);
+  void process_cfn_fabs(gimple *stmt);
   void process_cfn_ffs(gimple *stmt);
   void process_cfn_fmax(gimple *stmt);
   void process_cfn_fmin(gimple *stmt);
@@ -4525,6 +4526,28 @@ void Converter::process_cfn_expect(gimple *stmt)
   tree2instruction.insert({lhs, arg});
 }
 
+void Converter::process_cfn_fabs(gimple *stmt)
+{
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, tree lhs_elem_type)
+    -> std::pair<Inst *, Inst *>
+    {
+      if (state->arch != Arch::gimple)
+	{
+	  // Backends may choose to implement fabs as a bit operation. Skip
+	  // checking if this would generate a non-canonical NaN.
+	  Inst *shift = bb->value_inst(1, elem1->bitsize);
+	  Inst *inst = bb->build_inst(Op::SHL, elem1, shift);
+	  inst = bb->build_inst(Op::LSHR, inst, shift);
+	  constrain_src_value(inst, lhs_elem_type);
+	}
+      Inst *res = bb->build_inst(Op::FABS, elem1);
+      Inst *res_indef = get_res_indef(elem1_indef, lhs_elem_type);
+      return {res, res_indef};
+    };
+  process_cfn_unary(stmt, gen_elem);
+}
+
 void Converter::process_cfn_ffs(gimple *stmt)
 {
   Inst *arg = tree2inst(gimple_call_arg(stmt, 0));
@@ -5590,6 +5613,11 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BUILT_IN_EXPECT:
     case CFN_BUILT_IN_EXPECT_WITH_PROBABILITY:
       process_cfn_expect(stmt);
+      break;
+    case CFN_BUILT_IN_FABSF:
+    case CFN_BUILT_IN_FABS:
+    case CFN_BUILT_IN_FABSL:
+      process_cfn_fabs(stmt);
       break;
     case CFN_BUILT_IN_FFS:
     case CFN_BUILT_IN_FFSL:
