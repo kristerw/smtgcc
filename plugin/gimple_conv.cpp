@@ -193,6 +193,7 @@ struct Converter {
   void process_cfn_unreachable(gimple *stmt);
   void process_cfn_usubc(gimple *stmt);
   void process_cfn_vcond_mask(gimple *stmt);
+  void process_cfn_vec_addsub(gimple *stmt);
   void process_cfn_vec_convert(gimple *stmt);
   void process_cfn_vec_widen(gimple *stmt, Op op, bool high);
   void process_cfn_vec_widen_abd(gimple *stmt, bool high);
@@ -5333,6 +5334,57 @@ void Converter::process_cfn_vcond_mask(gimple *stmt)
     tree2indef.insert({lhs, indef});
 }
 
+void Converter::process_cfn_vec_addsub(gimple *stmt)
+{
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  assert(VECTOR_TYPE_P(TREE_TYPE(arg2_expr)) == VECTOR_TYPE_P(arg1_type));
+  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
+
+  tree elem_type = TREE_TYPE(arg1_type);
+  uint32_t elem_bitsize = bitsize_for_type(elem_type);
+  uint32_t nof_elem = bitsize_for_type(arg1_type) / elem_bitsize;
+
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+  assert(VECTOR_TYPE_P(TREE_TYPE(lhs)) == VECTOR_TYPE_P(arg1_type));
+
+  Inst *res = nullptr;
+  Inst *res_indef = nullptr;
+  for (uint32_t j = 0; j < nof_elem; j++)
+    {
+      Inst *elem1 = extract_vec_elem(bb, arg1, elem_bitsize, j);
+      Inst *elem2 = extract_vec_elem(bb, arg2, elem_bitsize, j);
+      Inst *elem1_indef = nullptr;
+      if (arg1_indef)
+	elem1_indef = extract_vec_elem(bb, arg1_indef, elem_bitsize, j);
+      Inst *elem2_indef = nullptr;
+      if (arg2_indef)
+	elem2_indef = extract_vec_elem(bb, arg2_indef, elem_bitsize, j);
+      Op op = (j & 1) ? Op::FADD : Op::FSUB;
+      Inst *inst = bb->build_inst(op, elem1, elem2);
+      Inst *indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+      if (indef)
+	{
+	  if (res_indef)
+	    res_indef = bb->build_inst(Op::CONCAT, indef, res_indef);
+	  else
+	    res_indef = indef;
+	}
+    }
+  constrain_range(bb, lhs, res);
+  tree2instruction.insert({lhs, res});
+  if (res_indef)
+    tree2indef.insert({lhs, res_indef});
+}
+
 void Converter::process_cfn_vec_convert(gimple *stmt)
 {
   tree arg1_expr = gimple_call_arg(stmt, 0);
@@ -5760,6 +5812,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_VCOND_MASK:
       process_cfn_vcond_mask(stmt);
+      break;
+    case CFN_VEC_ADDSUB:
+      process_cfn_vec_addsub(stmt);
       break;
     case CFN_VEC_CONVERT:
       process_cfn_vec_convert(stmt);
