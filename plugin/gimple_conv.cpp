@@ -109,7 +109,7 @@ struct Converter {
   std::pair<Inst *, Inst *>tree2inst_indef(tree expr);
   std::pair<Inst *, Inst *>tree2inst_prov(tree expr);
   Inst *tree2inst(tree expr);
-  std::tuple<Inst *, Inst *, Inst *> tree2inst_init_var(tree expr);
+  std::tuple<Inst *, Inst *, Inst *> tree2inst_constructor(tree expr);
   Inst *get_res_indef(Inst *arg1_indef, tree lhs_type);
   Inst *get_res_indef(Inst *arg1_indef, Inst *arg2_indef, tree lhs_type);
   Inst *get_res_indef(Inst *arg1_indef, Inst *arg2_indef, Inst *arg3_indef, tree lhs_type);
@@ -1244,11 +1244,11 @@ Inst *Converter::tree2inst(tree expr)
   return inst;
 }
 
-// Processing constructors for global variables may give us more complex expr
-// than what we get from normal operations. For example, initializing an array
-// of pointers may have an initializer &a-&b that in the function body would
-// be calculated by its own stmt.
-std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_init_var(tree expr)
+// Processing constructors may give us more complex expr than what we get
+// from normal operations. For example, initializing an array of pointers
+// may have an initializer &a-&b that in the function body would be
+// calculated by its own stmt.
+std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_constructor(tree expr)
 {
   check_type(TREE_TYPE(expr));
 
@@ -1259,8 +1259,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_init_var(tree expr)
       tree arg2_expr = TREE_OPERAND(expr, 1);
       tree arg1_type = TREE_TYPE(arg1_expr);
       tree arg2_type = TREE_TYPE(arg2_expr);
-      auto [arg1, arg1_indef, arg1_prov] = tree2inst_init_var(arg1_expr);
-      auto [arg2, arg2_indef, arg2_prov] = tree2inst_init_var(arg2_expr);
+      auto [arg1, arg1_indef, arg1_prov] = tree2inst_constructor(arg1_expr);
+      auto [arg2, arg2_indef, arg2_prov] = tree2inst_constructor(arg2_expr);
       return process_binary_scalar(code, arg1, arg1_indef, arg1_prov, arg2,
 				   arg2_indef, arg2_prov, TREE_TYPE(expr),
 				   arg1_type, arg2_type);
@@ -1275,7 +1275,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_init_var(tree expr)
     case CONVERT_EXPR:
       {
 	tree arg_expr = TREE_OPERAND(expr, 0);
-	auto [arg, arg_indef, arg_prov] = tree2inst_init_var(arg_expr);
+	auto [arg, arg_indef, arg_prov] = tree2inst_constructor(arg_expr);
 	return process_unary_scalar(code, arg, arg_indef, arg_prov,
 				    TREE_TYPE(expr), TREE_TYPE(arg_expr));
       }
@@ -3537,7 +3537,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::vector_constructor(tree expr)
   // we may create a vector by concatenating a scalar with a vector.
   FOR_EACH_CONSTRUCTOR_VALUE(CONSTRUCTOR_ELTS(expr), idx, value)
     {
-      auto [elem, elem_indef] = tree2inst_indef(value);
+      auto [elem, elem_indef, elem_prov] = tree2inst_constructor(value);
       if (elem_indef)
 	{
 	  any_elem_has_indef = true;
@@ -6184,7 +6184,7 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
       || POINTER_TYPE_P(type)
       || VECTOR_TYPE_P(type))
     {
-      auto [value, indef, prov] = tree2inst_init_var(initial);
+      auto [value, indef, prov] = tree2inst_constructor(initial);
       value = to_mem_repr(value, type);
       store_value(mem_inst, value);
       return;
@@ -6249,7 +6249,7 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
 	  else
 	    {
 	      uint64_t bitsize = bitsize_for_type(elem_type);
-	      auto [value_inst, indef, prov] = tree2inst_init_var(value);
+	      auto [value_inst, indef, prov] = tree2inst_constructor(value);
 	      size = (bitsize + bit_offset + 7) / 8;
 	      if (DECL_BIT_FIELD_TYPE(index))
 		{
