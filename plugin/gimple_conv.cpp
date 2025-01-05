@@ -179,6 +179,7 @@ struct Converter {
   void process_cfn_mempcpy(gimple *stmt);
   void process_cfn_memset(gimple *stmt);
   void process_cfn_mul_overflow(gimple *stmt);
+  void process_cfn_mulh(gimple *stmt);
   void process_cfn_nan(gimple *stmt);
   void process_cfn_parity(gimple *stmt);
   void process_cfn_popcount(gimple *stmt);
@@ -5012,6 +5013,25 @@ void Converter::process_cfn_mul_overflow(gimple *stmt)
     tree2indef.insert({lhs, res_indef});
 }
 
+void Converter::process_cfn_mulh(gimple *stmt)
+{
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      Op op = TYPE_UNSIGNED(elem_type) ? Op::ZEXT : Op::SEXT;
+      Inst *eelem1 = bb->build_inst(op, elem1, 2 * elem1->bitsize);
+      Inst *eelem2 = bb->build_inst(op, elem2, 2 * elem2->bitsize);
+      Inst *res = bb->build_inst(Op::MUL, eelem1, eelem2);
+      uint32_t hi = res->bitsize - 1;
+      uint32_t lo = res->bitsize / 2;
+      res = bb->build_inst(Op::EXTRACT, res, hi, lo);
+      Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      return {res, res_indef};
+    };
+  process_cfn_binary(stmt, gen_elem);
+}
+
 void Converter::process_cfn_nan(gimple *stmt)
 {
   // TODO: Implement the argument setting NaN payload when support for
@@ -5717,6 +5737,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_MUL_OVERFLOW:
       process_cfn_mul_overflow(stmt);
+      break;
+    case CFN_MULH:
+      process_cfn_mulh(stmt);
       break;
     case CFN_REDUC_AND:
     case CFN_REDUC_IOR:
