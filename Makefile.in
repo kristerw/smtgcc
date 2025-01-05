@@ -28,7 +28,6 @@ else ifeq ($(findstring riscv, $(ARCH)), riscv)
 endif
 
 lib_sources = \
-	lib/cache.cpp \
 	lib/cfg.cpp \
 	lib/check.cpp \
 	lib/dead_code_elimination.cpp \
@@ -104,7 +103,7 @@ lib/cache.o: lib/cache.cpp
 	$(CXX) $(CXXFLAGS) -I$(GCCPLUGINS_DIR)/include -c $< -o $@
 lib/md5.o: lib/md5.c
 	$(CXX) -xc -DHAVE_CONFIG_H -D HAVE_LIMITS_H -DHAVE_SYS_TYPES_H -DHAVE_STDINT_H -DSTDC_HEADERS -DHAVE_MEMCPY $(CFLAGS) -I$(GCCPLUGINS_DIR)/include -c $< -o $@
-lib_objects += lib/md5.o
+lib_objects += lib/cache.o lib/md5.o
 
 smtgcc-check-refine: tools/smtgcc-check-refine.o $(lib_objects)
 	$(CXX) $(CXXFLAGS) tools/smtgcc-check-refine.o -o $@ $(lib_objects) $(LIBS)
