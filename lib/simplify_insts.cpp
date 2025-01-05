@@ -1445,6 +1445,14 @@ Inst *simplify_smul_wraps(Inst *inst)
       return new_inst3;
     }
 
+  // smul_wraps (sext x), (sext y) -> false if the extended x and y have
+  // at least 2x the number of bits as x and y.
+  if (arg1->op == Op::SEXT
+      && arg1->bitsize >= 2 * arg1->args[0]->bitsize
+      && arg2->op == Op::SEXT
+      && arg2->bitsize >= 2 * arg2->args[0]->bitsize)
+    return inst->bb->value_inst(0, 1);
+
   return inst;
 }
 
