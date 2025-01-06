@@ -128,7 +128,7 @@ struct Converter {
   std::tuple<Inst *, Inst *, Inst *> type_convert(Inst *inst, Inst *indef, Inst *prov, tree src_type, tree dest_type);
   Inst *type_convert(Inst *inst, tree src_type, tree dest_type);
   std::pair<Inst *, Inst *> process_unary_bool(enum tree_code code, Inst *arg1, Inst *arg1_indef, tree lhs_type, tree arg1_type);
-  void check_wide_bool(Inst *inst, Inst *indef, tree type);
+  void check_wide_bool(Inst *inst, tree type);
   std::tuple<Inst *, Inst *, Inst *> process_unary_int(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type);
   Inst *process_unary_scalar(enum tree_code code, Inst *arg1, tree lhs_type, tree arg1_type);
   std::tuple<Inst *, Inst *, Inst *> process_unary_scalar(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type);
@@ -147,7 +147,7 @@ struct Converter {
   std::pair<Inst *, Inst *> process_widen_mult_evenodd(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type, bool is_odd);
   Inst *process_ternary(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree arg1_type, tree arg2_type, tree arg3_type);
   Inst *process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree lhs_type, tree arg1_type, tree arg2_type, tree arg3_type);
-  std::pair<Inst *, Inst *> process_vec_cond(Inst *arg1, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type);
+  std::pair<Inst *, Inst *> process_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type);
   std::pair<Inst *, Inst *> process_vec_perm_expr(gimple *stmt);
   std::tuple<Inst *, Inst *, Inst *> vector_constructor(tree expr);
   void process_constructor(tree lhs, tree rhs);
@@ -453,6 +453,7 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
       Op op = TYPE_UNSIGNED(type) ? Op::ZEXT : Op::SEXT;
       tmp = bb->build_inst(op, tmp, inst->bitsize);
       bb->build_inst(Op::UB, bb->build_inst(Op::NE, inst, tmp));
+      return;
     }
 
   if (TREE_CODE(type) == RECORD_TYPE)
@@ -2094,7 +2095,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 		prov = extract_id(inst);
 	    }
 	  if (TREE_CODE(dest_type) == BOOLEAN_TYPE && dest_prec > 1)
-	    check_wide_bool(inst, res_indef, dest_type);
+	    check_wide_bool(inst, dest_type);
 	  return {inst, res_indef, prov};
 	}
       if (FLOAT_TYPE_P(dest_type))
@@ -2127,8 +2128,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	  Inst *is_in_range = bb->build_inst(Op::AND, clow, chigh);
 	  Inst *is_ub = bb->build_inst(Op::NOT, is_in_range);
 	  bb->build_inst(Op::UB, is_ub);
-	  if (indef)
-	    build_ub_if_not_zero(indef);
 
 	  op = TYPE_UNSIGNED(dest_type) ? Op::F2U : Op::F2S;
 	  Inst *res = bb->build_inst(op, inst, bitsize_for_type(dest_type));
@@ -2153,15 +2152,8 @@ Inst *Converter::type_convert(Inst *inst, tree src_type, tree dest_type)
   return std::get<0>(type_convert(inst, nullptr, nullptr, src_type, dest_type));
 }
 
-void Converter::check_wide_bool(Inst *inst, Inst *indef, tree type)
+void Converter::check_wide_bool(Inst *inst, tree type)
 {
-  if (indef)
-    {
-      Inst *zero = bb->value_inst(0, indef->bitsize);
-      Inst *cond = bb->build_inst(Op::NE, indef, zero);
-      bb->build_inst(Op::UB, cond);
-    }
-
   Inst *false_inst = bb->value_inst(0, inst->bitsize);
   Inst *true_inst = bb->value_inst(1, inst->bitsize);
   if (!TYPE_UNSIGNED(type))
@@ -2180,7 +2172,7 @@ std::pair<Inst *, Inst *> Converter::process_unary_bool(enum tree_code code, Ins
     process_unary_int(code, arg1, arg1_indef, nullptr, lhs_type, arg1_type);
 
   if (lhs->bitsize > 1)
-    check_wide_bool(lhs, lhs_indef, lhs_type);
+    check_wide_bool(lhs, lhs_type);
 
   assert(lhs->bitsize == TYPE_PRECISION(lhs_type));
   assert(!lhs_indef || lhs_indef->bitsize == TYPE_PRECISION(lhs_type));
@@ -2213,21 +2205,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_int(enum tree_code c
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
 	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
-	    if (arg1_indef)
-	      {
-		// Check if any assignment of values for the indef bits might
-		// give us the min_int value.
-		Inst *mask = bb->build_inst(Op::NOT, arg1_indef);
-		Inst *val = bb->build_inst(Op::AND, min_int_inst, mask);
-		Inst *masked_arg1 = bb->build_inst(Op::AND, arg1, mask);
-		Inst *cond = bb->build_inst(Op::EQ, masked_arg1, val);
-		bb->build_inst(Op::UB, cond);
-	      }
-	    else
-	      {
-		Inst *cond = bb->build_inst(Op::EQ, arg1, min_int_inst);
-		bb->build_inst(Op::UB, cond);
-	      }
+	    Inst *cond = bb->build_inst(Op::EQ, arg1, min_int_inst);
+	    bb->build_inst(Op::UB, cond);
 	  }
 	assert(!TYPE_UNSIGNED(arg1_type));
 	Inst *neg = bb->build_inst(Op::NEG, arg1);
@@ -2249,17 +2228,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_int(enum tree_code c
       if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	{
 	  Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
-	  if (arg1_indef)
-	    {
-	      // Check if any assignment of values for the indef bits might
-	      // give us the min_int value.
-	      Inst *mask = bb->build_inst(Op::NOT, arg1_indef);
-	      Inst *val = bb->build_inst(Op::AND, min_int_inst, mask);
-	      Inst *masked_arg1 = bb->build_inst(Op::AND, arg1, mask);
-	      bb->build_inst(Op::UB, bb->build_inst(Op::EQ, masked_arg1, val));
-	    }
-	  else
-	    bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg1, min_int_inst));
+	  bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg1, min_int_inst));
 	}
       return {bb->build_inst(Op::NEG, arg1), res_indef, nullptr};
     default:
@@ -2657,7 +2626,7 @@ std::pair<Inst *, Inst *> Converter::process_binary_bool(enum tree_code code, In
 	lhs_indef = bb->build_inst(Op::SEXT, lhs_indef, precision);
     }
   else if (lhs->bitsize > 1)
-    check_wide_bool(lhs, lhs_indef, lhs_type);
+    check_wide_bool(lhs, lhs_type);
 
   assert(lhs->bitsize == precision);
   assert(!lhs_indef || lhs_indef->bitsize == precision);
@@ -2777,14 +2746,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 					    arg2_unini,
 					    bb->build_inst(Op::OR, arg1_unini,
 							   arg1_nonzero)));
-
-	    if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
-	      {
-		bb->build_inst(Op::UB, is_indef);
-		res_indef = nullptr;
-	      }
-	    else
-	      res_indef = bb->build_inst(Op::SEXT, is_indef, arg1->bitsize);
+	    res_indef = bb->build_inst(Op::SEXT, is_indef, arg1->bitsize);
 	  }
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
@@ -2794,10 +2756,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       }
     case EXACT_DIV_EXPR:
       {
-	if (arg2_indef)
-	  build_ub_if_not_zero(arg2_indef);
-	Inst *res_indef = get_res_indef(arg1_indef, lhs_type);
-
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
 	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
@@ -2805,12 +2763,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	    Inst *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
 	    Inst *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
 	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
-	    if (arg1_indef)
-	      {
-		Inst *zero = bb->value_inst(0, arg1_indef->bitsize);
-		Inst *cond3 = bb->build_inst(Op::NE, arg1_indef, zero);
-		bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond2, cond3));
-	      }
 	  }
 	Inst *zero = bb->value_inst(0, arg1->bitsize);
 	Op rem_op = is_unsigned ? Op::UREM : Op::SREM;
@@ -2820,14 +2772,11 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	Inst *ub_cond2 = bb->build_inst(Op::EQ, arg2, zero);
 	bb->build_inst(Op::UB, ub_cond2);
 	Op div_op = is_unsigned ? Op::UDIV : Op::SDIV;
+	Inst *res_indef = get_res_indef(arg1_indef, lhs_type);
 	return {bb->build_inst(div_op, arg1, arg2), res_indef, nullptr};
       }
     case TRUNC_DIV_EXPR:
       {
-	if (arg2_indef)
-	  build_ub_if_not_zero(arg2_indef);
-	Inst *res_indef = get_res_indef(arg1_indef, lhs_type);
-
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
 	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
@@ -2835,25 +2784,16 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	    Inst *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
 	    Inst *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
 	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
-	    if (arg1_indef)
-	      {
-		Inst *zero = bb->value_inst(0, arg1_indef->bitsize);
-		Inst *cond3 = bb->build_inst(Op::NE, arg1_indef, zero);
-		bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond2, cond3));
-	      }
 	  }
 	Inst *zero_inst = bb->value_inst(0, arg1->bitsize);
 	Inst *cond = bb->build_inst(Op::EQ, arg2, zero_inst);
 	bb->build_inst(Op::UB, cond);
 	Op op = is_unsigned ? Op::UDIV : Op::SDIV;
+	Inst *res_indef = get_res_indef(arg1_indef, lhs_type);
 	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
       }
     case TRUNC_MOD_EXPR:
       {
-	if (arg2_indef)
-	  build_ub_if_not_zero(arg2_indef);
-	Inst *res_indef = get_res_indef(arg1_indef, lhs_type);
-
 	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
 	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
@@ -2861,17 +2801,12 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	    Inst *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
 	    Inst *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
 	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
-	    if (arg1_indef)
-	      {
-		Inst *zero = bb->value_inst(0, arg1_indef->bitsize);
-		Inst *cond3 = bb->build_inst(Op::NE, arg1_indef, zero);
-		bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond2, cond3));
-	      }
 	  }
 	Inst *zero_inst = bb->value_inst(0, arg1->bitsize);
 	Inst *cond = bb->build_inst(Op::EQ, arg2, zero_inst);
 	bb->build_inst(Op::UB, cond);
 	Op op = is_unsigned ? Op::UREM : Op::SREM;
+	Inst *res_indef = get_res_indef(arg1_indef, lhs_type);
 	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
       }
     case NE_EXPR:
@@ -2985,14 +2920,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	  prov = arg2_prov;
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
-	  {
-	    bb->build_inst(Op::UB, bb->build_inst(Op::SSUB_WRAPS, arg1, arg2));
-	    if (arg1_indef)
-	      build_ub_if_not_zero(arg1_indef);
-	    if (arg2_indef)
-	      build_ub_if_not_zero(arg2_indef);
-	    res_indef = nullptr;
-	  }
+	  bb->build_inst(Op::UB, bb->build_inst(Op::SSUB_WRAPS, arg1, arg2));
 	return {bb->build_inst(Op::SUB, arg1, arg2), res_indef, prov};
       }
     case PLUS_EXPR:
@@ -3006,14 +2934,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	  prov = arg2_prov;
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
-	  {
-	    bb->build_inst(Op::UB, bb->build_inst(Op::SADD_WRAPS, arg1, arg2));
-	    if (arg1_indef)
-	      build_ub_if_not_zero(arg1_indef);
-	    if (arg2_indef)
-	      build_ub_if_not_zero(arg2_indef);
-	    res_indef = nullptr;
-	  }
+	  bb->build_inst(Op::UB, bb->build_inst(Op::SADD_WRAPS, arg1, arg2));
 	return {bb->build_inst(Op::ADD, arg1, arg2), res_indef, prov};
       }
     case GE_EXPR:
@@ -3040,8 +2961,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       {
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	if (arg2_indef)
-	  build_ub_if_not_zero(arg2_indef);
 	res_indef = get_res_indef(arg1_indef, lhs_type);
 	arg2 = type_convert(arg2, arg2_type, arg1_type);
 	return {bb->build_inst(Op::SHL, arg1, arg2), res_indef, nullptr};
@@ -3077,8 +2996,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       {
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	if (arg2_indef)
-	  build_ub_if_not_zero(arg2_indef);
 	res_indef = get_res_indef(arg1_indef, lhs_type);
 	arg2 = type_convert(arg2, arg2_type, arg1_type);
 	Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
@@ -3090,8 +3007,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       {
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	if (arg2_indef)
-	  build_ub_if_not_zero(arg2_indef);
 	res_indef = get_res_indef(arg1_indef, lhs_type);
 	arg2 = type_convert(arg2, arg2_type, arg1_type);
 	Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
@@ -3106,8 +3021,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       {
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	if (arg2_indef)
-	  build_ub_if_not_zero(arg2_indef);
 	res_indef = get_res_indef(arg1_indef, lhs_type);
 	Op op = is_unsigned ? Op::LSHR : Op::ASHR;
 	arg2 = type_convert(arg2, arg2_type, arg1_type);
@@ -3464,7 +3377,7 @@ Inst *Converter::process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2
   return res;
 }
 
-std::pair<Inst *, Inst *> Converter::process_vec_cond(Inst *arg1, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type)
+std::pair<Inst *, Inst *> Converter::process_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type)
 {
   assert(VECTOR_TYPE_P(arg1_type));
   assert(VECTOR_TYPE_P(arg2_type));
@@ -3495,24 +3408,33 @@ std::pair<Inst *, Inst *> Converter::process_vec_cond(Inst *arg1, Inst *arg2, In
 	a1 = bb->build_extract_bit(a1, 0);
       Inst *a2 = extract_vec_elem(bb, arg2, elem_bitsize2, i);
       Inst *a3 = extract_vec_elem(bb, arg3, elem_bitsize2, i);
-
-      if (arg2_indef)
-	{
-	  Inst *a2_indef = extract_vec_elem(bb, arg2_indef, elem_bitsize2, i);
-	  Inst *a3_indef = extract_vec_elem(bb, arg3_indef, elem_bitsize2, i);
-	  Inst *indef = bb->build_inst(Op::ITE, a1, a2_indef, a3_indef);
-
-	  if (res_indef)
-	    res_indef = bb->build_inst(Op::CONCAT, indef, res_indef);
-	  else
-	    res_indef = indef;
-	}
-
       Inst *inst = bb->build_inst(Op::ITE, a1, a2, a3);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
 	res = inst;
+
+      Inst *indef = nullptr;
+      if (arg1_indef)
+	{
+	  Inst *a1_indef = extract_vec_elem(bb, arg1_indef, elem_bitsize1, i);
+	  if (TYPE_PRECISION(arg1_elem_type) != 1)
+	    a1_indef = bb->build_extract_bit(a1_indef, 0);
+	  indef = get_res_indef(arg1_indef, arg2_elem_type);
+	}
+      if (arg2_indef)
+	{
+	  Inst *a2_indef = extract_vec_elem(bb, arg2_indef, elem_bitsize2, i);
+	  Inst *a3_indef = extract_vec_elem(bb, arg3_indef, elem_bitsize2, i);
+	  indef = bb->build_inst(Op::ITE, a1, a2_indef, a3_indef);
+	}
+      if (indef)
+	{
+	  if (res_indef)
+	    res_indef = bb->build_inst(Op::CONCAT, indef, res_indef);
+	  else
+	    res_indef = indef;
+	}
     }
 
   return {res, res_indef};
@@ -3717,7 +3639,8 @@ void Converter::process_gimple_assign(gimple *stmt)
 	  std::tie(inst, indef) = process_vec_perm_expr(stmt);
 	else if (code == VEC_COND_EXPR)
 	  {
-	    Inst *arg1 = tree2inst(gimple_assign_rhs1(stmt));
+	    auto [arg1, arg1_indef] =
+	      tree2inst_indef(gimple_assign_rhs1(stmt));
 	    auto [arg2, arg2_indef] =
 	      tree2inst_indef(gimple_assign_rhs2(stmt));
 	    auto [arg3, arg3_indef] =
@@ -3725,28 +3648,40 @@ void Converter::process_gimple_assign(gimple *stmt)
 	    tree arg1_type = TREE_TYPE(gimple_assign_rhs1(stmt));
 	    tree arg2_type = TREE_TYPE(gimple_assign_rhs2(stmt));
 	    std::tie(inst, indef) =
-	      process_vec_cond(arg1, arg2, arg2_indef, arg3, arg3_indef,
-			       arg1_type, arg2_type);
+	      process_vec_cond(arg1, arg1_indef, arg2, arg2_indef,
+			       arg3, arg3_indef, arg1_type, arg2_type);
 	  }
 	else if (code == COND_EXPR)
 	  {
-	    tree rhs1 = gimple_assign_rhs1(stmt);
-	    assert(TREE_CODE(TREE_TYPE(rhs1)) == BOOLEAN_TYPE);
-	    Inst *arg1 = tree2inst(rhs1);
-	    if (TYPE_PRECISION(TREE_TYPE(rhs1)) != 1)
-	      arg1 = bb->build_extract_bit(arg1, 0);
+	    tree rhs1_type = TREE_TYPE(gimple_assign_rhs1(stmt));
+	    tree rhs2_type = TREE_TYPE(gimple_assign_rhs2(stmt));
+	    assert(TREE_CODE(rhs1_type) == BOOLEAN_TYPE);
+	    auto [arg1, arg1_indef, arg1_prov] =
+	      tree2inst_indef_prov(gimple_assign_rhs1(stmt));
+	    if (TYPE_PRECISION(rhs1_type) != 1)
+	      {
+		arg1 = bb->build_extract_bit(arg1, 0);
+		if (arg1_indef)
+		  arg1_indef = bb->build_extract_bit(arg1_indef, 0);
+	      }
 	    auto [arg2, arg2_indef, arg2_prov] =
 	      tree2inst_indef_prov(gimple_assign_rhs2(stmt));
 	    auto [arg3, arg3_indef, arg3_prov] =
 	      tree2inst_indef_prov(gimple_assign_rhs3(stmt));
+	    if (arg1_indef)
+	      indef = get_res_indef(arg1_indef, rhs2_type);
 	    if (arg2_indef || arg3_indef)
 	      {
 		if (!arg2_indef)
 		  arg2_indef = bb->value_inst(0, arg2->bitsize);
 		if (!arg3_indef)
 		  arg3_indef = bb->value_inst(0, arg3->bitsize);
-		indef =
+		Inst *arg_indef =
 		  bb->build_inst(Op::ITE, arg1, arg2_indef, arg3_indef);
+		if (indef)
+		  indef = bb->build_inst(Op::OR, indef, arg_indef);
+		else
+		  indef = arg_indef;
 	      }
 	    if (arg2_prov && arg3_prov)
 	      prov = bb->build_inst(Op::ITE, arg1, arg2_prov, arg3_prov);
@@ -4336,7 +4271,7 @@ void Converter::process_cfn_cond(gimple *stmt)
 {
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
-  Inst *arg1 = tree2inst(arg1_expr);
+  auto[arg1, arg1_indef] = tree2inst_indef(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
   tree arg2_type = TREE_TYPE(arg2_expr);
   auto[arg2, arg2_indef] = tree2inst_indef(arg2_expr);
@@ -4406,7 +4341,7 @@ void Converter::process_cfn_cond(gimple *stmt)
   if (VECTOR_TYPE_P(arg1_type))
     {
       std::tie(ret_inst, ret_indef) =
-	process_vec_cond(arg1, op_inst, op_indef, arg4, arg4_indef,
+	process_vec_cond(arg1, arg1_indef, op_inst, op_indef, arg4, arg4_indef,
 			 arg1_type, arg4_type);
     }
   else
@@ -5373,10 +5308,10 @@ void Converter::process_cfn_vcond_mask(gimple *stmt)
   if (!lhs)
     return;
 
-  Inst *arg1 = tree2inst(arg1_expr);
+  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
   auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
   auto [arg3, arg3_indef] = tree2inst_indef(arg3_expr);
-  auto [inst, indef] = process_vec_cond(arg1, arg2, arg2_indef,
+  auto [inst, indef] = process_vec_cond(arg1, arg1_indef, arg2, arg2_indef,
 					arg3, arg3_indef, arg1_type,
 					arg2_type);
   constrain_range(bb, lhs, inst);
@@ -5467,8 +5402,9 @@ void Converter::process_cfn_vec_set(gimple *stmt)
   uint32_t nof_elem = bitsize_for_type(arg1_type) / elem_bitsize;
   assert(elem_bitsize == bitsize_for_type(TREE_TYPE(arg2_expr)));
 
-  if (arg3_indef)
-    build_ub_if_not_zero(arg3_indef);
+  Inst *nof = bb->value_inst(nof_elem, arg3->bitsize);
+  Inst *in_range = bb->build_inst(Op::ULT, arg3, nof);
+  bb->build_inst(Op::UB, bb->build_inst(Op::NOT, in_range));
 
   if (arg1_indef || arg2_indef)
     {
