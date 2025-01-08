@@ -4802,6 +4802,8 @@ void Parser::parse_data(std::vector<unsigned char>& data)
 
 	  skip_line();
 	}
+      else if (cmd == ".base64")
+	throw Parse_error(".base64 not supported yet", line_number);
       else
 	{
 	  pos = start_pos;
@@ -5022,8 +5024,9 @@ void Parser::parse_rodata()
 
 	      parse_data(sym_name2data[label_name]);
 
-	      // TODO: Change to check.
-	      assert(!sym_name2data[label_name].empty());
+	      if (sym_name2data[label_name].empty())
+		throw Parse_error("Failed to parse data for " + label_name,
+				  line_number);
 
 	      continue;
 	    }
