@@ -3841,6 +3841,8 @@ void Parser::parse_vector_op()
     process_vec_binary(gen_fmax);
   else if (name == "fminnm")
     process_vec_binary(gen_fmin);
+  else if (name == "fmov")
+    process_vec_mov();
   else if (name == "fmul")
     process_vec_binary(Op::FMUL);
   else if (name == "fneg")
