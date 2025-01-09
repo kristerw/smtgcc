@@ -4494,6 +4494,10 @@ void Parser::parse_function()
   // SIMD reduce
   else if (name == "addv")
     process_vec_reduc(gen_add);
+  else if (name == "fmaxnmv")
+    process_vec_reduc(gen_fmax);
+  else if (name == "fminnmv")
+    process_vec_reduc(gen_fmin);
   else if (name == "saddlv")
     process_vec_reducl(gen_add, Op::SEXT);
   else if (name == "smaxv")
