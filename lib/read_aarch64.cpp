@@ -4480,6 +4480,10 @@ void Parser::parse_function()
   // SIMD pairwise arithmetic
   else if (name == "addp")
     process_vec_reduc(gen_add);
+  else if (name == "fmaxnmp")
+    process_vec_reduc(gen_fmax);
+  else if (name == "fminnmp")
+    process_vec_reduc(gen_fmin);
 
   // SIMD unary
   else if (name == "sqxtn")
