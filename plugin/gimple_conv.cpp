@@ -189,6 +189,7 @@ struct Converter {
   void process_cfn_signbit(gimple *stmt);
   void process_cfn_sub_overflow(gimple *stmt);
   void process_cfn_reduc(gimple *stmt);
+  void process_cfn_reduc_fminmax(gimple *stmt);
   void process_cfn_trap(gimple *stmt);
   void process_cfn_uaddc(gimple *stmt);
   void process_cfn_unreachable(gimple *stmt);
@@ -351,6 +352,14 @@ Inst *extract_vec_elem(Basic_block *bb, Inst *inst, uint32_t elem_bitsize, uint3
   Inst *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
   Inst *low = bb->value_inst(idx * elem_bitsize, 32);
   return bb->build_inst(Op::EXTRACT, inst, high, low);
+}
+
+std::tuple<Inst *, Inst *> extract_vec_elem(Basic_block *bb, Inst *inst, Inst *indef, uint32_t elem_bitsize, uint32_t idx)
+{
+  inst = extract_vec_elem(bb, inst, elem_bitsize, idx);
+  if (indef)
+    indef = extract_vec_elem(bb, indef, elem_bitsize, idx);
+  return {inst, indef};
 }
 
 std::tuple<Inst *, Inst *, Inst *> extract_vec_elem(Basic_block *bb, Inst *inst, Inst *indef, Inst *prov, uint32_t elem_bitsize, uint32_t idx)
@@ -5281,6 +5290,90 @@ void Converter::process_cfn_reduc(gimple *stmt)
     }
 }
 
+void Converter::process_cfn_reduc_fminmax(gimple *stmt)
+{
+  auto gen_elem_fmin =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      Inst *is_nan = bb->build_inst(Op::IS_NAN, elem2);
+      Inst *cmp = bb->build_inst(Op::FLT, elem1, elem2);
+      Inst *min1 = bb->build_inst(Op::ITE, cmp, elem1, elem2);
+      Inst *min2 = bb->build_inst(Op::ITE, is_nan, elem1, min1);
+
+      // 0.0 and -0.0 is equal as floating point values, and fmin(0.0, -0.0)
+      // may return eiter of them. But we treat them as 0.0 > -0.0 here,
+      // otherwise we will report miscompilations when GCC switch the order
+      // of the arguments.
+      Inst *zero = bb->value_inst(0, elem1->bitsize);
+      Inst *is_zero1 = bb->build_inst(Op::FEQ, elem1, zero);
+      Inst *is_zero2 = bb->build_inst(Op::FEQ, elem2, zero);
+      Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
+      Inst *cmp2 = bb->build_inst(Op::SLT, elem1, elem2);
+      Inst *min3 = bb->build_inst(Op::ITE, cmp2, elem1, elem2);
+
+      Inst *res = bb->build_inst(Op::ITE, is_zero, min3, min2);
+      Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      return {res, res_indef};
+    };
+  auto gen_elem_fmax =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      Inst *is_nan = bb->build_inst(Op::IS_NAN, elem2);
+      Inst *cmp = bb->build_inst(Op::FLT, elem2, elem1);
+      Inst *max1 = bb->build_inst(Op::ITE, cmp, elem1, elem2);
+      Inst *max2 = bb->build_inst(Op::ITE, is_nan, elem1, max1);
+
+      // 0.0 and -0.0 is equal as floating point values, and fmax(0.0, -0.0)
+      // may return eiter of them. But we treat them as 0.0 > -0.0 here,
+      // otherwise we will report miscompilations when GCC switch the order
+      // of the arguments.
+      Inst *zero = bb->value_inst(0, elem1->bitsize);
+      Inst *is_zero1 = bb->build_inst(Op::FEQ, elem1, zero);
+      Inst *is_zero2 = bb->build_inst(Op::FEQ, elem2, zero);
+      Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
+      Inst *cmp2 = bb->build_inst(Op::SLT, elem2, elem1);
+      Inst *max3 = bb->build_inst(Op::ITE, cmp2, elem1, elem2);
+
+      Inst *res =  bb->build_inst(Op::ITE, is_zero, max3, max2);
+      Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      return {res, res_indef};
+    };
+
+  tree arg_expr = gimple_call_arg(stmt, 0);
+  tree arg_type = TREE_TYPE(arg_expr);
+  assert(VECTOR_TYPE_P(arg_type));
+  tree elem_type = TREE_TYPE(arg_type);
+  auto[arg, arg_indef] = tree2inst_indef(arg_expr);
+  tree lhs = gimple_call_lhs(stmt);
+
+  combined_fn code = gimple_call_combined_fn(stmt);
+  assert(code == CFN_REDUC_FMIN || code == CFN_REDUC_FMAX);
+
+  uint32_t elem_bitsize = bitsize_for_type(elem_type);
+  uint32_t nof_elt = bitsize_for_type(arg_type) / elem_bitsize;
+  auto [inst, indef] = extract_vec_elem(bb, arg, arg_indef, elem_bitsize, 0);
+  for (uint64_t i = 1; i < nof_elt; i++)
+    {
+      auto [elem, elem_indef] =
+	extract_vec_elem(bb, arg, arg_indef, elem_bitsize, i);
+      if (code == CFN_REDUC_FMIN)
+	std::tie(inst, indef) =
+	  gen_elem_fmin(inst, indef, elem, elem_indef, elem_type);
+      else
+	std::tie(inst, indef) =
+	  gen_elem_fmax(inst, indef, elem, elem_indef, elem_type);
+    }
+
+  if (lhs)
+    {
+      tree2instruction.insert({lhs, inst});
+      if (indef)
+	tree2indef.insert({lhs, indef});
+    }
+}
+
 void Converter::process_cfn_trap(gimple *)
 {
   // TODO: Some passes add __builtin_trap for cases that are UB (so that
@@ -5841,6 +5934,10 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_REDUC_PLUS:
     case CFN_REDUC_XOR:
       process_cfn_reduc(stmt);
+      break;
+    case CFN_REDUC_FMIN:
+    case CFN_REDUC_FMAX:
+      process_cfn_reduc_fminmax(stmt);
       break;
     case CFN_SUB_OVERFLOW:
       process_cfn_sub_overflow(stmt);
