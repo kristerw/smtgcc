@@ -4096,6 +4096,8 @@ void Parser::parse_function()
   std::string_view name = get_name(0);
   if (name.starts_with(".cfi"))
     ;
+  else if (name.starts_with(".LF"))
+    ;
   else if (name.starts_with(".p2align"))
     ;
   else if (name == ".section")
