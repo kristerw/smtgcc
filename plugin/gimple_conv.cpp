@@ -2754,61 +2754,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 
 	return {bb->build_inst(Op::MUL, arg1, arg2), res_indef, nullptr};
       }
-    case EXACT_DIV_EXPR:
-      {
-	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
-	  {
-	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
-	    Inst *minus1_inst = bb->value_inst(-1, arg1->bitsize);
-	    Inst *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
-	    Inst *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
-	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
-	  }
-	Inst *zero = bb->value_inst(0, arg1->bitsize);
-	Op rem_op = is_unsigned ? Op::UREM : Op::SREM;
-	Inst *rem = bb->build_inst(rem_op, arg1, arg2);
-	Inst *ub_cond = bb->build_inst(Op::NE, rem, zero);
-	bb->build_inst(Op::UB, ub_cond);
-	Inst *ub_cond2 = bb->build_inst(Op::EQ, arg2, zero);
-	bb->build_inst(Op::UB, ub_cond2);
-	Op div_op = is_unsigned ? Op::UDIV : Op::SDIV;
-	Inst *res_indef = get_res_indef(arg1_indef, lhs_type);
-	return {bb->build_inst(div_op, arg1, arg2), res_indef, nullptr};
-      }
-    case TRUNC_DIV_EXPR:
-      {
-	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
-	  {
-	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
-	    Inst *minus1_inst = bb->value_inst(-1, arg1->bitsize);
-	    Inst *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
-	    Inst *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
-	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
-	  }
-	Inst *zero_inst = bb->value_inst(0, arg1->bitsize);
-	Inst *cond = bb->build_inst(Op::EQ, arg2, zero_inst);
-	bb->build_inst(Op::UB, cond);
-	Op op = is_unsigned ? Op::UDIV : Op::SDIV;
-	Inst *res_indef = get_res_indef(arg1_indef, lhs_type);
-	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
-      }
-    case TRUNC_MOD_EXPR:
-      {
-	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
-	  {
-	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
-	    Inst *minus1_inst = bb->value_inst(-1, arg1->bitsize);
-	    Inst *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
-	    Inst *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
-	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
-	  }
-	Inst *zero_inst = bb->value_inst(0, arg1->bitsize);
-	Inst *cond = bb->build_inst(Op::EQ, arg2, zero_inst);
-	bb->build_inst(Op::UB, cond);
-	Op op = is_unsigned ? Op::UREM : Op::SREM;
-	Inst *res_indef = get_res_indef(arg1_indef, lhs_type);
-	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
-      }
     case NE_EXPR:
     case EQ_EXPR:
       {
@@ -2844,6 +2789,58 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
   Inst *res_indef = get_res_indef(arg1_indef, arg2_indef, lhs_type);
   switch (code)
     {
+    case EXACT_DIV_EXPR:
+      {
+	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
+	  {
+	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
+	    Inst *minus1_inst = bb->value_inst(-1, arg1->bitsize);
+	    Inst *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
+	    Inst *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
+	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
+	  }
+	Inst *zero = bb->value_inst(0, arg1->bitsize);
+	Op rem_op = is_unsigned ? Op::UREM : Op::SREM;
+	Inst *rem = bb->build_inst(rem_op, arg1, arg2);
+	Inst *ub_cond = bb->build_inst(Op::NE, rem, zero);
+	bb->build_inst(Op::UB, ub_cond);
+	Inst *ub_cond2 = bb->build_inst(Op::EQ, arg2, zero);
+	bb->build_inst(Op::UB, ub_cond2);
+	Op div_op = is_unsigned ? Op::UDIV : Op::SDIV;
+	return {bb->build_inst(div_op, arg1, arg2), res_indef, nullptr};
+      }
+    case TRUNC_DIV_EXPR:
+      {
+	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
+	  {
+	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
+	    Inst *minus1_inst = bb->value_inst(-1, arg1->bitsize);
+	    Inst *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
+	    Inst *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
+	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
+	  }
+	Inst *zero_inst = bb->value_inst(0, arg1->bitsize);
+	Inst *cond = bb->build_inst(Op::EQ, arg2, zero_inst);
+	bb->build_inst(Op::UB, cond);
+	Op op = is_unsigned ? Op::UDIV : Op::SDIV;
+	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
+      }
+    case TRUNC_MOD_EXPR:
+      {
+	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
+	  {
+	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
+	    Inst *minus1_inst = bb->value_inst(-1, arg1->bitsize);
+	    Inst *cond1 = bb->build_inst(Op::EQ, arg1, min_int_inst);
+	    Inst *cond2 = bb->build_inst(Op::EQ, arg2, minus1_inst);
+	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
+	  }
+	Inst *zero_inst = bb->value_inst(0, arg1->bitsize);
+	Inst *cond = bb->build_inst(Op::EQ, arg2, zero_inst);
+	bb->build_inst(Op::UB, cond);
+	Op op = is_unsigned ? Op::UREM : Op::SREM;
+	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
+      }
     case MAX_EXPR:
       {
 	if ((arg1_prov || arg2_prov) && arg1_prov != arg2_prov)
@@ -2961,7 +2958,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       {
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	res_indef = get_res_indef(arg1_indef, lhs_type);
 	arg2 = type_convert(arg2, arg2_type, arg1_type);
 	return {bb->build_inst(Op::SHL, arg1, arg2), res_indef, nullptr};
       }
@@ -2996,7 +2992,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       {
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	res_indef = get_res_indef(arg1_indef, lhs_type);
 	arg2 = type_convert(arg2, arg2_type, arg1_type);
 	Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
 	Inst *shift = bb->build_inst(Op::ZEXT, arg2, concat->bitsize);
@@ -3007,7 +3002,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       {
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	res_indef = get_res_indef(arg1_indef, lhs_type);
 	arg2 = type_convert(arg2, arg2_type, arg1_type);
 	Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
 	Inst *shift = bb->build_inst(Op::ZEXT, arg2, concat->bitsize);
@@ -3021,7 +3015,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       {
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	res_indef = get_res_indef(arg1_indef, lhs_type);
 	Op op = is_unsigned ? Op::LSHR : Op::ASHR;
 	arg2 = type_convert(arg2, arg2_type, arg1_type);
 	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
