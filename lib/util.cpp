@@ -4,6 +4,38 @@
 
 namespace smtgcc {
 
+namespace {
+
+Inst *gen_fmin_fmax(Basic_block *bb, Inst *elem1, Inst *elem2, bool is_min)
+{
+  Inst *is_nan = bb->build_inst(Op::IS_NAN, elem2);
+  Inst *cmp;
+  if (is_min)
+    cmp = bb->build_inst(Op::FLT, elem1, elem2);
+  else
+    cmp = bb->build_inst(Op::FLT, elem2, elem1);
+  Inst *res1 = bb->build_inst(Op::ITE, cmp, elem1, elem2);
+  Inst *res2 = bb->build_inst(Op::ITE, is_nan, elem1, res1);
+  // 0.0 and -0.0 is equal as floating-point values, and fmin(0.0, -0.0)
+  // may return eiter of them. But we treat them as 0.0 > -0.0 here,
+  // otherwise we will report miscompilations when GCC switch the order
+  // of the arguments.
+  Inst *zero = bb->value_inst(0, elem1->bitsize);
+  Inst *is_zero1 = bb->build_inst(Op::FEQ, elem1, zero);
+  Inst *is_zero2 = bb->build_inst(Op::FEQ, elem2, zero);
+  Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
+  Inst *cmp2;
+  if (is_min)
+    cmp2 = bb->build_inst(Op::SLT, elem1, elem2);
+  else
+    cmp2 = bb->build_inst(Op::SLT, elem2, elem1);
+  Inst *res3 = bb->build_inst(Op::ITE, cmp2, elem1, elem2);
+  Inst *res = bb->build_inst(Op::ITE, is_zero, res3, res2);
+  return res;
+}
+
+} // end anonymous namespace
+
 uint32_t popcount(unsigned __int128 x)
 {
   uint32_t result = 0;
@@ -99,6 +131,16 @@ bool is_value_pow2(Inst *inst)
     return false;
   unsigned __int128 value = inst->value();
   return value != 0 && (value & (value - 1)) == 0;
+}
+
+Inst *gen_fmin(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return gen_fmin_fmax(bb, elem1, elem2, true);
+}
+
+Inst *gen_fmax(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return gen_fmin_fmax(bb, elem1, elem2, false);
 }
 
 Inst *gen_bitreverse(Basic_block *bb, Inst *arg)

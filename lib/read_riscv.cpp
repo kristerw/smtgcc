@@ -1350,29 +1350,11 @@ void Parser::process_fmin_fmax(uint32_t bitsize, bool is_min)
       arg1 = bb->build_trunc(arg1, 32);
       arg2 = bb->build_trunc(arg2, 32);
     }
-  Inst *is_nan = bb->build_inst(Op::IS_NAN, arg2);
-  Inst *cmp;
+  Inst *res;
   if (is_min)
-    cmp = bb->build_inst(Op::FLT, arg1, arg2);
+    res = gen_fmin(bb, arg1, arg2);
   else
-    cmp = bb->build_inst(Op::FLT, arg2, arg1);
-  Inst *res1 = bb->build_inst(Op::ITE, cmp, arg1, arg2);
-  Inst *res2 = bb->build_inst(Op::ITE, is_nan, arg1, res1);
-  // 0.0 and -0.0 is equal as floating-point values, and fmin(0.0, -0.0)
-  // may return eiter of them. But we treat them as 0.0 > -0.0 here,
-  // otherwise we will report miscompilations when GCC switch the order
-  // of the arguments.
-  Inst *zero = bb->value_inst(0, arg1->bitsize);
-  Inst *is_zero1 = bb->build_inst(Op::FEQ, arg1, zero);
-  Inst *is_zero2 = bb->build_inst(Op::FEQ, arg2, zero);
-  Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
-  Inst *cmp2;
-  if (is_min)
-    cmp2 = bb->build_inst(Op::SLT, arg1, arg2);
-  else
-    cmp2 = bb->build_inst(Op::SLT, arg2, arg1);
-  Inst *res3 = bb->build_inst(Op::ITE, cmp2, arg1, arg2);
-  Inst *res = bb->build_inst(Op::ITE, is_zero, res3, res2);
+    res = gen_fmax(bb, arg1, arg2);
   if (bitsize == 32)
     {
       Inst *m1 = bb->value_m1_inst(32);

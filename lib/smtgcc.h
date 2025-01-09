@@ -678,6 +678,8 @@ bool is_value_signed_max(Inst *inst);
 bool is_value_signed_max(Inst *inst, uint32_t bitsize);
 bool is_value_m1(Inst *inst);
 bool is_value_pow2(Inst *inst);
+Inst *gen_fmin(Basic_block *bb, Inst *elem1, Inst *elem2);
+Inst *gen_fmax(Basic_block *bb, Inst *elem1, Inst *elem2);
 Inst *gen_bitreverse(Basic_block *bb, Inst *arg);
 Inst *gen_clz(Basic_block *bb, Inst *arg);
 Inst *gen_clrsb(Basic_block *bb, Inst *arg);

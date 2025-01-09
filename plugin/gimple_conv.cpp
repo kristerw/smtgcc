@@ -4565,23 +4565,7 @@ void Converter::process_cfn_fmax(gimple *stmt)
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
     {
-      Inst *is_nan = bb->build_inst(Op::IS_NAN, elem2);
-      Inst *cmp = bb->build_inst(Op::FLT, elem2, elem1);
-      Inst *max1 = bb->build_inst(Op::ITE, cmp, elem1, elem2);
-      Inst *max2 = bb->build_inst(Op::ITE, is_nan, elem1, max1);
-
-      // 0.0 and -0.0 is equal as floating point values, and fmax(0.0, -0.0)
-      // may return eiter of them. But we treat them as 0.0 > -0.0 here,
-      // otherwise we will report miscompilations when GCC switch the order
-      // of the arguments.
-      Inst *zero = bb->value_inst(0, elem1->bitsize);
-      Inst *is_zero1 = bb->build_inst(Op::FEQ, elem1, zero);
-      Inst *is_zero2 = bb->build_inst(Op::FEQ, elem2, zero);
-      Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
-      Inst *cmp2 = bb->build_inst(Op::SLT, elem2, elem1);
-      Inst *max3 = bb->build_inst(Op::ITE, cmp2, elem1, elem2);
-
-      Inst *res =  bb->build_inst(Op::ITE, is_zero, max3, max2);
+      Inst *res = gen_fmax(bb, elem1, elem2);
       Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
       return {res, res_indef};
     };
@@ -4594,23 +4578,7 @@ void Converter::process_cfn_fmin(gimple *stmt)
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
     {
-      Inst *is_nan = bb->build_inst(Op::IS_NAN, elem2);
-      Inst *cmp = bb->build_inst(Op::FLT, elem1, elem2);
-      Inst *min1 = bb->build_inst(Op::ITE, cmp, elem1, elem2);
-      Inst *min2 = bb->build_inst(Op::ITE, is_nan, elem1, min1);
-
-      // 0.0 and -0.0 is equal as floating point values, and fmin(0.0, -0.0)
-      // may return eiter of them. But we treat them as 0.0 > -0.0 here,
-      // otherwise we will report miscompilations when GCC switch the order
-      // of the arguments.
-      Inst *zero = bb->value_inst(0, elem1->bitsize);
-      Inst *is_zero1 = bb->build_inst(Op::FEQ, elem1, zero);
-      Inst *is_zero2 = bb->build_inst(Op::FEQ, elem2, zero);
-      Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
-      Inst *cmp2 = bb->build_inst(Op::SLT, elem1, elem2);
-      Inst *min3 = bb->build_inst(Op::ITE, cmp2, elem1, elem2);
-
-      Inst *res = bb->build_inst(Op::ITE, is_zero, min3, min2);
+      Inst *res = gen_fmin(bb, elem1, elem2);
       Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
       return {res, res_indef};
     };
@@ -5296,23 +5264,7 @@ void Converter::process_cfn_reduc_fminmax(gimple *stmt)
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
     {
-      Inst *is_nan = bb->build_inst(Op::IS_NAN, elem2);
-      Inst *cmp = bb->build_inst(Op::FLT, elem1, elem2);
-      Inst *min1 = bb->build_inst(Op::ITE, cmp, elem1, elem2);
-      Inst *min2 = bb->build_inst(Op::ITE, is_nan, elem1, min1);
-
-      // 0.0 and -0.0 is equal as floating point values, and fmin(0.0, -0.0)
-      // may return eiter of them. But we treat them as 0.0 > -0.0 here,
-      // otherwise we will report miscompilations when GCC switch the order
-      // of the arguments.
-      Inst *zero = bb->value_inst(0, elem1->bitsize);
-      Inst *is_zero1 = bb->build_inst(Op::FEQ, elem1, zero);
-      Inst *is_zero2 = bb->build_inst(Op::FEQ, elem2, zero);
-      Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
-      Inst *cmp2 = bb->build_inst(Op::SLT, elem1, elem2);
-      Inst *min3 = bb->build_inst(Op::ITE, cmp2, elem1, elem2);
-
-      Inst *res = bb->build_inst(Op::ITE, is_zero, min3, min2);
+      Inst *res = gen_fmin(bb, elem1, elem2);
       Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
       return {res, res_indef};
     };
@@ -5320,23 +5272,7 @@ void Converter::process_cfn_reduc_fminmax(gimple *stmt)
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
     {
-      Inst *is_nan = bb->build_inst(Op::IS_NAN, elem2);
-      Inst *cmp = bb->build_inst(Op::FLT, elem2, elem1);
-      Inst *max1 = bb->build_inst(Op::ITE, cmp, elem1, elem2);
-      Inst *max2 = bb->build_inst(Op::ITE, is_nan, elem1, max1);
-
-      // 0.0 and -0.0 is equal as floating point values, and fmax(0.0, -0.0)
-      // may return eiter of them. But we treat them as 0.0 > -0.0 here,
-      // otherwise we will report miscompilations when GCC switch the order
-      // of the arguments.
-      Inst *zero = bb->value_inst(0, elem1->bitsize);
-      Inst *is_zero1 = bb->build_inst(Op::FEQ, elem1, zero);
-      Inst *is_zero2 = bb->build_inst(Op::FEQ, elem2, zero);
-      Inst *is_zero = bb->build_inst(Op::AND, is_zero1, is_zero2);
-      Inst *cmp2 = bb->build_inst(Op::SLT, elem2, elem1);
-      Inst *max3 = bb->build_inst(Op::ITE, cmp2, elem1, elem2);
-
-      Inst *res =  bb->build_inst(Op::ITE, is_zero, max3, max2);
+      Inst *res = gen_fmax(bb, elem1, elem2);
       Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
       return {res, res_indef};
     };
