@@ -1046,6 +1046,30 @@ Inst *gen_abd(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::ITE, cmp, neg_inst, inst);
 }
 
+Inst *gen_sabd(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *inst = bb->build_inst(Op::SUB, elem1, elem2);
+  Inst *neg_inst = bb->build_inst(Op::NEG, inst);
+  Inst *eelem1 = bb->build_inst(Op::SEXT, elem1, elem1->bitsize + 1);
+  Inst *eelem2 = bb->build_inst(Op::SEXT, elem2, elem2->bitsize + 1);
+  Inst *esub = bb->build_inst(Op::SUB, eelem1, eelem2);
+  Inst *zero = bb->value_inst(0, esub->bitsize);
+  Inst *cmp = bb->build_inst(Op::SLT, esub, zero);
+  return bb->build_inst(Op::ITE, cmp, neg_inst, inst);
+}
+
+Inst *gen_uabd(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *inst = bb->build_inst(Op::SUB, elem1, elem2);
+  Inst *neg_inst = bb->build_inst(Op::NEG, inst);
+  Inst *eelem1 = bb->build_inst(Op::ZEXT, elem1, elem1->bitsize + 1);
+  Inst *eelem2 = bb->build_inst(Op::ZEXT, elem2, elem2->bitsize + 1);
+  Inst *esub = bb->build_inst(Op::SUB, eelem1, eelem2);
+  Inst *zero = bb->value_inst(0, esub->bitsize);
+  Inst *cmp = bb->build_inst(Op::SLT, esub, zero);
+  return bb->build_inst(Op::ITE, cmp, neg_inst, inst);
+}
+
 Inst *gen_fnmul(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   Inst *res = bb->build_inst(Op::FMUL, elem1, elem2);
@@ -3885,6 +3909,8 @@ void Parser::parse_vector_op()
     process_vec_widen_binary_add(gen_abd, Op::SEXT, false);
   else if (name == "sabal2")
     process_vec_widen_binary_add(gen_abd, Op::SEXT, true);
+  else if (name == "sabd")
+    process_vec_binary(gen_sabd);
   else if (name == "sabdl")
     process_vec_widen_binary(gen_abd, Op::SEXT, false);
   else if (name == "sabdl2")
@@ -3967,6 +3993,8 @@ void Parser::parse_vector_op()
     process_vec_widen_binary_add(gen_abd, Op::ZEXT, false);
   else if (name == "uabal2")
     process_vec_widen_binary_add(gen_abd, Op::ZEXT, true);
+  else if (name == "uabd")
+    process_vec_binary(gen_uabd);
   else if (name == "uabdl")
     process_vec_widen_binary(gen_abd, Op::ZEXT, false);
   else if (name == "uabdl2")
