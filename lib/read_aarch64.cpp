@@ -4486,6 +4486,8 @@ void Parser::parse_function()
     process_umov();
 
   // SIMD shift
+  else if (name == "shl")
+    process_simd_shift(Op::SHL);
   else if (name == "sshr")
     process_simd_shift(Op::ASHR);
   else if (name == "ushr")
