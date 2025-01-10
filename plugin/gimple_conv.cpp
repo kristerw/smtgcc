@@ -4312,6 +4312,9 @@ void Converter::process_cfn_cond(gimple *stmt)
     case CFN_COND_SUB:
       code = MINUS_EXPR;
       break;
+    case CFN_COND_XOR:
+      code = BIT_XOR_EXPR;
+      break;
     default:
       {
 	const char *name = internal_fn_name(gimple_call_internal_fn(stmt));
@@ -5841,6 +5844,7 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_COND_SHL:
     case CFN_COND_SHR:
     case CFN_COND_SUB:
+    case CFN_COND_XOR:
       process_cfn_cond(stmt);
       break;
     case CFN_DIVMOD:
