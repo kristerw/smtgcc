@@ -6189,7 +6189,11 @@ void Converter::generate_return_inst()
       std::map<std::pair<Inst *, uint64_t>, std::vector<Inst *>> cache;
       if (VECTOR_TYPE_P(retval_type) || TREE_CODE(retval_type) == COMPLEX_TYPE)
 	{
-	  uint32_t elem_bitsize = bitsize_for_type(TREE_TYPE(retval_type));
+	  uint32_t elem_bitsize;
+	  if (VECTOR_TYPE_P(retval_type))
+	    elem_bitsize = bitsize_for_type(TREE_TYPE(retval_type));
+	  else
+	    elem_bitsize = bytesize_for_type(TREE_TYPE(retval_type)) * 8;
 	  retval = split_phi(retval, elem_bitsize, cache);
 	  if (retval_indef)
 	    retval_indef = split_phi(retval_indef, elem_bitsize, cache);
@@ -6887,7 +6891,11 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 
 	  if (VECTOR_TYPE_P(phi_type) || TREE_CODE(phi_type) == COMPLEX_TYPE)
 	    {
-	      uint32_t bs = bytesize_for_type(TREE_TYPE(phi_type)) * 8;
+	      uint32_t bs;
+	      if (VECTOR_TYPE_P(phi_type))
+		bs = bitsize_for_type(TREE_TYPE(phi_type));
+	      else
+		bs = bytesize_for_type(TREE_TYPE(phi_type)) * 8;
 	      tree2instruction[phi_result] = split_phi(phi_inst, bs, cache);
 	      tree2indef[phi_result] = split_phi(phi_indef, bs, cache);
 	    }
