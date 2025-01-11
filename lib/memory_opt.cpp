@@ -10,6 +10,14 @@ namespace {
 // Maximum number of bytes we track in an object.
 uint64_t max_mem_unroll_limit = 10000;
 
+bool is_local_memory(Inst *inst)
+{
+  if (inst->op != Op::MEMORY)
+    return false;
+  uint64_t id = inst->args[0]->value();
+  return (id >> (inst->bb->func->module->ptr_id_bits - 1)) != 0;
+}
+
 // Return a vector containing all the function's memory instructions.
 std::vector<Inst *> collect_mem(Function *func)
 {
@@ -333,10 +341,10 @@ void dead_store_elim(Function *func)
     {
       if (inst->op != Op::MEMORY)
 	continue;
-      uint64_t id = inst->args[0]->value();
-      if ((id >> (func->module->ptr_id_bits - 1)) == 0)
+      if (!is_local_memory(inst))
 	continue;
 
+      uint64_t id = inst->args[0]->value();
       uint64_t mem_addr = id << func->module->ptr_id_low;
       uint64_t size = inst->args[1]->value();
       size = std::min(max_mem_unroll_limit, size);
@@ -446,9 +454,10 @@ void dead_store_elim(Function *func)
 } // end anonymous namespace
 
 // This function makes the memory instructions consistent between src and tgt:
-//  * src and tgt have the same memory instructions
-//  * memory that is unused in both src and tgt is removed
-//  * The memory instructions are emitted in the same order
+//  * src and tgt have the same global memory instructions
+//  * global memory that is unused in both src and tgt is removed
+//  * unused local memory is removed
+//  * the memory instructions are emitted in the same order
 // This makes checking faster as more can be CSEd between src and tgt.
 void canonicalize_memory(Module *module)
 {
@@ -468,7 +477,7 @@ void canonicalize_memory(Module *module)
   std::sort(src_mem.begin(), src_mem.end(), comp);
   std::sort(tgt_mem.begin(), tgt_mem.end(), comp);
 
-  // Add missing memory instructions.
+  // Add missing global memory instructions.
   std::vector<Inst *> missing_src;
   std::vector<Inst *> missing_tgt;
   std::set_difference(tgt_mem.begin(), tgt_mem.end(),
@@ -479,24 +488,28 @@ void canonicalize_memory(Module *module)
 		      std::back_inserter(missing_tgt), comp);
   for (auto inst : missing_src)
     {
-      src_mem.push_back(clone_inst(inst, src));
+      if (!is_local_memory(inst))
+	src_mem.push_back(clone_inst(inst, src));
     }
   for (auto inst : missing_tgt)
     {
-      tgt_mem.push_back(clone_inst(inst, tgt));
+      if (!is_local_memory(inst))
+	tgt_mem.push_back(clone_inst(inst, tgt));
     }
 
   // Ensure that both src and tgt use the same instruction order.
+  // The global memory is placed before the local memory.
   std::sort(src_mem.begin(), src_mem.end(), comp);
   std::sort(tgt_mem.begin(), tgt_mem.end(), comp);
   reorder_mem(src_mem);
   reorder_mem(tgt_mem);
 
-  // Remove memory that is unused in both src and tgt.
-  assert(src_mem.size() == tgt_mem.size());
-  bool removed_mem = false;
+  // Remove global memory that is unused in both src and tgt.
+  std::vector<Inst *> remove;
   for (size_t i = 0; i < src_mem.size(); i++)
     {
+      if (is_local_memory(src_mem[i]))
+	break;
       __int128 src_arg1 = src_mem[i]->args[0]->value();
       __int128 src_arg2 = src_mem[i]->args[1]->value();
       __int128 src_arg3 = src_mem[i]->args[2]->value();
@@ -510,19 +523,41 @@ void canonicalize_memory(Module *module)
 	  && is_unused_memory(src_mem[i])
 	  && is_unused_memory(tgt_mem[i]))
 	{
-	  removed_mem = true;
-	  remove_unused_memory(src_mem[i]);
-	  remove_unused_memory(tgt_mem[i]);
+	  remove.push_back(src_mem[i]);
+	  remove.push_back(tgt_mem[i]);
 	}
     }
 
-  // Removing memory may open up new opportunities. For example, consider:
-  //   int b;
-  //   int *p = &b;
-  // b may become dead after we remove p. Therefore, we need to rerun the
-  // pass.
-  if (removed_mem)
-    canonicalize_memory(module);
+  // Remove unised local memory.
+  for (auto inst : src_mem)
+    {
+      if (!(inst->args[2]->value() & MEM_KEEP)
+	  && is_local_memory(inst)
+	  && is_unused_memory(inst))
+	remove.push_back(inst);
+    }
+  for (auto inst : tgt_mem)
+    {
+      if (!(inst->args[2]->value() & MEM_KEEP)
+	  && is_local_memory(inst)
+	  && is_unused_memory(inst))
+	remove.push_back(inst);
+    }
+
+  if (!remove.empty())
+    {
+      for (auto inst : remove)
+	{
+	  remove_unused_memory(inst);
+	}
+
+      // Removing memory may open up new opportunities. For example, consider:
+      //   int b;
+      //   int *p = &b;
+      // b may become dead after we remove p. Therefore, we need to rerun the
+      // pass.
+      canonicalize_memory(module);
+    }
 }
 
 void ls_elim(Function *func)
