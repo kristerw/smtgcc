@@ -164,6 +164,7 @@ struct Converter {
   void process_cfn_clrsb(gimple *stmt);
   void process_cfn_clz(gimple *stmt);
   void process_cfn_cond(gimple *stmt);
+  void process_cfn_cond_fminmax(gimple *stmt);
   void process_cfn_copysign(gimple *stmt);
   void process_cfn_ctz(gimple *stmt);
   void process_cfn_divmod(gimple *stmt);
@@ -4373,6 +4374,91 @@ void Converter::process_cfn_cond(gimple *stmt)
     }
 }
 
+void Converter::process_cfn_cond_fminmax(gimple *stmt)
+{
+  auto gen_elem_fmin =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      Inst *res = gen_fmin(bb, elem1, elem2);
+      Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      return {res, res_indef};
+    };
+  auto gen_elem_fmax =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      Inst *res = gen_fmax(bb, elem1, elem2);
+      Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      return {res, res_indef};
+    };
+
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  auto[arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  tree arg2_type = TREE_TYPE(arg2_expr);
+  tree arg2_elem_type = TREE_TYPE(arg2_type);
+  auto[arg2, arg2_indef] = tree2inst_indef(arg2_expr);
+  tree arg3_expr = gimple_call_arg(stmt, 2);
+  auto[arg3, arg3_indef] = tree2inst_indef(arg3_expr);
+  tree arg4_expr = gimple_call_arg(stmt, 3);
+  tree arg4_type = TREE_TYPE(arg4_expr);
+  auto[arg4, arg4_indef] = tree2inst_indef(arg4_expr);
+  tree lhs = gimple_call_lhs(stmt);
+
+  combined_fn code = gimple_call_combined_fn(stmt);
+  assert(code == CFN_COND_FMIN || code == CFN_COND_FMAX);
+
+  uint32_t elem_bitsize = bitsize_for_type(arg2_elem_type);
+  uint32_t nof_elt = bitsize_for_type(arg2_type) / elem_bitsize;
+  Inst *op_inst = nullptr;
+  Inst *op_indef = nullptr;
+  for (uint64_t i = 0; i < nof_elt; i++)
+    {
+      Inst *a2 = extract_vec_elem(bb, arg2, elem_bitsize, i);
+      Inst *a2_indef = nullptr;
+      if (arg2_indef)
+	a2_indef = extract_vec_elem(bb, arg2_indef, elem_bitsize, i);
+      Inst *a3 = extract_vec_elem(bb, arg3, elem_bitsize, i);
+      Inst *a3_indef = nullptr;
+      if (arg3_indef)
+	a3_indef = extract_vec_elem(bb, arg3_indef, elem_bitsize, i);
+      Inst *inst;
+      Inst *indef;
+      if (code == CFN_COND_FMIN)
+	std::tie(inst, indef) =
+	  gen_elem_fmin(a2, a2_indef, a3, a3_indef, arg2_type);
+      else
+	std::tie(inst, indef) =
+	  gen_elem_fmax(a2, a2_indef, a3, a3_indef, arg2_type);
+
+      if (op_inst)
+	op_inst = bb->build_inst(Op::CONCAT, inst, op_inst);
+      else
+	op_inst = inst;
+
+      if (indef)
+	{
+	  if (op_indef)
+	    op_indef = bb->build_inst(Op::CONCAT, indef, op_indef);
+	  else
+	    op_indef = indef;
+	}
+    }
+
+  auto [ret_inst, ret_indef] =
+    process_vec_cond(arg1, arg1_indef, op_inst, op_indef, arg4, arg4_indef,
+		     arg1_type, arg4_type);
+
+  if (lhs)
+    {
+      tree2instruction.insert({lhs, ret_inst});
+      if (ret_indef)
+	tree2indef.insert({lhs, ret_indef});
+    }
+}
+
 void Converter::process_cfn_copysign(gimple *stmt)
 {
   auto gen_elem =
@@ -5846,6 +5932,10 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_COND_SUB:
     case CFN_COND_XOR:
       process_cfn_cond(stmt);
+      break;
+    case CFN_COND_FMIN:
+    case CFN_COND_FMAX:
+      process_cfn_cond_fminmax(stmt);
       break;
     case CFN_DIVMOD:
       process_cfn_divmod(stmt);
