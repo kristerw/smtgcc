@@ -3819,6 +3819,8 @@ void Converter::process_gimple_assign(gimple *stmt)
 	  }
 	else if (VECTOR_TYPE_P(lhs_type))
 	  {
+	    if (code == VEC_DUPLICATE_EXPR)
+	      throw Not_implemented("process_gimple_assign: vec_duplicate_expr");
 	    auto [arg1, arg1_indef] = tree2inst_indef(rhs1);
 	    tree lhs_elem_type = TREE_TYPE(lhs_type);
 	    tree arg1_elem_type = TREE_TYPE(arg1_type);
