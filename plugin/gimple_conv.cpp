@@ -2140,7 +2140,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 
 	  op = TYPE_UNSIGNED(dest_type) ? Op::F2U : Op::F2S;
 	  Inst *res = bb->build_inst(op, inst, bitsize_for_type(dest_type));
-	  return {res, nullptr, nullptr};
+	  return {res, res_indef, nullptr};
 	}
       if (FLOAT_TYPE_P(dest_type))
 	{
