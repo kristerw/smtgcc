@@ -144,6 +144,9 @@ private:
   void process_vsetvli(bool arg1_is_imm);
   void process_vle(uint32_t elem_bitsize);
   void process_vse(uint32_t elem_bitsize);
+  Inst *gen_vec_ext(Op op, Inst *orig, Inst *arg1, Inst *mask,
+		    uint32_t elem_bitsize, uint32_t res_elem_bitsize);
+  void process_vec_ext(Op op, uint32_t elem_mult);
   Inst *gen_vec_unary(Op op, Inst *orig, Inst *arg1, Inst *mask,
 		      uint32_t elem_bitsize);
   void process_vec_unary(Op op);
@@ -1745,6 +1748,63 @@ void Parser::process_vse(uint32_t elem_bitsize)
       bb->build_br_inst(false_bb);
       bb = false_bb;
     }
+}
+
+Inst *Parser::gen_vec_ext(Op op, Inst *orig, Inst *arg1, Inst *mask,
+			  uint32_t elem_bitsize, uint32_t res_elem_bitsize)
+{
+  Inst *res = nullptr;
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  uint32_t nof_elem = rstate->vreg_bitsize / res_elem_bitsize;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, elem1, res_elem_bitsize);
+      Inst *orig_elem = extract_vec_elem(orig, res_elem_bitsize, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      if (mask)
+	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
+      inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  return res;
+}
+
+void Parser::process_vec_ext(Op op, uint32_t elem_mult)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  Inst *mask = nullptr;
+  if (tokens.size() > 4)
+    {
+      get_comma(4);
+      mask = get_vreg_value(5);
+      get_end_of_line(6);
+    }
+  else
+    get_end_of_line(4);
+
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  assert (elem_mult == 2 || elem_mult == 4 || elem_mult == 8);
+  Inst *res = gen_vec_ext(op, orig, arg1, mask, 64 / elem_mult, 64);
+  if (elem_mult <= 4)
+    {
+      Inst *res32 = gen_vec_ext(op, orig, arg1, mask, 32 / elem_mult, 32);
+      Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+      res = bb->build_inst(Op::ITE, cmp32, res32, res);
+    }
+  if (elem_mult == 2)
+    {
+      Inst *res16 = gen_vec_ext(op, orig, arg1, mask, 16 / elem_mult, 16);
+      Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+      res = bb->build_inst(Op::ITE, cmp16, res16, res);
+    }
+  bb->build_inst(Op::WRITE, dest, res);
 }
 
 Inst *Parser::gen_vec_unary(Op op, Inst *orig, Inst *arg1, Inst *mask,
@@ -3662,6 +3722,18 @@ void Parser::parse_function()
     process_vec_binary_vx(gen_vwsub_wv, 2, 2, 1);
 
   // Integer arithmetic - extension
+  else if (name == "vzext.vf2")
+    process_vec_ext(Op::ZEXT, 2);
+  else if (name == "vsext.vf2")
+    process_vec_ext(Op::SEXT, 2);
+  else if (name == "vzext.vf4")
+    process_vec_ext(Op::ZEXT, 4);
+  else if (name == "vsext.vf4")
+    process_vec_ext(Op::SEXT, 4);
+  else if (name == "vzext.vf8")
+    process_vec_ext(Op::ZEXT, 8);
+  else if (name == "vsext.vf8")
+    process_vec_ext(Op::SEXT, 8);
 
   // Integer arithmetic - bitwise logical
   else if (name == "vand.vv")
