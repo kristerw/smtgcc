@@ -2108,6 +2108,27 @@ Inst *gen_vwsub_wv(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::SUB, elem1, e2);
 }
 
+Inst *gen_vwmul(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *e1 = bb->build_inst(Op::SEXT, elem1, 2 * elem1->bitsize);
+  Inst *e2 = bb->build_inst(Op::SEXT, elem2, 2 * elem2->bitsize);
+  return bb->build_inst(Op::MUL, e1, e2);
+}
+
+Inst *gen_vwmulu(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *e1 = bb->build_inst(Op::ZEXT, elem1, 2 * elem1->bitsize);
+  Inst *e2 = bb->build_inst(Op::ZEXT, elem2, 2 * elem2->bitsize);
+  return bb->build_inst(Op::MUL, e1, e2);
+}
+
+Inst *gen_vwmulsu(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *e1 = bb->build_inst(Op::SEXT, elem1, 2 * elem1->bitsize);
+  Inst *e2 = bb->build_inst(Op::ZEXT, elem2, 2 * elem2->bitsize);
+  return bb->build_inst(Op::MUL, e1, e2);
+}
+
 Inst *Parser::gen_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
 			     Inst *orig, Inst *arg1, Inst *arg2, Inst *mask,
 			     uint32_t orig_elem_bitsize, uint32_t elem1_bitsize,
@@ -3896,6 +3917,18 @@ void Parser::parse_function()
     process_vec_binary_vx(Op::SREM);
 
   // Integer arithmetic - widening multiply
+  else if (name == "vwmul.vv")
+    process_vec_binary(gen_vwmul, 2, 1, 1);
+  else if (name == "vwmul.vx")
+    process_vec_binary_vx(gen_vwmul, 2, 1, 1);
+  else if (name == "vwmulu.vv")
+    process_vec_binary(gen_vwmulu, 2, 1, 1);
+  else if (name == "vwmulu.vx")
+    process_vec_binary_vx(gen_vwmulu, 2, 1, 1);
+  else if (name == "vwmulsu.vv")
+    process_vec_binary(gen_vwmulsu, 2, 1, 1);
+  else if (name == "vwmulsu.vx")
+    process_vec_binary_vx(gen_vwmulsu, 2, 1, 1);
 
   // Integer arithmetic - multiply add
 
