@@ -1931,6 +1931,16 @@ void Parser::process_vec_unary_vx(Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
+Inst *gen_f2u(Basic_block *bb, Inst *elem1)
+{
+  return bb->build_inst(Op::F2U, elem1, elem1->bitsize);
+}
+
+Inst *gen_f2s(Basic_block *bb, Inst *elem1)
+{
+  return bb->build_inst(Op::F2S, elem1, elem1->bitsize);
+}
+
 Inst *gen_u2f(Basic_block *bb, Inst *elem1)
 {
   return bb->build_inst(Op::U2F, elem1, elem1->bitsize);
@@ -4021,6 +4031,10 @@ void Parser::parse_function()
     process_vec_unary_vi(Op::MOV);
 
   // Floating-point - single-width  floating-point/integer type-convert
+  else if (name == "vfcvt.rtz.xu.f.v")
+    process_vec_unary(gen_f2u);
+  else if (name == "vfcvt.rtz.x.f.v")
+    process_vec_unary(gen_f2s);
   else if (name == "vfcvt.f.xu.v")
     process_vec_unary(gen_u2f);
   else if (name == "vfcvt.f.x.v")
