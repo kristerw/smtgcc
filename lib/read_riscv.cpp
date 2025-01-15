@@ -152,6 +152,9 @@ private:
   void process_vec_unary(Op op);
   void process_vec_unary_vi(Op op);
   void process_vec_unary_vx(Op op);
+  Inst *gen_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*), Inst *orig,
+		      Inst *arg1, Inst *mask, uint32_t elem_bitsize);
+  void process_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
   Inst *gen_vec_binary(Op op, Inst *orig, Inst *arg1, Inst *arg2, Inst *mask,
 		       uint32_t elem_bitsize);
   void process_vec_binary(Op op);
@@ -1918,6 +1921,73 @@ void Parser::process_vec_unary_vx(Op op)
   Inst *res16 = gen_vec_unary(op, orig, change_prec(arg1, 16), mask, 16);
   Inst *res32 = gen_vec_unary(op, orig, change_prec(arg1, 32), mask, 32);
   Inst *res64 = gen_vec_unary(op, orig, change_prec(arg1, 64), mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+Inst *gen_u2f(Basic_block *bb, Inst *elem1)
+{
+  return bb->build_inst(Op::U2F, elem1, elem1->bitsize);
+}
+
+Inst *gen_s2f(Basic_block *bb, Inst *elem1)
+{
+  return bb->build_inst(Op::S2F, elem1, elem1->bitsize);
+}
+
+Inst *Parser::gen_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*), Inst *orig,
+			    Inst *arg1, Inst *mask, uint32_t elem_bitsize)
+{
+  Inst *res = nullptr;
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1;
+      if (arg1->bitsize == elem_bitsize)
+	elem1 = arg1;
+      else
+	elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = gen_elem(bb, elem1);
+      Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      if (mask)
+	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
+      inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  return res;
+}
+
+void Parser::process_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*))
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  Inst *mask = nullptr;
+  if (tokens.size() > 4)
+    {
+      get_comma(4);
+      mask = get_vreg_value(5);
+      get_end_of_line(6);
+    }
+  else
+    get_end_of_line(4);
+
+  Inst *res8 = gen_vec_unary(gen_elem, orig, arg1, mask, 8);
+  Inst *res16 = gen_vec_unary(gen_elem, orig, arg1, mask, 16);
+  Inst *res32 = gen_vec_unary(gen_elem, orig, arg1, mask, 32);
+  Inst *res64 = gen_vec_unary(gen_elem, orig, arg1, mask, 64);
   Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
   Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
   Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
@@ -3949,6 +4019,12 @@ void Parser::parse_function()
     process_vec_unary_vx(Op::MOV);
   else if (name == "vmv.v.i")
     process_vec_unary_vi(Op::MOV);
+
+  // Floating-point - single-width  floating-point/integer type-convert
+  else if (name == "vfcvt.f.xu.v")
+    process_vec_unary(gen_u2f);
+  else if (name == "vfcvt.f.x.v")
+    process_vec_unary(gen_s2f);
 
   // Floating-point - add/subtract
   else if (name == "vfadd.vv")
