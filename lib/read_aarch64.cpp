@@ -1110,6 +1110,22 @@ Inst *gen_mul(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::MUL, elem1, elem2);
 }
 
+Inst *gen_sat_uadd(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *add = bb->build_inst(Op::ADD, elem1, elem2);
+  Inst *cmp = bb->build_inst(Op::ULT, elem1, add);
+  Inst *m1 = bb->value_inst(-1, elem1->bitsize);
+  return bb->build_inst(Op::ITE, cmp, add, m1);
+}
+
+Inst *gen_sat_usub(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *sub = bb->build_inst(Op::SUB, elem1, elem2);
+  Inst *cmp = bb->build_inst(Op::ULT, elem2, elem1);
+  Inst *zero = bb->value_inst(0, elem1->bitsize);
+  return bb->build_inst(Op::ITE, cmp, sub, zero);
+}
+
 Inst *gen_abd(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   Inst *inst = bb->build_inst(Op::SUB, elem1, elem2);
@@ -4102,6 +4118,10 @@ void Parser::parse_vector_op()
     process_vec_widen_binary(gen_mul, Op::ZEXT, false);
   else if (name == "umull2")
     process_vec_widen_binary(gen_mul, Op::ZEXT, true);
+  else if (name == "uqadd")
+    process_vec_binary(gen_sat_uadd);
+  else if (name == "uqsub")
+    process_vec_binary(gen_sat_usub);
   else if (name == "ushl")
     process_vec_binary(gen_ushl);
   else if (name == "ushll")
@@ -4630,6 +4650,12 @@ void Parser::parse_function()
   // SIMD unary
   else if (name == "sqxtn")
     process_unary(gen_sqxtn);
+
+  // Misc scalar versions of SIMD instructions
+  else if (name == "uqadd")
+    process_binary(gen_sat_uadd);
+  else if (name == "uqsub")
+    process_binary(gen_sat_usub);
 
   else
     throw Parse_error("unhandled instruction: "s + std::string(name),
