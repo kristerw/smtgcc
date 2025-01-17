@@ -98,10 +98,14 @@ private:
   std::tuple<uint64_t, uint32_t, uint32_t> get_vreg_(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_vreg(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_scalar_vreg(unsigned idx);
+  std::tuple<uint64_t, uint32_t, uint32_t> get_zreg_(unsigned idx);
+  std::tuple<Inst *, uint32_t, uint32_t> get_zreg(unsigned idx);
   uint32_t get_reg_size(unsigned idx);
   bool is_vector_op();
+  bool is_sve_op();
   bool is_freg(unsigned idx);
   bool is_vreg(unsigned idx);
+  bool is_zreg(unsigned idx);
   Inst *get_imm(unsigned idx);
   Inst *get_reg_value(unsigned idx);
   Inst *get_reg_or_imm_value(unsigned idx, uint32_t bitsize);
@@ -235,6 +239,8 @@ private:
   void process_vec_trn2();
   void process_vec_tbl();
   void parse_vector_op();
+  void process_sve_index();
+  void parse_sve_op();
   void parse_function();
 
   void skip_space_and_comments();
@@ -244,7 +250,10 @@ void Parser::skip_space_and_comments()
 {
   while (isspace(buf[pos]))
     pos++;
-  if (buf[pos] == '#' && (!isdigit(buf[pos + 1]) && buf[pos + 1] != ':'))
+  if (buf[pos] == '#'
+      && (!isdigit(buf[pos + 1])
+	  && buf[pos + 1] != '-'
+	  && buf[pos + 1] != ':'))
     {
       while (buf[pos] != '\n')
 	pos++;
@@ -639,6 +648,47 @@ uint64_t Parser::get_vreg_idx(unsigned idx, uint32_t nof_elem,
   return reg_idx;
 }
 
+std::tuple<uint64_t, uint32_t, uint32_t> Parser::get_zreg_(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+
+  if (tokens[idx].kind != Lexeme::name
+      || tokens[idx].size < 3
+      || buf[tokens[idx].pos] != 'z'
+      || !isdigit(buf[tokens[idx].pos + 1]))
+    throw Parse_error("expected a vector register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  uint32_t value = buf[tokens[idx].pos + 1] - '0';
+  uint32_t pos = 2;
+  if (isdigit(buf[tokens[idx].pos + pos]))
+    value = value * 10 + (buf[tokens[idx].pos + pos++] - '0');
+  if (value > 31)
+    throw Parse_error("expected a vector register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  uint64_t reg_idx = Aarch64RegIdx::v0 + value;
+  std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
+  if (suffix == ".q")
+    return {reg_idx, 1, 128};
+  if (suffix == ".d")
+    return {reg_idx, 2, 64};
+  if (suffix == ".s")
+    return {reg_idx, 4, 32};
+  if (suffix == ".h")
+    return {reg_idx, 8, 16};
+  if (suffix == ".b")
+    return {reg_idx, 16, 8};
+
+  throw Parse_error("expected a vector register instead of "
+		    + std::string(token_string(tokens[idx])), line_number);
+}
+
+std::tuple<Inst *, uint32_t, uint32_t> Parser::get_zreg(unsigned idx)
+{
+  auto [reg_idx, nof_elem, elem_bitsize] = get_zreg_(idx);
+  return {rstate->registers[reg_idx], nof_elem, elem_bitsize};
+}
+
 uint32_t Parser::get_reg_size(unsigned idx)
 {
   if (tokens.size() <= idx)
@@ -690,6 +740,11 @@ bool Parser::is_vector_op()
   return is_vreg(1);
 }
 
+bool Parser::is_sve_op()
+{
+  return is_zreg(1);
+}
+
 bool Parser::is_freg(unsigned idx)
 {
   if (tokens.size() <= idx)
@@ -716,6 +771,24 @@ bool Parser::is_vreg(unsigned idx)
   if (tokens.size() <= idx || tokens[idx].kind != Lexeme::name)
     return false;
   if (buf[tokens[idx].pos] != 'v')
+    return false;
+
+  if (isdigit(buf[tokens[idx].pos + 1]))
+    {
+      if ((buf[tokens[idx].pos + 2] == '.')
+	  || (isdigit(buf[tokens[idx].pos + 2])
+	      && buf[tokens[idx].pos + 3] == '.'))
+	return true;
+    }
+
+  return false;
+}
+
+bool Parser::is_zreg(unsigned idx)
+{
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::name)
+    return false;
+  if (buf[tokens[idx].pos] != 'z')
     return false;
 
   if (isdigit(buf[tokens[idx].pos + 1]))
@@ -4068,6 +4141,37 @@ void Parser::parse_vector_op()
 		      line_number);
 }
 
+void Parser::process_sve_index()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg2 = get_imm(3);
+  get_comma(4);
+  Inst *arg3 = get_imm(5);
+  get_end_of_line(6);
+
+  __int128 imm1 = arg2->signed_value();
+  __int128 imm2 = arg3->signed_value();
+  Inst *res = bb->value_inst(imm1, elem_bitsize);
+  for (uint32_t i = 1; i < nof_elem; i++)
+    {
+      Inst *inst = bb->value_inst(imm1 + i * imm2, elem_bitsize);
+      res = bb->build_inst(Op::CONCAT, inst, res);
+    }
+  write_reg(dest, res);
+}
+
+void Parser::parse_sve_op()
+{
+  std::string_view name = get_name(0);
+
+  if (name == "index")
+    process_sve_index();
+  else
+    throw Parse_error("unhandled sve instruction: "s + std::string(name),
+		      line_number);
+}
+
 void Parser::parse_function()
 {
   if (tokens[0].kind == Lexeme::label_def)
@@ -4104,6 +4208,8 @@ void Parser::parse_function()
 
   else if (is_vector_op())
     parse_vector_op();
+  else if (is_sve_op())
+    parse_sve_op();
 
   // Branches, Exception generating, and System instructions
   else if (name == "beq")
