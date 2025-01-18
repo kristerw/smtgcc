@@ -97,7 +97,7 @@ struct Converter {
   uint8_t bitfield_padding_at_offset(tree fld, int64_t offset);
   uint8_t padding_at_offset(tree type, uint64_t offset);
   Inst *build_memory_inst(uint64_t id, uint64_t size, uint32_t flags);
-  void build_ub_if_not_zero(Inst *inst);
+  void build_ub_if_not_zero(Inst *inst, Inst *cmp = nullptr);
   void constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *indef=nullptr);
   void mem_access_ub_check(Inst *ptr, Inst *prov, uint64_t size);
   void store_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr);
@@ -174,7 +174,11 @@ struct Converter {
   void process_cfn_fmax(gimple *stmt);
   void process_cfn_fmin(gimple *stmt);
   void process_cfn_loop_vectorized(gimple *stmt);
+  std::tuple<Inst*, Inst*> mask_len_load(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, Inst *mask, Inst *mask_indef, tree mask_type, Inst *len, tree lhs_type, Inst *orig, Inst *orig_indef);
+  void process_cfn_mask_len_load(gimple *stmt);
   void process_cfn_mask_load(gimple *stmt);
+  void mask_len_store(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, Inst *mask, Inst *mask_indef, tree mask_type, Inst *len, tree value_type, Inst *value, Inst *value_indef);
+  void process_cfn_mask_len_store(gimple *stmt);
   void process_cfn_mask_store(gimple *stmt);
   void process_cfn_memcpy(gimple *stmt);
   void process_cfn_memmove(gimple *stmt);
@@ -187,6 +191,7 @@ struct Converter {
   void process_cfn_popcount(gimple *stmt);
   void process_cfn_sat_add(gimple *stmt);
   void process_cfn_sat_sub(gimple *stmt);
+  void process_cfn_select_vl(gimple *stmt);
   void process_cfn_signbit(gimple *stmt);
   void process_cfn_sub_overflow(gimple *stmt);
   void process_cfn_reduc(gimple *stmt);
@@ -331,6 +336,8 @@ uint64_t Converter::bytesize_for_type(tree type)
   tree size_tree = TYPE_SIZE(type);
   if (size_tree == NULL_TREE)
     throw Not_implemented("bytesize_for_type: incomplete type");
+  if (VECTOR_TYPE_P(type) && POLY_INT_CST_P(size_tree))
+    return TREE_INT_CST_LOW(POLY_INT_CST_COEFF(size_tree, 0)) / 8;
   if (TREE_CODE(size_tree) != INTEGER_CST)
     {
       // Things like function parameters
@@ -520,11 +527,13 @@ Inst *Converter::build_memory_inst(uint64_t id, uint64_t size, uint32_t flags)
   return entry_bb->build_inst(Op::MEMORY, arg1, arg2, arg3);
 }
 
-void Converter::build_ub_if_not_zero(Inst *inst)
+void Converter::build_ub_if_not_zero(Inst *inst, Inst *cmp)
 {
   Inst *zero = bb->value_inst(0, inst->bitsize);
-  Inst *cmp = bb->build_inst(Op::NE, inst, zero);
-  bb->build_inst(Op::UB, cmp);
+  Inst *is_ub = bb->build_inst(Op::NE, inst, zero);
+  if (cmp)
+    is_ub = bb->build_inst(Op::AND, is_ub, cmp);
+  bb->build_inst(Op::UB, is_ub);
 }
 
 void Converter::constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *indef)
@@ -1124,18 +1133,47 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	return {res, nullptr, nullptr};
       }
     case VECTOR_CST:
-      {
-	unsigned HOST_WIDE_INT nunits;
-	if (!VECTOR_CST_NELTS(expr).is_constant(&nunits))
-	  throw Not_implemented("tree2inst: !VECTOR_CST_NELTS");
-	Inst *ret = tree2inst(VECTOR_CST_ELT(expr, 0));
-	for (unsigned i = 1; i < nunits; i++)
-	  {
-	    Inst *elem = tree2inst(VECTOR_CST_ELT(expr, i));
-	    ret = bb->build_inst(Op::CONCAT, elem, ret);
-	  }
-	return {ret, nullptr, nullptr};
-      }
+      if (VECTOR_CST_NELTS(expr).is_constant())
+	{
+	  uint32_t nunits = VECTOR_CST_NELTS(expr).to_constant();
+	  Inst *ret = tree2inst(VECTOR_CST_ELT(expr, 0));
+	  for (uint32_t i = 1; i < nunits; i++)
+	    {
+	      Inst *elem = tree2inst(VECTOR_CST_ELT(expr, i));
+	      ret = bb->build_inst(Op::CONCAT, elem, ret);
+	    }
+	  return {ret, nullptr, nullptr};
+	}
+      if (VECTOR_CST_DUPLICATE_P(expr))
+	{
+	  uint32_t bitsize = bitsize_for_type(TREE_TYPE(expr));
+	  uint32_t elem_bitsize = bitsize_for_type(TREE_TYPE(TREE_TYPE(expr)));
+	  uint32_t nof_elem = bitsize / elem_bitsize;
+	  Inst *elem = tree2inst(VECTOR_CST_ELT(expr, 0));
+	  Inst *ret = elem;
+	  for (uint32_t i = 1; i < nof_elem; i++)
+	    {
+	      ret = bb->build_inst(Op::CONCAT, elem, ret);
+	    }
+	  return {ret, nullptr, nullptr};
+	}
+      if (VECTOR_CST_STEPPED_P(expr))
+	{
+	  uint32_t bitsize = bitsize_for_type(TREE_TYPE(expr));
+	  uint32_t elem_bitsize = bitsize_for_type(TREE_TYPE(TREE_TYPE(expr)));
+	  uint32_t nof_elem = bitsize / elem_bitsize;
+	  unsigned __int128 base = tree2inst(VECTOR_CST_ELT(expr, 0))->value();
+	  unsigned __int128 step =
+	    tree2inst(VECTOR_CST_ELT(expr, 1))->value() - base;
+	  Inst *ret = bb->value_inst(base, elem_bitsize);
+	  for (uint32_t i = 1; i < nof_elem; i++)
+	    {
+	      Inst *elem = bb->value_inst(base + i * step, elem_bitsize);;
+	      ret = bb->build_inst(Op::CONCAT, elem, ret);
+	    }
+	  return {ret, nullptr, nullptr};
+	}
+      throw Not_implemented("tree2inst: complicated VECTOR_CST");
     case COMPLEX_CST:
       {
 	tree elem_type = TREE_TYPE(TREE_TYPE(expr));
@@ -3109,6 +3147,9 @@ std::pair<Inst *, Inst *> Converter::process_binary_vec(enum tree_code code, Ins
   if (code == VEC_WIDEN_MULT_ODD_EXPR)
     return process_widen_mult_evenodd(arg1, arg1_indef, arg2, arg2_indef,
 				      lhs_type, arg1_type, arg2_type, true);
+  if (code == VEC_SERIES_EXPR)
+    throw Not_implemented("process_binary_vec: "s + get_tree_code_name(code));
+
   assert(VECTOR_TYPE_P(lhs_type));
   assert(VECTOR_TYPE_P(arg1_type));
   tree lhs_elem_type = TREE_TYPE(lhs_type);
@@ -4682,21 +4723,16 @@ void Converter::process_cfn_loop_vectorized(gimple *stmt)
   tree2instruction.insert({lhs, bb->value_inst(0, 1)});
 }
 
-void Converter::process_cfn_mask_load(gimple *stmt)
+std::tuple<Inst*, Inst*> Converter::mask_len_load(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, Inst *mask, Inst *mask_indef, tree mask_type, Inst *len, tree lhs_type, Inst *orig, Inst *orig_indef)
 {
-  tree ptr_expr = gimple_call_arg(stmt, 0);
-  tree alignment_expr = gimple_call_arg(stmt, 1);
-  tree mask_expr = gimple_call_arg(stmt, 2);
-  tree mask_type = TREE_TYPE(mask_expr);
-  tree lhs = gimple_call_lhs(stmt);
-  assert(lhs);
-  tree lhs_type = TREE_TYPE(lhs);
+ tree elem_type = VECTOR_TYPE_P(lhs_type) ? TREE_TYPE(lhs_type) : lhs_type;
+  tree mask_elem_type =
+    VECTOR_TYPE_P(mask_type) ? TREE_TYPE(mask_type) : mask_type;
+  uint64_t elem_size = bytesize_for_type(elem_type);
+  uint64_t elem_bitsize = bitsize_for_type(elem_type);
+  assert(TREE_CODE(mask_elem_type) == BOOLEAN_TYPE);
+  uint64_t mask_elem_bitsize = bitsize_for_type(mask_elem_type);
 
-  auto [ptr, ptr_prov] = tree2inst_prov(ptr_expr);
-  Inst *mask = tree2inst(mask_expr);
-  uint64_t size = bytesize_for_type(lhs_type);
-
-  uint64_t alignment = get_int_cst_val(alignment_expr) / 8;
   if (alignment > 1)
     {
       uint32_t high_val = 0;
@@ -4713,14 +4749,7 @@ void Converter::process_cfn_mask_load(gimple *stmt)
       bb->build_inst(Op::UB, cond);
     }
 
-  assert(VECTOR_TYPE_P(lhs_type) == VECTOR_TYPE_P(mask_type));
-  tree elem_type = VECTOR_TYPE_P(lhs_type) ? TREE_TYPE(lhs_type) : lhs_type;
-  tree mask_elem_type =
-    VECTOR_TYPE_P(mask_type) ? TREE_TYPE(mask_type) : mask_type;
-  uint64_t elem_size = bytesize_for_type(elem_type);
-  assert(TREE_CODE(mask_elem_type) == BOOLEAN_TYPE);
-  uint64_t mask_elem_bitsize = bitsize_for_type(mask_elem_type);
-
+  uint64_t size = bytesize_for_type(lhs_type);
   uint64_t nof_elem = size / elem_size;
   assert((size % elem_size) == 0);
   Inst *inst = nullptr;
@@ -4731,16 +4760,39 @@ void Converter::process_cfn_mask_load(gimple *stmt)
       Inst *cond = extract_vec_elem(bb, mask, mask_elem_bitsize, i);
       if (cond->bitsize != 1)
 	cond = bb->build_trunc(cond, 1);
+      Inst *mask_elem_indef = nullptr;
+      if (mask_indef)
+	mask_elem_indef =
+	  extract_vec_elem(bb, mask_indef, mask_elem_bitsize, i);
+      if (len)
+	{
+	  Inst *i_inst = bb->value_inst(i, len->bitsize);
+	  Inst *cmp = bb->build_inst(Op::ULT, i_inst, len);
+	  if (mask_elem_indef)
+	    build_ub_if_not_zero(mask_elem_indef, cmp);
+	  cond = bb->build_inst(Op::AND, cmp, cond);
+	}
+      else
+	{
+	  if (mask_elem_indef)
+	    build_ub_if_not_zero(mask_elem_indef);
+	}
+      if (ptr_indef)
+	build_ub_if_not_zero(ptr_indef, cond);
 
       Inst *offset = bb->value_inst(i * elem_size, ptr->bitsize);
       Inst *src_ptr = bb->build_inst(Op::ADD, ptr, offset);
       load_ub_check(src_ptr, ptr_prov, elem_size, cond);
       auto [elem, elem_indef, elem_flags] = load_value(src_ptr, elem_size);
-      constrain_src_value(elem, elem_type);
-      Inst *zero = bb->value_inst(0, elem->bitsize);
-      Inst *m1 = bb->value_inst(-1, elem->bitsize);
-      elem = bb->build_inst(Op::ITE, cond, elem, zero);
-      elem_indef = bb->build_inst(Op::ITE, cond, elem_indef, m1);
+      if (!VECTOR_TYPE_P(lhs_type))
+	std::tie(elem, elem_indef) = from_mem_repr(elem, elem_indef, elem_type);
+      auto [orig_elem, orig_elem_indef] =
+	extract_vec_elem(bb, orig, orig_indef, elem_bitsize, i);
+      // TODO: We should call constrain_src_value in order to constrain
+      // non-canonical NaN etc. But this should only be done when not masked.
+      // constrain_src_value(elem, elem_type, elem_flags);
+      elem = bb->build_inst(Op::ITE, cond, elem, orig_elem);
+      elem_indef = bb->build_inst(Op::ITE, cond, elem_indef, orig_elem_indef);
 
       if (inst)
 	inst = bb->build_inst(Op::CONCAT, elem, inst);
@@ -4756,7 +4808,34 @@ void Converter::process_cfn_mask_load(gimple *stmt)
 	mem_flags = elem_flags;
     }
 
-  constrain_src_value(inst, lhs_type, mem_flags);
+  return {inst, indef};
+}
+
+void Converter::process_cfn_mask_len_load(gimple *stmt)
+{
+  tree ptr_expr = gimple_call_arg(stmt, 0);
+  tree alignment_expr = gimple_call_arg(stmt, 1);
+  tree mask_expr = gimple_call_arg(stmt, 2);
+  tree mask_type = TREE_TYPE(mask_expr);
+  tree orig_expr = gimple_call_arg(stmt, 3);
+  tree len_expr = gimple_call_arg(stmt, 4);
+  assert(TYPE_UNSIGNED(TREE_TYPE(len_expr)));
+  tree bias = gimple_call_arg(stmt, 5);
+  if (tree2inst(bias)->value() != 0)
+    throw Not_implemented("process_cfn_mask_len_load: bias != 0");
+  tree lhs = gimple_call_lhs(stmt);
+  assert(lhs);
+  tree lhs_type = TREE_TYPE(lhs);
+
+  auto [ptr, ptr_indef, ptr_prov] = tree2inst_indef_prov(ptr_expr);
+  auto [orig, orig_indef] = tree2inst_indef(orig_expr);
+  uint64_t alignment = get_int_cst_val(alignment_expr) / 8;
+  auto [mask, mask_indef] = tree2inst_indef(mask_expr);
+  Inst *len = tree2inst(len_expr);
+
+  auto [inst, indef] =
+    mask_len_load(ptr, ptr_indef, ptr_prov, alignment, mask, mask_indef,
+		  mask_type, len, lhs_type, orig, orig_indef);
   std::tie(inst, indef) = from_mem_repr(inst, indef, lhs_type);
   constrain_range(bb, lhs, inst);
   tree2instruction.insert({lhs, inst});
@@ -4765,22 +4844,45 @@ void Converter::process_cfn_mask_load(gimple *stmt)
     tree2prov.insert({lhs, extract_id(inst)});
 }
 
-void Converter::process_cfn_mask_store(gimple *stmt)
+void Converter::process_cfn_mask_load(gimple *stmt)
 {
   tree ptr_expr = gimple_call_arg(stmt, 0);
   tree alignment_expr = gimple_call_arg(stmt, 1);
   tree mask_expr = gimple_call_arg(stmt, 2);
   tree mask_type = TREE_TYPE(mask_expr);
-  tree value_expr = gimple_call_arg(stmt, 3);
-  tree value_type = TREE_TYPE(value_expr);
+  tree lhs = gimple_call_lhs(stmt);
+  assert(lhs);
+  tree lhs_type = TREE_TYPE(lhs);
 
-  auto [ptr, ptr_prov] = tree2inst_prov(ptr_expr);
-  Inst *mask = tree2inst(mask_expr);
-  auto [value, indef] = tree2inst_indef(value_expr);
-  assert((value->bitsize & 7) == 0);
-  uint64_t size = value->bitsize / 8;
-
+  auto [ptr, ptr_indef, ptr_prov] = tree2inst_indef_prov(ptr_expr);
   uint64_t alignment = get_int_cst_val(alignment_expr) / 8;
+  auto [mask, mask_indef] = tree2inst_indef(mask_expr);
+
+  uint64_t bitsize = bitsize_for_type(lhs_type);
+  Inst *orig = bb->value_inst(0, bitsize);
+  Inst *orig_indef = bb->value_inst(-1, bitsize);
+  auto [inst, indef] =
+    mask_len_load(ptr, ptr_indef, ptr_prov, alignment, mask, mask_indef,
+		  mask_type, nullptr, lhs_type, orig, orig_indef);
+  std::tie(inst, indef) = from_mem_repr(inst, indef, lhs_type);
+  constrain_range(bb, lhs, inst);
+  tree2instruction.insert({lhs, inst});
+  tree2indef.insert({lhs, indef});
+  if (POINTER_TYPE_P(lhs_type))
+    tree2prov.insert({lhs, extract_id(inst)});
+}
+
+void Converter::mask_len_store(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, Inst *mask, Inst *mask_indef, tree mask_type, Inst *len, tree value_type, Inst *value, Inst *value_indef)
+{
+ tree elem_type =
+   VECTOR_TYPE_P(value_type) ? TREE_TYPE(value_type) : value_type;
+  tree mask_elem_type =
+    VECTOR_TYPE_P(mask_type) ? TREE_TYPE(mask_type) : mask_type;
+  uint64_t elem_size = bytesize_for_type(elem_type);
+  uint64_t elem_bitsize = bitsize_for_type(elem_type);
+  assert(TREE_CODE(mask_elem_type) == BOOLEAN_TYPE);
+  uint64_t mask_elem_bitsize = bitsize_for_type(mask_elem_type);
+
   if (alignment > 1)
     {
       uint32_t high_val = 0;
@@ -4797,18 +4899,10 @@ void Converter::process_cfn_mask_store(gimple *stmt)
       bb->build_inst(Op::UB, cond);
     }
 
-  assert(VECTOR_TYPE_P(value_type) == VECTOR_TYPE_P(mask_type));
-  tree value_elem_type =
-    VECTOR_TYPE_P(value_type) ? TREE_TYPE(value_type) : value_type;
-  tree mask_elem_type =
-    VECTOR_TYPE_P(mask_type) ? TREE_TYPE(mask_type) : mask_type;
-  uint64_t elem_size = bytesize_for_type(value_elem_type);
-  assert(TREE_CODE(mask_elem_type) == BOOLEAN_TYPE);
-  uint64_t mask_elem_bitsize = bitsize_for_type(mask_elem_type);
+  if (!value_indef)
+    value_indef = bb->value_inst(0, value->bitsize);
 
-  if (!indef)
-    indef = bb->value_inst(0, value->bitsize);
-
+  uint64_t size = bytesize_for_type(value_type);
   uint64_t nof_elem = size / elem_size;
   assert((size % elem_size) == 0);
   for (uint64_t i = 0; i < nof_elem; i++)
@@ -4816,22 +4910,82 @@ void Converter::process_cfn_mask_store(gimple *stmt)
       Inst *cond = extract_vec_elem(bb, mask, mask_elem_bitsize, i);
       if (cond->bitsize != 1)
 	cond = bb->build_trunc(cond, 1);
+      Inst *mask_elem_indef = nullptr;
+      if (mask_indef)
+	mask_elem_indef =
+	  extract_vec_elem(bb, mask_indef, mask_elem_bitsize, i);
+      if (len)
+	{
+	  Inst *i_inst = bb->value_inst(i, len->bitsize);
+	  Inst *cmp = bb->build_inst(Op::ULT, i_inst, len);
+	  if (mask_elem_indef)
+	    build_ub_if_not_zero(mask_elem_indef, cmp);
+	  cond = bb->build_inst(Op::AND, cmp, cond);
+	}
+      else
+	{
+	  if (mask_elem_indef)
+	    build_ub_if_not_zero(mask_elem_indef);
+	}
+      if (ptr_indef)
+	build_ub_if_not_zero(ptr_indef, cond);
 
       Basic_block *true_bb = func->build_bb();
       Basic_block *false_bb = func->build_bb();
       bb->build_br_inst(cond, true_bb, false_bb);
-
       bb = true_bb;
-      Inst *elem = extract_vec_elem(bb, value, elem_size * 8, i);
-      Inst *elem_indef = extract_vec_elem(bb, indef, elem_size * 8, i);
+      auto [elem, elem_indef] =
+	extract_vec_elem(bb, value, value_indef, elem_bitsize, i);
       Inst *offset = bb->value_inst(i * elem_size, ptr->bitsize);
       Inst *dst_ptr = bb->build_inst(Op::ADD, ptr, offset);
+      if (!VECTOR_TYPE_P(value_type))
+	std::tie(elem, elem_indef) = to_mem_repr(elem, elem_indef, elem_type);
       store_ub_check(dst_ptr, ptr_prov, elem_size, cond);
       store_value(dst_ptr, elem, elem_indef);
       bb->build_br_inst(false_bb);
 
       bb = false_bb;
     }
+}
+
+void Converter::process_cfn_mask_len_store(gimple *stmt)
+{
+  tree ptr_expr = gimple_call_arg(stmt, 0);
+  tree alignment_expr = gimple_call_arg(stmt, 1);
+  tree mask_expr = gimple_call_arg(stmt, 2);
+  tree mask_type = TREE_TYPE(mask_expr);
+  tree len_expr = gimple_call_arg(stmt, 3);
+  assert(TYPE_UNSIGNED(TREE_TYPE(len_expr)));
+  tree bias = gimple_call_arg(stmt, 4);
+  if (tree2inst(bias)->value() != 0)
+    throw Not_implemented("process_cfn_mask_len_store: bias != 0");
+  tree value_expr = gimple_call_arg(stmt, 5);
+  tree value_type = TREE_TYPE(value_expr);
+
+  auto [ptr, ptr_indef, ptr_prov] = tree2inst_indef_prov(ptr_expr);
+  uint64_t alignment = get_int_cst_val(alignment_expr) / 8;
+  auto [mask, mask_indef] = tree2inst_indef(mask_expr);
+  Inst *len = tree2inst(len_expr);
+  auto [value, value_indef] = tree2inst_indef(value_expr);
+  mask_len_store(ptr, ptr_indef, ptr_prov, alignment, mask, mask_indef,
+		 mask_type, len, value_type, value, value_indef);
+}
+
+void Converter::process_cfn_mask_store(gimple *stmt)
+{
+  tree ptr_expr = gimple_call_arg(stmt, 0);
+  tree alignment_expr = gimple_call_arg(stmt, 1);
+  tree mask_expr = gimple_call_arg(stmt, 2);
+  tree mask_type = TREE_TYPE(mask_expr);
+  tree value_expr = gimple_call_arg(stmt, 3);
+  tree value_type = TREE_TYPE(value_expr);
+
+  auto [ptr, ptr_indef, ptr_prov] = tree2inst_indef_prov(ptr_expr);
+  uint64_t alignment = get_int_cst_val(alignment_expr) / 8;
+  auto [mask, mask_indef] = tree2inst_indef(mask_expr);
+  auto [value, value_indef] = tree2inst_indef(value_expr);
+  mask_len_store(ptr, ptr_indef, ptr_prov, alignment, mask, mask_indef,
+		 mask_type, nullptr, value_type, value, value_indef);
 }
 
 void Converter::process_cfn_memcpy(gimple *stmt)
@@ -5208,6 +5362,26 @@ void Converter::process_cfn_sat_sub(gimple *stmt)
       return {res, res_indef};
     };
   process_cfn_binary(stmt, gen_elem);
+}
+
+void Converter::process_cfn_select_vl(gimple *stmt)
+{
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  Inst *arg1 = tree2inst(arg1_expr);
+  assert(TYPE_UNSIGNED(arg1_type));
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  assert(POLY_INT_CST_P(arg2_expr));
+  uint32_t nof_elem = TREE_INT_CST_LOW(POLY_INT_CST_COEFF(arg2_expr, 0));
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+
+  Inst *nof = bb->value_inst(nof_elem, arg1->bitsize);
+  Inst *cmp = bb->build_inst(Op::ULT, arg1, nof);
+  Inst *res = bb->build_inst(Op::ITE, cmp, arg1, nof);
+  constrain_range(bb, lhs, res);
+  tree2instruction.insert({lhs, res});
 }
 
 void Converter::process_cfn_signbit(gimple *stmt)
@@ -5911,6 +6085,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_SAT_SUB:
       process_cfn_sat_sub(stmt);
       break;
+    case CFN_SELECT_VL:
+      process_cfn_select_vl(stmt);
+      break;
     case CFN_BUILT_IN_SIGNBIT:
     case CFN_BUILT_IN_SIGNBITF:
     case CFN_BUILT_IN_SIGNBITL:
@@ -5946,6 +6123,12 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_LOOP_VECTORIZED:
       process_cfn_loop_vectorized(stmt);
+      break;
+    case CFN_MASK_LEN_LOAD:
+      process_cfn_mask_len_load(stmt);
+      break;
+    case CFN_MASK_LEN_STORE:
+      process_cfn_mask_len_store(stmt);
       break;
     case CFN_MASK_LOAD:
       process_cfn_mask_load(stmt);
@@ -7149,6 +7332,8 @@ uint64_t bitsize_for_type(tree type)
   tree size_tree = TYPE_SIZE(type);
   if (size_tree == NULL_TREE)
     throw Not_implemented("bitsize_for_type: incomplete type");
+  if (VECTOR_TYPE_P(type) && POLY_INT_CST_P(size_tree))
+    return TREE_INT_CST_LOW(POLY_INT_CST_COEFF(size_tree, 0));
   if (TREE_CODE(size_tree) != INTEGER_CST)
     {
       // Things like function parameters

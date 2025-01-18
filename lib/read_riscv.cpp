@@ -1645,8 +1645,15 @@ void Parser::process_vsetvli(bool arg1_is_imm)
   else
     throw Parse_error("invalid SEW", line_number);
 
-  if (arg3 != "m1" && arg3 != "mf2" && arg3 != "mf4" && arg3 != "mf8")
+  if (arg3 == "mf2")
+    nof_vec_elem /= 2;
+  else if (arg3 == "mf4")
+    nof_vec_elem /= 4;
+  else if (arg3 == "mf8")
+    nof_vec_elem /= 8;
+  else if (arg3 != "m1")
     throw Parse_error("vsetvli: only m1/mf* are implemented", line_number);
+
   if (arg4 != "ta" && arg4 != "tu")
     throw Parse_error("expected ta or tu", line_number);
   if (arg5 != "ma" && arg5 != "mu")
@@ -1656,7 +1663,7 @@ void Parser::process_vsetvli(bool arg1_is_imm)
   Inst *vlmax = bb->value_inst(nof_vec_elem, arg1->bitsize);
   if (is_reg_x0(3))
     {
-      if (is_reg_x0(0))
+      if (is_reg_x0(1))
 	{
 	  // Keep existing vl. I.e. nothing to do here.
 	}
@@ -1668,8 +1675,8 @@ void Parser::process_vsetvli(bool arg1_is_imm)
     }
   else
     {
-      Inst *cmp = bb->build_inst(Op::ULT, vlmax, arg1);
-      Inst *vl = bb->build_inst(Op::ITE, cmp, vlmax, arg1);
+      Inst *cmp = bb->build_inst(Op::ULT, arg1, vlmax);
+      Inst *vl = bb->build_inst(Op::ITE, cmp, arg1, vlmax);
       bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::vl], vl);
       bb->build_inst(Op::WRITE, dest, vl);
     }
@@ -1724,7 +1731,15 @@ void Parser::process_vse(uint32_t elem_bitsize)
   get_left_paren(4);
   Inst *ptr = get_reg_value(5);
   get_right_paren(6);
-  get_end_of_line(7);
+  Inst *mask = nullptr;
+  if (tokens.size() > 7)
+    {
+      get_comma(7);
+      mask = get_vreg_value(8);
+      get_end_of_line(9);
+    }
+  else
+    get_end_of_line(7);
 
   Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
   uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
@@ -1734,6 +1749,8 @@ void Parser::process_vse(uint32_t elem_bitsize)
       Basic_block *false_bb = func->build_bb();
       Inst *i_inst = bb->value_inst(i, vl->bitsize);
       Inst *cmp = bb->build_inst(Op::ULT, i_inst, vl);
+      if (mask)
+	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
       bb->build_br_inst(cmp, true_bb, false_bb);
       bb = true_bb;
 
