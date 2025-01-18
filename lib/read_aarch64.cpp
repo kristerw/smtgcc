@@ -106,11 +106,13 @@ private:
   bool is_freg(unsigned idx);
   bool is_vreg(unsigned idx);
   bool is_zreg(unsigned idx);
-  Inst *get_imm(unsigned idx);
+  Inst *get_imm(unsigned idxo);
+  Inst *get_imm(unsigned idx, uint32_t bitsize);
   Inst *get_reg_value(unsigned idx);
   Inst *get_reg_or_imm_value(unsigned idx, uint32_t bitsize);
   Inst *get_freg_value(unsigned idx);
   Inst *get_vreg_value(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
+  Inst *get_zreg_value(unsigned idx);
   uint64_t get_vreg_idx(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
@@ -239,6 +241,7 @@ private:
   void process_vec_trn2();
   void process_vec_tbl();
   void parse_vector_op();
+  void process_sve_binary(Op op);
   void process_sve_index();
   void parse_sve_op();
   void parse_function();
@@ -639,6 +642,12 @@ Inst *Parser::get_vreg_value(unsigned idx, uint32_t nof_elem,
   return bb->build_trunc(inst, nof_elem * elem_bitsize);
 }
 
+Inst *Parser::get_zreg_value(unsigned idx)
+{
+  auto [dest, dest_nof_elem, dest_elem_bitsize] = get_zreg(idx);
+  return bb->build_inst(Op::READ, dest);
+}
+
 uint64_t Parser::get_vreg_idx(unsigned idx, uint32_t nof_elem,
 			      uint32_t elem_bitsize)
 {
@@ -807,6 +816,13 @@ Inst *Parser::get_imm(unsigned idx)
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
   return bb->value_inst(get_hex_or_integer(idx), reg_bitsize);
+}
+
+Inst *Parser::get_imm(unsigned idx, uint32_t bitsize)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  return bb->value_inst(get_hex_or_integer(idx), bitsize);
 }
 
 Inst *Parser::get_reg_value(unsigned idx)
@@ -4161,6 +4177,37 @@ void Parser::parse_vector_op()
 		      line_number);
 }
 
+void Parser::process_sve_binary(Op op)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1 = get_zreg_value(3);
+  get_comma(4);
+  Inst *arg2;
+  if (is_zreg(5))
+    arg2 = get_zreg_value(5);
+  else
+    arg2 = get_imm(5, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2;
+      if (arg2->bitsize == elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, elem1, elem2);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_index()
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -4185,8 +4232,14 @@ void Parser::parse_sve_op()
 {
   std::string_view name = get_name(0);
 
-  if (name == "index")
+  if (name == "and")
+    process_sve_binary(Op::AND);
+  else if (name == "eor")
+    process_sve_binary(Op::XOR);
+  else if (name == "index")
     process_sve_index();
+  else if (name == "orr")
+    process_sve_binary(Op::OR);
   else
     throw Parse_error("unhandled sve instruction: "s + std::string(name),
 		      line_number);
