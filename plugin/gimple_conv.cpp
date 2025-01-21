@@ -132,6 +132,7 @@ struct Converter {
   std::tuple<Inst *, Inst *, Inst *> process_unary_int(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type);
   Inst *process_unary_scalar(enum tree_code code, Inst *arg1, tree lhs_type, tree arg1_type);
   std::tuple<Inst *, Inst *, Inst *> process_unary_scalar(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type);
+  std::pair<Inst *, Inst *> process_vec_duplicate(Inst *arg1, Inst *arg1_indef, tree lhs_elem_type, tree arg1_elem_type);
   std::pair<Inst *, Inst *> process_unary_vec(enum tree_code code, Inst *arg1, Inst *arg1_indef, tree lhs_elem_type, tree arg1_elem_type);
   std::pair<Inst *, Inst *> process_unary_float(enum tree_code code, Inst *arg1, Inst *arg1_indef, tree lhs_type, tree arg1_type);
   Inst *process_unary_complex(enum tree_code code, Inst *arg1, tree lhs_type);
@@ -2432,6 +2433,22 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_scalar(enum tree_cod
   return {inst, indef, prov};
 }
 
+std::pair<Inst *, Inst *> Converter::process_vec_duplicate(Inst *arg1, Inst *arg1_indef, tree lhs_type, tree arg1_type)
+{
+  uint32_t elem_bitsize = bitsize_for_type(arg1_type);
+  assert(bitsize_for_type(TREE_TYPE(lhs_type)) == elem_bitsize);
+  uint32_t nof_elt = bitsize_for_type(lhs_type) / elem_bitsize;
+  Inst *res = arg1;
+  Inst *res_indef = arg1_indef;
+  for (uint64_t i = 1; i < nof_elt; i++)
+    {
+      res = bb->build_inst(Op::CONCAT, arg1, res);
+      if (res_indef)
+	res_indef = bb->build_inst(Op::CONCAT, arg1_indef, res_indef);
+    }
+  return {res, res_indef};
+}
+
 std::pair<Inst *, Inst *> Converter::process_unary_vec(enum tree_code code, Inst *arg1, Inst *arg1_indef, tree lhs_elem_type, tree arg1_elem_type)
 {
   uint32_t elem_bitsize = bitsize_for_type(arg1_elem_type);
@@ -3875,14 +3892,18 @@ void Converter::process_gimple_assign(gimple *stmt)
 	  }
 	else if (VECTOR_TYPE_P(lhs_type))
 	  {
-	    if (code == VEC_DUPLICATE_EXPR)
-	      throw Not_implemented("process_gimple_assign: vec_duplicate_expr");
 	    auto [arg1, arg1_indef] = tree2inst_indef(rhs1);
-	    tree lhs_elem_type = TREE_TYPE(lhs_type);
-	    tree arg1_elem_type = TREE_TYPE(arg1_type);
-	    std::tie(inst, indef) =
-	      process_unary_vec(code, arg1, arg1_indef, lhs_elem_type,
-				arg1_elem_type);
+	    if (code == VEC_DUPLICATE_EXPR)
+	      std::tie(inst, indef) =
+		process_vec_duplicate(arg1, arg1_indef, lhs_type, arg1_type);
+	    else
+	      {
+		tree lhs_elem_type = TREE_TYPE(lhs_type);
+		tree arg1_elem_type = TREE_TYPE(arg1_type);
+		std::tie(inst, indef) =
+		  process_unary_vec(code, arg1, arg1_indef, lhs_elem_type,
+				    arg1_elem_type);
+	      }
 	  }
 	else
 	  {
