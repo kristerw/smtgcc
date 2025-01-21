@@ -1106,6 +1106,21 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	  }
 	return {inst, nullptr, prov};
       }
+    case POLY_INT_CST:
+      {
+	uint32_t precision = bitsize_for_type(TREE_TYPE(expr));
+	unsigned __int128 value = TREE_INT_CST_LOW(POLY_INT_CST_COEFF(expr, 0));
+	Inst *inst = bb->value_inst(value, precision);
+	Inst *prov = nullptr;
+	if (POINTER_TYPE_P(TREE_TYPE(expr)))
+	  {
+	    uint32_t ptr_id_bits = module->ptr_id_bits;
+	    uint32_t ptr_id_low = module->ptr_id_low;
+	    uint64_t id = (value >> ptr_id_low) & ((1 << ptr_id_bits) - 1);
+	    prov = bb->value_inst(id, ptr_id_bits);
+	  }
+	return {inst, nullptr, prov};
+      }
     case REAL_CST:
       {
 	tree type = TREE_TYPE(expr);
