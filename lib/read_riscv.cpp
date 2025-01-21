@@ -1693,7 +1693,15 @@ void Parser::process_vle(uint32_t elem_bitsize)
   get_left_paren(4);
   Inst *ptr = get_reg_value(5);
   get_right_paren(6);
-  get_end_of_line(7);
+  Inst *mask = nullptr;
+  if (tokens.size() > 7)
+    {
+      get_comma(7);
+      mask = get_vreg_value(8);
+      get_end_of_line(9);
+    }
+  else
+    get_end_of_line(7);
 
   Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
   Inst *value = nullptr;
@@ -1705,6 +1713,8 @@ void Parser::process_vle(uint32_t elem_bitsize)
       Inst *elem_ptr = bb->build_inst(Op::ADD, ptr, elem_offset_inst);
       Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
       Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      if (mask)
+	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
       for (uint32_t j = 0; j < elem_bitsize / 8; j++)
 	{
 	  Inst *offset_inst = bb->value_inst(j, ptr->bitsize);
