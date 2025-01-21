@@ -148,7 +148,7 @@ struct Converter {
   std::pair<Inst *, Inst *> process_widen_mult_evenodd(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type, bool is_odd);
   Inst *process_ternary(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree arg1_type, tree arg2_type, tree arg3_type);
   Inst *process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree lhs_type, tree arg1_type, tree arg2_type, tree arg3_type);
-  std::pair<Inst *, Inst *> process_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type);
+  std::pair<Inst *, Inst *> process_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type, Inst *len = nullptr);
   std::pair<Inst *, Inst *> process_vec_perm_expr(gimple *stmt);
   std::tuple<Inst *, Inst *, Inst *> vector_constructor(tree expr);
   void process_constructor(tree lhs, tree rhs);
@@ -164,7 +164,9 @@ struct Converter {
   void process_cfn_bswap(gimple *stmt);
   void process_cfn_clrsb(gimple *stmt);
   void process_cfn_clz(gimple *stmt);
+  std::pair<Inst*, Inst*> gen_cfn_cond(tree_code code, Inst *cond, Inst *cond_indef, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *orig, Inst *orig_indef, Inst *len, tree cond_type, tree arg1_type, tree arg2_type, tree orig_type);
   void process_cfn_cond(gimple *stmt);
+  void process_cfn_cond_len(gimple *stmt);
   void process_cfn_cond_fminmax(gimple *stmt);
   void process_cfn_copysign(gimple *stmt);
   void process_cfn_ctz(gimple *stmt);
@@ -3453,7 +3455,7 @@ Inst *Converter::process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2
   return res;
 }
 
-std::pair<Inst *, Inst *> Converter::process_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type)
+std::pair<Inst *, Inst *> Converter::process_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type, Inst *len)
 {
   assert(VECTOR_TYPE_P(arg1_type));
   assert(VECTOR_TYPE_P(arg2_type));
@@ -3484,6 +3486,12 @@ std::pair<Inst *, Inst *> Converter::process_vec_cond(Inst *arg1, Inst *arg1_ind
 	a1 = bb->build_extract_bit(a1, 0);
       Inst *a2 = extract_vec_elem(bb, arg2, elem_bitsize2, i);
       Inst *a3 = extract_vec_elem(bb, arg3, elem_bitsize2, i);
+      if (len)
+	{
+	  Inst *i_inst = bb->value_inst(i, len->bitsize);
+	  Inst *cmp = bb->build_inst(Op::ULT, i_inst, len);
+	  a1 = bb->build_inst(Op::AND, cmp, a1);
+	}
       Inst *inst = bb->build_inst(Op::ITE, a1, a2, a3);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
@@ -4349,20 +4357,69 @@ void Converter::process_cfn_clz(gimple *stmt)
   tree2instruction.insert({lhs, res});
 }
 
+std::pair<Inst*, Inst*> Converter::gen_cfn_cond(tree_code code, Inst *cond, Inst *cond_indef, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *orig, Inst *orig_indef, Inst *len, tree cond_type, tree arg1_type, tree arg2_type, tree orig_type)
+{
+  Inst *op_inst;
+  Inst *op_indef = nullptr;
+  // TODO: We ignore overflow for now, but we may need to modify this to
+  // check for oveflow when the condition is true.
+  // TODO: Indef cond is UB.
+  if (VECTOR_TYPE_P(arg1_type))
+    {
+      std::tie(op_inst, op_indef) =
+	process_binary_vec(code, arg1, arg1_indef, arg2, arg2_indef,
+			   arg1_type, arg1_type, arg2_type, true);
+    }
+  else
+    {
+      Inst *op_prov;
+      std::tie(op_inst, op_indef, op_prov) =
+	process_binary_scalar(code, arg1, arg1_indef, nullptr,
+			      arg2, arg2_indef, nullptr,
+			      arg1_type, arg1_type, arg2_type, true);
+    }
+
+  Inst *res;
+  Inst *res_indef = nullptr;
+  if (VECTOR_TYPE_P(cond_type))
+    {
+      std::tie(res, res_indef) =
+	process_vec_cond(cond, cond_indef, op_inst, op_indef, orig, orig_indef,
+			 cond_type, orig_type, len);
+    }
+  else
+    {
+      assert(TREE_CODE(cond_type) == BOOLEAN_TYPE);
+      if (TYPE_PRECISION(cond_type) != 1)
+	cond = bb->build_extract_bit(cond, 0);
+      res = bb->build_inst(Op::ITE, cond, op_inst, orig);
+      if (op_indef || orig_indef)
+	{
+	  if (!op_indef)
+	    op_indef = bb->value_inst(0, op_inst->bitsize);
+	  if (!orig_indef)
+	    orig_indef = bb->value_inst(0, orig->bitsize);
+	  res_indef = bb->build_inst(Op::ITE, cond, op_indef, orig_indef);
+	}
+    }
+
+  return {res, res_indef};
+}
+
 void Converter::process_cfn_cond(gimple *stmt)
 {
-  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree cond_expr = gimple_call_arg(stmt, 0);
+  tree cond_type = TREE_TYPE(cond_expr);
+  auto[cond, cond_indef] = tree2inst_indef(cond_expr);
+  tree arg1_expr = gimple_call_arg(stmt, 1);
   tree arg1_type = TREE_TYPE(arg1_expr);
   auto[arg1, arg1_indef] = tree2inst_indef(arg1_expr);
-  tree arg2_expr = gimple_call_arg(stmt, 1);
+  tree arg2_expr = gimple_call_arg(stmt, 2);
   tree arg2_type = TREE_TYPE(arg2_expr);
   auto[arg2, arg2_indef] = tree2inst_indef(arg2_expr);
-  tree arg3_expr = gimple_call_arg(stmt, 2);
-  tree arg3_type = TREE_TYPE(arg3_expr);
-  auto[arg3, arg3_indef] = tree2inst_indef(arg3_expr);
-  tree arg4_expr = gimple_call_arg(stmt, 3);
-  tree arg4_type = TREE_TYPE(arg4_expr);
-  auto[arg4, arg4_indef] = tree2inst_indef(arg4_expr);
+  tree orig_expr = gimple_call_arg(stmt, 3);
+  tree orig_type = TREE_TYPE(orig_expr);
+  auto[orig, orig_indef] = tree2inst_indef(orig_expr);
   tree lhs = gimple_call_lhs(stmt);
 
   tree_code code;
@@ -4402,54 +4459,92 @@ void Converter::process_cfn_cond(gimple *stmt)
       }
     }
 
-  Inst *op_inst;
-  Inst *op_indef = nullptr;
-  // TODO: We ignore overflow for now, but we may need to modify this to
-  // check for oveflow when the condition is true.
-  if (VECTOR_TYPE_P(arg2_type))
-    {
-      std::tie(op_inst, op_indef) =
-	process_binary_vec(code, arg2, arg2_indef, arg3, arg3_indef,
-			   arg2_type, arg2_type, arg3_type, true);
-    }
-  else
-    {
-      Inst *op_prov;
-      std::tie(op_inst, op_indef, op_prov) =
-	process_binary_scalar(code, arg2, arg2_indef, nullptr,
-			      arg3, arg3_indef, nullptr,
-			      arg2_type, arg2_type, arg3_type, true);
-    }
-
-  Inst *ret_inst;
-  Inst *ret_indef = nullptr;
-  if (VECTOR_TYPE_P(arg1_type))
-    {
-      std::tie(ret_inst, ret_indef) =
-	process_vec_cond(arg1, arg1_indef, op_inst, op_indef, arg4, arg4_indef,
-			 arg1_type, arg4_type);
-    }
-  else
-    {
-      assert(TREE_CODE(arg1_type) == BOOLEAN_TYPE);
-      if (TYPE_PRECISION(arg1_type) != 1)
-	arg1 = bb->build_extract_bit(arg1, 0);
-      ret_inst = bb->build_inst(Op::ITE, arg1, op_inst, arg4);
-      if (op_indef || arg4_indef)
-	{
-	  if (!op_indef)
-	    op_indef = bb->value_inst(0, op_inst->bitsize);
-	  if (!arg4_indef)
-	    arg4_indef = bb->value_inst(0, arg4->bitsize);
-	  ret_indef = bb->build_inst(Op::ITE, arg1, op_indef, arg4_indef);
-	}
-    }
+  auto [res, res_indef] =
+    gen_cfn_cond(code, cond, cond_indef, arg1, arg1_indef, arg2, arg2_indef,
+		 orig, orig_indef, nullptr, cond_type, arg1_type, arg2_type,
+		 orig_type);
 
   if (lhs)
     {
-      tree2instruction.insert({lhs, ret_inst});
-      if (ret_indef)
-	tree2indef.insert({lhs, ret_indef});
+      tree2instruction.insert({lhs, res});
+      if (res_indef)
+	tree2indef.insert({lhs, res_indef});
+    }
+}
+
+void Converter::process_cfn_cond_len(gimple *stmt)
+{
+  tree cond_expr = gimple_call_arg(stmt, 0);
+  tree cond_type = TREE_TYPE(cond_expr);
+  auto[cond, cond_indef] = tree2inst_indef(cond_expr);
+  tree arg1_expr = gimple_call_arg(stmt, 1);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  auto[arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  tree arg2_expr = gimple_call_arg(stmt, 2);
+  tree arg2_type = TREE_TYPE(arg2_expr);
+  auto[arg2, arg2_indef] = tree2inst_indef(arg2_expr);
+  tree orig_expr = gimple_call_arg(stmt, 3);
+  tree orig_type = TREE_TYPE(orig_expr);
+  auto[orig, orig_indef] = tree2inst_indef(orig_expr);
+  tree len_expr = gimple_call_arg(stmt, 4);
+  assert(TYPE_UNSIGNED(TREE_TYPE(len_expr)));
+  Inst *len = tree2inst(len_expr);
+  tree len_type = TREE_TYPE(len_expr);
+  tree bias_expr = gimple_call_arg(stmt, 5);
+  Inst *bias = tree2inst(bias_expr);
+  tree bias_type = TREE_TYPE(bias_expr);
+
+  tree lhs = gimple_call_lhs(stmt);
+
+  tree_code code;
+  switch (gimple_call_combined_fn(stmt))
+    {
+    case CFN_COND_LEN_ADD:
+      code = PLUS_EXPR;
+      break;
+    case CFN_COND_LEN_AND:
+      code = BIT_AND_EXPR;
+      break;
+    case CFN_COND_LEN_IOR:
+      code = BIT_IOR_EXPR;
+      break;
+    case CFN_COND_LEN_MUL:
+      code = MULT_EXPR;
+      break;
+    case CFN_COND_LEN_RDIV:
+      code = RDIV_EXPR;
+      break;
+    case CFN_COND_LEN_SHL:
+      code = LSHIFT_EXPR;
+      break;
+    case CFN_COND_LEN_SHR:
+      code = RSHIFT_EXPR;
+      break;
+    case CFN_COND_LEN_SUB:
+      code = MINUS_EXPR;
+      break;
+    case CFN_COND_LEN_XOR:
+      code = BIT_XOR_EXPR;
+      break;
+    default:
+      {
+	const char *name = internal_fn_name(gimple_call_internal_fn(stmt));
+	throw Not_implemented("process_cfn_cond: "s + name);
+      }
+    }
+
+  bias = type_convert(bias, bias_type, len_type);
+  len = bb->build_inst(Op::ADD, len, bias);
+  auto [res, res_indef] =
+    gen_cfn_cond(code, cond, cond_indef, arg1, arg1_indef, arg2, arg2_indef,
+		 orig, orig_indef, len, cond_type, arg1_type, arg2_type,
+		 orig_type);
+
+  if (lhs)
+    {
+      tree2instruction.insert({lhs, res});
+      if (res_indef)
+	tree2indef.insert({lhs, res_indef});
     }
 }
 
@@ -6147,6 +6242,17 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_COND_SUB:
     case CFN_COND_XOR:
       process_cfn_cond(stmt);
+      break;
+    case CFN_COND_LEN_ADD:
+    case CFN_COND_LEN_AND:
+    case CFN_COND_LEN_IOR:
+    case CFN_COND_LEN_MUL:
+    case CFN_COND_LEN_RDIV:
+    case CFN_COND_LEN_SHL:
+    case CFN_COND_LEN_SHR:
+    case CFN_COND_LEN_SUB:
+    case CFN_COND_LEN_XOR:
+      process_cfn_cond_len(stmt);
       break;
     case CFN_COND_FMIN:
     case CFN_COND_FMAX:
