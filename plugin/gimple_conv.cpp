@@ -176,6 +176,7 @@ struct Converter {
   void process_cfn_ffs(gimple *stmt);
   void process_cfn_fmax(gimple *stmt);
   void process_cfn_fmin(gimple *stmt);
+  void process_cfn_isfinite(gimple *stmt);
   void process_cfn_isinf(gimple *stmt);
   void process_cfn_loop_vectorized(gimple *stmt);
   std::tuple<Inst*, Inst*> mask_len_load(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, Inst *mask, Inst *mask_indef, tree mask_type, Inst *len, tree lhs_type, Inst *orig, Inst *orig_indef);
@@ -4849,6 +4850,25 @@ void Converter::process_cfn_fmin(gimple *stmt)
   process_cfn_binary(stmt, gen_elem);
 }
 
+void Converter::process_cfn_isfinite(gimple *stmt)
+{
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, tree elem_type)
+    -> std::pair<Inst *, Inst *>
+    {
+      Inst *is_inf = bb->build_inst(Op::IS_INF, elem1);
+      Inst *is_nan = bb->build_inst(Op::IS_NAN, elem1);
+      Inst *res = bb->build_inst(Op::OR, is_inf, is_nan);
+      res = bb->build_inst(Op::NOT, res);
+      uint32_t bitsize = bitsize_for_type(elem_type);
+      if (bitsize > res->bitsize)
+	res = bb->build_inst(Op::ZEXT, res, bitsize);
+      Inst *res_indef = get_res_indef(elem1_indef, elem_type);
+      return {res, res_indef};
+    };
+  process_cfn_unary(stmt, gen_elem);
+}
+
 void Converter::process_cfn_isinf(gimple *stmt)
 {
   auto gen_elem =
@@ -6201,6 +6221,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BUILT_IN_FMINF64:
     case CFN_FMIN:
       process_cfn_fmin(stmt);
+      break;
+    case CFN_BUILT_IN_ISFINITE:
+      process_cfn_isfinite(stmt);
       break;
     case CFN_BUILT_IN_ISINF:
     case CFN_BUILT_IN_ISINFF:
