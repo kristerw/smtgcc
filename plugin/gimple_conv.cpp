@@ -206,6 +206,7 @@ struct Converter {
   void process_cfn_unreachable(gimple *stmt);
   void process_cfn_usubc(gimple *stmt);
   void process_cfn_vcond_mask(gimple *stmt);
+  void process_cfn_vcond_mask_len(gimple *stmt);
   void process_cfn_vec_addsub(gimple *stmt);
   void process_cfn_vec_convert(gimple *stmt);
   void process_cfn_vec_set(gimple *stmt);
@@ -5779,6 +5780,38 @@ void Converter::process_cfn_vcond_mask(gimple *stmt)
     tree2indef.insert({lhs, indef});
 }
 
+void Converter::process_cfn_vcond_mask_len(gimple *stmt)
+{
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  tree arg2_type = TREE_TYPE(arg2_expr);
+  tree arg3_expr = gimple_call_arg(stmt, 2);
+  tree len_expr = gimple_call_arg(stmt, 3);
+  assert(TYPE_UNSIGNED(TREE_TYPE(len_expr)));
+  Inst *len = tree2inst(len_expr);
+  tree len_type = TREE_TYPE(len_expr);
+  tree bias_expr = gimple_call_arg(stmt, 4);
+  Inst *bias = tree2inst(bias_expr);
+  tree bias_type = TREE_TYPE(bias_expr);
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+
+  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
+  auto [arg3, arg3_indef] = tree2inst_indef(arg3_expr);
+  bias = type_convert(bias, bias_type, len_type);
+  len = bb->build_inst(Op::ADD, len, bias);
+  auto [inst, indef] = process_vec_cond(arg1, arg1_indef, arg2, arg2_indef,
+					arg3, arg3_indef, arg1_type,
+					arg2_type, len);
+  constrain_range(bb, lhs, inst);
+  tree2instruction.insert({lhs, inst});
+  if (indef)
+    tree2indef.insert({lhs, indef});
+}
+
 void Converter::process_cfn_vec_addsub(gimple *stmt)
 {
   tree arg1_expr = gimple_call_arg(stmt, 0);
@@ -6356,6 +6389,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_VCOND_MASK:
       process_cfn_vcond_mask(stmt);
+      break;
+    case CFN_VCOND_MASK_LEN:
+      process_cfn_vcond_mask_len(stmt);
       break;
     case CFN_VEC_ADDSUB:
       process_cfn_vec_addsub(stmt);
