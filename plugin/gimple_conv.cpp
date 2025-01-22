@@ -176,6 +176,7 @@ struct Converter {
   void process_cfn_ffs(gimple *stmt);
   void process_cfn_fmax(gimple *stmt);
   void process_cfn_fmin(gimple *stmt);
+  void process_cfn_isinf(gimple *stmt);
   void process_cfn_loop_vectorized(gimple *stmt);
   std::tuple<Inst*, Inst*> mask_len_load(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, Inst *mask, Inst *mask_indef, tree mask_type, Inst *len, tree lhs_type, Inst *orig, Inst *orig_indef);
   void process_cfn_mask_len_load(gimple *stmt);
@@ -4848,6 +4849,26 @@ void Converter::process_cfn_fmin(gimple *stmt)
   process_cfn_binary(stmt, gen_elem);
 }
 
+void Converter::process_cfn_isinf(gimple *stmt)
+{
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, tree elem_type)
+    -> std::pair<Inst *, Inst *>
+    {
+      Inst *res = bb->build_inst(Op::IS_INF, elem1);
+      uint32_t bitsize = bitsize_for_type(elem_type);
+      if (bitsize > res->bitsize)
+	res = bb->build_inst(Op::ZEXT, res, bitsize);
+      Inst *neg = bb->build_inst(Op::NEG, res);
+      Inst *zero = bb->value_inst(0, elem1->bitsize);
+      Inst *is_neg = bb->build_inst(Op::FLT, elem1, zero);
+      res = bb->build_inst(Op::ITE, is_neg, neg, res);
+      Inst *res_indef = get_res_indef(elem1_indef, elem_type);
+      return {res, res_indef};
+    };
+  process_cfn_unary(stmt, gen_elem);
+}
+
 void Converter::process_cfn_loop_vectorized(gimple *stmt)
 {
   tree lhs = gimple_call_lhs(stmt);
@@ -6180,6 +6201,11 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BUILT_IN_FMINF64:
     case CFN_FMIN:
       process_cfn_fmin(stmt);
+      break;
+    case CFN_BUILT_IN_ISINF:
+    case CFN_BUILT_IN_ISINFF:
+    case CFN_BUILT_IN_ISINFL:
+      process_cfn_isinf(stmt);
       break;
     case CFN_BUILT_IN_MEMCPY:
       process_cfn_memcpy(stmt);
