@@ -211,6 +211,7 @@ struct Converter {
   void process_cfn_vcond_mask_len(gimple *stmt);
   void process_cfn_vec_addsub(gimple *stmt);
   void process_cfn_vec_convert(gimple *stmt);
+  void process_cfn_vec_extract(gimple *stmt);
   void process_cfn_vec_set(gimple *stmt);
   void process_cfn_vec_widen(gimple *stmt, Op op, bool high);
   void process_cfn_vec_widen_abd(gimple *stmt, bool high);
@@ -404,6 +405,26 @@ Inst *extract_elem(Basic_block *bb, Inst *vec, uint32_t elem_bitsize, Inst *idx)
     shift = bb->build_inst(Op::ZEXT, shift, vec->bitsize);
   Inst *inst = bb->build_inst(Op::LSHR, vec, shift);
   return bb->build_trunc(inst, elem_bitsize);
+}
+
+std::pair<Inst *, Inst *> extract_elem(Basic_block *bb, Inst *vec, Inst *vec_indef, uint32_t elem_bitsize, Inst *idx, Inst *idx_indef)
+{
+  Inst *res = extract_elem(bb, vec, elem_bitsize, idx);
+  Inst *res_indef = nullptr;
+  if (vec_indef)
+    res_indef = extract_elem(bb, vec_indef, elem_bitsize, idx);
+  if (idx_indef)
+    {
+      Inst *zero = bb->value_inst(0, idx_indef->bitsize);
+      idx_indef = bb->build_inst(Op::NE, idx_indef, zero);
+      if (elem_bitsize > 1)
+	idx_indef = bb->build_inst(Op::SEXT, idx_indef, elem_bitsize);
+      if (res_indef)
+	res_indef = bb->build_inst(Op::OR, res_indef, idx_indef);
+      else
+	res_indef = idx_indef;
+    }
+  return {res, res_indef};
 }
 
 bool is_bit_field(tree expr)
@@ -5945,6 +5966,47 @@ void Converter::process_cfn_vec_convert(gimple *stmt)
   tree2instruction.insert({lhs, inst});
 }
 
+void Converter::process_cfn_vec_extract(gimple *stmt)
+{
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+
+  uint32_t elem_bitsize = bitsize_for_type(TREE_TYPE(arg1_type));
+  uint32_t nof_elem = bitsize_for_type(arg1_type) / elem_bitsize;
+  Inst *nof = bb->value_inst(nof_elem, arg2->bitsize);
+  Inst *in_range = bb->build_inst(Op::ULT, arg2, nof);
+  bb->build_inst(Op::UB, bb->build_inst(Op::NOT, in_range));
+
+  Inst *res;
+  Inst *res_indef = nullptr;
+  if (TREE_CODE(arg2_expr) == INTEGER_CST || POLY_INT_CST_P(arg2_expr))
+    {
+      unsigned __int128 idx = get_int_cst_val(arg2_expr);
+      if (idx >= nof_elem)
+	{
+	  // This is UB, so does not matter what we return.
+	  res = bb->value_inst(0, elem_bitsize);
+	}
+      else
+	std::tie(res, res_indef) =
+	  extract_vec_elem(bb, arg1, arg1_indef, elem_bitsize, idx);
+    }
+  else
+    std::tie(res, res_indef) =
+      extract_elem(bb, arg1, arg1_indef, elem_bitsize, arg2, arg2_indef);
+
+  constrain_range(bb, lhs, res);
+  tree2instruction.insert({lhs, res});
+  if (res_indef)
+    tree2indef.insert({lhs, res_indef});
+}
+
 void Converter::process_cfn_vec_set(gimple *stmt)
 {
   tree arg1_expr = gimple_call_arg(stmt, 0);
@@ -6466,6 +6528,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_VEC_CONVERT:
       process_cfn_vec_convert(stmt);
+      break;
+    case CFN_VEC_EXTRACT:
+      process_cfn_vec_extract(stmt);
       break;
     case CFN_VEC_SET:
       process_cfn_vec_set(stmt);
