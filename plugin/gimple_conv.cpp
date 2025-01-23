@@ -197,6 +197,7 @@ struct Converter {
   void process_cfn_popcount(gimple *stmt);
   void process_cfn_sat_add(gimple *stmt);
   void process_cfn_sat_sub(gimple *stmt);
+  void process_cfn_sat_trunc(gimple *stmt);
   void process_cfn_select_vl(gimple *stmt);
   void process_cfn_signbit(gimple *stmt);
   void process_cfn_sub_overflow(gimple *stmt);
@@ -5565,6 +5566,43 @@ void Converter::process_cfn_sat_sub(gimple *stmt)
   process_cfn_binary(stmt, gen_elem);
 }
 
+void Converter::process_cfn_sat_trunc(gimple *stmt)
+{
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, tree elem_type)
+    -> std::pair<Inst *, Inst *>
+    {
+      Inst *res = bb->build_trunc(elem1, bitsize_for_type(elem_type));
+      Inst *res_indef = get_res_indef(elem1_indef, elem_type);
+      if (TYPE_UNSIGNED(elem_type))
+	{
+	  Inst *m1_res = bb->value_inst(-1, res->bitsize);
+	  Inst *m1_ext = bb->value_inst(m1_res->value(), elem1->bitsize);
+	  Inst *cmp = bb->build_inst(Op::ULT, elem1, m1_ext);
+	  res = bb->build_inst(Op::ITE, cmp, res, m1_res);
+	}
+      else
+	{
+	  unsigned __int128 maxint =
+	    (((unsigned __int128)1) << (res->bitsize - 1)) - 1;
+	  unsigned __int128 minint =
+	    ((unsigned __int128)1) << (res->bitsize - 1);
+	  Inst *max_res = bb->value_inst(maxint, res->bitsize);
+	  Inst *max_ext =
+	    bb->value_inst(max_res->signed_value(), elem1->bitsize);
+	  Inst *min_res = bb->value_inst(minint, res->bitsize);
+	  Inst *min_ext =
+	    bb->value_inst(min_res->signed_value(), elem1->bitsize);
+	  Inst *cmp_max = bb->build_inst(Op::SLT, elem1, max_ext);
+	  Inst *cmp_min = bb->build_inst(Op::SLT, elem1, min_ext);
+	  res = bb->build_inst(Op::ITE, cmp_max, res, max_res);
+	  res = bb->build_inst(Op::ITE, cmp_min, min_res, res);
+	}
+      return {res, res_indef};
+    };
+  process_cfn_unary(stmt, gen_elem);
+}
+
 void Converter::process_cfn_select_vl(gimple *stmt)
 {
   tree arg1_expr = gimple_call_arg(stmt, 0);
@@ -6324,6 +6362,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_SAT_SUB:
       process_cfn_sat_sub(stmt);
+      break;
+    case CFN_SAT_TRUNC:
+      process_cfn_sat_trunc(stmt);
       break;
     case CFN_SELECT_VL:
       process_cfn_select_vl(stmt);
