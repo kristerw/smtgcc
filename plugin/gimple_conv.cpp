@@ -343,15 +343,13 @@ uint64_t Converter::bytesize_for_type(tree type)
   tree size_tree = TYPE_SIZE(type);
   if (size_tree == NULL_TREE)
     throw Not_implemented("bytesize_for_type: incomplete type");
-  if (VECTOR_TYPE_P(type) && POLY_INT_CST_P(size_tree))
-    return TREE_INT_CST_LOW(POLY_INT_CST_COEFF(size_tree, 0)) / 8;
-  if (TREE_CODE(size_tree) != INTEGER_CST)
+  if (TREE_CODE(size_tree) != INTEGER_CST && !POLY_INT_CST_P(size_tree))
     {
       // Things like function parameters
       //   int foo(int n, struct T { char a[n]; } b);
       throw Not_implemented("bytesize_for_type: complicated type");
     }
-  uint64_t bitsize = TREE_INT_CST_LOW(size_tree);
+  uint64_t bitsize = get_int_cst_val(size_tree);
   assert((bitsize & 7) == 0);
   uint64_t size = bitsize / 8;
   if (size >= (uint64_t(1) << module->ptr_offset_bits))
@@ -1116,7 +1114,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
     case POLY_INT_CST:
       {
 	uint32_t precision = bitsize_for_type(TREE_TYPE(expr));
-	unsigned __int128 value = TREE_INT_CST_LOW(POLY_INT_CST_COEFF(expr, 0));
+	unsigned __int128 value = get_int_cst_val(expr);
 	Inst *inst = bb->value_inst(value, precision);
 	Inst *prov = nullptr;
 	if (POINTER_TYPE_P(TREE_TYPE(expr)))
@@ -5574,8 +5572,7 @@ void Converter::process_cfn_select_vl(gimple *stmt)
   Inst *arg1 = tree2inst(arg1_expr);
   assert(TYPE_UNSIGNED(arg1_type));
   tree arg2_expr = gimple_call_arg(stmt, 1);
-  assert(POLY_INT_CST_P(arg2_expr));
-  uint32_t nof_elem = TREE_INT_CST_LOW(POLY_INT_CST_COEFF(arg2_expr, 0));
+  uint32_t nof_elem = get_int_cst_val(arg2_expr);
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
@@ -7589,24 +7586,24 @@ uint64_t bitsize_for_type(tree type)
   tree size_tree = TYPE_SIZE(type);
   if (size_tree == NULL_TREE)
     throw Not_implemented("bitsize_for_type: incomplete type");
-  if (VECTOR_TYPE_P(type) && POLY_INT_CST_P(size_tree))
-    return TREE_INT_CST_LOW(POLY_INT_CST_COEFF(size_tree, 0));
-  if (TREE_CODE(size_tree) != INTEGER_CST)
+  if (TREE_CODE(size_tree) != INTEGER_CST && !POLY_INT_CST_P(size_tree))
     {
       // Things like function parameters
       //   int foo(int n, struct T { char a[n]; } b);
       throw Not_implemented("bitsize_for_type: dynamically sized type");
     }
-  return TREE_INT_CST_LOW(size_tree);
+  return get_int_cst_val(size_tree);
 }
 
 unsigned __int128 get_int_cst_val(tree expr)
 {
-  assert(TREE_CODE(expr) == INTEGER_CST);
+  assert(TREE_CODE(expr) == INTEGER_CST || POLY_INT_CST_P(expr));
   uint32_t precision = TYPE_PRECISION(TREE_TYPE(expr));
   if (precision > 128)
     throw Not_implemented("get_int_cst_val: INTEGER_CST precision > 128");
   assert(precision > 0 && precision <= 128);
+  if (POLY_INT_CST_P(expr))
+    expr = POLY_INT_CST_COEFF(expr, 0);
   unsigned __int128 value = 0;
   if (TREE_INT_CST_NUNITS(expr) == 2)
     {
