@@ -3009,6 +3009,8 @@ void Parser::parse_function()
   std::string_view name = get_name(0);
   if (name.starts_with(".cfi"))
     ;
+  else if (name.starts_with(".option"))
+    ;
   else if (name == ".section")
     {
       if (tokens.size() > 1)
