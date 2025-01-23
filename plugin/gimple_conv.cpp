@@ -146,6 +146,7 @@ struct Converter {
   std::pair<Inst *, Inst *> process_binary_vec(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
   std::pair<Inst *, Inst *> process_widen_sum_vec(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type);
   std::pair<Inst *, Inst *> process_widen_mult_evenodd(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type, bool is_odd);
+  std::pair<Inst *, Inst *> process_vec_series(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type);
   Inst *process_ternary(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree arg1_type, tree arg2_type, tree arg3_type);
   Inst *process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree lhs_type, tree arg1_type, tree arg2_type, tree arg3_type);
   std::pair<Inst *, Inst *> process_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type, Inst *len = nullptr);
@@ -3185,7 +3186,7 @@ std::pair<Inst *, Inst *> Converter::process_binary_vec(enum tree_code code, Ins
     return process_widen_mult_evenodd(arg1, arg1_indef, arg2, arg2_indef,
 				      lhs_type, arg1_type, arg2_type, true);
   if (code == VEC_SERIES_EXPR)
-    throw Not_implemented("process_binary_vec: "s + get_tree_code_name(code));
+    return process_vec_series(arg1, arg1_indef, arg2, arg2_indef, lhs_type);
 
   assert(VECTOR_TYPE_P(lhs_type));
   assert(VECTOR_TYPE_P(arg1_type));
@@ -3365,6 +3366,35 @@ std::pair<Inst *, Inst *> Converter::process_widen_mult_evenodd(Inst *arg1, Inst
 	  else
 	    res_indef = inst_indef;
 	}
+    }
+  return {res, res_indef};
+}
+
+std::pair<Inst *, Inst *> Converter::process_vec_series(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type)
+{
+  tree elem_type = TREE_TYPE(lhs_type);
+  uint32_t elem_bitsize = bitsize_for_type(elem_type);
+  uint32_t bitsize = bitsize_for_type(lhs_type);
+  uint32_t nof_elem = bitsize / elem_bitsize;
+  assert(arg1->bitsize == elem_bitsize);
+  assert(arg2->bitsize == elem_bitsize);
+
+  Inst *elem_indef = nullptr;
+  if (arg1_indef || arg2_indef)
+    {
+      if (!arg1_indef)
+	arg1_indef = bb->value_inst(0, arg1->bitsize);
+      elem_indef = get_res_indef(arg1_indef, arg2_indef, elem_type);
+    }
+  Inst *res = arg1;
+  Inst *res_indef = arg1_indef;
+  Inst *elem = arg1;
+  for (uint32_t i = 1; i < nof_elem; i++)
+    {
+      elem = bb->build_inst(Op::ADD, elem, arg2);
+      res = bb->build_inst(Op::CONCAT, elem, res);
+      if (res_indef)
+	res_indef = bb->build_inst(Op::CONCAT, elem_indef, res_indef);
     }
   return {res, res_indef};
 }
