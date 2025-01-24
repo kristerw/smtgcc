@@ -88,6 +88,10 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
   for (int i = 0; i < 32; i++)
     rstate.registers.push_back(bb->build_inst(Op::REGISTER, 128));
 
+  // Registers p0-p16.
+  for (int i = 0; i < 16; i++)
+    rstate.registers.push_back(bb->build_inst(Op::REGISTER, 16));
+
   // SP
   rstate.registers.push_back(bb->build_inst(Op::REGISTER, 64));
 

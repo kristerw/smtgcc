@@ -100,12 +100,15 @@ private:
   std::tuple<Inst *, uint32_t, uint32_t> get_scalar_vreg(unsigned idx);
   std::tuple<uint64_t, uint32_t, uint32_t> get_zreg_(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_zreg(unsigned idx);
+  std::tuple<uint64_t, std::string_view> get_preg_(unsigned idx);
+  std::tuple<Inst *, uint32_t, uint32_t> get_preg(unsigned idx);
   uint32_t get_reg_size(unsigned idx);
   bool is_vector_op();
   bool is_sve_op();
   bool is_freg(unsigned idx);
   bool is_vreg(unsigned idx);
   bool is_zreg(unsigned idx);
+  bool is_preg(unsigned idx);
   Inst *get_imm(unsigned idxo);
   Inst *get_imm(unsigned idx, uint32_t bitsize);
   Inst *get_reg_value(unsigned idx);
@@ -113,6 +116,8 @@ private:
   Inst *get_freg_value(unsigned idx);
   Inst *get_vreg_value(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
   Inst *get_zreg_value(unsigned idx);
+  Inst *get_preg_value(unsigned idx);
+  Inst *get_preg_zeroing_value(unsigned idx);
   uint64_t get_vreg_idx(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
@@ -191,6 +196,7 @@ private:
   void process_ands(bool perform_not = false);
   void process_tst();
   void process_ccmp(bool is_ccmn = false);
+  void process_inc(uint32_t elem_bitsize);
   void process_ext(Op op, uint32_t src_bitsize);
   void process_shift(Op op);
   void process_ror();
@@ -201,6 +207,7 @@ private:
   void process_ubfx(Op op);
   void process_ubfiz(Op op);
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
+  Inst *extract_pred_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   void process_vec_unary(Op op);
   void process_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
   void process_vec_binary(Op op, bool perform_not = false);
@@ -243,6 +250,11 @@ private:
   void parse_vector_op();
   void process_sve_binary(Op op);
   void process_sve_index();
+  void process_sve_while();
+  Inst *load_value(Inst *ptr, uint64_t size);
+  void process_sve_ld1();
+  void store_value(Inst *ptr, Inst *value);
+  void process_sve_st1();
   void parse_sve_op();
   void parse_function();
 
@@ -333,6 +345,7 @@ void Parser::lex_name(void)
   int start_pos = pos;
   pos++;
   while (isalnum(buf[pos])
+	 || buf[pos] == '/'
 	 || buf[pos] == '_'
 	 || buf[pos] == '.'
 	 || buf[pos] == '$')
@@ -648,6 +661,26 @@ Inst *Parser::get_zreg_value(unsigned idx)
   return bb->build_inst(Op::READ, dest);
 }
 
+Inst *Parser::get_preg_value(unsigned idx)
+{
+  auto [reg_idx, suffix] = get_preg_(idx);
+  Inst *reg = rstate->registers[reg_idx];
+  if (suffix != "")
+    throw Parse_error("expected a predicate register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  return bb->build_inst(Op::READ, reg);
+}
+
+Inst *Parser::get_preg_zeroing_value(unsigned idx)
+{
+  auto [reg_idx, suffix] = get_preg_(idx);
+  Inst *reg = rstate->registers[reg_idx];
+  if (suffix != "/z")
+    throw Parse_error("expected a predicate register/z instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  return bb->build_inst(Op::READ, reg);
+}
+
 uint64_t Parser::get_vreg_idx(unsigned idx, uint32_t nof_elem,
 			      uint32_t elem_bitsize)
 {
@@ -696,6 +729,48 @@ std::tuple<Inst *, uint32_t, uint32_t> Parser::get_zreg(unsigned idx)
 {
   auto [reg_idx, nof_elem, elem_bitsize] = get_zreg_(idx);
   return {rstate->registers[reg_idx], nof_elem, elem_bitsize};
+}
+
+std::tuple<uint64_t, std::string_view> Parser::get_preg_(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+
+  if (tokens[idx].kind != Lexeme::name
+      || tokens[idx].size < 2
+      || buf[tokens[idx].pos] != 'p'
+      || !isdigit(buf[tokens[idx].pos + 1]))
+    throw Parse_error("expected a predicate register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  uint32_t value = buf[tokens[idx].pos + 1] - '0';
+  uint32_t pos = 2;
+  if (isdigit(buf[tokens[idx].pos + pos]))
+    value = value * 10 + (buf[tokens[idx].pos + pos++] - '0');
+  if (value > 31)
+    throw Parse_error("expected a predicate register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  uint64_t reg_idx = Aarch64RegIdx::v0 + value;
+  std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
+  return {reg_idx, suffix};
+}
+
+std::tuple<Inst *, uint32_t, uint32_t> Parser::get_preg(unsigned idx)
+{
+  auto [reg_idx, suffix] = get_preg_(idx);
+  Inst *reg = rstate->registers[reg_idx];
+  if (suffix == ".q")
+    return {reg, 1, 128};
+  if (suffix == ".d")
+    return {reg, 2, 64};
+  if (suffix == ".s")
+    return {reg, 4, 32};
+  if (suffix == ".h")
+    return {reg, 8, 16};
+  if (suffix == ".b")
+    return {reg, 16, 8};
+
+  throw Parse_error("expected a predicate register instead of "
+		    + std::string(token_string(tokens[idx])), line_number);
 }
 
 uint32_t Parser::get_reg_size(unsigned idx)
@@ -751,7 +826,7 @@ bool Parser::is_vector_op()
 
 bool Parser::is_sve_op()
 {
-  return is_zreg(1);
+  return is_zreg(1) || is_preg(1);
 }
 
 bool Parser::is_freg(unsigned idx)
@@ -798,6 +873,24 @@ bool Parser::is_zreg(unsigned idx)
   if (tokens.size() <= idx || tokens[idx].kind != Lexeme::name)
     return false;
   if (buf[tokens[idx].pos] != 'z')
+    return false;
+
+  if (isdigit(buf[tokens[idx].pos + 1]))
+    {
+      if ((buf[tokens[idx].pos + 2] == '.')
+	  || (isdigit(buf[tokens[idx].pos + 2])
+	      && buf[tokens[idx].pos + 3] == '.'))
+	return true;
+    }
+
+  return false;
+}
+
+bool Parser::is_preg(unsigned idx)
+{
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::name)
+    return false;
+  if (buf[tokens[idx].pos] != 'p')
     return false;
 
   if (isdigit(buf[tokens[idx].pos + 1]))
@@ -2679,6 +2772,18 @@ void Parser::process_ccmp(bool is_ccmn)
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
 }
 
+void Parser::process_inc(uint32_t elem_bitsize)
+{
+  Inst *dest = get_reg(1);
+  Inst *arg1 = get_reg_value(1);
+  get_end_of_line(2);
+
+  uint32_t nof_elem = 128 / elem_bitsize;
+  Inst *increment = bb->value_inst(nof_elem, arg1->bitsize);
+  Inst *res = bb->build_inst(Op::ADD, arg1, increment);
+  write_reg(dest, res);
+}
+
 Inst *Parser::extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx)
 {
   if (idx == 0 && inst->bitsize == elem_bitsize)
@@ -2687,6 +2792,11 @@ Inst *Parser::extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx)
   Inst *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
   Inst *low = bb->value_inst(idx * elem_bitsize, 32);
   return bb->build_inst(Op::EXTRACT, inst, high, low);
+}
+
+Inst *Parser::extract_pred_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx)
+{
+  return bb->build_extract_bit(inst, idx * elem_bitsize / 8);
 }
 
 void Parser::process_vec_unary(Op op)
@@ -4228,18 +4338,145 @@ void Parser::process_sve_index()
   write_reg(dest, res);
 }
 
+void Parser::process_sve_while()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_reg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  Inst *one = bb->value_inst(1, arg1->bitsize);
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *inst = bb->build_inst(Op::ULT, arg1, arg2);
+      if (elem_bitsize > 8)
+	inst = bb->build_inst(Op::SEXT, inst, elem_bitsize / 8);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+      arg1 = bb->build_inst(Op::ADD, arg1, one);
+    }
+
+  Inst *n = extract_vec_elem(res, 1, 0);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
+  Inst *z = bb->build_inst(Op::EQ, res, bb->value_inst(0, res->bitsize));
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
+  Inst *c = bb->build_inst(Op::NOT, extract_vec_elem(res, 1, 15));
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
+  Inst *v = bb->value_inst(0, 1);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
+
+  write_reg(dest, res);
+}
+
+Inst *Parser::load_value(Inst *ptr, uint64_t size)
+{
+  Inst *value = nullptr;
+  for (uint64_t i = 0; i < size; i++)
+    {
+      Inst *offset = bb->value_inst(i, ptr->bitsize);
+      Inst *addr = bb->build_inst(Op::ADD, ptr, offset);
+      Inst *data_byte = bb->build_inst(Op::LOAD, addr);
+      if (value)
+	value = bb->build_inst(Op::CONCAT, data_byte, value);
+      else
+	value = data_byte;
+    }
+  return value;
+}
+
+void Parser::process_sve_ld1()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1 = get_preg_zeroing_value(3);
+  get_comma(4);
+  Inst *arg2 = process_address(5);
+
+  Inst *zero = bb->value_inst(0, elem_bitsize);
+  Inst *step = bb->value_inst(elem_bitsize / 8, arg2->bitsize);
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *pred = extract_pred_elem(arg1, elem_bitsize, i);
+      Inst *inst = load_value(arg2, elem_bitsize / 8);
+      inst = bb->build_inst(Op::ITE, pred, inst, zero);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+      arg2 = bb->build_inst(Op::ADD, arg2, step);
+    }
+
+  write_reg(dest, res);
+}
+
+void Parser::store_value(Inst *ptr, Inst *value)
+{
+  for (uint64_t i = 0; i < value->bitsize / 8; i++)
+    {
+      Inst *offset = bb->value_inst(i, ptr->bitsize);
+      Inst *addr = bb->build_inst(Op::ADD, ptr, offset);
+      Inst *data_byte = extract_vec_elem(value, 8, i);
+      bb->build_inst(Op::STORE, addr, data_byte);
+    }
+}
+
+void Parser::process_sve_st1()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  Inst *arg0 = get_zreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_preg_value(3);
+  get_comma(4);
+  Inst *arg2 = process_address(5);
+
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Basic_block *true_bb = func->build_bb();
+      Basic_block *false_bb = func->build_bb();
+      Inst *pred = extract_pred_elem(arg1, elem_bitsize, i);
+      bb->build_br_inst(pred, true_bb, false_bb);
+      bb = true_bb;
+
+      Inst *elem_offset = bb->value_inst(i * elem_bitsize / 8, arg2->bitsize);
+      Inst *elem_ptr = bb->build_inst(Op::ADD, arg2, elem_offset);
+      Inst *elem = extract_vec_elem(arg0, elem_bitsize, i);
+      store_value(elem_ptr, elem);
+
+      bb->build_br_inst(false_bb);
+      bb = false_bb;
+    }
+}
+
 void Parser::parse_sve_op()
 {
   std::string_view name = get_name(0);
 
-  if (name == "and")
+  if (name == "add")
+    process_sve_binary(Op::ADD);
+  else if (name == "and")
     process_sve_binary(Op::AND);
   else if (name == "eor")
     process_sve_binary(Op::XOR);
   else if (name == "index")
     process_sve_index();
+  else if (name == "ld1b" || name == "ld1h" || name == "ld1w" || name == "ld1d")
+    process_sve_ld1();
+  else if (name == "mul")
+    process_sve_binary(Op::MUL);
   else if (name == "orr")
     process_sve_binary(Op::OR);
+  else if (name == "st1b" || name == "st1h" || name == "st1w" || name == "st1d")
+    process_sve_st1();
+  else if (name == "sub")
+    process_sve_binary(Op::SUB);
+  else if (name == "whilelo")
+    process_sve_while();
   else
     throw Parse_error("unhandled sve instruction: "s + std::string(name),
 		      line_number);
@@ -4287,7 +4524,7 @@ void Parser::parse_function()
   // Branches, Exception generating, and System instructions
   else if (name == "beq")
     process_cond_branch(Cond_code::EQ);
-  else if (name == "bne")
+  else if (name == "bne" || name == "b.any")
     process_cond_branch(Cond_code::NE);
   else if (name == "bcs")
     process_cond_branch(Cond_code::CS);
@@ -4704,7 +4941,15 @@ void Parser::parse_function()
   else if (name == "sqxtn")
     process_unary(gen_sqxtn);
 
-  // Misc scalar versions of SIMD instructions
+  // Misc scalar versions of SIMD and SVE instructions
+  else if (name == "incb")
+    process_inc(8);
+  else if (name == "inch")
+    process_inc(16);
+  else if (name == "incw")
+    process_inc(32);
+  else if (name == "incd")
+    process_inc(64);
   else if (name == "uqadd")
     process_binary(gen_sat_uadd);
   else if (name == "uqsub")

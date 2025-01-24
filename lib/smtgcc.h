@@ -499,13 +499,30 @@ struct Aarch64RegIdx {
   static constexpr uint64_t v30 = 62;
   static constexpr uint64_t v31 = 63;
 
-  static constexpr uint64_t sp = 64;
+  static constexpr uint64_t p0 = 64;
+  static constexpr uint64_t p1 = 65;
+  static constexpr uint64_t p2 = 66;
+  static constexpr uint64_t p3 = 67;
+  static constexpr uint64_t p4 = 68;
+  static constexpr uint64_t p5 = 69;
+  static constexpr uint64_t p6 = 70;
+  static constexpr uint64_t p7 = 71;
+  static constexpr uint64_t p8 = 72;
+  static constexpr uint64_t p9 = 73;
+  static constexpr uint64_t p10 = 74;
+  static constexpr uint64_t p11 = 75;
+  static constexpr uint64_t p12 = 76;
+  static constexpr uint64_t p13 = 77;
+  static constexpr uint64_t p14 = 78;
+  static constexpr uint64_t p15 = 79;
+
+  static constexpr uint64_t sp = 80;
 
   // Condition flags
-  static constexpr uint64_t n = 65;
-  static constexpr uint64_t z = 66;
-  static constexpr uint64_t c = 67;
-  static constexpr uint64_t v = 68;
+  static constexpr uint64_t n = 81;
+  static constexpr uint64_t z = 82;
+  static constexpr uint64_t c = 83;
+  static constexpr uint64_t v = 84;
 };
 
 struct aarch64_state {
