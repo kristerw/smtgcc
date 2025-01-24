@@ -1277,7 +1277,15 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	auto [value, indef, prov] = tree2inst_indef_prov(arg);
 	uint64_t bitsize = get_int_cst_val(TREE_OPERAND(expr, 1));
 	uint64_t bit_offset = get_int_cst_val(TREE_OPERAND(expr, 2));
-	Inst *high = bb->value_inst(bitsize + bit_offset - 1, 32);
+	uint64_t hi = bitsize + bit_offset - 1;
+	if (bit_offset >= value->bitsize || hi >= value->bitsize)
+	  {
+	    if (POINTER_TYPE_P(TREE_TYPE(expr)) && !prov)
+	      prov = bb->value_inst(0, func->module->ptr_id_bits);
+	    value = bb->value_inst(0, bitsize);
+	    return {value, nullptr, prov};
+	  }
+	Inst *high = bb->value_inst(hi, 32);
 	Inst *low = bb->value_inst(bit_offset, 32);
 	value = to_mem_repr(value, TREE_TYPE(arg));
 	value = bb->build_inst(Op::EXTRACT, value, high, low);
