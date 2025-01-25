@@ -5024,6 +5024,8 @@ std::tuple<Inst*, Inst*> Converter::mask_len_load(Inst *ptr, Inst *ptr_indef, In
       // non-canonical NaN etc. But this should only be done when not masked.
       // constrain_src_value(elem, elem_type, elem_flags);
       elem = bb->build_inst(Op::ITE, cond, elem, orig_elem);
+      if (!orig_elem_indef)
+	orig_elem_indef = bb->value_inst(0, elem_indef->bitsize);
       elem_indef = bb->build_inst(Op::ITE, cond, elem_indef, orig_elem_indef);
 
       if (inst)
@@ -5082,17 +5084,16 @@ void Converter::process_cfn_mask_load(gimple *stmt)
   tree alignment_expr = gimple_call_arg(stmt, 1);
   tree mask_expr = gimple_call_arg(stmt, 2);
   tree mask_type = TREE_TYPE(mask_expr);
+  tree orig_expr = gimple_call_arg(stmt, 3);
   tree lhs = gimple_call_lhs(stmt);
   assert(lhs);
   tree lhs_type = TREE_TYPE(lhs);
 
   auto [ptr, ptr_indef, ptr_prov] = tree2inst_indef_prov(ptr_expr);
+  auto [orig, orig_indef] = tree2inst_indef(orig_expr);
   uint64_t alignment = get_int_cst_val(alignment_expr) / 8;
   auto [mask, mask_indef] = tree2inst_indef(mask_expr);
 
-  uint64_t bitsize = bitsize_for_type(lhs_type);
-  Inst *orig = bb->value_inst(0, bitsize);
-  Inst *orig_indef = bb->value_inst(-1, bitsize);
   auto [inst, indef] =
     mask_len_load(ptr, ptr_indef, ptr_prov, alignment, mask, mask_indef,
 		  mask_type, nullptr, lhs_type, orig, orig_indef);
