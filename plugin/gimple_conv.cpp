@@ -4155,6 +4155,7 @@ void Converter::process_cfn_unary(gimple *stmt, const std::function<std::pair<In
 
 void Converter::process_cfn_abd(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
@@ -4177,6 +4178,7 @@ void Converter::process_cfn_abd(gimple *stmt)
 
 void Converter::process_cfn_add_overflow(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
@@ -4231,6 +4233,7 @@ void Converter::process_cfn_add_overflow(gimple *stmt)
 
 void Converter::process_cfn_bit_andn(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
@@ -4248,6 +4251,7 @@ void Converter::process_cfn_bit_andn(gimple *stmt)
 
 void Converter::process_cfn_bit_iorn(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
@@ -4265,8 +4269,11 @@ void Converter::process_cfn_bit_iorn(gimple *stmt)
 
 void Converter::process_cfn_assume_aligned(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2
+	 || gimple_call_num_args(stmt) == 3);
   auto [arg1, arg1_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
   Inst *arg2 = tree2inst(gimple_call_arg(stmt, 1));
+  // TODO: handle arg3
   assert(arg1->bitsize == arg2->bitsize);
   Inst *one = bb->value_inst(1, arg2->bitsize);
   Inst *mask = bb->build_inst(Op::SUB, arg2, one);
@@ -4285,6 +4292,7 @@ void Converter::process_cfn_assume_aligned(gimple *stmt)
 
 void Converter::process_cfn_bswap(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
@@ -4319,6 +4327,7 @@ void Converter::process_cfn_bswap(gimple *stmt)
 
 void Converter::process_cfn_clrsb(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, tree lhs_elem_type)
     -> std::pair<Inst *, Inst *>
@@ -4341,6 +4350,8 @@ void Converter::process_cfn_clrsb(gimple *stmt)
 
 void Converter::process_cfn_clz(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1
+	 || gimple_call_num_args(stmt) == 2);
   tree arg_expr = gimple_call_arg(stmt, 0);
   tree arg_type = TREE_TYPE(arg_expr);
   Inst *arg = tree2inst(arg_expr);
@@ -4470,6 +4481,7 @@ std::pair<Inst*, Inst*> Converter::gen_cfn_cond(tree_code code, Inst *cond, Inst
 
 void Converter::process_cfn_cond(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 4);
   tree cond_expr = gimple_call_arg(stmt, 0);
   tree cond_type = TREE_TYPE(cond_expr);
   auto[cond, cond_indef] = tree2inst_indef(cond_expr);
@@ -4536,6 +4548,7 @@ void Converter::process_cfn_cond(gimple *stmt)
 
 void Converter::process_cfn_cond_len(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 6);
   tree cond_expr = gimple_call_arg(stmt, 0);
   tree cond_type = TREE_TYPE(cond_expr);
   auto[cond, cond_indef] = tree2inst_indef(cond_expr);
@@ -4612,6 +4625,7 @@ void Converter::process_cfn_cond_len(gimple *stmt)
 
 void Converter::process_cfn_cond_fminmax(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 4);
   auto gen_elem_fmin =
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
@@ -4697,6 +4711,7 @@ void Converter::process_cfn_cond_fminmax(gimple *stmt)
 
 void Converter::process_cfn_copysign(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
@@ -4726,6 +4741,8 @@ void Converter::process_cfn_copysign(gimple *stmt)
 
 void Converter::process_cfn_ctz(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1
+	 || gimple_call_num_args(stmt) == 2);
   tree arg_expr = gimple_call_arg(stmt, 0);
   tree arg_type = TREE_TYPE(arg_expr);
   Inst *arg = tree2inst(arg_expr);
@@ -4806,6 +4823,7 @@ void Converter::process_cfn_ctz(gimple *stmt)
 
 void Converter::process_cfn_divmod(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
@@ -4833,16 +4851,21 @@ void Converter::process_cfn_divmod(gimple *stmt)
 
 void Converter::process_cfn_expect(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2
+	 || gimple_call_num_args(stmt) == 3);
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
-  Inst *arg = tree2inst(gimple_call_arg(stmt, 0));
-  constrain_range(bb, lhs, arg);
-  tree2instruction.insert({lhs, arg});
+  Inst *arg1 = tree2inst(gimple_call_arg(stmt, 0));
+  // Ignore arg2 and arg3. They only contain the most common value and the
+  // probability, which we can't use for anything.
+  constrain_range(bb, lhs, arg1);
+  tree2instruction.insert({lhs, arg1});
 }
 
 void Converter::process_cfn_fabs(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, tree lhs_elem_type)
     -> std::pair<Inst *, Inst *>
@@ -4865,6 +4888,7 @@ void Converter::process_cfn_fabs(gimple *stmt)
 
 void Converter::process_cfn_ffs(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   Inst *arg = tree2inst(gimple_call_arg(stmt, 0));
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
@@ -4886,6 +4910,7 @@ void Converter::process_cfn_ffs(gimple *stmt)
 
 void Converter::process_cfn_fmax(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
@@ -4899,6 +4924,7 @@ void Converter::process_cfn_fmax(gimple *stmt)
 
 void Converter::process_cfn_fmin(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
@@ -4912,6 +4938,7 @@ void Converter::process_cfn_fmin(gimple *stmt)
 
 void Converter::process_cfn_isfinite(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, tree elem_type)
     -> std::pair<Inst *, Inst *>
@@ -4931,6 +4958,7 @@ void Converter::process_cfn_isfinite(gimple *stmt)
 
 void Converter::process_cfn_isinf(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, tree elem_type)
     -> std::pair<Inst *, Inst *>
@@ -4957,7 +4985,7 @@ void Converter::process_cfn_loop_vectorized(gimple *stmt)
 
 std::tuple<Inst*, Inst*> Converter::mask_len_load(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, Inst *mask, Inst *mask_indef, tree mask_type, Inst *len, tree lhs_type, Inst *orig, Inst *orig_indef)
 {
- tree elem_type = VECTOR_TYPE_P(lhs_type) ? TREE_TYPE(lhs_type) : lhs_type;
+  tree elem_type = VECTOR_TYPE_P(lhs_type) ? TREE_TYPE(lhs_type) : lhs_type;
   tree mask_elem_type =
     VECTOR_TYPE_P(mask_type) ? TREE_TYPE(mask_type) : mask_type;
   uint64_t elem_size = bytesize_for_type(elem_type);
@@ -5047,6 +5075,7 @@ std::tuple<Inst*, Inst*> Converter::mask_len_load(Inst *ptr, Inst *ptr_indef, In
 
 void Converter::process_cfn_mask_len_load(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 6);
   tree ptr_expr = gimple_call_arg(stmt, 0);
   tree alignment_expr = gimple_call_arg(stmt, 1);
   tree mask_expr = gimple_call_arg(stmt, 2);
@@ -5080,6 +5109,7 @@ void Converter::process_cfn_mask_len_load(gimple *stmt)
 
 void Converter::process_cfn_mask_load(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 4);
   tree ptr_expr = gimple_call_arg(stmt, 0);
   tree alignment_expr = gimple_call_arg(stmt, 1);
   tree mask_expr = gimple_call_arg(stmt, 2);
@@ -5183,6 +5213,7 @@ void Converter::mask_len_store(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint6
 
 void Converter::process_cfn_mask_len_store(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 6);
   tree ptr_expr = gimple_call_arg(stmt, 0);
   tree alignment_expr = gimple_call_arg(stmt, 1);
   tree mask_expr = gimple_call_arg(stmt, 2);
@@ -5206,6 +5237,7 @@ void Converter::process_cfn_mask_len_store(gimple *stmt)
 
 void Converter::process_cfn_mask_store(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 4);
   tree ptr_expr = gimple_call_arg(stmt, 0);
   tree alignment_expr = gimple_call_arg(stmt, 1);
   tree mask_expr = gimple_call_arg(stmt, 2);
@@ -5223,6 +5255,7 @@ void Converter::process_cfn_mask_store(gimple *stmt)
 
 void Converter::process_cfn_memcpy(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 3);
   if (TREE_CODE(gimple_call_arg(stmt, 2)) != INTEGER_CST)
     throw Not_implemented("non-constant memcpy size");
   auto [orig_dest_ptr, dest_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
@@ -5269,6 +5302,7 @@ void Converter::process_cfn_memcpy(gimple *stmt)
 
 void Converter::process_cfn_memmove(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 3);
   if (TREE_CODE(gimple_call_arg(stmt, 2)) != INTEGER_CST)
     throw Not_implemented("non-constant memmove size");
   auto [orig_dest_ptr, dest_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
@@ -5314,6 +5348,7 @@ void Converter::process_cfn_memmove(gimple *stmt)
 
 void Converter::process_cfn_mempcpy(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 3);
   if (TREE_CODE(gimple_call_arg(stmt, 2)) != INTEGER_CST)
     throw Not_implemented("non-constant mempcpy size");
   auto [orig_dest_ptr, dest_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
@@ -5362,6 +5397,7 @@ void Converter::process_cfn_mempcpy(gimple *stmt)
 
 void Converter::process_cfn_memset(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 3);
   if (TREE_CODE(gimple_call_arg(stmt, 2)) != INTEGER_CST)
     throw Not_implemented("non-constant memset size");
   auto [orig_ptr, ptr_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
@@ -5397,6 +5433,7 @@ void Converter::process_cfn_memset(gimple *stmt)
 
 void Converter::process_cfn_mul_overflow(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
@@ -5450,6 +5487,7 @@ void Converter::process_cfn_mul_overflow(gimple *stmt)
 
 void Converter::process_cfn_mulh(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
@@ -5469,6 +5507,7 @@ void Converter::process_cfn_mulh(gimple *stmt)
 
 void Converter::process_cfn_nan(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   // TODO: Implement the argument setting NaN payload when support for
   // noncanonical NaNs is implemented in the SMT solvers.
   tree lhs = gimple_call_lhs(stmt);
@@ -5483,6 +5522,7 @@ void Converter::process_cfn_nan(gimple *stmt)
 
 void Converter::process_cfn_parity(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
@@ -5504,6 +5544,13 @@ void Converter::process_cfn_parity(gimple *stmt)
 
 void Converter::process_cfn_popcount(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1
+	 || gimple_call_num_args(stmt) == 2);
+  // TODO: Handle popcount arg2.
+  // arg2 indicates that the result is used in a way that may allow for
+  // a simpler version of the operation. For example, arg2 == 0 tells us
+  // that arg1 cannot be 0. This does not help us, but we may want to
+  // make it UB if the condition specified by arg2 is not satisfied.
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, tree lhs_elem_type)
     -> std::pair<Inst *, Inst *>
@@ -5525,6 +5572,7 @@ void Converter::process_cfn_popcount(gimple *stmt)
 
 void Converter::process_cfn_sat_add(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
@@ -5562,6 +5610,7 @@ void Converter::process_cfn_sat_add(gimple *stmt)
 
 void Converter::process_cfn_sat_sub(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
@@ -5599,6 +5648,7 @@ void Converter::process_cfn_sat_sub(gimple *stmt)
 
 void Converter::process_cfn_sat_trunc(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, tree elem_type)
     -> std::pair<Inst *, Inst *>
@@ -5636,6 +5686,7 @@ void Converter::process_cfn_sat_trunc(gimple *stmt)
 
 void Converter::process_cfn_select_vl(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   Inst *arg1 = tree2inst(arg1_expr);
@@ -5655,6 +5706,7 @@ void Converter::process_cfn_select_vl(gimple *stmt)
 
 void Converter::process_cfn_signbit(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, tree lhs_elem_type)
     -> std::pair<Inst *, Inst *>
@@ -5681,6 +5733,7 @@ void Converter::process_cfn_signbit(gimple *stmt)
 
 void Converter::process_cfn_sub_overflow(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
@@ -5734,6 +5787,7 @@ void Converter::process_cfn_sub_overflow(gimple *stmt)
 
 void Converter::process_cfn_reduc(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   tree arg_expr = gimple_call_arg(stmt, 0);
   tree arg_type = TREE_TYPE(arg_expr);
   assert(VECTOR_TYPE_P(arg_type));
@@ -5794,6 +5848,7 @@ void Converter::process_cfn_reduc(gimple *stmt)
 
 void Converter::process_cfn_reduc_fminmax(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   auto gen_elem_fmin =
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
@@ -5844,8 +5899,9 @@ void Converter::process_cfn_reduc_fminmax(gimple *stmt)
     }
 }
 
-void Converter::process_cfn_trap(gimple *)
+void Converter::process_cfn_trap(gimple *stmt ATTRIBUTE_UNUSED)
 {
+  assert(gimple_call_num_args(stmt) == 0);
   // TODO: Some passes add __builtin_trap for cases that are UB (so that
   // the program terminates instead of continuing in a random state).
   // We threat these as UB for now, but they should arguably be handled
@@ -5855,6 +5911,7 @@ void Converter::process_cfn_trap(gimple *)
 
 void Converter::process_cfn_vcond_mask(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 3);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
@@ -5878,6 +5935,7 @@ void Converter::process_cfn_vcond_mask(gimple *stmt)
 
 void Converter::process_cfn_vcond_mask_len(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 5);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
@@ -5910,6 +5968,7 @@ void Converter::process_cfn_vcond_mask_len(gimple *stmt)
 
 void Converter::process_cfn_vec_addsub(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
@@ -5961,6 +6020,7 @@ void Converter::process_cfn_vec_addsub(gimple *stmt)
 
 void Converter::process_cfn_vec_convert(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 1);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   Inst *arg1 = tree2inst(arg1_expr);
   tree arg1_elem_type = TREE_TYPE(TREE_TYPE(arg1_expr));
@@ -5978,6 +6038,7 @@ void Converter::process_cfn_vec_convert(gimple *stmt)
 
 void Converter::process_cfn_vec_extract(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
@@ -6019,6 +6080,7 @@ void Converter::process_cfn_vec_extract(gimple *stmt)
 
 void Converter::process_cfn_vec_set(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 3);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
@@ -6081,6 +6143,7 @@ void Converter::process_cfn_vec_set(gimple *stmt)
 
 void Converter::process_cfn_vec_widen(gimple *stmt, Op op, bool high)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
@@ -6136,6 +6199,7 @@ void Converter::process_cfn_vec_widen(gimple *stmt, Op op, bool high)
 
 void Converter::process_cfn_vec_widen_abd(gimple *stmt, bool high)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
@@ -6195,6 +6259,7 @@ void Converter::process_cfn_vec_widen_abd(gimple *stmt, bool high)
 
 void Converter::process_cfn_uaddc(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 3);
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
@@ -6234,13 +6299,15 @@ void Converter::process_cfn_uaddc(gimple *stmt)
     tree2indef.insert({lhs, res_indef});
 }
 
-void Converter::process_cfn_unreachable(gimple *)
+void Converter::process_cfn_unreachable(gimple *stmt ATTRIBUTE_UNUSED)
 {
+  assert(gimple_call_num_args(stmt) == 0);
   bb->build_inst(Op::UB, bb->value_inst(1, 1));
 }
 
 void Converter::process_cfn_usubc(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 3);
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
@@ -6282,11 +6349,12 @@ void Converter::process_cfn_usubc(gimple *stmt)
 
 void Converter::process_cfn_while_ult(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 3);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg2_expr = gimple_call_arg(stmt, 1);
+  // TODO: Handle arg3_expr.
   Inst *arg1 = tree2inst(arg1_expr);
   Inst *arg2 = tree2inst(arg2_expr);
-  // TODO: Handle arg3.
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
@@ -6314,6 +6382,7 @@ void Converter::process_cfn_while_ult(gimple *stmt)
 
 void Converter::process_cfn_xorsign(gimple *stmt)
 {
+  assert(gimple_call_num_args(stmt) == 2);
   auto gen_elem =
     [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
 	   tree elem_type) -> std::pair<Inst *, Inst *>
