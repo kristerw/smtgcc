@@ -149,7 +149,7 @@ struct Converter {
   std::pair<Inst *, Inst *> process_vec_series(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type);
   Inst *process_ternary(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree arg1_type, tree arg2_type, tree arg3_type);
   Inst *process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree lhs_type, tree arg1_type, tree arg2_type, tree arg3_type);
-  std::pair<Inst *, Inst *> process_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type, Inst *len = nullptr);
+  std::pair<Inst *, Inst *> gen_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type, Inst *len = nullptr);
   std::pair<Inst *, Inst *> process_vec_perm_expr(gimple *stmt);
   std::tuple<Inst *, Inst *, Inst *> vector_constructor(tree expr);
   void process_constructor(tree lhs, tree rhs);
@@ -3517,7 +3517,7 @@ Inst *Converter::process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2
   return res;
 }
 
-std::pair<Inst *, Inst *> Converter::process_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type, Inst *len)
+std::pair<Inst *, Inst *> Converter::gen_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type, Inst *len)
 {
   assert(VECTOR_TYPE_P(arg1_type));
   assert(VECTOR_TYPE_P(arg2_type));
@@ -3544,7 +3544,7 @@ std::pair<Inst *, Inst *> Converter::process_vec_cond(Inst *arg1, Inst *arg1_ind
   for (uint64_t i = 0; i < nof_elt; i++)
     {
       Inst *a1 = extract_vec_elem(bb, arg1, elem_bitsize1, i);
-      if (TYPE_PRECISION(arg1_elem_type) != 1)
+      if (a1->bitsize > 1)
 	a1 = bb->build_extract_bit(a1, 0);
       Inst *a2 = extract_vec_elem(bb, arg2, elem_bitsize2, i);
       Inst *a3 = extract_vec_elem(bb, arg3, elem_bitsize2, i);
@@ -3564,15 +3564,25 @@ std::pair<Inst *, Inst *> Converter::process_vec_cond(Inst *arg1, Inst *arg1_ind
       if (arg1_indef)
 	{
 	  Inst *a1_indef = extract_vec_elem(bb, arg1_indef, elem_bitsize1, i);
-	  if (TYPE_PRECISION(arg1_elem_type) != 1)
+	  if (a1_indef->bitsize > 1)
 	    a1_indef = bb->build_extract_bit(a1_indef, 0);
-	  indef = get_res_indef(arg1_indef, arg2_elem_type);
+	  if (len)
+	    {
+	      Inst *i_inst = bb->value_inst(i, len->bitsize);
+	      Inst *cmp = bb->build_inst(Op::ULT, i_inst, len);
+	      a1_indef = bb->build_inst(Op::AND, cmp, a1_indef);
+	    }
+	  indef = get_res_indef(a1_indef, arg2_elem_type);
 	}
       if (arg2_indef)
 	{
 	  Inst *a2_indef = extract_vec_elem(bb, arg2_indef, elem_bitsize2, i);
 	  Inst *a3_indef = extract_vec_elem(bb, arg3_indef, elem_bitsize2, i);
-	  indef = bb->build_inst(Op::ITE, a1, a2_indef, a3_indef);
+	  Inst *indef2 = bb->build_inst(Op::ITE, a1, a2_indef, a3_indef);
+	  if (indef)
+	    indef = bb->build_inst(Op::OR, indef, indef2);
+	  else
+	    indef = indef2;
 	}
       if (indef)
 	{
@@ -3794,8 +3804,8 @@ void Converter::process_gimple_assign(gimple *stmt)
 	    tree arg1_type = TREE_TYPE(gimple_assign_rhs1(stmt));
 	    tree arg2_type = TREE_TYPE(gimple_assign_rhs2(stmt));
 	    std::tie(inst, indef) =
-	      process_vec_cond(arg1, arg1_indef, arg2, arg2_indef,
-			       arg3, arg3_indef, arg1_type, arg2_type);
+	      gen_vec_cond(arg1, arg1_indef, arg2, arg2_indef,
+			   arg3, arg3_indef, arg1_type, arg2_type);
 	  }
 	else if (code == COND_EXPR)
 	  {
@@ -4457,8 +4467,8 @@ std::pair<Inst*, Inst*> Converter::gen_cfn_cond(tree_code code, Inst *cond, Inst
   if (VECTOR_TYPE_P(cond_type))
     {
       std::tie(res, res_indef) =
-	process_vec_cond(cond, cond_indef, op_inst, op_indef, orig, orig_indef,
-			 cond_type, orig_type, len);
+	gen_vec_cond(cond, cond_indef, op_inst, op_indef, orig, orig_indef,
+		     cond_type, orig_type, len);
     }
   else
     {
@@ -4698,8 +4708,8 @@ void Converter::process_cfn_cond_fminmax(gimple *stmt)
     }
 
   auto [ret_inst, ret_indef] =
-    process_vec_cond(arg1, arg1_indef, op_inst, op_indef, arg4, arg4_indef,
-		     arg1_type, arg4_type);
+    gen_vec_cond(arg1, arg1_indef, op_inst, op_indef, arg4, arg4_indef,
+		 arg1_type, arg4_type);
 
   if (lhs)
     {
@@ -5924,9 +5934,8 @@ void Converter::process_cfn_vcond_mask(gimple *stmt)
   auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
   auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
   auto [arg3, arg3_indef] = tree2inst_indef(arg3_expr);
-  auto [inst, indef] = process_vec_cond(arg1, arg1_indef, arg2, arg2_indef,
-					arg3, arg3_indef, arg1_type,
-					arg2_type);
+  auto [inst, indef] = gen_vec_cond(arg1, arg1_indef, arg2, arg2_indef,
+				    arg3, arg3_indef, arg1_type, arg2_type);
   constrain_range(bb, lhs, inst);
   tree2instruction.insert({lhs, inst});
   if (indef)
@@ -5957,9 +5966,9 @@ void Converter::process_cfn_vcond_mask_len(gimple *stmt)
   auto [arg3, arg3_indef] = tree2inst_indef(arg3_expr);
   bias = type_convert(bias, bias_type, len_type);
   len = bb->build_inst(Op::ADD, len, bias);
-  auto [inst, indef] = process_vec_cond(arg1, arg1_indef, arg2, arg2_indef,
-					arg3, arg3_indef, arg1_type,
-					arg2_type, len);
+  auto [inst, indef] = gen_vec_cond(arg1, arg1_indef, arg2, arg2_indef,
+				    arg3, arg3_indef, arg1_type, arg2_type,
+				    len);
   constrain_range(bb, lhs, inst);
   tree2instruction.insert({lhs, inst});
   if (indef)
