@@ -242,6 +242,7 @@ private:
   void process_vec_mov();
   void process_vec_movi(bool invert = false);
   void process_vec_orr();
+  void process_vec_f2i(bool is_unsigned);
   void process_vec_zip1();
   void process_vec_zip2();
   void process_vec_trn1();
@@ -1152,16 +1153,6 @@ Inst *gen_s2f(Basic_block *bb, Inst *elem1)
 Inst *gen_u2f(Basic_block *bb, Inst *elem1)
 {
   return bb->build_inst(Op::U2F, elem1, elem1->bitsize);
-}
-
-Inst *gen_f2s(Basic_block *bb, Inst *elem1)
-{
-  return bb->build_inst(Op::F2S, elem1, elem1->bitsize);
-}
-
-Inst *gen_f2u(Basic_block *bb, Inst *elem1)
-{
-  return bb->build_inst(Op::F2U, elem1, elem1->bitsize);
 }
 
 Inst *gen_abs(Basic_block *bb, Inst *elem1)
@@ -3379,6 +3370,41 @@ void Parser::process_vec_orr()
   write_reg(dest, res);
 }
 
+void Parser::process_vec_f2i(bool is_unsigned)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  Inst *arg2 = nullptr;
+  if (tokens.size() > 4)
+    {
+      get_comma(4);
+      arg2 = get_imm(5);
+      get_end_of_line(6);
+    }
+  else
+    get_end_of_line(4);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      if (arg2)
+	{
+	  Inst *scale = bb->value_inst(1ull << arg2->value(), 64);
+	  scale = bb->build_inst(Op::U2F, scale, elem1->bitsize);
+	  elem1 = bb->build_inst(Op::FMUL, elem1, scale);
+	}
+      Op op = is_unsigned ? Op::F2U : Op::F2S;
+      Inst *inst = bb->build_inst(op, elem1, elem_bitsize);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_zip1()
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -4071,9 +4097,9 @@ void Parser::parse_vector_op()
   else if (name == "fcvtn2")
     process_vec_narrow(Op::FCHPREC, true);
   else if (name == "fcvtzs")
-    process_vec_unary(gen_f2s);
+    process_vec_f2i(false);
   else if (name == "fcvtzu")
-    process_vec_unary(gen_f2u);
+    process_vec_f2i(true);
   else if (name == "fdiv")
     process_vec_binary(Op::FDIV);
   else if (name == "fmaxnm")
