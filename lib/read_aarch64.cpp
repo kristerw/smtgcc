@@ -1222,9 +1222,9 @@ Inst *gen_mul(Basic_block *bb, Inst *elem1, Inst *elem2)
 Inst *gen_sat_uadd(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   Inst *add = bb->build_inst(Op::ADD, elem1, elem2);
-  Inst *cmp = bb->build_inst(Op::ULT, elem1, add);
+  Inst *cmp = bb->build_inst(Op::ULT, add, elem1);
   Inst *m1 = bb->value_inst(-1, elem1->bitsize);
-  return bb->build_inst(Op::ITE, cmp, add, m1);
+  return bb->build_inst(Op::ITE, cmp, m1, add);
 }
 
 Inst *gen_sat_usub(Basic_block *bb, Inst *elem1, Inst *elem2)
