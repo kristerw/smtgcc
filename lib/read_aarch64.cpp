@@ -3874,7 +3874,7 @@ void Parser::process_vec_binary_high_narrow(Op op, bool high)
       Inst *elem1 = extract_vec_elem(arg1, src_elem_bitsize, i);
       Inst *elem2 = extract_vec_elem(arg2, src_elem_bitsize, i);
       Inst *inst = bb->build_inst(op, elem1, elem2);
-      inst = bb->build_trunc(inst, elem_bitsize);
+      inst = bb->build_inst(Op::EXTRACT, inst, inst->bitsize - 1, elem_bitsize);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
