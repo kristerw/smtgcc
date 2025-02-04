@@ -250,6 +250,7 @@ private:
   void process_vec_tbl();
   void parse_vector_op();
   void process_sve_binary(Op op);
+  void process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_index();
   void process_sve_while();
   Inst *load_value(Inst *ptr, uint64_t size);
@@ -1224,6 +1225,46 @@ Inst *gen_sat_usub(Basic_block *bb, Inst *elem1, Inst *elem2)
   Inst *cmp = bb->build_inst(Op::ULT, elem2, elem1);
   Inst *zero = bb->value_inst(0, elem1->bitsize);
   return bb->build_inst(Op::ITE, cmp, sub, zero);
+}
+
+Inst *gen_sat_sadd(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *res = bb->build_inst(Op::ADD, elem1, elem2);
+  Inst *zero = bb->value_inst(0, res->bitsize);
+  Inst *is_neg_elem2 = bb->build_inst(Op::SLT, elem2, zero);
+  Inst *is_pos_elem2 = bb->build_inst(Op::NOT, is_neg_elem2);
+  Inst *is_neg_oflw = bb->build_inst(Op::SLT, elem1, res);
+  is_neg_oflw = bb->build_inst(Op::AND, is_neg_oflw, is_neg_elem2);
+  Inst *is_pos_oflw = bb->build_inst(Op::SLT, res, elem1);
+  is_pos_oflw = bb->build_inst(Op::AND, is_pos_oflw, is_pos_elem2);
+  unsigned __int128 maxint =
+    (((unsigned __int128)1) << (res->bitsize - 1)) - 1;
+  unsigned __int128 minint =
+    ((unsigned __int128)1) << (res->bitsize - 1);
+  Inst *maxint_inst = bb->value_inst(maxint, res->bitsize);
+  Inst *minint_inst = bb->value_inst(minint, res->bitsize);
+  res = bb->build_inst(Op::ITE, is_pos_oflw, maxint_inst, res);
+  return bb->build_inst(Op::ITE, is_neg_oflw, minint_inst, res);
+}
+
+Inst *gen_sat_ssub(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *res = bb->build_inst(Op::SUB, elem1, elem2);
+  Inst *zero = bb->value_inst(0, res->bitsize);
+  Inst *is_neg_elem2 = bb->build_inst(Op::SLT, elem2, zero);
+  Inst *is_pos_elem2 = bb->build_inst(Op::NOT, is_neg_elem2);
+  Inst *is_neg_oflw = bb->build_inst(Op::SLT, elem1, res);
+  is_neg_oflw = bb->build_inst(Op::AND, is_neg_oflw, is_pos_elem2);
+  Inst *is_pos_oflw = bb->build_inst(Op::SLT, res, elem1);
+  is_pos_oflw = bb->build_inst(Op::AND, is_pos_oflw, is_neg_elem2);
+  unsigned __int128 maxint =
+    (((unsigned __int128)1) << (res->bitsize - 1)) - 1;
+  unsigned __int128 minint =
+    ((unsigned __int128)1) << (res->bitsize - 1);
+  Inst *maxint_inst = bb->value_inst(maxint, res->bitsize);
+  Inst *minint_inst = bb->value_inst(minint, res->bitsize);
+  res = bb->build_inst(Op::ITE, is_pos_oflw, maxint_inst, res);
+  return bb->build_inst(Op::ITE, is_neg_oflw, minint_inst, res);
 }
 
 Inst *gen_abd(Basic_block *bb, Inst *elem1, Inst *elem2)
@@ -4196,6 +4237,10 @@ void Parser::parse_vector_op()
     process_vec_widen_shift(Op::SHL, Op::ZEXT, false);
   else if (name == "shll2")
     process_vec_widen_shift(Op::SHL, Op::ZEXT, true);
+  else if (name == "sqadd")
+    process_vec_binary(gen_sat_sadd);
+  else if (name == "sqsub")
+    process_vec_binary(gen_sat_ssub);
   else if (name == "sshl")
     process_vec_binary(gen_sshl);
   else if (name == "sshll")
@@ -4336,6 +4381,37 @@ void Parser::process_sve_binary(Op op)
       else
 	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
       Inst *inst = bb->build_inst(op, elem1, elem2);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1 = get_zreg_value(3);
+  get_comma(4);
+  Inst *arg2;
+  if (is_zreg(5))
+    arg2 = get_zreg_value(5);
+  else
+    arg2 = get_imm(5, elem_bitsize);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2;
+      if (arg2->bitsize == elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = gen_elem(bb, elem1, elem2);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
@@ -4497,10 +4573,18 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::MUL);
   else if (name == "orr")
     process_sve_binary(Op::OR);
+  else if (name == "sqadd")
+    process_sve_binary(gen_sat_sadd);
+  else if (name == "sqsub")
+    process_sve_binary(gen_sat_ssub);
   else if (name == "st1b" || name == "st1h" || name == "st1w" || name == "st1d")
     process_sve_st1();
   else if (name == "sub")
     process_sve_binary(Op::SUB);
+  else if (name == "uqadd")
+    process_sve_binary(gen_sat_uadd);
+  else if (name == "uqsub")
+    process_sve_binary(gen_sat_usub);
   else if (name == "whilelo")
     process_sve_while();
   else
@@ -4976,6 +5060,10 @@ void Parser::parse_function()
     process_inc(32);
   else if (name == "incd")
     process_inc(64);
+  else if (name == "sqadd")
+    process_binary(gen_sat_sadd);
+  else if (name == "sqsub")
+    process_binary(gen_sat_ssub);
   else if (name == "uqadd")
     process_binary(gen_sat_uadd);
   else if (name == "uqsub")
