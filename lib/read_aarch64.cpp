@@ -4424,17 +4424,18 @@ void Parser::process_sve_index()
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
   get_comma(2);
-  Inst *arg2 = get_imm(3);
+  Inst *arg2 = get_reg_or_imm_value(3, elem_bitsize);
   get_comma(4);
-  Inst *arg3 = get_imm(5);
+  Inst *arg3 = get_reg_or_imm_value(5, elem_bitsize);
   get_end_of_line(6);
 
-  __int128 imm1 = arg2->signed_value();
-  __int128 imm2 = arg3->signed_value();
-  Inst *res = bb->value_inst(imm1, elem_bitsize);
+  arg2 = bb->build_trunc(arg2, elem_bitsize);
+  arg3 = bb->build_trunc(arg3, elem_bitsize);
+  Inst *res = arg2;
+  Inst *inst = res;
   for (uint32_t i = 1; i < nof_elem; i++)
     {
-      Inst *inst = bb->value_inst(imm1 + i * imm2, elem_bitsize);
+      inst = bb->build_inst(Op::ADD, inst, arg3);
       res = bb->build_inst(Op::CONCAT, inst, res);
     }
   write_reg(dest, res);
