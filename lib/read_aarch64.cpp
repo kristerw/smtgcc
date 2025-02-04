@@ -118,6 +118,7 @@ private:
   Inst *get_zreg_value(unsigned idx);
   Inst *get_preg_value(unsigned idx);
   Inst *get_preg_zeroing_value(unsigned idx);
+  Inst *get_preg_merging_value(unsigned idx);
   uint64_t get_vreg_idx(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
@@ -683,6 +684,16 @@ Inst *Parser::get_preg_zeroing_value(unsigned idx)
   return bb->build_inst(Op::READ, reg);
 }
 
+Inst *Parser::get_preg_merging_value(unsigned idx)
+{
+  auto [reg_idx, suffix] = get_preg_(idx);
+  Inst *reg = rstate->registers[reg_idx];
+  if (suffix != "/m")
+    throw Parse_error("expected a predicate register/m instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  return bb->build_inst(Op::READ, reg);
+}
+
 uint64_t Parser::get_vreg_idx(unsigned idx, uint32_t nof_elem,
 			      uint32_t elem_bitsize)
 {
@@ -897,9 +908,16 @@ bool Parser::is_preg(unsigned idx)
 
   if (isdigit(buf[tokens[idx].pos + 1]))
     {
+      if (tokens[idx].size == 2
+	  || (tokens[idx].size == 3 && isdigit(buf[tokens[idx].pos + 2])))
+	return true;
       if ((buf[tokens[idx].pos + 2] == '.')
 	  || (isdigit(buf[tokens[idx].pos + 2])
 	      && buf[tokens[idx].pos + 3] == '.'))
+	return true;
+      if ((buf[tokens[idx].pos + 2] == '/')
+	  || (isdigit(buf[tokens[idx].pos + 2])
+	      && buf[tokens[idx].pos + 3] == '/'))
 	return true;
     }
 
@@ -4361,15 +4379,23 @@ void Parser::parse_vector_op()
 void Parser::process_sve_binary(Op op)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  Inst *orig = get_zreg_value(1);
   get_comma(2);
-  Inst *arg1 = get_zreg_value(3);
-  get_comma(4);
+  Inst *pred = nullptr;
+  int idx = 3;
+  if (is_preg(3))
+    {
+      pred = get_preg_merging_value(idx++);
+      get_comma(idx++);
+    }
+  Inst *arg1 = get_zreg_value(idx++);
+  get_comma(idx++);
   Inst *arg2;
-  if (is_zreg(5))
-    arg2 = get_zreg_value(5);
+  if (is_zreg(idx))
+    arg2 = get_zreg_value(idx++);
   else
-    arg2 = get_imm(5, elem_bitsize);
-  get_end_of_line(6);
+    arg2 = get_imm(idx++, elem_bitsize);
+  get_end_of_line(idx);
 
   Inst *res = nullptr;
   for (uint32_t i = 0; i < nof_elem; i++)
@@ -4381,6 +4407,12 @@ void Parser::process_sve_binary(Op op)
       else
 	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
       Inst *inst = bb->build_inst(op, elem1, elem2);
+      if (pred)
+	{
+	  Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+	  Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+	  inst = bb->build_inst(Op::ITE, pred_elem, inst, orig_elem);
+	}
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
@@ -4392,15 +4424,23 @@ void Parser::process_sve_binary(Op op)
 void Parser::process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  Inst *orig = get_zreg_value(1);
   get_comma(2);
-  Inst *arg1 = get_zreg_value(3);
-  get_comma(4);
+  Inst *pred = nullptr;
+  int idx = 3;
+  if (is_preg(3))
+    {
+      pred = get_preg_merging_value(idx++);
+      get_comma(idx++);
+    }
+  Inst *arg1 = get_zreg_value(idx++);
+  get_comma(idx++);
   Inst *arg2;
-  if (is_zreg(5))
-    arg2 = get_zreg_value(5);
+  if (is_zreg(idx))
+    arg2 = get_zreg_value(idx++);
   else
-    arg2 = get_imm(5, elem_bitsize);
-  get_end_of_line(6);
+    arg2 = get_imm(idx++, elem_bitsize);
+  get_end_of_line(idx);
 
   Inst *res = nullptr;
   for (uint32_t i = 0; i < nof_elem; i++)
@@ -4412,6 +4452,12 @@ void Parser::process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
       else
 	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
       Inst *inst = gen_elem(bb, elem1, elem2);
+      if (pred)
+	{
+	  Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+	  Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+	  inst = bb->build_inst(Op::ITE, pred_elem, inst, orig_elem);
+	}
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
@@ -4566,6 +4612,14 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::AND);
   else if (name == "eor")
     process_sve_binary(Op::XOR);
+  else if (name == "fadd")
+    process_sve_binary(Op::FADD);
+  else if (name == "fdiv")
+    process_sve_binary(Op::FDIV);
+  else if (name == "fmul")
+    process_sve_binary(Op::FMUL);
+  else if (name == "fsub")
+    process_sve_binary(Op::FSUB);
   else if (name == "index")
     process_sve_index();
   else if (name == "ld1b" || name == "ld1h" || name == "ld1w" || name == "ld1d")
