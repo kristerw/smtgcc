@@ -4574,6 +4574,10 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::MUL);
   else if (name == "orr")
     process_sve_binary(Op::OR);
+  else if (name == "smax")
+    process_sve_binary(gen_smax);
+  else if (name == "smin")
+    process_sve_binary(gen_smin);
   else if (name == "sqadd")
     process_sve_binary(gen_sat_sadd);
   else if (name == "sqsub")
@@ -4582,6 +4586,10 @@ void Parser::parse_sve_op()
     process_sve_st1();
   else if (name == "sub")
     process_sve_binary(Op::SUB);
+  else if (name == "umax")
+    process_sve_binary(gen_umax);
+  else if (name == "umin")
+    process_sve_binary(gen_umin);
   else if (name == "uqadd")
     process_sve_binary(gen_sat_uadd);
   else if (name == "uqsub")
