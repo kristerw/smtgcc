@@ -4610,6 +4610,8 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::ADD);
   else if (name == "and")
     process_sve_binary(Op::AND);
+  else if (name == "asr")
+    process_sve_binary(Op::ASHR);
   else if (name == "eor")
     process_sve_binary(Op::XOR);
   else if (name == "fadd")
@@ -4624,6 +4626,10 @@ void Parser::parse_sve_op()
     process_sve_index();
   else if (name == "ld1b" || name == "ld1h" || name == "ld1w" || name == "ld1d")
     process_sve_ld1();
+  else if (name == "lsl")
+    process_sve_binary(Op::SHL);
+  else if (name == "lsr")
+    process_sve_binary(Op::LSHR);
   else if (name == "mul")
     process_sve_binary(Op::MUL);
   else if (name == "orr")
