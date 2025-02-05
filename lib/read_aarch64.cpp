@@ -214,7 +214,7 @@ private:
   void process_vec_binary(Op op, bool perform_not = false);
   void process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_widen_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op, bool high);
-  void process_vec_widen_binary_add(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op, bool high);
+  void process_vec_widen_binary_op(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op, Op op, bool high);
   void process_vec_widen_pairwise_add(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op);
   void process_vec_widen_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op);
   void process_vec_widen2_binary(Op op, Op widen_op, bool high);
@@ -2985,7 +2985,7 @@ void Parser::process_vec_widen_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst
   write_reg(dest, res);
 }
 
-void Parser::process_vec_widen_binary_add(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op, bool high)
+void Parser::process_vec_widen_binary_op(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op, Op op, bool high)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
   Inst *orig = get_vreg_value(1, nof_elem, elem_bitsize);
@@ -3017,7 +3017,7 @@ void Parser::process_vec_widen_binary_add(Inst*(*gen_elem)(Basic_block*, Inst*, 
       elem1 = bb->build_inst(widen_op, elem1, elem_bitsize);
       elem2 = bb->build_inst(widen_op, elem2, elem_bitsize);
       Inst *inst = gen_elem(bb, elem1, elem2);
-      inst = bb->build_inst(Op::ADD, inst, elem0);
+      inst = bb->build_inst(op, elem0, inst);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
@@ -4206,9 +4206,9 @@ void Parser::parse_vector_op()
   else if (name == "rev64")
     process_vec_rev(64);
   else if (name == "sabal")
-    process_vec_widen_binary_add(gen_abd, Op::SEXT, false);
+    process_vec_widen_binary_op(gen_abd, Op::SEXT, Op::ADD, false);
   else if (name == "sabal2")
-    process_vec_widen_binary_add(gen_abd, Op::SEXT, true);
+    process_vec_widen_binary_op(gen_abd, Op::SEXT, Op::ADD, true);
   else if (name == "sabd")
     process_vec_binary(gen_sabd);
   else if (name == "sabdl")
@@ -4244,9 +4244,13 @@ void Parser::parse_vector_op()
   else if (name == "sminp")
     process_vec_pairwise(gen_smin);
   else if (name == "smlal")
-    process_vec_widen_binary_add(gen_mul, Op::SEXT, false);
+    process_vec_widen_binary_op(gen_mul, Op::SEXT, Op::ADD, false);
   else if (name == "smlal2")
-    process_vec_widen_binary_add(gen_mul, Op::SEXT, true);
+    process_vec_widen_binary_op(gen_mul, Op::SEXT, Op::ADD, true);
+  else if (name == "smlsl")
+    process_vec_widen_binary_op(gen_mul, Op::SEXT, Op::SUB, false);
+  else if (name == "smlsl2")
+    process_vec_widen_binary_op(gen_mul, Op::SEXT, Op::SUB, true);
   else if (name == "smull")
     process_vec_widen_binary(gen_mul, Op::SEXT, false);
   else if (name == "smull2")
@@ -4294,9 +4298,9 @@ void Parser::parse_vector_op()
   else if (name == "trn2")
     process_vec_trn2();
   else if (name == "uabal")
-    process_vec_widen_binary_add(gen_abd, Op::ZEXT, false);
+    process_vec_widen_binary_op(gen_abd, Op::ZEXT, Op::ADD, false);
   else if (name == "uabal2")
-    process_vec_widen_binary_add(gen_abd, Op::ZEXT, true);
+    process_vec_widen_binary_op(gen_abd, Op::ZEXT, Op::ADD, true);
   else if (name == "uabd")
     process_vec_binary(gen_uabd);
   else if (name == "uabdl")
@@ -4326,9 +4330,13 @@ void Parser::parse_vector_op()
   else if (name == "uminp")
     process_vec_pairwise(gen_umin);
   else if (name == "umlal")
-    process_vec_widen_binary_add(gen_mul, Op::ZEXT, false);
+    process_vec_widen_binary_op(gen_mul, Op::ZEXT, Op::ADD, false);
   else if (name == "umlal2")
-    process_vec_widen_binary_add(gen_mul, Op::ZEXT, true);
+    process_vec_widen_binary_op(gen_mul, Op::ZEXT, Op::ADD, true);
+  else if (name == "umlsl")
+    process_vec_widen_binary_op(gen_mul, Op::ZEXT, Op::SUB, false);
+  else if (name == "umlsl2")
+    process_vec_widen_binary_op(gen_mul, Op::ZEXT, Op::SUB, true);
   else if (name == "umull")
     process_vec_widen_binary(gen_mul, Op::ZEXT, false);
   else if (name == "umull2")
