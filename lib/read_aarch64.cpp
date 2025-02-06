@@ -258,6 +258,9 @@ private:
   void process_sve_ld1();
   void store_value(Inst *ptr, Inst *value);
   void process_sve_st1();
+  void process_sve_mov_preg();
+  void process_sve_mov_zreg();
+  void process_sve_mov();
   void parse_sve_op();
   void parse_function();
 
@@ -668,7 +671,7 @@ Inst *Parser::get_preg_value(unsigned idx)
 {
   auto [reg_idx, suffix] = get_preg_(idx);
   Inst *reg = rstate->registers[reg_idx];
-  if (suffix != "")
+  if (suffix != "" && suffix != ".b")
     throw Parse_error("expected a predicate register instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
   return bb->build_inst(Op::READ, reg);
@@ -965,10 +968,14 @@ Inst *Parser::get_reg_or_imm_value(unsigned idx, uint32_t bitsize)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
+  Inst *value;
   if (tokens[idx].kind == Lexeme::name)
-    return get_reg_value(idx);
+    value = get_reg_value(idx);
   else
-    return bb->build_trunc(get_imm(idx), bitsize);
+    value = get_imm(idx);
+  if (value->bitsize > bitsize)
+    value = bb->build_trunc(value, bitsize);
+  return value;
 }
 
 Basic_block *Parser::get_bb(unsigned idx)
@@ -4483,8 +4490,6 @@ void Parser::process_sve_index()
   Inst *arg3 = get_reg_or_imm_value(5, elem_bitsize);
   get_end_of_line(6);
 
-  arg2 = bb->build_trunc(arg2, elem_bitsize);
-  arg3 = bb->build_trunc(arg3, elem_bitsize);
   Inst *res = arg2;
   Inst *inst = res;
   for (uint32_t i = 1; i < nof_elem; i++)
@@ -4610,6 +4615,46 @@ void Parser::process_sve_st1()
     }
 }
 
+void Parser::process_sve_mov_preg()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  get_comma(2);
+  Inst *arg1 = get_preg_value(3);
+  get_end_of_line(4);
+
+  write_reg(dest, arg1);
+}
+
+void Parser::process_sve_mov_zreg()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  if (is_zreg(3))
+    {
+      Inst *arg1 = get_zreg_value(3);
+      get_end_of_line(4);
+      write_reg(dest, arg1);
+      return;
+    }
+  Inst *arg1 = get_reg_or_imm_value(3, elem_bitsize);
+  get_end_of_line(4);
+
+  Inst *res = arg1;
+  for (uint32_t i = 1; i < nof_elem; i++)
+    {
+      res = bb->build_inst(Op::CONCAT, arg1, res);
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_sve_mov()
+{
+  if (is_preg(1))
+    process_sve_mov_preg();
+  else
+    process_sve_mov_zreg();
+}
+
 void Parser::parse_sve_op()
 {
   std::string_view name = get_name(0);
@@ -4638,6 +4683,8 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::SHL);
   else if (name == "lsr")
     process_sve_binary(Op::LSHR);
+  else if (name == "mov")
+    process_sve_mov();
   else if (name == "mul")
     process_sve_binary(Op::MUL);
   else if (name == "orr")
