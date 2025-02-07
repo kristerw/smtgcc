@@ -2710,7 +2710,45 @@ std::pair<Inst *, Inst *> Converter::process_binary_bool(enum tree_code code, In
 
   Inst *lhs;
   Inst *lhs_indef = nullptr;
-  if (FLOAT_TYPE_P(arg1_type))
+  if (VECTOR_TYPE_P(arg1_type))
+    {
+      assert(code == EQ_EXPR || code == NE_EXPR);
+      // We can compare vectors in the same way as scalars, but it is
+      // more efficient to do it elementwise since we then can perform
+      // more optimizations on the generated code.
+      tree elem_type = TREE_TYPE(arg1_type);
+      uint32_t elem_bitsize = bitsize_for_type(elem_type);
+      uint32_t nof_elt = bitsize_for_type(arg1_type) / elem_bitsize;
+      lhs = bb->value_inst(code == EQ_EXPR, 1);
+      Op op = code == EQ_EXPR ? Op::AND : Op::OR;
+      if (arg1_indef || arg2_indef)
+	lhs_indef = bb->value_inst(0, 1);
+      for (uint64_t i = 0; i < nof_elt; i++)
+	{
+	  Inst *a1 = extract_vec_elem(bb, arg1, elem_bitsize, i);
+	  Inst *a1_indef = nullptr;
+	  if (arg1_indef)
+	    a1_indef = extract_vec_elem(bb, arg1_indef, elem_bitsize, i);
+	  Inst *a2 = extract_vec_elem(bb, arg2, elem_bitsize, i);
+	  Inst *a2_indef = nullptr;
+	  if (arg2_indef)
+	    a2_indef = extract_vec_elem(bb, arg2_indef, elem_bitsize, i);
+	  if (a1_indef || a2_indef)
+	    {
+	      if (!a1_indef)
+		a1_indef = bb->value_inst(0, elem_bitsize);
+	      if (!a2_indef)
+		a2_indef = bb->value_inst(0, elem_bitsize);
+	    }
+	  auto [inst, inst_indef] =
+	    process_binary_bool(code, a1, a1_indef, a2, a2_indef,
+				boolean_type_node, elem_type, elem_type);
+	  lhs = bb->build_inst(op, lhs, inst);
+	  if (lhs_indef)
+	    lhs_indef = bb->build_inst(Op::OR, lhs_indef, inst_indef);
+	}
+    }
+  else if (FLOAT_TYPE_P(arg1_type))
     {
       std::tie(lhs, lhs_indef) =
 	process_binary_float(code, arg1, arg1_indef, arg2, arg2_indef,
