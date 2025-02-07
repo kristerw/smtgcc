@@ -4512,9 +4512,11 @@ void Parser::process_sve_while()
   Inst *res = nullptr;
   Inst *one = bb->value_inst(1, arg1->bitsize);
   Inst *last_cmp = nullptr;
+  Inst *z = bb->value_inst(0, 1);
   for (uint32_t i = 0; i < nof_elem; i++)
     {
       Inst *inst = bb->build_inst(Op::ULT, arg1, arg2);
+      z = bb->build_inst(Op::OR, z, inst);
       last_cmp = inst;
       if (elem_bitsize > 8)
 	inst = bb->build_inst(Op::ZEXT, inst, elem_bitsize / 8);
@@ -4527,7 +4529,7 @@ void Parser::process_sve_while()
 
   Inst *n = extract_vec_elem(res, 1, 0);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
-  Inst *z = bb->build_inst(Op::EQ, res, bb->value_inst(0, res->bitsize));
+  z = bb->build_inst(Op::NOT, z);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
   Inst *c = bb->build_inst(Op::NOT, last_cmp);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
