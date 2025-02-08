@@ -261,6 +261,8 @@ private:
   void process_sve_mov_preg();
   void process_sve_mov_zreg();
   void process_sve_mov();
+  void process_sve_ptrue();
+  void process_sve_pfalse();
   void parse_sve_op();
   void parse_function();
 
@@ -4659,6 +4661,68 @@ void Parser::process_sve_mov()
     process_sve_mov_zreg();
 }
 
+void Parser::process_sve_ptrue()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  get_comma(2);
+  std::string_view pattern = get_name(3);
+  get_end_of_line(4);
+
+  uint32_t true_nof;
+  if (pattern == "all")
+    true_nof = nof_elem;
+  else if (pattern == "vl1")
+    true_nof = 1;
+  else if (pattern == "vl2")
+    true_nof = 2;
+  else if (pattern == "vl3")
+    true_nof = 3;
+  else if (pattern == "vl4")
+    true_nof = 4;
+  else if (pattern == "vl5")
+    true_nof = 5;
+  else if (pattern == "vl6")
+    true_nof = 6;
+  else if (pattern == "vl7")
+    true_nof = 7;
+  else if (pattern == "vl8")
+    true_nof = 8;
+  else if (pattern == "vl16")
+    true_nof = 16;
+  else if (pattern == "vl32")
+    true_nof = 32;
+  else if (pattern == "vl64")
+    true_nof = 64;
+  else if (pattern == "vl128")
+    true_nof = 128;
+  else if (pattern == "vl256")
+    true_nof = 256;
+  else
+    throw Parse_error("ptrue " + std::string(pattern), line_number);
+  if (true_nof > nof_elem)
+    true_nof = 0;
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *inst = bb->value_inst(i < true_nof, elem_bitsize / 8);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+
+  write_reg(dest, res);
+}
+
+void Parser::process_sve_pfalse()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  get_end_of_line(2);
+
+  write_reg(dest, bb->value_inst(0, dest->bitsize));
+}
+
 void Parser::parse_sve_op()
 {
   std::string_view name = get_name(0);
@@ -4693,6 +4757,10 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::MUL);
   else if (name == "orr")
     process_sve_binary(Op::OR);
+  else if (name == "pfalse")
+    process_sve_pfalse();
+  else if (name == "ptrue")
+    process_sve_ptrue();
   else if (name == "smax")
     process_sve_binary(gen_smax);
   else if (name == "smin")
