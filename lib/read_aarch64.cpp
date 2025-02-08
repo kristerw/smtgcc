@@ -4893,7 +4893,7 @@ void Parser::parse_function()
     parse_sve_op();
 
   // Branches, Exception generating, and System instructions
-  else if (name == "beq")
+  else if (name == "beq" || name == "b.none")
     process_cond_branch(Cond_code::EQ);
   else if (name == "bne" || name == "b.any")
     process_cond_branch(Cond_code::NE);
