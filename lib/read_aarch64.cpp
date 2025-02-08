@@ -207,6 +207,7 @@ private:
   void process_bfxil();
   void process_ubfx(Op op);
   void process_ubfiz(Op op);
+  void process_cnt(uint64_t elem_bitsize);
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   Inst *extract_pred_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   void process_vec_unary(Op op);
@@ -2533,6 +2534,70 @@ void Parser::process_ubfiz(Op op)
   Inst *res = bb->build_trunc(arg1, arg3->value());
   res = bb->build_inst(op, res, arg1->bitsize);
   res = bb->build_inst(Op::SHL, res, bb->build_trunc(arg2, arg1->bitsize));
+  write_reg(dest, res);
+}
+
+void Parser::process_cnt(uint64_t elem_bitsize)
+{
+  uint64_t nof_elem = 128 / elem_bitsize;
+  uint64_t true_nof = nof_elem;
+  Inst *imm = nullptr;
+  Inst *dest = get_reg(1);
+  if (tokens.size() > 2)
+    {
+      get_comma(2);
+      std::string_view pattern = get_name(3);
+      if (tokens.size() > 4)
+	{
+	  get_comma(4);
+	  std::string_view mul = get_name(5);
+	  if (mul != "mul")
+	    throw Parse_error("expected mul instead of " + std::string(mul),
+			      line_number);
+	  imm = get_imm(6, dest->bitsize);
+	  get_end_of_line(7);
+	}
+      else
+	get_end_of_line(4);
+
+      if (pattern == "vl1")
+	true_nof = 1;
+      else if (pattern == "vl2")
+	true_nof = 2;
+      else if (pattern == "vl3")
+	true_nof = 3;
+      else if (pattern == "vl4")
+	true_nof = 4;
+      else if (pattern == "vl5")
+	true_nof = 5;
+      else if (pattern == "vl6")
+	true_nof = 6;
+      else if (pattern == "vl7")
+	true_nof = 7;
+      else if (pattern == "vl8")
+	true_nof = 8;
+      else if (pattern == "vl16")
+	true_nof = 16;
+      else if (pattern == "vl32")
+	true_nof = 32;
+      else if (pattern == "vl64")
+	true_nof = 64;
+      else if (pattern == "vl128")
+	true_nof = 128;
+      else if (pattern == "vl256")
+	true_nof = 256;
+      else if (pattern != "all")
+	throw Parse_error("ptrue " + std::string(pattern), line_number);
+      if (true_nof > nof_elem)
+	true_nof = 0;
+    }
+  else
+    get_end_of_line(2);
+
+  Inst *res = bb->value_inst(true_nof, dest->bitsize);
+  if (imm)
+    res = bb->build_inst(Op::MUL, res, imm);
+
   write_reg(dest, res);
 }
 
@@ -5248,6 +5313,14 @@ void Parser::parse_function()
     process_unary(gen_sqxtn);
 
   // Misc scalar versions of SIMD and SVE instructions
+  else if (name == "cntb")
+    process_cnt(8);
+  else if (name == "cnth")
+    process_cnt(16);
+  else if (name == "cntw")
+    process_cnt(32);
+  else if (name == "cntd")
+    process_cnt(64);
   else if (name == "incb")
     process_inc(8);
   else if (name == "inch")
