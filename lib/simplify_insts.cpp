@@ -820,6 +820,26 @@ Inst *simplify_or(Inst *inst)
       && is_value_one(arg2))
     return arg2;
 
+  // or (slt x, y) (eq (x, y)) -> not (slt y, x)
+  if (arg1->op == Op::EQ || arg2->op == Op::EQ)
+    {
+      Inst *a1 = arg1;
+      Inst *a2 = arg2;
+      if (a1->op == Op::EQ)
+	std::swap(a1, a2);
+      if ((a1->op == Op::SLT || a1->op == Op::ULT)
+	  && ((a1->args[0] == a2->args[0] && (a1->args[1] == a2->args[1]))
+	      || (a1->args[0] == a2->args[1] && (a1->args[1] == a2->args[0]))))
+	{
+	  Inst *new_inst1 = create_inst(a1->op, a1->args[1], a1->args[0]);
+	  new_inst1->insert_before(inst);
+	  new_inst1 = simplify_inst(new_inst1);
+	  Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
+	  new_inst2->insert_before(inst);
+	  return new_inst2;
+	}
+    }
+
   return inst;
 }
 
