@@ -1192,16 +1192,25 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	  uint32_t bitsize = bitsize_for_type(TREE_TYPE(expr));
 	  uint32_t elem_bitsize = bitsize_for_type(TREE_TYPE(TREE_TYPE(expr)));
 	  uint32_t nof_elem = bitsize / elem_bitsize;
-	  Inst *elem = tree2inst(VECTOR_CST_ELT(expr, 0));
-	  Inst *ret = elem;
-	  for (uint32_t i = 1; i < nof_elem; i++)
+	  uint32_t nof_patterns = VECTOR_CST_NPATTERNS(expr);
+	  Inst *ret = nullptr;
+	  for (uint32_t i = 0; i < nof_elem; i += nof_patterns)
 	    {
-	      ret = bb->build_inst(Op::CONCAT, elem, ret);
+	      for (uint32_t j = 0; j < nof_patterns; j++)
+		{
+		  Inst *elem = tree2inst(VECTOR_CST_ELT(expr, j));
+		  if (ret)
+		    ret = bb->build_inst(Op::CONCAT, elem, ret);
+		  else
+		    ret = elem;
+		}
 	    }
 	  return {ret, nullptr, nullptr};
 	}
       if (VECTOR_CST_STEPPED_P(expr))
 	{
+	  if (VECTOR_CST_NPATTERNS(expr) > 1)
+	    throw Not_implemented("tree2inst: VECTOR_CST_NPATTERNS(expr) > 1");
 	  uint32_t bitsize = bitsize_for_type(TREE_TYPE(expr));
 	  uint32_t elem_bitsize = bitsize_for_type(TREE_TYPE(TREE_TYPE(expr)));
 	  uint32_t nof_elem = bitsize / elem_bitsize;
@@ -1216,7 +1225,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	    }
 	  return {ret, nullptr, nullptr};
 	}
-      throw Not_implemented("tree2inst: complicated VECTOR_CST");
+      throw Not_implemented("tree2inst: VECTOR_CST");
     case COMPLEX_CST:
       {
 	tree elem_type = TREE_TYPE(TREE_TYPE(expr));
