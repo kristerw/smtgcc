@@ -17,6 +17,10 @@ enum class SIMD_cond {
   FEQ, FGE, FGT, FLE, FLT, EQ, GE, GT, HI, HS, LE, LT
 };
 
+enum class SVE_cond {
+  EQ, GE, GT, HI, HS, LE, LO, LS, LT, NE
+};
+
 struct Parser {
   Parser(aarch64_state *rstate) : rstate{rstate} {}
 
@@ -116,6 +120,7 @@ private:
   Inst *get_freg_value(unsigned idx);
   Inst *get_vreg_value(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
   Inst *get_zreg_value(unsigned idx);
+  Inst *get_zreg_or_imm_value(unsigned idx, uint32_t bitsize);
   Inst *get_preg_value(unsigned idx);
   Inst *get_preg_zeroing_value(unsigned idx);
   Inst *get_preg_merging_value(unsigned idx);
@@ -251,6 +256,7 @@ private:
   void process_vec_trn2();
   void process_vec_tbl();
   void parse_vector_op();
+  void process_sve_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
   void process_sve_binary(Op op);
   void process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_index();
@@ -264,6 +270,7 @@ private:
   void process_sve_mov();
   void process_sve_ptrue();
   void process_sve_pfalse();
+  void process_sve_compare(SVE_cond op);
   void parse_sve_op();
   void parse_function();
 
@@ -668,6 +675,16 @@ Inst *Parser::get_zreg_value(unsigned idx)
 {
   auto [dest, dest_nof_elem, dest_elem_bitsize] = get_zreg(idx);
   return bb->build_inst(Op::READ, dest);
+}
+
+Inst *Parser::get_zreg_or_imm_value(unsigned idx, uint32_t bitsize)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  if (tokens[idx].kind == Lexeme::name)
+    return get_zreg_value(idx);
+  else
+    return bb->build_trunc(get_imm(idx), bitsize);
 }
 
 Inst *Parser::get_preg_value(unsigned idx)
@@ -1381,6 +1398,12 @@ Inst *gen_sqxtn(Basic_block *bb, Inst *elem1)
   Inst *cmp2 = bb->build_inst(Op::SLT, smax1, elem1);
   res = bb->build_inst(Op::ITE, cmp1, smin2, res);
   return bb->build_inst(Op::ITE, cmp2, smax2, res);
+}
+
+Inst *gen_cnot(Basic_block *bb, Inst *elem)
+{
+  Inst *cmp = bb->build_inst(Op::NE, elem, bb->value_inst(0, elem->bitsize));
+  return bb->build_inst(Op::ZEXT, cmp, elem->bitsize);
 }
 
 Inst *gen_simd_compare(Basic_block *bb, Inst *elem1, Inst *elem2, SIMD_cond op)
@@ -4458,6 +4481,40 @@ void Parser::parse_vector_op()
 		      line_number);
 }
 
+void Parser::process_sve_unary(Inst*(*gen_elem)(Basic_block*, Inst*))
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  Inst *orig = get_zreg_value(1);
+  get_comma(2);
+  Inst *pred = nullptr;
+  int idx = 3;
+  if (is_preg(3))
+    {
+      pred = get_preg_merging_value(idx++);
+      get_comma(idx++);
+    }
+  Inst *arg1 = get_zreg_value(idx++);
+  get_end_of_line(idx);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = gen_elem(bb, elem1);
+      if (pred)
+	{
+	  Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+	  Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+	  inst = bb->build_inst(Op::ITE, pred_elem, inst, orig_elem);
+	}
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_binary(Op op)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -4472,11 +4529,7 @@ void Parser::process_sve_binary(Op op)
     }
   Inst *arg1 = get_zreg_value(idx++);
   get_comma(idx++);
-  Inst *arg2;
-  if (is_zreg(idx))
-    arg2 = get_zreg_value(idx++);
-  else
-    arg2 = get_imm(idx++, elem_bitsize);
+  Inst *arg2 = get_zreg_or_imm_value(idx++, elem_bitsize);
   get_end_of_line(idx);
 
   Inst *res = nullptr;
@@ -4517,11 +4570,7 @@ void Parser::process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
     }
   Inst *arg1 = get_zreg_value(idx++);
   get_comma(idx++);
-  Inst *arg2;
-  if (is_zreg(idx))
-    arg2 = get_zreg_value(idx++);
-  else
-    arg2 = get_imm(idx++, elem_bitsize);
+  Inst *arg2 = get_zreg_or_imm_value(idx++, elem_bitsize);
   get_end_of_line(idx);
 
   Inst *res = nullptr;
@@ -4788,6 +4837,97 @@ void Parser::process_sve_pfalse()
   write_reg(dest, bb->value_inst(0, dest->bitsize));
 }
 
+Inst *gen_sve_compare(Basic_block *bb, Inst *elem1, Inst *elem2, SVE_cond op)
+{
+  Inst *cond;
+  switch (op)
+    {
+    case SVE_cond::EQ:
+      cond = bb->build_inst(Op::EQ, elem1, elem2);
+      break;
+    case SVE_cond::GE:
+      cond = bb->build_inst(Op::SLE, elem2, elem1);
+      break;
+    case SVE_cond::GT:
+      cond = bb->build_inst(Op::SLT, elem2, elem1);
+      break;
+    case SVE_cond::HI:
+      cond = bb->build_inst(Op::ULT, elem2, elem1);
+      break;
+    case SVE_cond::HS:
+      cond = bb->build_inst(Op::ULE, elem2, elem1);
+      break;
+    case SVE_cond::LE:
+      cond = bb->build_inst(Op::SLE, elem1, elem2);
+      break;
+    case SVE_cond::LO:
+      cond = bb->build_inst(Op::ULT, elem2, elem1);
+      break;
+    case SVE_cond::LS:
+      cond = bb->build_inst(Op::ULE, elem2, elem1);
+      break;
+    case SVE_cond::LT:
+      cond = bb->build_inst(Op::SLT, elem1, elem2);
+      break;
+    case SVE_cond::NE:
+      cond = bb->build_inst(Op::EQ, elem1, elem2);
+      break;
+    }
+  return cond;
+}
+
+void Parser::process_sve_compare(SVE_cond op)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  get_comma(2);
+  Inst *pred = nullptr;
+  int idx = 3;
+  if (is_preg(3))
+    {
+      pred = get_preg_zeroing_value(idx++);
+      get_comma(idx++);
+    }
+  Inst *arg1 = get_zreg_value(idx++);
+  get_comma(idx++);
+  Inst *arg2 = get_zreg_or_imm_value(idx++, elem_bitsize);
+  get_end_of_line(idx);
+
+  Inst *res = nullptr;
+  Inst *last_cmp = nullptr;
+  Inst *z = bb->value_inst(0, 1);
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2;
+      if (arg2->bitsize == elem_bitsize)
+	elem2 = arg2;
+      else
+	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = gen_sve_compare(bb, elem1, elem2, op);
+      z = bb->build_inst(Op::OR, z, inst);
+      last_cmp = inst;
+      Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+      inst = bb->build_inst(Op::ITE, pred_elem, inst, bb->value_inst(0, 1));
+      if (elem_bitsize > 8)
+	inst = bb->build_inst(Op::ZEXT, inst, elem_bitsize / 8);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+
+  Inst *n = extract_vec_elem(res, 1, 0);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
+  z = bb->build_inst(Op::NOT, z);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
+  Inst *c = bb->build_inst(Op::NOT, last_cmp);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
+  Inst *v = bb->value_inst(0, 1);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
+
+  write_reg(dest, res);
+}
+
 void Parser::parse_sve_op()
 {
   std::string_view name = get_name(0);
@@ -4798,6 +4938,28 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::AND);
   else if (name == "asr")
     process_sve_binary(Op::ASHR);
+  else if (name == "cmpeq")
+    process_sve_compare(SVE_cond::EQ);
+  else if (name == "cmpge")
+    process_sve_compare(SVE_cond::GE);
+  else if (name == "cmpgt")
+    process_sve_compare(SVE_cond::GT);
+  else if (name == "cmphi")
+    process_sve_compare(SVE_cond::HI);
+  else if (name == "cmphs")
+    process_sve_compare(SVE_cond::HS);
+  else if (name == "cmple")
+    process_sve_compare(SVE_cond::LE);
+  else if (name == "cmplo")
+    process_sve_compare(SVE_cond::LO);
+  else if (name == "cmpls")
+    process_sve_compare(SVE_cond::LS);
+  else if (name == "cmplt")
+    process_sve_compare(SVE_cond::LT);
+  else if (name == "cmpne")
+    process_sve_compare(SVE_cond::NE);
+  else if (name == "cnot")
+    process_sve_unary(gen_cnot);
   else if (name == "eor")
     process_sve_binary(Op::XOR);
   else if (name == "fadd")
