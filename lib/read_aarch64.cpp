@@ -109,6 +109,7 @@ private:
   uint32_t get_reg_size(unsigned idx);
   bool is_vector_op();
   bool is_sve_op();
+  bool is_sve_preg_op();
   bool is_freg(unsigned idx);
   bool is_vreg(unsigned idx);
   bool is_zreg(unsigned idx);
@@ -259,6 +260,7 @@ private:
   void process_sve_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
   void process_sve_binary(Op op);
   void process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_sve_preg_binary(Op op);
   void process_sve_sel();
   void process_sve_index();
   void process_sve_while();
@@ -268,10 +270,10 @@ private:
   void process_sve_st1();
   void process_sve_mov_preg();
   void process_sve_mov_zreg();
-  void process_sve_mov();
   void process_sve_ptrue();
   void process_sve_pfalse();
   void process_sve_compare(SVE_cond op);
+  void parse_sve_preg_op();
   void parse_sve_op();
   void parse_function();
 
@@ -863,7 +865,12 @@ bool Parser::is_vector_op()
 
 bool Parser::is_sve_op()
 {
-  return is_zreg(1) || is_preg(1);
+  return is_zreg(1);
+}
+
+bool Parser::is_sve_preg_op()
+{
+  return is_preg(1);
 }
 
 bool Parser::is_freg(unsigned idx)
@@ -4598,6 +4605,36 @@ void Parser::process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
   write_reg(dest, res);
 }
 
+void Parser::process_sve_preg_binary(Op op)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  get_comma(2);
+  Inst *pred = get_preg_zeroing_value(3);
+  get_comma(4);
+  Inst *arg1 = get_preg_value(5);
+  get_comma(6);
+  Inst *arg2 = get_preg_value(7);
+  get_end_of_line(8);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_pred_elem(arg1, elem_bitsize, i);
+      Inst *elem2 = extract_pred_elem(arg2, elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, elem1, elem2);
+
+      Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+      inst = bb->build_inst(Op::ITE, pred_elem, inst, bb->value_inst(0, 1));
+      if (elem_bitsize > 8)
+	inst = bb->build_inst(Op::ZEXT, inst, elem_bitsize / 8);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_sel()
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -4794,14 +4831,6 @@ void Parser::process_sve_mov_zreg()
   write_reg(dest, res);
 }
 
-void Parser::process_sve_mov()
-{
-  if (is_preg(1))
-    process_sve_mov_preg();
-  else
-    process_sve_mov_zreg();
-}
-
 void Parser::process_sve_ptrue()
 {
   auto [dest, nof_elem, elem_bitsize] = get_preg(1);
@@ -4955,16 +4984,12 @@ void Parser::process_sve_compare(SVE_cond op)
   write_reg(dest, res);
 }
 
-void Parser::parse_sve_op()
+void Parser::parse_sve_preg_op()
 {
   std::string_view name = get_name(0);
 
-  if (name == "add")
-    process_sve_binary(Op::ADD);
-  else if (name == "and")
-    process_sve_binary(Op::AND);
-  else if (name == "asr")
-    process_sve_binary(Op::ASHR);
+  if (name == "and")
+    process_sve_preg_binary(Op::AND);
   else if (name == "cmpeq")
     process_sve_compare(SVE_cond::EQ);
   else if (name == "cmpge")
@@ -4985,6 +5010,33 @@ void Parser::parse_sve_op()
     process_sve_compare(SVE_cond::LT);
   else if (name == "cmpne")
     process_sve_compare(SVE_cond::NE);
+  else if (name == "eor")
+    process_sve_preg_binary(Op::XOR);
+  else if (name == "mov")
+    process_sve_mov_preg();
+  else if (name == "orr")
+    process_sve_preg_binary(Op::OR);
+  else if (name == "pfalse")
+    process_sve_pfalse();
+  else if (name == "ptrue")
+    process_sve_ptrue();
+  else if (name == "whilelo")
+    process_sve_while();
+  else
+    throw Parse_error("unhandled sve preg instruction: "s + std::string(name),
+		      line_number);
+}
+
+void Parser::parse_sve_op()
+{
+  std::string_view name = get_name(0);
+
+  if (name == "add")
+    process_sve_binary(Op::ADD);
+  else if (name == "and")
+    process_sve_binary(Op::AND);
+  else if (name == "asr")
+    process_sve_binary(Op::ASHR);
   else if (name == "cnot")
     process_sve_unary(gen_cnot);
   else if (name == "eor")
@@ -5006,15 +5058,11 @@ void Parser::parse_sve_op()
   else if (name == "lsr")
     process_sve_binary(Op::LSHR);
   else if (name == "mov")
-    process_sve_mov();
+    process_sve_mov_zreg();
   else if (name == "mul")
     process_sve_binary(Op::MUL);
   else if (name == "orr")
     process_sve_binary(Op::OR);
-  else if (name == "pfalse")
-    process_sve_pfalse();
-  else if (name == "ptrue")
-    process_sve_ptrue();
   else if (name == "sel")
     process_sve_sel();
   else if (name == "smax")
@@ -5037,8 +5085,6 @@ void Parser::parse_sve_op()
     process_sve_binary(gen_sat_uadd);
   else if (name == "uqsub")
     process_sve_binary(gen_sat_usub);
-  else if (name == "whilelo")
-    process_sve_while();
   else
     throw Parse_error("unhandled sve instruction: "s + std::string(name),
 		      line_number);
@@ -5080,6 +5126,8 @@ void Parser::parse_function()
 
   else if (is_vector_op())
     parse_vector_op();
+  else if (is_sve_preg_op())
+    parse_sve_preg_op();
   else if (is_sve_op())
     parse_sve_op();
 
