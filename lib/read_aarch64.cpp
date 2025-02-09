@@ -203,7 +203,7 @@ private:
   void process_ands(bool perform_not = false);
   void process_tst();
   void process_ccmp(bool is_ccmn = false);
-  void process_inc(uint32_t elem_bitsize);
+  void process_dec_inc(Op op, uint32_t elem_bitsize);
   void process_ext(Op op, uint32_t src_bitsize);
   void process_shift(Op op);
   void process_ror();
@@ -2927,7 +2927,7 @@ void Parser::process_ccmp(bool is_ccmn)
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
 }
 
-void Parser::process_inc(uint32_t elem_bitsize)
+void Parser::process_dec_inc(Op op, uint32_t elem_bitsize)
 {
   Inst *dest = get_reg(1);
   Inst *arg1 = get_reg_value(1);
@@ -2935,7 +2935,7 @@ void Parser::process_inc(uint32_t elem_bitsize)
 
   uint32_t nof_elem = 128 / elem_bitsize;
   Inst *increment = bb->value_inst(nof_elem, arg1->bitsize);
-  Inst *res = bb->build_inst(Op::ADD, arg1, increment);
+  Inst *res = bb->build_inst(op, arg1, increment);
   write_reg(dest, res);
 }
 
@@ -5560,14 +5560,22 @@ void Parser::parse_function()
     process_cnt(32);
   else if (name == "cntd")
     process_cnt(64);
+  else if (name == "decb")
+    process_dec_inc(Op::SUB, 8);
+  else if (name == "dech")
+    process_dec_inc(Op::SUB, 16);
+  else if (name == "decw")
+    process_dec_inc(Op::SUB, 32);
+  else if (name == "decd")
+    process_dec_inc(Op::SUB, 64);
   else if (name == "incb")
-    process_inc(8);
+    process_dec_inc(Op::ADD, 8);
   else if (name == "inch")
-    process_inc(16);
+    process_dec_inc(Op::ADD, 16);
   else if (name == "incw")
-    process_inc(32);
+    process_dec_inc(Op::ADD, 32);
   else if (name == "incd")
-    process_inc(64);
+    process_dec_inc(Op::ADD, 64);
   else if (name == "sqadd")
     process_binary(gen_sat_sadd);
   else if (name == "sqsub")
