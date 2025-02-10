@@ -2558,54 +2558,54 @@ std::pair<Inst *, Inst *> Converter::process_binary_float(enum tree_code code, I
       return {bb->build_inst(Op::FLT, arg1, arg2), res_indef};
     case UNEQ_EXPR:
       {
-	Inst *isnan1 = bb->build_inst(Op::FNE, arg1, arg1);
-	Inst *isnan2 = bb->build_inst(Op::FNE, arg2, arg2);
+	Inst *isnan1 = bb->build_inst(Op::IS_NAN, arg1);
+	Inst *isnan2 = bb->build_inst(Op::IS_NAN, arg2);
 	Inst *isnan = bb->build_inst(Op::OR, isnan1, isnan2);
 	Inst *cmp = bb->build_inst(Op::FEQ, arg1, arg2);
 	return {bb->build_inst(Op::OR, isnan, cmp), res_indef};
       }
     case UNLT_EXPR:
       {
-	Inst *isnan1 = bb->build_inst(Op::FNE, arg1, arg1);
-	Inst *isnan2 = bb->build_inst(Op::FNE, arg2, arg2);
+	Inst *isnan1 = bb->build_inst(Op::IS_NAN, arg1);
+	Inst *isnan2 = bb->build_inst(Op::IS_NAN, arg2);
 	Inst *isnan = bb->build_inst(Op::OR, isnan1, isnan2);
 	Inst *cmp = bb->build_inst(Op::FLT, arg1, arg2);
 	return {bb->build_inst(Op::OR, isnan, cmp), res_indef};
       }
     case UNLE_EXPR:
       {
-	Inst *isnan1 = bb->build_inst(Op::FNE, arg1, arg1);
-	Inst *isnan2 = bb->build_inst(Op::FNE, arg2, arg2);
+	Inst *isnan1 = bb->build_inst(Op::IS_NAN, arg1);
+	Inst *isnan2 = bb->build_inst(Op::IS_NAN, arg2);
 	Inst *isnan = bb->build_inst(Op::OR, isnan1, isnan2);
 	Inst *cmp = bb->build_inst(Op::FLE, arg1, arg2);
 	return {bb->build_inst(Op::OR, isnan, cmp), res_indef};
       }
     case UNGT_EXPR:
       {
-	Inst *isnan1 = bb->build_inst(Op::FNE, arg1, arg1);
-	Inst *isnan2 = bb->build_inst(Op::FNE, arg2, arg2);
+	Inst *isnan1 = bb->build_inst(Op::IS_NAN, arg1);
+	Inst *isnan2 = bb->build_inst(Op::IS_NAN, arg2);
 	Inst *isnan = bb->build_inst(Op::OR, isnan1, isnan2);
 	Inst *cmp = bb->build_inst(Op::FLT, arg2, arg1);
 	return {bb->build_inst(Op::OR, isnan, cmp), res_indef};
       }
     case UNGE_EXPR:
       {
-	Inst *isnan1 = bb->build_inst(Op::FNE, arg1, arg1);
-	Inst *isnan2 = bb->build_inst(Op::FNE, arg2, arg2);
+	Inst *isnan1 = bb->build_inst(Op::IS_NAN, arg1);
+	Inst *isnan2 = bb->build_inst(Op::IS_NAN, arg2);
 	Inst *isnan = bb->build_inst(Op::OR, isnan1, isnan2);
 	Inst *cmp = bb->build_inst(Op::FLE, arg2, arg1);
 	return {bb->build_inst(Op::OR, isnan, cmp), res_indef};
       }
     case UNORDERED_EXPR:
       {
-	Inst *isnan1 = bb->build_inst(Op::FNE, arg1, arg1);
-	Inst *isnan2 = bb->build_inst(Op::FNE, arg2, arg2);
+	Inst *isnan1 = bb->build_inst(Op::IS_NAN, arg1);
+	Inst *isnan2 = bb->build_inst(Op::IS_NAN, arg2);
 	return {bb->build_inst(Op::OR, isnan1, isnan2), res_indef};
       }
     case ORDERED_EXPR:
       {
-	Inst *isnan1 = bb->build_inst(Op::FNE, arg1, arg1);
-	Inst *isnan2 = bb->build_inst(Op::FNE, arg2, arg2);
+	Inst *isnan1 = bb->build_inst(Op::IS_NAN, arg1);
+	Inst *isnan2 = bb->build_inst(Op::IS_NAN, arg2);
 	Inst *isnan = bb->build_inst(Op::OR, isnan1, isnan2);
 	return {bb->build_inst(Op::NOT, isnan), res_indef};
       }
