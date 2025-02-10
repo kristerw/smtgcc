@@ -21,6 +21,10 @@ enum class SVE_cond {
   EQ, GE, GT, HI, HS, LE, LO, LS, LT, NE
 };
 
+enum class Predication_mode {
+  zeroing, merging
+};
+
 struct Parser {
   Parser(aarch64_state *rstate) : rstate{rstate} {}
 
@@ -123,6 +127,7 @@ private:
   Inst *get_zreg_value(unsigned idx);
   Inst *get_zreg_or_imm_value(unsigned idx, uint32_t bitsize);
   Inst *get_preg_value(unsigned idx);
+  std::pair<Inst *, Predication_mode> get_preg_value_and_mode(unsigned idx);
   Inst *get_preg_zeroing_value(unsigned idx);
   Inst *get_preg_merging_value(unsigned idx);
   uint64_t get_vreg_idx(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
@@ -698,6 +703,18 @@ Inst *Parser::get_preg_value(unsigned idx)
     throw Parse_error("expected a predicate register instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
   return bb->build_inst(Op::READ, reg);
+}
+
+std::pair<Inst *, Predication_mode> Parser::get_preg_value_and_mode(unsigned idx)
+{
+  auto [reg_idx, suffix] = get_preg_(idx);
+  Inst *reg = rstate->registers[reg_idx];
+  Inst *inst = bb->build_inst(Op::READ, reg);
+  if (suffix == "/z")
+    return {inst, Predication_mode::zeroing};
+  if (suffix == "/m")
+    return {inst, Predication_mode::merging};
+  throw Parse_error("expected a predication mode /z or /m", line_number);
 }
 
 Inst *Parser::get_preg_zeroing_value(unsigned idx)
@@ -4812,21 +4829,45 @@ void Parser::process_sve_mov_preg()
 void Parser::process_sve_mov_zreg()
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  Inst *orig = get_zreg_value(1);
   get_comma(2);
-  if (is_zreg(3))
+  Inst *pred = nullptr;
+  Predication_mode mode;
+  int idx = 3;
+  if (is_preg(3))
     {
-      Inst *arg1 = get_zreg_value(3);
-      get_end_of_line(4);
-      write_reg(dest, arg1);
-      return;
+      std::tie(pred, mode) = get_preg_value_and_mode(idx++);
+      get_comma(idx++);
     }
-  Inst *arg1 = get_reg_or_imm_value(3, elem_bitsize);
-  get_end_of_line(4);
+  Inst *arg1;
+  if (is_zreg(idx))
+    arg1 = get_zreg_value(idx++);
+  else
+    arg1 = get_reg_or_imm_value(idx++, elem_bitsize);
+  get_end_of_line(idx);
 
-  Inst *res = arg1;
-  for (uint32_t i = 1; i < nof_elem; i++)
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
     {
-      res = bb->build_inst(Op::CONCAT, arg1, res);
+      Inst *inst;
+      if (arg1->bitsize == elem_bitsize)
+	inst = arg1;
+      else
+	inst = extract_vec_elem(arg1, elem_bitsize, i);
+      if (pred)
+	{
+	  Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+	  Inst *inst2;
+	  if (mode == Predication_mode::zeroing)
+	    inst2 = bb->value_inst(0, elem_bitsize);
+	  else
+	    inst2 = extract_vec_elem(orig, elem_bitsize, i);
+	  inst = bb->build_inst(Op::ITE, pred_elem, inst, inst2);
+	}
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
     }
   write_reg(dest, res);
 }
