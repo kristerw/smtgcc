@@ -156,7 +156,7 @@ private:
   void process_call();
   void store_ub_check(Inst *ptr, uint64_t size);
   void load_ub_check(Inst *ptr, uint64_t size);
-  Inst *process_address(unsigned idx);
+  Inst *process_address(unsigned idx, unsigned vec_size = 0);
   void process_load(uint32_t trunc_size = 0, Op op = Op::ZEXT);
   void process_ldp();
   void process_ldpsw();
@@ -1555,7 +1555,7 @@ void Parser::process_call()
   throw Not_implemented("call " + std::string(name));
 }
 
-Inst *Parser::process_address(unsigned idx)
+Inst *Parser::process_address(unsigned idx, unsigned vec_size)
 {
   get_left_bracket(idx++);
   Inst *ptr_reg = get_reg(idx);
@@ -1590,20 +1590,42 @@ Inst *Parser::process_address(unsigned idx)
 	  get_comma(idx++);
 	  std::string_view cmd = get_name(idx++);
 	  if (cmd == "sxtw")
-	    offset = bb->build_inst(Op::SEXT, offset, ptr->bitsize);
+	    {
+	      offset = bb->build_inst(Op::SEXT, offset, ptr->bitsize);
+	      if (tokens.size() > idx
+		  && tokens[idx].kind != Lexeme::right_bracket)
+		{
+		  Inst *shift = get_imm(idx++);
+		  offset = bb->build_inst(Op::SHL, offset, shift);
+		}
+	    }
 	  else if (cmd == "uxtw")
-	    offset = bb->build_inst(Op::ZEXT, offset, ptr->bitsize);
+	    {
+	      offset = bb->build_inst(Op::ZEXT, offset, ptr->bitsize);
+	      if (tokens.size() > idx
+		  && tokens[idx].kind != Lexeme::right_bracket)
+		{
+		  Inst *shift = get_imm(idx++);
+		  offset = bb->build_inst(Op::SHL, offset, shift);
+		}
+	    }
 	  else if (cmd == "lsl")
-	    ;  // Nothing to do.
-	  else
-	    throw Parse_error("unknown extension " + std::string(cmd),
-			      line_number);
-
-	  if (tokens.size() > idx && tokens[idx].kind != Lexeme::right_bracket)
 	    {
 	      Inst *shift = get_imm(idx++);
 	      offset = bb->build_inst(Op::SHL, offset, shift);
 	    }
+	  else if (vec_size != 0 && cmd == "mul")
+	    {
+	      std::string_view vl = get_name(idx++);
+	      if (vl != "vl")
+		throw Parse_error("expected vl insted of " + std::string(vl),
+				  line_number);
+	      Inst *size = bb->value_inst(vec_size, offset->bitsize);
+	      offset = bb->build_inst(Op::MUL, offset, size);
+	    }
+	  else
+	    throw Parse_error("unknown extension " + std::string(cmd),
+			      line_number);
 	}
       get_right_bracket(idx++);
       ptr = bb->build_inst(Op::ADD, ptr, offset);
@@ -4768,7 +4790,7 @@ void Parser::process_sve_ld1()
   get_comma(2);
   Inst *arg1 = get_preg_zeroing_value(3);
   get_comma(4);
-  Inst *arg2 = process_address(5);
+  Inst *arg2 = process_address(5, dest->bitsize / 8);
 
   Inst *zero = bb->value_inst(0, elem_bitsize);
   Inst *step = bb->value_inst(elem_bitsize / 8, arg2->bitsize);
@@ -4806,7 +4828,7 @@ void Parser::process_sve_st1()
   get_comma(2);
   Inst *arg1 = get_preg_value(3);
   get_comma(4);
-  Inst *arg2 = process_address(5);
+  Inst *arg2 = process_address(5, dest->bitsize / 8);
 
   for (uint32_t i = 0; i < nof_elem; i++)
     {
