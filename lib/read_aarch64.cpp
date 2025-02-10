@@ -918,16 +918,10 @@ bool Parser::is_vreg(unsigned idx)
     return false;
   if (buf[tokens[idx].pos] != 'v')
     return false;
+  if (!isdigit(buf[tokens[idx].pos + 1]))
+    return false;
 
-  if (isdigit(buf[tokens[idx].pos + 1]))
-    {
-      if ((buf[tokens[idx].pos + 2] == '.')
-	  || (isdigit(buf[tokens[idx].pos + 2])
-	      && buf[tokens[idx].pos + 3] == '.'))
-	return true;
-    }
-
-  return false;
+  return true;
 }
 
 bool Parser::is_zreg(unsigned idx)
@@ -936,16 +930,10 @@ bool Parser::is_zreg(unsigned idx)
     return false;
   if (buf[tokens[idx].pos] != 'z')
     return false;
+  if (!isdigit(buf[tokens[idx].pos + 1]))
+    return false;
 
-  if (isdigit(buf[tokens[idx].pos + 1]))
-    {
-      if ((buf[tokens[idx].pos + 2] == '.')
-	  || (isdigit(buf[tokens[idx].pos + 2])
-	      && buf[tokens[idx].pos + 3] == '.'))
-	return true;
-    }
-
-  return false;
+  return true;
 }
 
 bool Parser::is_preg(unsigned idx)
@@ -954,23 +942,10 @@ bool Parser::is_preg(unsigned idx)
     return false;
   if (buf[tokens[idx].pos] != 'p')
     return false;
+  if (!isdigit(buf[tokens[idx].pos + 1]))
+    return false;
 
-  if (isdigit(buf[tokens[idx].pos + 1]))
-    {
-      if (tokens[idx].size == 2
-	  || (tokens[idx].size == 3 && isdigit(buf[tokens[idx].pos + 2])))
-	return true;
-      if ((buf[tokens[idx].pos + 2] == '.')
-	  || (isdigit(buf[tokens[idx].pos + 2])
-	      && buf[tokens[idx].pos + 3] == '.'))
-	return true;
-      if ((buf[tokens[idx].pos + 2] == '/')
-	  || (isdigit(buf[tokens[idx].pos + 2])
-	      && buf[tokens[idx].pos + 3] == '/'))
-	return true;
-    }
-
-  return false;
+  return true;
 }
 
 Inst *Parser::get_imm(unsigned idx)
