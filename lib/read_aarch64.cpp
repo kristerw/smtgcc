@@ -262,6 +262,7 @@ private:
   void process_vec_trn2();
   void process_vec_tbl();
   void parse_vector_op();
+  void process_sve_unary(Op op);
   void process_sve_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
   void process_sve_binary(Op op);
   void process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
@@ -4506,6 +4507,40 @@ void Parser::parse_vector_op()
 		      line_number);
 }
 
+void Parser::process_sve_unary(Op op)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  Inst *orig = get_zreg_value(1);
+  get_comma(2);
+  Inst *pred = nullptr;
+  int idx = 3;
+  if (is_preg(3))
+    {
+      pred = get_preg_merging_value(idx++);
+      get_comma(idx++);
+    }
+  Inst *arg1 = get_zreg_value(idx++);
+  get_end_of_line(idx);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, elem1);
+      if (pred)
+	{
+	  Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+	  Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+	  inst = bb->build_inst(Op::ITE, pred_elem, inst, orig_elem);
+	}
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_unary(Inst*(*gen_elem)(Basic_block*, Inst*))
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -5111,7 +5146,9 @@ void Parser::parse_sve_op()
 {
   std::string_view name = get_name(0);
 
-  if (name == "add")
+  if (name == "abs")
+    process_sve_unary(gen_abs);
+  else if (name == "add")
     process_sve_binary(Op::ADD);
   else if (name == "and")
     process_sve_binary(Op::AND);
@@ -5141,6 +5178,10 @@ void Parser::parse_sve_op()
     process_sve_mov_zreg();
   else if (name == "mul")
     process_sve_binary(Op::MUL);
+  else if (name == "neg")
+    process_sve_unary(Op::NEG);
+  else if (name == "not")
+    process_sve_unary(Op::NOT);
   else if (name == "orr")
     process_sve_binary(Op::OR);
   else if (name == "sel")
