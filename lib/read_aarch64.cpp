@@ -18,7 +18,7 @@ enum class SIMD_cond {
 };
 
 enum class SVE_cond {
-  EQ, GE, GT, HI, HS, LE, LO, LS, LT, NE
+  FEQ, FGE, FGT, FLE, FLT, FNE, FUO, EQ, GE, GT, HI, HS, LE, LO, LS, LT, NE
 };
 
 enum class Predication_mode {
@@ -4969,6 +4969,31 @@ Inst *gen_sve_compare(Basic_block *bb, Inst *elem1, Inst *elem2, SVE_cond op)
     case SVE_cond::NE:
       cond = bb->build_inst(Op::EQ, elem1, elem2);
       break;
+    case SVE_cond::FEQ:
+      cond = bb->build_inst(Op::FEQ, elem1, elem2);
+      break;
+    case SVE_cond::FGE:
+      cond = bb->build_inst(Op::FLE, elem2, elem1);
+      break;
+    case SVE_cond::FGT:
+      cond = bb->build_inst(Op::FLT, elem2, elem1);
+      break;
+    case SVE_cond::FLE:
+      cond = bb->build_inst(Op::FLE, elem1, elem2);
+      break;
+    case SVE_cond::FLT:
+      cond = bb->build_inst(Op::FLT, elem1, elem2);
+      break;
+    case SVE_cond::FNE:
+      cond = bb->build_inst(Op::NOT, bb->build_inst(Op::FEQ, elem1, elem2));
+      break;
+    case SVE_cond::FUO:
+      {
+	Inst *is_nan1 = bb->build_inst(Op::IS_NAN, elem1);
+	Inst *is_nan2 = bb->build_inst(Op::IS_NAN, elem2);
+	cond = bb->build_inst(Op::OR, is_nan1, is_nan2);
+      }
+      break;
     }
   return cond;
 }
@@ -5053,6 +5078,20 @@ void Parser::parse_sve_preg_op()
     process_sve_compare(SVE_cond::NE);
   else if (name == "eor")
     process_sve_preg_binary(Op::XOR);
+  else if (name == "fcmeq")
+    process_sve_compare(SVE_cond::FEQ);
+  else if (name == "fcmge")
+    process_sve_compare(SVE_cond::FGE);
+  else if (name == "fcmgt")
+    process_sve_compare(SVE_cond::FGT);
+  else if (name == "fcmle")
+    process_sve_compare(SVE_cond::FLE);
+  else if (name == "fcmlt")
+    process_sve_compare(SVE_cond::FLT);
+  else if (name == "fcmne")
+    process_sve_compare(SVE_cond::FNE);
+  else if (name == "fcmuo")
+    process_sve_compare(SVE_cond::FUO);
   else if (name == "mov")
     process_sve_mov_preg();
   else if (name == "orr")

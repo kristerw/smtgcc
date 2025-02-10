@@ -1173,10 +1173,37 @@ bool is_ext(Inst *inst)
   return false;
 }
 
+Inst *simplify_feq(Inst *inst)
+{
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+
+  // feq x, x -> not (is_nan x)
+  if (arg1 == arg2)
+    {
+      Inst *new_inst1 = create_inst(Op::IS_NAN, arg1);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
+  return inst;
+}
+
 Inst *simplify_fne(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
+
+  // fne x, x -> is_nan x
+  if (arg1 == arg2)
+    {
+      Inst *new_inst = create_inst(Op::IS_NAN, arg1);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
 
   // fne x, y -> not (feq x, y)
   Inst *new_inst1 = create_inst(Op::FEQ, arg1, arg2);
@@ -2625,6 +2652,9 @@ Inst *simplify_inst(Inst *inst)
       break;
     case Op::U2F:
       inst = simplify_u2f(inst);
+      break;
+    case Op::FEQ:
+      inst = simplify_feq(inst);
       break;
     case Op::FNE:
       inst = simplify_fne(inst);
