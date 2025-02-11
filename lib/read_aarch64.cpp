@@ -107,7 +107,8 @@ private:
   std::tuple<Inst *, uint32_t, uint32_t> get_vreg(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_scalar_vreg(unsigned idx);
   std::tuple<uint64_t, uint32_t, uint32_t> get_zreg_(unsigned idx);
-  std::tuple<Inst *, uint32_t, uint32_t> get_zreg(unsigned idx);
+  std::tuple<Inst *, uint32_t, uint32_t> get_zreg(unsigned idx,
+						  bool allow_no_type = false);
   std::tuple<uint64_t, std::string_view> get_preg_(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_preg(unsigned idx);
   uint32_t get_reg_size(unsigned idx);
@@ -278,6 +279,7 @@ private:
   void process_sve_st1(uint32_t store_elem_size);
   void process_sve_mov_preg();
   void process_sve_mov_zreg();
+  void process_sve_movprfx();
   void process_sve_ptrue();
   void process_sve_pfalse();
   void process_sve_compare(SVE_cond op);
@@ -684,7 +686,7 @@ Inst *Parser::get_vreg_value(unsigned idx, uint32_t nof_elem,
 
 Inst *Parser::get_zreg_value(unsigned idx)
 {
-  auto [dest, dest_nof_elem, dest_elem_bitsize] = get_zreg(idx);
+  auto [dest, dest_nof_elem, dest_elem_bitsize] = get_zreg(idx, true);
   return bb->build_inst(Op::READ, dest);
 }
 
@@ -755,17 +757,17 @@ std::tuple<uint64_t, uint32_t, uint32_t> Parser::get_zreg_(unsigned idx)
     throw Parse_error("expected more arguments", line_number);
 
   if (tokens[idx].kind != Lexeme::name
-      || tokens[idx].size < 3
+      || tokens[idx].size < 2
       || buf[tokens[idx].pos] != 'z'
       || !isdigit(buf[tokens[idx].pos + 1]))
-    throw Parse_error("expected a vector register instead of "
+    throw Parse_error("expected a z-register instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
   uint32_t value = buf[tokens[idx].pos + 1] - '0';
   uint32_t pos = 2;
   if (isdigit(buf[tokens[idx].pos + pos]))
     value = value * 10 + (buf[tokens[idx].pos + pos++] - '0');
   if (value > 31)
-    throw Parse_error("expected a vector register instead of "
+    throw Parse_error("expected a z-register instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
   uint64_t reg_idx = Aarch64RegIdx::v0 + value;
   std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
@@ -779,14 +781,19 @@ std::tuple<uint64_t, uint32_t, uint32_t> Parser::get_zreg_(unsigned idx)
     return {reg_idx, 8, 16};
   if (suffix == ".b")
     return {reg_idx, 16, 8};
+  if (suffix == "")
+    return {reg_idx, 0, 0};
 
-  throw Parse_error("expected a vector register instead of "
+  throw Parse_error("expected a z-register instead of "
 		    + std::string(token_string(tokens[idx])), line_number);
 }
 
-std::tuple<Inst *, uint32_t, uint32_t> Parser::get_zreg(unsigned idx)
+std::tuple<Inst *, uint32_t, uint32_t> Parser::get_zreg(unsigned idx, bool allow_no_type)
 {
   auto [reg_idx, nof_elem, elem_bitsize] = get_zreg_(idx);
+  if (!allow_no_type && (nof_elem == 0 || elem_bitsize == 0))
+    throw Parse_error("expected a z-register with type instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
   return {rstate->registers[reg_idx], nof_elem, elem_bitsize};
 }
 
@@ -4909,6 +4916,25 @@ void Parser::process_sve_mov_zreg()
   write_reg(dest, res);
 }
 
+void Parser::process_sve_movprfx()
+{
+  // GCC generates movprfx instructions without a type, such as
+  //  movprfx z29, z30
+  // so we need to handle this as a special case since get_zreg usually
+  // expects the type.
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1, true);
+  if (elem_bitsize == 0)
+    {
+      get_comma(2);
+      Inst *arg1 = get_zreg_value(3);
+      get_end_of_line(4);
+
+      write_reg(dest, arg1);
+    }
+  else
+    process_sve_mov_zreg();
+}
+
 void Parser::process_sve_ptrue()
 {
   auto [dest, nof_elem, elem_bitsize] = get_preg(1);
@@ -5156,6 +5182,8 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::LSHR);
   else if (name == "mov")
     process_sve_mov_zreg();
+  else if (name == "movprfx")
+    process_sve_movprfx();
   else if (name == "mul")
     process_sve_binary(Op::MUL);
   else if (name == "neg")
