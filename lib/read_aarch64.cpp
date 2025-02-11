@@ -118,8 +118,7 @@ private:
   bool is_vreg(unsigned idx);
   bool is_zreg(unsigned idx);
   bool is_preg(unsigned idx);
-  Inst *get_imm(unsigned idxo);
-  Inst *get_imm(unsigned idx, uint32_t bitsize);
+  Inst *get_imm(unsigned idx);
   Inst *get_reg_value(unsigned idx);
   Inst *get_reg_or_imm_value(unsigned idx, uint32_t bitsize);
   Inst *get_freg_value(unsigned idx);
@@ -189,6 +188,9 @@ private:
   Inst *process_arg_shift(unsigned idx, Inst *arg);
   Inst *process_arg_ext(unsigned idx, Inst *arg, uint32_t bitsize);
   Inst *process_last_arg(unsigned idx, uint32_t bitsize);
+  uint64_t process_last_pattern_mul(unsigned idx, uint64_t elem_bitsize,
+				    bool parse_mul = true);
+  uint64_t process_last_pattern(unsigned idx, uint64_t elem_bitsize);
   Inst *process_last_scalar_vec_arg(unsigned idx);
   void process_binary(Op op, bool perform_not = false);
   void process_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
@@ -953,13 +955,6 @@ Inst *Parser::get_imm(unsigned idx)
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
   return bb->value_inst(get_hex_or_integer(idx), reg_bitsize);
-}
-
-Inst *Parser::get_imm(unsigned idx, uint32_t bitsize)
-{
-  if (tokens.size() <= idx)
-    throw Parse_error("expected more arguments", line_number);
-  return bb->value_inst(get_hex_or_integer(idx), bitsize);
 }
 
 Inst *Parser::get_reg_value(unsigned idx)
@@ -2426,6 +2421,69 @@ Inst *Parser::process_last_arg(unsigned idx, uint32_t bitsize)
   return arg;
 }
 
+// The pattern and mul are optional and is treated as "all" if not present.
+uint64_t Parser::process_last_pattern_mul(unsigned idx, uint64_t elem_bitsize, bool parse_mul)
+{
+  uint64_t nof_elem = 128 / elem_bitsize;
+  uint64_t nof = nof_elem;
+  uint64_t mul = 1;
+  if (tokens.size() > idx)
+    {
+      get_comma(idx++);
+      std::string_view pattern = get_name(idx++);
+      if (parse_mul && tokens.size() > idx)
+	{
+	  get_comma(idx++);
+	  std::string_view sv = get_name(idx++);
+	  if (sv != "mul")
+	    throw Parse_error("expected mul instead of " + std::string(sv),
+			      line_number);
+	  mul = get_hex_or_integer(idx++);
+	}
+      get_end_of_line(idx);
+
+      if (pattern == "vl1")
+	nof = 1;
+      else if (pattern == "vl2")
+	nof = 2;
+      else if (pattern == "vl3")
+	nof = 3;
+      else if (pattern == "vl4")
+	nof = 4;
+      else if (pattern == "vl5")
+	nof = 5;
+      else if (pattern == "vl6")
+	nof = 6;
+      else if (pattern == "vl7")
+	nof = 7;
+      else if (pattern == "vl8")
+	nof = 8;
+      else if (pattern == "vl16")
+	nof = 16;
+      else if (pattern == "vl32")
+	nof = 32;
+      else if (pattern == "vl64")
+	nof = 64;
+      else if (pattern == "vl128")
+	nof = 128;
+      else if (pattern == "vl256")
+	nof = 256;
+      else if (pattern != "all")
+	throw Parse_error("invalid pattern " + std::string(pattern),
+			  line_number);
+      if (nof > nof_elem)
+	nof = 0;
+    }
+  get_end_of_line(idx);
+
+  return nof * mul;
+}
+
+uint64_t Parser::process_last_pattern(unsigned idx, uint64_t elem_bitsize)
+{
+  return process_last_pattern_mul(idx, elem_bitsize, false);
+}
+
 Inst *Parser::process_last_scalar_vec_arg(unsigned idx)
 {
   auto [reg, elem_bitsize, elem_idx] = get_scalar_vreg(idx);
@@ -2585,66 +2643,10 @@ void Parser::process_ubfiz(Op op)
 
 void Parser::process_cnt(uint64_t elem_bitsize)
 {
-  uint64_t nof_elem = 128 / elem_bitsize;
-  uint64_t true_nof = nof_elem;
-  Inst *imm = nullptr;
   Inst *dest = get_reg(1);
-  if (tokens.size() > 2)
-    {
-      get_comma(2);
-      std::string_view pattern = get_name(3);
-      if (tokens.size() > 4)
-	{
-	  get_comma(4);
-	  std::string_view mul = get_name(5);
-	  if (mul != "mul")
-	    throw Parse_error("expected mul instead of " + std::string(mul),
-			      line_number);
-	  imm = get_imm(6, dest->bitsize);
-	  get_end_of_line(7);
-	}
-      else
-	get_end_of_line(4);
+  uint64_t nof = process_last_pattern_mul(2, elem_bitsize);
 
-      if (pattern == "vl1")
-	true_nof = 1;
-      else if (pattern == "vl2")
-	true_nof = 2;
-      else if (pattern == "vl3")
-	true_nof = 3;
-      else if (pattern == "vl4")
-	true_nof = 4;
-      else if (pattern == "vl5")
-	true_nof = 5;
-      else if (pattern == "vl6")
-	true_nof = 6;
-      else if (pattern == "vl7")
-	true_nof = 7;
-      else if (pattern == "vl8")
-	true_nof = 8;
-      else if (pattern == "vl16")
-	true_nof = 16;
-      else if (pattern == "vl32")
-	true_nof = 32;
-      else if (pattern == "vl64")
-	true_nof = 64;
-      else if (pattern == "vl128")
-	true_nof = 128;
-      else if (pattern == "vl256")
-	true_nof = 256;
-      else if (pattern != "all")
-	throw Parse_error("ptrue " + std::string(pattern), line_number);
-      if (true_nof > nof_elem)
-	true_nof = 0;
-    }
-  else
-    get_end_of_line(2);
-
-  Inst *res = bb->value_inst(true_nof, dest->bitsize);
-  if (imm)
-    res = bb->build_inst(Op::MUL, res, imm);
-
-  write_reg(dest, res);
+  write_reg(dest, bb->value_inst(nof, dest->bitsize));
 }
 
 void Parser::process_shift(Op op)
@@ -2946,10 +2948,9 @@ void Parser::process_dec_inc(Op op, uint32_t elem_bitsize)
 {
   Inst *dest = get_reg(1);
   Inst *arg1 = get_reg_value(1);
-  get_end_of_line(2);
+  uint64_t nof = process_last_pattern_mul(2, elem_bitsize);
 
-  uint32_t nof_elem = 128 / elem_bitsize;
-  Inst *increment = bb->value_inst(nof_elem, arg1->bitsize);
+  Inst *increment = bb->value_inst(nof, arg1->bitsize);
   Inst *res = bb->build_inst(op, arg1, increment);
   write_reg(dest, res);
 }
@@ -4907,48 +4908,12 @@ void Parser::process_sve_mov_zreg()
 void Parser::process_sve_ptrue()
 {
   auto [dest, nof_elem, elem_bitsize] = get_preg(1);
-  get_comma(2);
-  std::string_view pattern = get_name(3);
-  get_end_of_line(4);
-
-  uint32_t true_nof;
-  if (pattern == "all")
-    true_nof = nof_elem;
-  else if (pattern == "vl1")
-    true_nof = 1;
-  else if (pattern == "vl2")
-    true_nof = 2;
-  else if (pattern == "vl3")
-    true_nof = 3;
-  else if (pattern == "vl4")
-    true_nof = 4;
-  else if (pattern == "vl5")
-    true_nof = 5;
-  else if (pattern == "vl6")
-    true_nof = 6;
-  else if (pattern == "vl7")
-    true_nof = 7;
-  else if (pattern == "vl8")
-    true_nof = 8;
-  else if (pattern == "vl16")
-    true_nof = 16;
-  else if (pattern == "vl32")
-    true_nof = 32;
-  else if (pattern == "vl64")
-    true_nof = 64;
-  else if (pattern == "vl128")
-    true_nof = 128;
-  else if (pattern == "vl256")
-    true_nof = 256;
-  else
-    throw Parse_error("ptrue " + std::string(pattern), line_number);
-  if (true_nof > nof_elem)
-    true_nof = 0;
+  uint64_t nof = process_last_pattern(2, elem_bitsize);
 
   Inst *res = nullptr;
   for (uint32_t i = 0; i < nof_elem; i++)
     {
-      Inst *inst = bb->value_inst(i < true_nof, elem_bitsize / 8);
+      Inst *inst = bb->value_inst(i < nof, elem_bitsize / 8);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
