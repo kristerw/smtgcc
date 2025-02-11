@@ -13,11 +13,7 @@ using namespace smtgcc;
 namespace smtgcc {
 namespace {
 
-enum class SIMD_cond {
-  FEQ, FGE, FGT, FLE, FLT, EQ, GE, GT, HI, HS, LE, LT
-};
-
-enum class SVE_cond {
+enum class Vec_cond {
   FEQ, FGE, FGT, FLE, FLT, FNE, FUO, EQ, GE, GT, HI, HS, LE, LO, LS, LT, NE
 };
 
@@ -195,7 +191,7 @@ private:
   Inst *process_last_scalar_vec_arg(unsigned idx);
   void process_binary(Op op, bool perform_not = false);
   void process_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
-  void process_simd_compare(SIMD_cond op);
+  void process_simd_compare(Vec_cond op);
   void process_simd_shift(Op op);
   void process_rev();
   void process_rev(uint32_t bitsize);
@@ -251,7 +247,7 @@ private:
   void process_vec_xtn(bool high);
   void process_vec_mla(Op op = Op::ADD);
   void process_vec_uzp(bool odd);
-  void process_vec_simd_compare(SIMD_cond op);
+  void process_vec_simd_compare(Vec_cond op);
   void process_vec_ins();
   void process_vec_rev(uint32_t bitsize);
   void process_vec_dup();
@@ -282,7 +278,7 @@ private:
   void process_sve_movprfx();
   void process_sve_ptrue();
   void process_sve_pfalse();
-  void process_sve_compare(SVE_cond op);
+  void process_sve_compare(Vec_cond op);
   void parse_sve_preg_op();
   void parse_sve_op();
   void parse_function();
@@ -1409,49 +1405,68 @@ Inst *gen_cnot(Basic_block *bb, Inst *elem)
   return bb->build_inst(Op::ZEXT, cmp, elem->bitsize);
 }
 
-Inst *gen_simd_compare(Basic_block *bb, Inst *elem1, Inst *elem2, SIMD_cond op)
+Inst *gen_elem_compare(Basic_block *bb, Inst *elem1, Inst *elem2, Vec_cond op)
 {
   Inst *cond;
   switch (op)
     {
-    case SIMD_cond::EQ:
+    case Vec_cond::EQ:
       cond = bb->build_inst(Op::EQ, elem1, elem2);
       break;
-    case SIMD_cond::GE:
-      cond = bb->build_inst(Op::SLE, elem2, elem1);
+    case Vec_cond::GE:
+      cond = bb->build_inst(Op::NOT, bb->build_inst(Op::SLT, elem1, elem2));
       break;
-    case SIMD_cond::GT:
+    case Vec_cond::GT:
       cond = bb->build_inst(Op::SLT, elem2, elem1);
       break;
-    case SIMD_cond::HI:
+    case Vec_cond::HI:
       cond = bb->build_inst(Op::ULT, elem2, elem1);
       break;
-    case SIMD_cond::HS:
-      cond = bb->build_inst(Op::ULE, elem2, elem1);
+    case Vec_cond::HS:
+      cond = bb->build_inst(Op::NOT, bb->build_inst(Op::ULT, elem1, elem2));
       break;
-    case SIMD_cond::LE:
-      cond = bb->build_inst(Op::SLE, elem1, elem2);
+    case Vec_cond::LE:
+      cond = bb->build_inst(Op::NOT, bb->build_inst(Op::SLT, elem2, elem1));
       break;
-    case SIMD_cond::LT:
+    case Vec_cond::LO:
+      cond = bb->build_inst(Op::ULT, elem1, elem2);
+      break;
+    case Vec_cond::LS:
+      cond = bb->build_inst(Op::NOT, bb->build_inst(Op::ULT, elem2, elem1));
+      break;
+    case Vec_cond::LT:
       cond = bb->build_inst(Op::SLT, elem1, elem2);
       break;
-    case SIMD_cond::FEQ:
+    case Vec_cond::NE:
+      cond = bb->build_inst(Op::NOT, bb->build_inst(Op::EQ, elem1, elem2));
+      break;
+    case Vec_cond::FEQ:
       cond = bb->build_inst(Op::FEQ, elem1, elem2);
       break;
-    case SIMD_cond::FGE:
+    case Vec_cond::FGE:
       cond = bb->build_inst(Op::FLE, elem2, elem1);
       break;
-    case SIMD_cond::FGT:
+    case Vec_cond::FGT:
       cond = bb->build_inst(Op::FLT, elem2, elem1);
       break;
-    case SIMD_cond::FLE:
+    case Vec_cond::FLE:
       cond = bb->build_inst(Op::FLE, elem1, elem2);
       break;
-    case SIMD_cond::FLT:
+    case Vec_cond::FLT:
       cond = bb->build_inst(Op::FLT, elem1, elem2);
       break;
+    case Vec_cond::FNE:
+      cond = bb->build_inst(Op::NOT, bb->build_inst(Op::FEQ, elem1, elem2));
+      break;
+    case Vec_cond::FUO:
+      {
+	Inst *is_nan1 = bb->build_inst(Op::IS_NAN, elem1);
+	Inst *is_nan2 = bb->build_inst(Op::IS_NAN, elem2);
+	cond = bb->build_inst(Op::OR, is_nan1, is_nan2);
+      }
+      break;
     }
-  return bb->build_inst(Op::SEXT, cond, elem1->bitsize);
+  return cond;
 }
 
 void Parser::process_cond_branch(Cond_code cc)
@@ -2526,7 +2541,7 @@ void Parser::process_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
   write_reg(dest, res);
 }
 
-void Parser::process_simd_compare(SIMD_cond op)
+void Parser::process_simd_compare(Vec_cond op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -2534,7 +2549,8 @@ void Parser::process_simd_compare(SIMD_cond op)
   get_comma(4);
   Inst *arg2 = process_last_arg(5, arg1->bitsize);
 
-  Inst *res = gen_simd_compare(bb, arg1, arg2, op);
+  Inst *res = gen_elem_compare(bb, arg1, arg2, op);
+  res = bb->build_inst(Op::SEXT, res, arg1->bitsize);
   write_reg(dest, res);
 }
 
@@ -3321,7 +3337,7 @@ void Parser::process_vec_widen(Op op, bool high)
   write_reg(dest, res);
 }
 
-void Parser::process_vec_simd_compare(SIMD_cond op)
+void Parser::process_vec_simd_compare(Vec_cond op)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
   get_comma(2);
@@ -3348,7 +3364,8 @@ void Parser::process_vec_simd_compare(SIMD_cond op)
 	elem2 = arg2;
       else
 	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
-      Inst *inst = gen_simd_compare(bb, elem1, elem2, op);
+      Inst *inst = gen_elem_compare(bb, elem1, elem2, op);
+      inst = bb->build_inst(Op::SEXT, inst, elem_bitsize);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
@@ -4238,19 +4255,19 @@ void Parser::parse_vector_op()
   else if (name == "clz")
     process_vec_unary(gen_clz);
   else if (name == "cmeq")
-    process_vec_simd_compare(SIMD_cond::EQ);
+    process_vec_simd_compare(Vec_cond::EQ);
   else if (name == "cmge")
-    process_vec_simd_compare(SIMD_cond::GE);
+    process_vec_simd_compare(Vec_cond::GE);
   else if (name == "cmgt")
-    process_vec_simd_compare(SIMD_cond::GT);
+    process_vec_simd_compare(Vec_cond::GT);
   else if (name == "cmhi")
-    process_vec_simd_compare(SIMD_cond::HI);
+    process_vec_simd_compare(Vec_cond::HI);
   else if (name == "cmhs")
-    process_vec_simd_compare(SIMD_cond::HS);
+    process_vec_simd_compare(Vec_cond::HS);
   else if (name == "cmle")
-    process_vec_simd_compare(SIMD_cond::LE);
+    process_vec_simd_compare(Vec_cond::LE);
   else if (name == "cmlt")
-    process_vec_simd_compare(SIMD_cond::LT);
+    process_vec_simd_compare(Vec_cond::LT);
   else if (name == "cmtst")
     process_vec_binary(gen_cmtst);
   else if (name == "cnt")
@@ -4266,15 +4283,15 @@ void Parser::parse_vector_op()
   else if (name == "fadd")
     process_vec_binary(Op::FADD);
   else if (name == "fcmeq")
-    process_vec_simd_compare(SIMD_cond::FEQ);
+    process_vec_simd_compare(Vec_cond::FEQ);
   else if (name == "fcmge")
-    process_vec_simd_compare(SIMD_cond::FGE);
+    process_vec_simd_compare(Vec_cond::FGE);
   else if (name == "fcmgt")
-    process_vec_simd_compare(SIMD_cond::FGT);
+    process_vec_simd_compare(Vec_cond::FGT);
   else if (name == "fcmle")
-    process_vec_simd_compare(SIMD_cond::FLE);
+    process_vec_simd_compare(Vec_cond::FLE);
   else if (name == "fcmlt")
-    process_vec_simd_compare(SIMD_cond::FLT);
+    process_vec_simd_compare(Vec_cond::FLT);
   else if (name == "fcvtl")
     process_vec_widen(Op::FCHPREC, false);
   else if (name == "fcvtl2")
@@ -4961,71 +4978,7 @@ void Parser::process_sve_pfalse()
   write_reg(dest, bb->value_inst(0, dest->bitsize));
 }
 
-Inst *gen_sve_compare(Basic_block *bb, Inst *elem1, Inst *elem2, SVE_cond op)
-{
-  Inst *cond;
-  switch (op)
-    {
-    case SVE_cond::EQ:
-      cond = bb->build_inst(Op::EQ, elem1, elem2);
-      break;
-    case SVE_cond::GE:
-      cond = bb->build_inst(Op::SLE, elem2, elem1);
-      break;
-    case SVE_cond::GT:
-      cond = bb->build_inst(Op::SLT, elem2, elem1);
-      break;
-    case SVE_cond::HI:
-      cond = bb->build_inst(Op::ULT, elem2, elem1);
-      break;
-    case SVE_cond::HS:
-      cond = bb->build_inst(Op::ULE, elem2, elem1);
-      break;
-    case SVE_cond::LE:
-      cond = bb->build_inst(Op::SLE, elem1, elem2);
-      break;
-    case SVE_cond::LO:
-      cond = bb->build_inst(Op::ULT, elem2, elem1);
-      break;
-    case SVE_cond::LS:
-      cond = bb->build_inst(Op::ULE, elem2, elem1);
-      break;
-    case SVE_cond::LT:
-      cond = bb->build_inst(Op::SLT, elem1, elem2);
-      break;
-    case SVE_cond::NE:
-      cond = bb->build_inst(Op::EQ, elem1, elem2);
-      break;
-    case SVE_cond::FEQ:
-      cond = bb->build_inst(Op::FEQ, elem1, elem2);
-      break;
-    case SVE_cond::FGE:
-      cond = bb->build_inst(Op::FLE, elem2, elem1);
-      break;
-    case SVE_cond::FGT:
-      cond = bb->build_inst(Op::FLT, elem2, elem1);
-      break;
-    case SVE_cond::FLE:
-      cond = bb->build_inst(Op::FLE, elem1, elem2);
-      break;
-    case SVE_cond::FLT:
-      cond = bb->build_inst(Op::FLT, elem1, elem2);
-      break;
-    case SVE_cond::FNE:
-      cond = bb->build_inst(Op::NOT, bb->build_inst(Op::FEQ, elem1, elem2));
-      break;
-    case SVE_cond::FUO:
-      {
-	Inst *is_nan1 = bb->build_inst(Op::IS_NAN, elem1);
-	Inst *is_nan2 = bb->build_inst(Op::IS_NAN, elem2);
-	cond = bb->build_inst(Op::OR, is_nan1, is_nan2);
-      }
-      break;
-    }
-  return cond;
-}
-
-void Parser::process_sve_compare(SVE_cond op)
+void Parser::process_sve_compare(Vec_cond op)
 {
   auto [dest, nof_elem, elem_bitsize] = get_preg(1);
   get_comma(2);
@@ -5052,7 +5005,7 @@ void Parser::process_sve_compare(SVE_cond op)
 	elem2 = arg2;
       else
 	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
-      Inst *inst = gen_sve_compare(bb, elem1, elem2, op);
+      Inst *inst = gen_elem_compare(bb, elem1, elem2, op);
       z = bb->build_inst(Op::OR, z, inst);
       last_cmp = inst;
       Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
@@ -5084,41 +5037,41 @@ void Parser::parse_sve_preg_op()
   if (name == "and")
     process_sve_preg_binary(Op::AND);
   else if (name == "cmpeq")
-    process_sve_compare(SVE_cond::EQ);
+    process_sve_compare(Vec_cond::EQ);
   else if (name == "cmpge")
-    process_sve_compare(SVE_cond::GE);
+    process_sve_compare(Vec_cond::GE);
   else if (name == "cmpgt")
-    process_sve_compare(SVE_cond::GT);
+    process_sve_compare(Vec_cond::GT);
   else if (name == "cmphi")
-    process_sve_compare(SVE_cond::HI);
+    process_sve_compare(Vec_cond::HI);
   else if (name == "cmphs")
-    process_sve_compare(SVE_cond::HS);
+    process_sve_compare(Vec_cond::HS);
   else if (name == "cmple")
-    process_sve_compare(SVE_cond::LE);
+    process_sve_compare(Vec_cond::LE);
   else if (name == "cmplo")
-    process_sve_compare(SVE_cond::LO);
+    process_sve_compare(Vec_cond::LO);
   else if (name == "cmpls")
-    process_sve_compare(SVE_cond::LS);
+    process_sve_compare(Vec_cond::LS);
   else if (name == "cmplt")
-    process_sve_compare(SVE_cond::LT);
+    process_sve_compare(Vec_cond::LT);
   else if (name == "cmpne")
-    process_sve_compare(SVE_cond::NE);
+    process_sve_compare(Vec_cond::NE);
   else if (name == "eor")
     process_sve_preg_binary(Op::XOR);
   else if (name == "fcmeq")
-    process_sve_compare(SVE_cond::FEQ);
+    process_sve_compare(Vec_cond::FEQ);
   else if (name == "fcmge")
-    process_sve_compare(SVE_cond::FGE);
+    process_sve_compare(Vec_cond::FGE);
   else if (name == "fcmgt")
-    process_sve_compare(SVE_cond::FGT);
+    process_sve_compare(Vec_cond::FGT);
   else if (name == "fcmle")
-    process_sve_compare(SVE_cond::FLE);
+    process_sve_compare(Vec_cond::FLE);
   else if (name == "fcmlt")
-    process_sve_compare(SVE_cond::FLT);
+    process_sve_compare(Vec_cond::FLT);
   else if (name == "fcmne")
-    process_sve_compare(SVE_cond::FNE);
+    process_sve_compare(Vec_cond::FNE);
   else if (name == "fcmuo")
-    process_sve_compare(SVE_cond::FUO);
+    process_sve_compare(Vec_cond::FUO);
   else if (name == "mov")
     process_sve_mov_preg();
   else if (name == "orr")
@@ -5612,29 +5565,29 @@ void Parser::parse_function()
 
   // SIMD compare
   else if (name == "cmeq")
-    process_simd_compare(SIMD_cond::EQ);
+    process_simd_compare(Vec_cond::EQ);
   else if (name == "cmhs")
-    process_simd_compare(SIMD_cond::HS);
+    process_simd_compare(Vec_cond::HS);
   else if (name == "cmge")
-    process_simd_compare(SIMD_cond::GE);
+    process_simd_compare(Vec_cond::GE);
   else if (name == "cmhi")
-    process_simd_compare(SIMD_cond::HI);
+    process_simd_compare(Vec_cond::HI);
   else if (name == "cmgt")
-    process_simd_compare(SIMD_cond::GT);
+    process_simd_compare(Vec_cond::GT);
   else if (name == "cmle")
-    process_simd_compare(SIMD_cond::LE);
+    process_simd_compare(Vec_cond::LE);
   else if (name == "cmlt")
-    process_simd_compare(SIMD_cond::LT);
+    process_simd_compare(Vec_cond::LT);
   else if (name == "fcmeq")
-    process_simd_compare(SIMD_cond::FEQ);
+    process_simd_compare(Vec_cond::FEQ);
   else if (name == "fcmge")
-    process_simd_compare(SIMD_cond::FGE);
+    process_simd_compare(Vec_cond::FGE);
   else if (name == "fcmgt")
-    process_simd_compare(SIMD_cond::FGT);
+    process_simd_compare(Vec_cond::FGT);
   else if (name == "fcmle")
-    process_simd_compare(SIMD_cond::FLE);
+    process_simd_compare(Vec_cond::FLE);
   else if (name == "fcmlt")
-    process_simd_compare(SIMD_cond::FLT);
+    process_simd_compare(Vec_cond::FLT);
 
   // SIMD move
   else if (name == "dup")
