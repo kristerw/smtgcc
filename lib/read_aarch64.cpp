@@ -273,9 +273,9 @@ private:
   void process_sve_index();
   void process_sve_while();
   Inst *load_value(Inst *ptr, uint64_t size);
-  void process_sve_ld1();
+  void process_sve_ld1(uint32_t load_elem_size, Op op);
   void store_value(Inst *ptr, Inst *value);
-  void process_sve_st1();
+  void process_sve_st1(uint32_t store_elem_size);
   void process_sve_mov_preg();
   void process_sve_mov_zreg();
   void process_sve_ptrue();
@@ -4785,7 +4785,7 @@ Inst *Parser::load_value(Inst *ptr, uint64_t size)
   return value;
 }
 
-void Parser::process_sve_ld1()
+void Parser::process_sve_ld1(uint32_t load_elem_size, Op op)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
   get_comma(2);
@@ -4794,12 +4794,14 @@ void Parser::process_sve_ld1()
   Inst *arg2 = process_address(5, dest->bitsize / 8);
 
   Inst *zero = bb->value_inst(0, elem_bitsize);
-  Inst *step = bb->value_inst(elem_bitsize / 8, arg2->bitsize);
+  Inst *step = bb->value_inst(load_elem_size, arg2->bitsize);
   Inst *res = nullptr;
   for (uint32_t i = 0; i < nof_elem; i++)
     {
       Inst *pred = extract_pred_elem(arg1, elem_bitsize, i);
-      Inst *inst = load_value(arg2, elem_bitsize / 8);
+      Inst *inst = load_value(arg2, load_elem_size);
+      if (inst->bitsize < elem_bitsize)
+	inst = bb->build_inst(op, inst, elem_bitsize);
       inst = bb->build_inst(Op::ITE, pred, inst, zero);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
@@ -4822,7 +4824,7 @@ void Parser::store_value(Inst *ptr, Inst *value)
     }
 }
 
-void Parser::process_sve_st1()
+void Parser::process_sve_st1(uint32_t store_elem_size)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
   Inst *arg0 = get_zreg_value(1);
@@ -4839,9 +4841,11 @@ void Parser::process_sve_st1()
       bb->build_br_inst(pred, true_bb, false_bb);
       bb = true_bb;
 
-      Inst *elem_offset = bb->value_inst(i * elem_bitsize / 8, arg2->bitsize);
+      Inst *elem_offset = bb->value_inst(i * store_elem_size, arg2->bitsize);
       Inst *elem_ptr = bb->build_inst(Op::ADD, arg2, elem_offset);
       Inst *elem = extract_vec_elem(arg0, elem_bitsize, i);
+      if (elem_bitsize > 8 * store_elem_size)
+	elem = bb->build_trunc(elem, 8 * store_elem_size);
       store_value(elem_ptr, elem);
 
       bb->build_br_inst(false_bb);
@@ -5130,8 +5134,22 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::FSUB);
   else if (name == "index")
     process_sve_index();
-  else if (name == "ld1b" || name == "ld1h" || name == "ld1w" || name == "ld1d")
-    process_sve_ld1();
+  else if (name == "ld1b")
+    process_sve_ld1(1, Op::ZEXT);
+  else if (name == "ld1h")
+    process_sve_ld1(2, Op::ZEXT);
+  else if (name == "ld1w")
+    process_sve_ld1(4, Op::ZEXT);
+  else if (name == "ld1d")
+    process_sve_ld1(8, Op::ZEXT);
+  else if (name == "ld1sb")
+    process_sve_ld1(1, Op::SEXT);
+  else if (name == "ld1sh")
+    process_sve_ld1(2, Op::SEXT);
+  else if (name == "ld1sw")
+    process_sve_ld1(4, Op::SEXT);
+  else if (name == "ld1sd")
+    process_sve_ld1(8, Op::SEXT);
   else if (name == "lsl")
     process_sve_binary(Op::SHL);
   else if (name == "lsr")
@@ -5156,8 +5174,14 @@ void Parser::parse_sve_op()
     process_sve_binary(gen_sat_sadd);
   else if (name == "sqsub")
     process_sve_binary(gen_sat_ssub);
-  else if (name == "st1b" || name == "st1h" || name == "st1w" || name == "st1d")
-    process_sve_st1();
+  else if (name == "st1b")
+    process_sve_st1(1);
+  else if (name == "st1h")
+    process_sve_st1(2);
+  else if (name == "st1w")
+    process_sve_st1(4);
+  else if (name == "st1d")
+    process_sve_st1(8);
   else if (name == "sub")
     process_sve_binary(Op::SUB);
   else if (name == "umax")
