@@ -263,7 +263,7 @@ private:
   void parse_vector_op();
   void process_sve_unary(Op op);
   void process_sve_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
-  void process_sve_binary(Op op);
+  void process_sve_binary(Op op, bool reversed = false);
   void process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_preg_binary(Op op);
   void process_sve_sel();
@@ -4598,7 +4598,7 @@ void Parser::process_sve_unary(Inst*(*gen_elem)(Basic_block*, Inst*))
   write_reg(dest, res);
 }
 
-void Parser::process_sve_binary(Op op)
+void Parser::process_sve_binary(Op op, bool reversed)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
   Inst *orig = get_zreg_value(1);
@@ -4615,10 +4615,16 @@ void Parser::process_sve_binary(Op op)
   Inst *arg2 = get_zreg_or_imm_value(idx++, elem_bitsize);
   get_end_of_line(idx);
 
+  if (reversed)
+    std::swap(arg1, arg2);
   Inst *res = nullptr;
   for (uint32_t i = 0; i < nof_elem; i++)
     {
-      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem1;
+      if (arg1->bitsize == elem_bitsize)
+	elem1 = arg1;
+      else
+	elem1 = extract_vec_elem(arg1, elem_bitsize, i);
       Inst *elem2;
       if (arg2->bitsize == elem_bitsize)
 	elem2 = arg2;
@@ -5120,6 +5126,8 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::AND);
   else if (name == "asr")
     process_sve_binary(Op::ASHR);
+  else if (name == "asrr")
+    process_sve_binary(Op::ASHR, true);
   else if (name == "cnot")
     process_sve_unary(gen_cnot);
   else if (name == "eor")
@@ -5164,8 +5172,12 @@ void Parser::parse_sve_op()
     process_sve_ld1(8, Op::SEXT);
   else if (name == "lsl")
     process_sve_binary(Op::SHL);
+  else if (name == "lslr")
+    process_sve_binary(Op::SHL, true);
   else if (name == "lsr")
     process_sve_binary(Op::LSHR);
+  else if (name == "lsrr")
+    process_sve_binary(Op::LSHR, true);
   else if (name == "mov")
     process_sve_mov_zreg();
   else if (name == "movprfx")
@@ -5180,6 +5192,8 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::OR);
   else if (name == "sdiv")
     process_sve_binary(Op::SDIV);
+  else if (name == "sdivr")
+    process_sve_binary(Op::SDIV, true);
   else if (name == "sel")
     process_sve_sel();
   else if (name == "smax")
@@ -5200,8 +5214,12 @@ void Parser::parse_sve_op()
     process_sve_st1(8);
   else if (name == "sub")
     process_sve_binary(Op::SUB);
+  else if (name == "subr")
+    process_sve_binary(Op::SUB, true);
   else if (name == "udiv")
     process_sve_binary(Op::UDIV);
+  else if (name == "udivr")
+    process_sve_binary(Op::UDIV, true);
   else if (name == "umax")
     process_sve_binary(gen_umax);
   else if (name == "umin")
