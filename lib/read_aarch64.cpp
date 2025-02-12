@@ -217,6 +217,8 @@ private:
   void process_bfxil();
   void process_ubfx(Op op);
   void process_ubfiz(Op op);
+  void process_addpl();
+  void process_addvl();
   void process_cnt(uint64_t elem_bitsize);
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   Inst *extract_pred_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
@@ -2662,6 +2664,36 @@ void Parser::process_ubfiz(Op op)
   Inst *res = bb->build_trunc(arg1, arg3->value());
   res = bb->build_inst(op, res, arg1->bitsize);
   res = bb->build_inst(Op::SHL, res, bb->build_trunc(arg2, arg1->bitsize));
+  write_reg(dest, res);
+}
+
+void Parser::process_addpl()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  unsigned __int128 arg2 = get_hex_or_integer(5);
+  get_end_of_line(6);
+
+  arg2 = arg2 * rstate->registers[Aarch64RegIdx::p0]->bitsize / 8;
+  Inst *value = bb->value_inst(arg2, arg1->bitsize);
+  Inst *res = bb->build_inst(Op::ADD, arg1, value);
+  write_reg(dest, res);
+}
+
+void Parser::process_addvl()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  unsigned __int128 arg2 = get_hex_or_integer(5);
+  get_end_of_line(6);
+
+  arg2 = arg2 * rstate->registers[Aarch64RegIdx::v0]->bitsize / 8;
+  Inst *value = bb->value_inst(arg2, arg1->bitsize);
+  Inst *res = bb->build_inst(Op::ADD, arg1, value);
   write_reg(dest, res);
 }
 
@@ -5695,6 +5727,10 @@ void Parser::parse_function()
     process_unary(gen_sqxtn);
 
   // Misc scalar versions of SIMD and SVE instructions
+  else if (name == "addpl")
+    process_addpl();
+  else if (name == "addvl")
+    process_addvl();
   else if (name == "cntb")
     process_cnt(8);
   else if (name == "cnth")
