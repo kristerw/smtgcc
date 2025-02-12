@@ -268,6 +268,7 @@ private:
   void process_sve_binary(Op op, bool reversed = false);
   void process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_preg_binary(Op op);
+  void process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_ext(Op op, uint64_t trunc_bitsize);
   void process_sve_sel();
   void process_sve_index();
@@ -1407,6 +1408,11 @@ Inst *gen_cnot(Basic_block *bb, Inst *elem)
 {
   Inst *cmp = bb->build_inst(Op::NE, elem, bb->value_inst(0, elem->bitsize));
   return bb->build_inst(Op::ZEXT, cmp, elem->bitsize);
+}
+
+Inst *gen_bic(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::AND, elem1, bb->build_inst(Op::NOT, elem2));
 }
 
 Inst *gen_elem_compare(Basic_block *bb, Inst *elem1, Inst *elem2, Vec_cond op)
@@ -4749,6 +4755,36 @@ void Parser::process_sve_preg_binary(Op op)
   write_reg(dest, res);
 }
 
+void Parser::process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  get_comma(2);
+  Inst *pred = get_preg_zeroing_value(3);
+  get_comma(4);
+  Inst *arg1 = get_preg_value(5);
+  get_comma(6);
+  Inst *arg2 = get_preg_value(7);
+  get_end_of_line(8);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_pred_elem(arg1, elem_bitsize, i);
+      Inst *elem2 = extract_pred_elem(arg2, elem_bitsize, i);
+      Inst *inst = gen_elem(bb, elem1, elem2);
+
+      Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+      inst = bb->build_inst(Op::ITE, pred_elem, inst, bb->value_inst(0, 1));
+      if (elem_bitsize > 8)
+	inst = bb->build_inst(Op::ZEXT, inst, elem_bitsize / 8);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_ext(Op op, uint64_t trunc_bitsize)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -5111,6 +5147,8 @@ void Parser::parse_sve_preg_op()
 
   if (name == "and")
     process_sve_preg_binary(Op::AND);
+  else if (name == "bic")
+    process_sve_preg_binary(gen_bic);
   else if (name == "cmpeq")
     process_sve_compare(Vec_cond::EQ);
   else if (name == "cmpge")
@@ -5196,6 +5234,8 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::ASHR);
   else if (name == "asrr")
     process_sve_binary(Op::ASHR, true);
+  else if (name == "bic")
+    process_sve_binary(gen_bic);
   else if (name == "cnot")
     process_sve_unary(gen_cnot);
   else if (name == "eor")
