@@ -30,7 +30,7 @@ void build_return(aarch64_state *rstate, Function *src_func, function *fun)
   if (SCALAR_FLOAT_TYPE_P(ret_type) && ret_bitsize <= rstate->freg_bitsize)
     {
       Inst *retval =
-	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::v0]);
+	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z0]);
       if (ret_bitsize < retval->bitsize)
 	retval = bb->build_trunc(retval, ret_bitsize);
       bb->build_ret_inst(retval);
@@ -84,7 +84,7 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
   for (int i = 0; i < 32; i++)
     rstate.registers.push_back(bb->build_inst(Op::REGISTER, 64));
 
-  // Registers v0-v31.
+  // Registers z0-z31.
   for (int i = 0; i < 32; i++)
     rstate.registers.push_back(bb->build_inst(Op::REGISTER, 128));
 
@@ -156,7 +156,7 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
 	{
 	  if (freg_nbr >= 8)
 	    throw Not_implemented("setup_aarch64_function: too many params");
-	  write_reg(bb, rstate.registers[Aarch64RegIdx::v0 + freg_nbr], param);
+	  write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + freg_nbr], param);
 	  freg_nbr++;
 	}
       else if ((INTEGRAL_TYPE_P(type) || POINTER_TYPE_P(type))

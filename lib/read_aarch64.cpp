@@ -578,7 +578,7 @@ Inst *Parser::get_freg(unsigned idx)
   uint32_t value = buf[tokens[idx].pos + 1] - '0';
   if (tokens[idx].size == 3)
     value = value * 10 + (buf[tokens[idx].pos + 2] - '0');
-  return rstate->registers[Aarch64RegIdx::v0 + value];
+  return rstate->registers[Aarch64RegIdx::z0 + value];
 }
 
 Inst *Parser::get_freg_value(unsigned idx)
@@ -605,7 +605,7 @@ std::tuple<uint64_t, uint32_t, uint32_t> Parser::get_vreg_(unsigned idx)
   if (value > 31)
     throw Parse_error("expected a vector register instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
-  uint64_t reg_idx = Aarch64RegIdx::v0 + value;
+  uint64_t reg_idx = Aarch64RegIdx::z0 + value;
   std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
   if (suffix == ".2d")
     return {reg_idx, 2, 64};
@@ -650,7 +650,7 @@ std::tuple<Inst *, uint32_t, uint32_t> Parser::get_scalar_vreg(unsigned idx)
   if (value > 31)
     throw Parse_error("expected a vector register instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
-  Inst *reg = rstate->registers[Aarch64RegIdx::v0 + value];
+  Inst *reg = rstate->registers[Aarch64RegIdx::z0 + value];
   std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
   uint32_t elem_bitsize;
   if (suffix == ".d")
@@ -768,7 +768,7 @@ std::tuple<uint64_t, uint32_t, uint32_t> Parser::get_zreg_(unsigned idx)
   if (value > 31)
     throw Parse_error("expected a z-register instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
-  uint64_t reg_idx = Aarch64RegIdx::v0 + value;
+  uint64_t reg_idx = Aarch64RegIdx::z0 + value;
   std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
   if (suffix == ".q")
     return {reg_idx, 1, 128};
@@ -814,7 +814,7 @@ std::tuple<uint64_t, std::string_view> Parser::get_preg_(unsigned idx)
   if (value > 31)
     throw Parse_error("expected a predicate register instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
-  uint64_t reg_idx = Aarch64RegIdx::v0 + value;
+  uint64_t reg_idx = Aarch64RegIdx::z0 + value;
   std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
   return {reg_idx, suffix};
 }
@@ -2691,7 +2691,7 @@ void Parser::process_addvl()
   unsigned __int128 arg2 = get_hex_or_integer(5);
   get_end_of_line(6);
 
-  arg2 = arg2 * rstate->registers[Aarch64RegIdx::v0]->bitsize / 8;
+  arg2 = arg2 * rstate->registers[Aarch64RegIdx::z0]->bitsize / 8;
   Inst *value = bb->value_inst(arg2, arg1->bitsize);
   Inst *res = bb->build_inst(Op::ADD, arg1, value);
   write_reg(dest, res);
@@ -3761,9 +3761,9 @@ void Parser::process_vec_tbl()
       arg2 = get_vreg_value(9, nof_elem, elem_bitsize);
       get_end_of_line(10);
 
-      assert(start_idx >= Aarch64RegIdx::v0);
+      assert(start_idx >= Aarch64RegIdx::z0);
       assert(start_idx < end_idx);
-      assert(end_idx <= Aarch64RegIdx::v31);
+      assert(end_idx <= Aarch64RegIdx::z31);
       assert(nof_elem * elem_bitsize == 128);
       arg1 = bb->build_inst(Op::READ, rstate->registers[start_idx]);
       for (uint64_t i = start_idx + 1; i <= end_idx; i++)
