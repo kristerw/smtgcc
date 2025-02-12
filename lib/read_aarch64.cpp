@@ -4854,7 +4854,7 @@ void Parser::process_sve_ld1(uint32_t load_elem_size, Op op)
   get_comma(2);
   Inst *arg1 = get_preg_zeroing_value(3);
   get_comma(4);
-  Inst *arg2 = process_address(5, dest->bitsize / 8);
+  Inst *arg2 = process_address(5, load_elem_size * nof_elem);
 
   Inst *zero = bb->value_inst(0, elem_bitsize);
   Inst *step = bb->value_inst(load_elem_size, arg2->bitsize);
@@ -4894,7 +4894,7 @@ void Parser::process_sve_st1(uint32_t store_elem_size)
   get_comma(2);
   Inst *arg1 = get_preg_value(3);
   get_comma(4);
-  Inst *arg2 = process_address(5, dest->bitsize / 8);
+  Inst *arg2 = process_address(5, store_elem_size * nof_elem);
 
   for (uint32_t i = 0; i < nof_elem; i++)
     {
