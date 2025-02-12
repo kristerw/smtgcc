@@ -5226,6 +5226,10 @@ void Parser::parse_sve_op()
     process_sve_unary(Op::NOT);
   else if (name == "orr")
     process_sve_binary(Op::OR);
+  else if (name == "sabd")
+    process_sve_binary(gen_sabd);
+  else if (name == "scvtf")
+    process_sve_unary(gen_s2f);
   else if (name == "sdiv")
     process_sve_binary(Op::SDIV);
   else if (name == "sdivr")
@@ -5252,6 +5256,10 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::SUB);
   else if (name == "subr")
     process_sve_binary(Op::SUB, true);
+  else if (name == "uabd")
+    process_sve_binary(gen_uabd);
+  else if (name == "ucvtf")
+    process_sve_unary(gen_u2f);
   else if (name == "udiv")
     process_sve_binary(Op::UDIV);
   else if (name == "udivr")
