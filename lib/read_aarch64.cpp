@@ -5174,6 +5174,10 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::FADD);
   else if (name == "fdiv")
     process_sve_binary(Op::FDIV);
+  else if (name == "fmaxnm")
+    process_sve_binary(gen_fmax);
+  else if (name == "fminnm")
+    process_sve_binary(gen_fmin);
   else if (name == "fmul")
     process_sve_binary(Op::FMUL);
   else if (name == "fsub")
