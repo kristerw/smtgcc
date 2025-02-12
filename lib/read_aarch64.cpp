@@ -280,6 +280,7 @@ private:
   void process_sve_pfalse();
   void process_sve_compare(Vec_cond op);
   void parse_sve_preg_op();
+  void process_sve_dec_inc(Op op, uint32_t pattern_elem_bitsize);
   void parse_sve_op();
   void parse_function();
 
@@ -5087,6 +5088,26 @@ void Parser::parse_sve_preg_op()
 		      line_number);
 }
 
+void Parser::process_sve_dec_inc(Op op, uint32_t pattern_elem_bitsize)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  Inst *orig = get_zreg_value(1);
+  uint64_t nof = process_last_pattern_mul(2, pattern_elem_bitsize);
+
+  Inst *increment = bb->value_inst(nof, elem_bitsize);
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem = extract_vec_elem(orig, elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, elem, increment);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::parse_sve_op()
 {
   std::string_view name = get_name(0);
@@ -5103,6 +5124,12 @@ void Parser::parse_sve_op()
     process_sve_unary(gen_cnot);
   else if (name == "eor")
     process_sve_binary(Op::XOR);
+  else if (name == "dech")
+    process_sve_dec_inc(Op::SUB, 16);
+  else if (name == "decw")
+    process_sve_dec_inc(Op::SUB, 32);
+  else if (name == "decd")
+    process_sve_dec_inc(Op::SUB, 64);
   else if (name == "fadd")
     process_sve_binary(Op::FADD);
   else if (name == "fdiv")
@@ -5113,6 +5140,12 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::FSUB);
   else if (name == "index")
     process_sve_index();
+  else if (name == "inch")
+    process_sve_dec_inc(Op::ADD, 16);
+  else if (name == "incw")
+    process_sve_dec_inc(Op::ADD, 32);
+  else if (name == "incd")
+    process_sve_dec_inc(Op::ADD, 64);
   else if (name == "ld1b")
     process_sve_ld1(1, Op::ZEXT);
   else if (name == "ld1h")
