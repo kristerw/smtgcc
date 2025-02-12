@@ -268,6 +268,7 @@ private:
   void process_sve_binary(Op op, bool reversed = false);
   void process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_preg_binary(Op op);
+  void process_sve_ext(Op op, uint64_t trunc_bitsize);
   void process_sve_sel();
   void process_sve_index();
   void process_sve_while();
@@ -4748,6 +4749,41 @@ void Parser::process_sve_preg_binary(Op op)
   write_reg(dest, res);
 }
 
+void Parser::process_sve_ext(Op op, uint64_t trunc_bitsize)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  Inst *orig = get_zreg_value(1);
+  get_comma(2);
+  Inst *pred = nullptr;
+  int idx = 3;
+  if (is_preg(3))
+    {
+      pred = get_preg_merging_value(idx++);
+      get_comma(idx++);
+    }
+  Inst *arg1 = get_zreg_value(idx++);
+  get_end_of_line(idx);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      elem1 = bb->build_trunc(elem1, trunc_bitsize);
+      Inst *inst = bb->build_inst(op, elem1, elem_bitsize);
+      if (pred)
+	{
+	  Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+	  Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+	  inst = bb->build_inst(Op::ITE, pred_elem, inst, orig_elem);
+	}
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_sel()
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -5256,6 +5292,12 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::SUB);
   else if (name == "subr")
     process_sve_binary(Op::SUB, true);
+  else if (name == "sxtb")
+    process_sve_ext(Op::SEXT, 8);
+  else if (name == "sxth")
+    process_sve_ext(Op::SEXT, 16);
+  else if (name == "sxtw")
+    process_sve_ext(Op::SEXT, 32);
   else if (name == "uabd")
     process_sve_binary(gen_uabd);
   else if (name == "ucvtf")
@@ -5272,6 +5314,12 @@ void Parser::parse_sve_op()
     process_sve_binary(gen_sat_uadd);
   else if (name == "uqsub")
     process_sve_binary(gen_sat_usub);
+  else if (name == "uxtb")
+    process_sve_ext(Op::ZEXT, 8);
+  else if (name == "uxth")
+    process_sve_ext(Op::ZEXT, 16);
+  else if (name == "uxtw")
+    process_sve_ext(Op::ZEXT, 32);
   else
     throw Parse_error("unhandled sve instruction: "s + std::string(name),
 		      line_number);
