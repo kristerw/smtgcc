@@ -5178,6 +5178,8 @@ void Parser::parse_sve_op()
     process_sve_unary(Op::NOT);
   else if (name == "orr")
     process_sve_binary(Op::OR);
+  else if (name == "sdiv")
+    process_sve_binary(Op::SDIV);
   else if (name == "sel")
     process_sve_sel();
   else if (name == "smax")
@@ -5198,6 +5200,8 @@ void Parser::parse_sve_op()
     process_sve_st1(8);
   else if (name == "sub")
     process_sve_binary(Op::SUB);
+  else if (name == "udiv")
+    process_sve_binary(Op::UDIV);
   else if (name == "umax")
     process_sve_binary(gen_umax);
   else if (name == "umin")
