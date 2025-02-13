@@ -282,6 +282,7 @@ private:
   void process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_ext(Op op, uint64_t trunc_bitsize);
   void process_sve_sel();
+  void process_sve_eor3();
   void process_sve_index();
   void process_sve_while();
   Inst *load_value(Inst *ptr, uint64_t size);
@@ -4939,6 +4940,33 @@ void Parser::process_sve_sel()
   write_reg(dest, res);
 }
 
+void Parser::process_sve_eor3()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1 = get_zreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_zreg_value(5);
+  get_comma(6);
+  Inst *arg3 = get_zreg_value(7);
+  get_end_of_line(8);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *elem3 = extract_vec_elem(arg3, elem_bitsize, i);
+      Inst *inst = bb->build_inst(Op::XOR, elem1, elem2);
+      inst = bb->build_inst(Op::XOR, inst, elem3);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_index()
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -5378,6 +5406,8 @@ void Parser::parse_sve_op()
     process_sve_unary(gen_cnot);
   else if (name == "eor")
     process_sve_binary(Op::XOR);
+  else if (name == "eor3")
+    process_sve_eor3();
   else if (name == "dech")
     process_sve_dec_inc(Op::SUB, 16);
   else if (name == "decw")
