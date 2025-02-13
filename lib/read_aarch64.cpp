@@ -106,7 +106,8 @@ private:
   std::tuple<Inst *, uint32_t, uint32_t> get_zreg(unsigned idx,
 						  bool allow_no_type = false);
   std::tuple<uint64_t, std::string_view> get_preg_(unsigned idx);
-  std::tuple<Inst *, uint32_t, uint32_t> get_preg(unsigned idx);
+  std::tuple<Inst *, uint32_t, uint32_t> get_preg(unsigned idx,
+						  bool allow_no_type = false);
   uint32_t get_reg_size(unsigned idx);
   bool is_vector_op();
   bool is_sve_op();
@@ -283,6 +284,10 @@ private:
   void process_sve_ptrue();
   void process_sve_pfalse();
   void process_sve_compare(Vec_cond op);
+  void process_sve_ldr();
+  void process_sve_ldr_preg();
+  void process_sve_str();
+  void process_sve_str_preg();
   void parse_sve_preg_op();
   void process_sve_dec_inc(Op op, uint32_t pattern_elem_bitsize);
   void parse_sve_op();
@@ -816,12 +821,12 @@ std::tuple<uint64_t, std::string_view> Parser::get_preg_(unsigned idx)
   if (value > 31)
     throw Parse_error("expected a predicate register instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
-  uint64_t reg_idx = Aarch64RegIdx::z0 + value;
+  uint64_t reg_idx = Aarch64RegIdx::p0 + value;
   std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
   return {reg_idx, suffix};
 }
 
-std::tuple<Inst *, uint32_t, uint32_t> Parser::get_preg(unsigned idx)
+std::tuple<Inst *, uint32_t, uint32_t> Parser::get_preg(unsigned idx, bool allow_no_type)
 {
   auto [reg_idx, suffix] = get_preg_(idx);
   Inst *reg = rstate->registers[reg_idx];
@@ -835,6 +840,8 @@ std::tuple<Inst *, uint32_t, uint32_t> Parser::get_preg(unsigned idx)
     return {reg, 8, 16};
   if (suffix == ".b")
     return {reg, 16, 8};
+  if (allow_no_type && suffix == "")
+    return {reg, 0, 0};
 
   throw Parse_error("expected a predicate register instead of "
 		    + std::string(token_string(tokens[idx])), line_number);
@@ -5125,6 +5132,50 @@ void Parser::process_sve_compare(Vec_cond op)
   write_reg(dest, res);
 }
 
+void Parser::process_sve_ldr_preg()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1, true);
+  uint32_t size = dest->bitsize / 8;
+  get_comma(2);
+  Inst *ptr = process_address(3, size);
+
+  load_ub_check(ptr, size);
+  Inst *value = load_value(ptr, size);
+  write_reg(dest, value);
+}
+
+void Parser::process_sve_ldr()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1, true);
+  uint32_t size = dest->bitsize / 8;
+  get_comma(2);
+  Inst *ptr = process_address(3, size);
+
+  load_ub_check(ptr, size);
+  Inst *value = load_value(ptr, size);
+  write_reg(dest, value);
+}
+
+void Parser::process_sve_str()
+{
+  Inst *value = get_zreg_value(1);
+  get_comma(2);
+  Inst *ptr = process_address(3, value->bitsize / 8);
+
+  store_ub_check(ptr, value->bitsize / 8);
+  store_value(ptr, value);
+}
+
+void Parser::process_sve_str_preg()
+{
+  Inst *value = get_preg_value(1);
+  get_comma(2);
+  Inst *ptr = process_address(3, value->bitsize / 8);
+
+  store_ub_check(ptr, value->bitsize / 8);
+  store_value(ptr, value);
+}
+
 void Parser::parse_sve_preg_op()
 {
   std::string_view name = get_name(0);
@@ -5169,6 +5220,8 @@ void Parser::parse_sve_preg_op()
     process_sve_compare(Vec_cond::FNE);
   else if (name == "fcmuo")
     process_sve_compare(Vec_cond::FUO);
+  else if (name == "ldr")
+    process_sve_ldr_preg();
   else if (name == "mov")
     process_sve_mov_preg();
   else if (name == "orr")
@@ -5177,6 +5230,8 @@ void Parser::parse_sve_preg_op()
     process_sve_pfalse();
   else if (name == "ptrue")
     process_sve_ptrue();
+  else if (name == "str")
+    process_sve_str_preg();
   else if (name == "whilelo")
     process_sve_while();
   else
@@ -5266,6 +5321,8 @@ void Parser::parse_sve_op()
     process_sve_ld1(4, Op::SEXT);
   else if (name == "ld1sd")
     process_sve_ld1(8, Op::SEXT);
+  else if (name == "ldr")
+    process_sve_ldr();
   else if (name == "lsl")
     process_sve_binary(Op::SHL);
   else if (name == "lslr")
@@ -5312,6 +5369,8 @@ void Parser::parse_sve_op()
     process_sve_st1(4);
   else if (name == "st1d")
     process_sve_st1(8);
+  else if (name == "str")
+    process_sve_str();
   else if (name == "sub")
     process_sve_binary(Op::SUB);
   else if (name == "subr")
