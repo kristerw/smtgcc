@@ -283,6 +283,8 @@ private:
   void process_sve_ext(Op op, uint64_t trunc_bitsize);
   void process_sve_sel();
   void process_sve_eor3();
+  void process_sve_uzp(bool odd);
+  void process_sve_preg_uzp(bool odd);
   void process_sve_index();
   void process_sve_while();
   Inst *load_value(Inst *ptr, uint64_t size);
@@ -719,11 +721,7 @@ Inst *Parser::get_zreg_or_imm_value(unsigned idx, uint32_t bitsize)
 
 Inst *Parser::get_preg_value(unsigned idx)
 {
-  auto [reg_idx, suffix] = get_preg_(idx);
-  Inst *reg = rstate->registers[reg_idx];
-  if (suffix != "" && suffix != ".b")
-    throw Parse_error("expected a predicate register instead of "
-		      + std::string(token_string(tokens[idx])), line_number);
+  auto [reg, nof_elem, elem_bitsize] = get_preg(idx, true);
   return bb->build_inst(Op::READ, reg);
 }
 
@@ -4967,6 +4965,59 @@ void Parser::process_sve_eor3()
   write_reg(dest, res);
 }
 
+void Parser::process_sve_uzp(bool odd)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1 = get_zreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_zreg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem / 2; i++)
+    {
+      Inst *inst = extract_vec_elem(arg1, elem_bitsize, 2 * i + odd);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  for (uint32_t i = 0; i < nof_elem / 2; i++)
+    {
+      Inst *inst = extract_vec_elem(arg2, elem_bitsize, 2 * i + odd);
+      res = bb->build_inst(Op::CONCAT, inst, res);
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_sve_preg_uzp(bool odd)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  elem_bitsize = dest->bitsize / nof_elem;
+  get_comma(2);
+  Inst *arg1 = get_preg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_preg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem / 2; i++)
+    {
+      Inst *inst = extract_vec_elem(arg1, elem_bitsize, 2 * i + odd);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  for (uint32_t i = 0; i < nof_elem / 2; i++)
+    {
+      Inst *inst = extract_vec_elem(arg2, elem_bitsize, 2 * i + odd);
+      res = bb->build_inst(Op::CONCAT, inst, res);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_index()
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -5359,6 +5410,10 @@ void Parser::parse_sve_preg_op()
     process_sve_ptrue();
   else if (name == "str")
     process_sve_str_preg();
+  else if (name == "uzp1")
+    process_sve_preg_uzp(false);
+  else if (name == "uzp2")
+    process_sve_preg_uzp(true);
   else if (name == "whilelo")
     process_sve_while();
   else
@@ -5532,6 +5587,10 @@ void Parser::parse_sve_op()
     process_sve_ext(Op::ZEXT, 16);
   else if (name == "uxtw")
     process_sve_ext(Op::ZEXT, 32);
+  else if (name == "uzp1")
+    process_sve_uzp(false);
+  else if (name == "uzp2")
+    process_sve_uzp(true);
   else
     throw Parse_error("unhandled sve instruction: "s + std::string(name),
 		      line_number);
