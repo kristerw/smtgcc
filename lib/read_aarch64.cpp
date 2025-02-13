@@ -21,6 +21,13 @@ enum class Predication_mode {
   zeroing, merging
 };
 
+// Value to use as the initial value in SVE reduction operations where
+// elements may be masked (non-masked operations use the first element
+// as the initial value).
+enum class Value {
+  umin, umax, smin, smax, fmin, fmax
+};
+
 struct Parser {
   Parser(aarch64_state *rstate) : rstate{rstate} {}
 
@@ -108,7 +115,7 @@ private:
   std::tuple<uint64_t, std::string_view> get_preg_(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_preg(unsigned idx,
 						  bool allow_no_type = false);
-  uint32_t get_reg_size(unsigned idx);
+  uint32_t get_reg_bitsize(unsigned idx);
   bool is_vector_op();
   bool is_sve_op();
   bool is_sve_preg_op();
@@ -141,6 +148,7 @@ private:
   void get_left_brace(unsigned idx);
   void get_right_brace(unsigned idx);
   void get_end_of_line(unsigned idx);
+  Inst *get_value(Value v, uint32_t bitsize);
   void write_reg(Inst *reg, Inst *value);
   Inst *build_cond(Cond_code cc);
   void process_cond_branch(Cond_code cc);
@@ -232,7 +240,9 @@ private:
   void process_vec_widen_pairwise_add(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op);
   void process_vec_widen_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op);
   void process_vec_widen2_binary(Op op, Op widen_op, bool high);
-  void process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_reduc_vreg(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_reduc_zreg(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Value init_value);
+  void process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Value init_value);
   void process_vec_reducl(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op op);
   void process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_widen(Op, bool high = false);
@@ -591,7 +601,7 @@ Inst *Parser::get_freg(unsigned idx)
 Inst *Parser::get_freg_value(unsigned idx)
 {
   Inst *inst = bb->build_inst(Op::READ, get_freg(idx));
-  return bb->build_trunc(inst, get_reg_size(idx));
+  return bb->build_trunc(inst, get_reg_bitsize(idx));
 }
 
 std::tuple<uint64_t, uint32_t, uint32_t> Parser::get_vreg_(unsigned idx)
@@ -847,7 +857,7 @@ std::tuple<Inst *, uint32_t, uint32_t> Parser::get_preg(unsigned idx, bool allow
 		    + std::string(token_string(tokens[idx])), line_number);
 }
 
-uint32_t Parser::get_reg_size(unsigned idx)
+uint32_t Parser::get_reg_bitsize(unsigned idx)
 {
   if (tokens.size() <= idx)
     throw Parse_error("expected more arguments", line_number);
@@ -1113,6 +1123,50 @@ void Parser::get_end_of_line(unsigned idx)
     throw Parse_error("expected end of line after "
 		      + std::string(token_string(tokens[idx - 1])),
 				    line_number);
+}
+
+Inst *Parser::get_value(Value value_enum, uint32_t bitsize)
+{
+  if (bitsize > 64)
+    throw Parse_error("get_value: Invalid bitsize", line_number);
+
+  unsigned __int128 value;
+  switch (value_enum)
+    {
+      case Value::umin:
+	value = 0;
+	break;
+      case Value::umax:
+	value = -1;
+	break;
+      case Value::smin:
+	value = 1ull << (bitsize - 1);
+	break;
+      case Value::smax:
+	value = (1ull << (bitsize - 1)) - 1;
+	break;
+      case Value::fmin:
+	if (bitsize == 16)
+	  value = 0xfc00;
+	else if (bitsize == 32)
+	  value = 0xff800000;
+	else if (bitsize == 64)
+	  value = 0xfff0000000000000ul;
+	else
+	  throw Parse_error("get_value: Invalid bitsize", line_number);
+	break;
+      case Value::fmax:
+	if (bitsize == 16)
+	  value = 0x7c00;
+	else if (bitsize == 32)
+	  value = 0x7f800000;
+	else if (bitsize == 64)
+	  value = 0x7ff0000000000000ul;
+	else
+	  throw Parse_error("get_value: Invalid bitsize", line_number);
+	break;
+    }
+  return bb->value_inst(value, bitsize);
 }
 
 void Parser::write_reg(Inst *reg, Inst *value)
@@ -1417,6 +1471,21 @@ Inst *gen_cnot(Basic_block *bb, Inst *elem)
   return bb->build_inst(Op::ZEXT, cmp, elem->bitsize);
 }
 
+Inst *gen_and(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::AND, elem1, elem2);
+}
+
+Inst *gen_xor(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::XOR, elem1, elem2);
+}
+
+Inst *gen_or(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::OR, elem1, elem2);
+}
+
 Inst *gen_bic(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   return bb->build_inst(Op::AND, elem1, bb->build_inst(Op::NOT, elem2));
@@ -1556,7 +1625,7 @@ void Parser::process_csel(Op op)
 void Parser::process_cset(Op op)
 {
   Inst *dest = get_reg(1);
-  uint32_t dest_bitsize = get_reg_size(1);
+  uint32_t dest_bitsize = get_reg_bitsize(1);
   get_comma(2);
   Cond_code cc = get_cc(3);
   get_end_of_line(4);
@@ -1752,7 +1821,7 @@ void Parser::process_load(uint32_t trunc_size, Op op)
   if (is_freg(1))
     {
       dest = get_freg(1);
-      size = get_reg_size(1) / 8;
+      size = get_reg_bitsize(1) / 8;
     }
   else
     {
@@ -1778,7 +1847,7 @@ void Parser::process_ldp()
   if (is_freg(1))
     {
       dest1 = get_freg(1);
-      size = get_reg_size(1) / 8;
+      size = get_reg_bitsize(1) / 8;
     }
   else
     {
@@ -1967,7 +2036,7 @@ void Parser::process_fccmp()
 void Parser::process_i2f(bool is_unsigned)
 {
   Inst *dest = get_freg(1);
-  uint32_t dest_bitsize = get_reg_size(1);
+  uint32_t dest_bitsize = get_reg_bitsize(1);
   get_comma(2);
   Inst *arg1 = get_reg_value(3);
   Inst *arg2 = nullptr;
@@ -1994,7 +2063,7 @@ void Parser::process_i2f(bool is_unsigned)
 void Parser::process_f2i(bool is_unsigned)
 {
   Inst *dest = get_reg(1);
-  uint32_t dest_bitsize = get_reg_size(1);
+  uint32_t dest_bitsize = get_reg_bitsize(1);
   get_comma(2);
   Inst *arg1 = get_reg_value(3);
   Inst *arg2 = nullptr;
@@ -2021,7 +2090,7 @@ void Parser::process_f2i(bool is_unsigned)
 void Parser::process_f2f()
 {
   Inst *dest = get_freg(1);
-  uint32_t dest_bitsize = get_reg_size(1);
+  uint32_t dest_bitsize = get_reg_bitsize(1);
   get_comma(2);
   Inst *arg1 = get_freg_value(3);
   get_end_of_line(4);
@@ -2293,7 +2362,7 @@ void Parser::process_fmov()
 void Parser::process_smov()
 {
   Inst *dest = get_reg(1);
-  uint32_t dest_bitsize = get_reg_size(1);
+  uint32_t dest_bitsize = get_reg_bitsize(1);
   get_comma(2);
   Inst *arg1 = process_last_scalar_vec_arg(3);
 
@@ -3280,7 +3349,7 @@ void Parser::process_vec_widen2_binary(Op op, Op widen_op, bool high)
   write_reg(dest, res);
 }
 
-void Parser::process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+void Parser::process_vec_reduc_vreg(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
 {
   Inst *dest = get_reg(1);
   get_comma(2);
@@ -3295,6 +3364,36 @@ void Parser::process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
       res = gen_elem(bb, res, elem1);
     }
   write_reg(dest, res);
+}
+
+void Parser::process_vec_reduc_zreg(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Value init_value)
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *pred = get_preg_value(3);
+  get_comma(4);
+  Inst *arg1 = get_zreg_value(5);
+  get_end_of_line(6);
+
+  uint32_t elem_bitsize = get_reg_bitsize(1);
+  uint32_t nof_elem = arg1->bitsize / elem_bitsize;
+  Inst *res = get_value(init_value, elem_bitsize);
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = gen_elem(bb, res, elem1);
+      Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+      res = bb->build_inst(Op::ITE, pred_elem, inst, res);
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Value init_value)
+{
+  if (is_preg(3))
+    process_vec_reduc_zreg(gen_elem, init_value);
+  else
+    process_vec_reduc_vreg(gen_elem);
 }
 
 void Parser::process_vec_reducl(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op op)
@@ -5839,37 +5938,39 @@ void Parser::parse_function()
 
   // SIMD reduce
   else if (name == "addv")
-    process_vec_reduc(gen_add);
+    process_vec_reduc(gen_add, Value::umin);
   else if (name == "fmaxnmv")
-    process_vec_reduc(gen_fmax);
+    process_vec_reduc(gen_fmax, Value::fmin);
   else if (name == "fminnmv")
-    process_vec_reduc(gen_fmin);
+    process_vec_reduc(gen_fmin, Value::fmax);
   else if (name == "saddlv")
     process_vec_reducl(gen_add, Op::SEXT);
   else if (name == "smaxv")
-    process_vec_reduc(gen_smax);
+    process_vec_reduc(gen_smax, Value::smin);
   else if (name == "sminv")
-    process_vec_reduc(gen_smin);
+    process_vec_reduc(gen_smin, Value::smax);
   else if (name == "uaddlv")
     process_vec_reducl(gen_add, Op::ZEXT);
   else if (name == "umaxv")
-    process_vec_reduc(gen_umax);
+    process_vec_reduc(gen_umax, Value::umin);
   else if (name == "uminv")
-    process_vec_reduc(gen_umin);
+    process_vec_reduc(gen_umin, Value::umax);
 
   // SIMD pairwise arithmetic
   else if (name == "addp")
-    process_vec_reduc(gen_add);
+    process_vec_reduc_vreg(gen_add);
   else if (name == "fmaxnmp")
-    process_vec_reduc(gen_fmax);
+    process_vec_reduc_vreg(gen_fmax);
   else if (name == "fminnmp")
-    process_vec_reduc(gen_fmin);
+    process_vec_reduc_vreg(gen_fmin);
 
   // SIMD unary
   else if (name == "sqxtn")
     process_unary(gen_sqxtn);
 
   // Misc scalar versions of SIMD and SVE instructions
+  else if (name == "andv")
+    process_vec_reduc_zreg(gen_and, Value::umax);
   else if (name == "addpl")
     process_addpl();
   else if (name == "addvl")
@@ -5890,6 +5991,8 @@ void Parser::parse_function()
     process_dec_inc(Op::SUB, 32);
   else if (name == "decd")
     process_dec_inc(Op::SUB, 64);
+  else if (name == "eorv")
+    process_vec_reduc_zreg(gen_xor, Value::umin);
   else if (name == "incb")
     process_dec_inc(Op::ADD, 8);
   else if (name == "inch")
@@ -5898,6 +6001,8 @@ void Parser::parse_function()
     process_dec_inc(Op::ADD, 32);
   else if (name == "incd")
     process_dec_inc(Op::ADD, 64);
+  else if (name == "orv")
+    process_vec_reduc_zreg(gen_or, Value::umin);
   else if (name == "sqadd")
     process_binary(gen_sat_sadd);
   else if (name == "sqsub")
