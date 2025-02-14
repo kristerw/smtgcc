@@ -150,6 +150,7 @@ private:
   void get_end_of_line(unsigned idx);
   Inst *get_value(Value v, uint32_t bitsize);
   void write_reg(Inst *reg, Inst *value);
+  void set_nzcv(Inst *n, Inst *z, Inst *c, Inst *v);
   Inst *build_cond(Cond_code cc);
   void process_cond_branch(Cond_code cc);
   void process_cbz(bool is_cbnz = false);
@@ -1177,6 +1178,22 @@ void Parser::write_reg(Inst *reg, Inst *value)
   bb->build_inst(Op::WRITE, reg, value);
 }
 
+void Parser::set_nzcv(Inst *n, Inst *z, Inst *c, Inst *v)
+{
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
+
+  Inst *not_z = bb->build_inst(Op::NOT, z);
+  Inst *hi = bb->build_inst(Op::AND, not_z, c);
+  Inst *lt = bb->build_inst(Op::NE, n, v);
+  Inst *gt = bb->build_inst(Op::AND, not_z, bb->build_inst(Op::EQ, n, v));
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::hi], hi);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::lt], lt);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::gt], gt);
+}
+
 Inst *Parser::build_cond(Cond_code cc)
 {
   switch (cc)
@@ -1210,45 +1227,28 @@ Inst *Parser::build_cond(Cond_code cc)
 	return bb->build_inst(Op::NOT, v);
       }
     case Cond_code::HI:
-      {
-	Inst *z = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z]);
-	Inst *c = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::c]);
-	Inst *not_z = bb->build_inst(Op::NOT, z);
-	return bb->build_inst(Op::AND, not_z, c);
-      }
+      return bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::hi]);
     case Cond_code::LS:
       {
-	Inst *z = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z]);
-	Inst *c = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::c]);
-	Inst *not_c = bb->build_inst(Op::NOT, c);
-	return bb->build_inst(Op::OR, z, not_c);
+	Inst *hi =
+	  bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::hi]);
+	return bb->build_inst(Op::NOT, hi);
       }
     case Cond_code::GE:
       {
-	Inst *n = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::n]);
-	Inst *v = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::v]);
-	return bb->build_inst(Op::EQ, n, v);
+	Inst *lt =
+	  bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::lt]);
+	return bb->build_inst(Op::NOT, lt);
       }
     case Cond_code::LT:
-      {
-	Inst *n = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::n]);
-	Inst *v = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::v]);
-	return bb->build_inst(Op::NE, n, v);
-      }
+      return bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::lt]);
     case Cond_code::GT:
-      {
-	Inst *n = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::n]);
-	Inst *z = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z]);
-	Inst *v = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::v]);
-	Inst *not_z = bb->build_inst(Op::NOT, z);
-	return bb->build_inst(Op::AND, not_z, bb->build_inst(Op::EQ, n, v));
-      }
+      return bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::gt]);
     case Cond_code::LE:
       {
-	Inst *n = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::n]);
-	Inst *z = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z]);
-	Inst *v = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::v]);
-	return bb->build_inst(Op::OR, z, bb->build_inst(Op::NE, n, v));
+	Inst *gt =
+	  bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::gt]);
+	return bb->build_inst(Op::NOT, gt);
       }
     }
 
@@ -1969,10 +1969,7 @@ void Parser::process_fcmp()
 
   Inst *v = any_is_nan;
 
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
+  set_nzcv(n, z, c, v);
 }
 
 void Parser::process_fccmp()
@@ -2026,10 +2023,7 @@ void Parser::process_fccmp()
   Inst *c = bb->build_inst(Op::ITE, cond, c1, c2);
   Inst *v = bb->build_inst(Op::ITE, cond, v1, v2);
 
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
+  set_nzcv(n, z, c, v);
 }
 
 void Parser::process_i2f(bool is_unsigned)
@@ -2889,6 +2883,15 @@ Inst *Parser::gen_sub_cond_flags(Inst *arg1, Inst *arg2)
   Inst *v = bb->build_inst(Op::OR, v1, v2);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
 
+  Inst *hi = bb->build_inst(Op::ULT, arg2, arg1);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::hi], hi);
+
+  Inst *lt = bb->build_inst(Op::SLT, arg1, arg2);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::lt], lt);
+
+  Inst *gt = bb->build_inst(Op::SLT, arg2, arg1);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::gt], gt);
+
   return res;
 }
 
@@ -2905,24 +2908,22 @@ Inst *Parser::gen_add_cond_flags(Inst *arg1, Inst *arg2)
   Inst *is_pos_res = bb->build_inst(Op::NOT, is_neg_res);
 
   Inst *n = is_neg_res;
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
 
   Inst *z = bb->build_inst(Op::EQ, res, zero);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
 
   Inst *c1 = bb->build_inst(Op::AND, is_neg_arg1, is_neg_arg2);
   Inst *c2 = bb->build_inst(Op::AND, is_neg_arg1, is_pos_res);
   Inst *c3 = bb->build_inst(Op::AND, is_neg_arg2, is_pos_res);
   Inst *c = bb->build_inst(Op::OR, c1, c2);
   c = bb->build_inst(Op::OR, c, c3);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
 
   Inst *v1 = bb->build_inst(Op::AND, is_neg_arg1, is_neg_arg2);
   v1 = bb->build_inst(Op::AND, v1, is_pos_res);
   Inst *v2 = bb->build_inst(Op::AND, is_pos_arg1, is_pos_arg2);
   v2 = bb->build_inst(Op::AND, v2, is_neg_res);
   Inst *v = bb->build_inst(Op::OR, v1, v2);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
+
+  set_nzcv(n, z, c, v);
 
   return res;
 }
@@ -2933,13 +2934,11 @@ Inst *Parser::gen_and_cond_flags(Inst *arg1, Inst *arg2)
 
   Inst *zero = bb->value_inst(0, res->bitsize);
   Inst *n = bb->build_inst(Op::SLT, res, zero);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
   Inst *z = bb->build_inst(Op::EQ, res, zero);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
   Inst *c = bb->value_inst(0, 1);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
   Inst *v = bb->value_inst(0, 1);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
+
+  set_nzcv(n, z, c, v);
 
   return res;
 }
@@ -3063,10 +3062,8 @@ void Parser::process_ccmp(bool is_ccmn)
   Inst *z = bb->build_inst(Op::ITE, cond, z1, z2);
   Inst *c = bb->build_inst(Op::ITE, cond, c1, c2);
   Inst *v = bb->build_inst(Op::ITE, cond, v1, v2);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
+
+  set_nzcv(n, z, c, v);
 }
 
 void Parser::process_dec_inc(Op op, uint32_t elem_bitsize)
@@ -5065,14 +5062,11 @@ void Parser::process_sve_while()
     }
 
   Inst *n = extract_vec_elem(res, 1, 0);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
   z = bb->build_inst(Op::NOT, z);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
   Inst *c = bb->build_inst(Op::NOT, last_cmp);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
   Inst *v = bb->value_inst(0, 1);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
 
+  set_nzcv(n, z, c, v);
   write_reg(dest, res);
 }
 
@@ -5299,14 +5293,11 @@ void Parser::process_sve_compare(Vec_cond op)
     }
 
   Inst *n = extract_vec_elem(res, 1, 0);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
   z = bb->build_inst(Op::NOT, z);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
   Inst *c = bb->build_inst(Op::NOT, last_cmp);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
   Inst *v = bb->value_inst(0, 1);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
 
+  set_nzcv(n, z, c, v);
   write_reg(dest, res);
 }
 

@@ -96,10 +96,12 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
   rstate.registers.push_back(bb->build_inst(Op::REGISTER, 64));
 
   // Condition flags: N, Z, C, V
-  rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
-  rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
-  rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
-  rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
+  for (int i = 0; i < 4; i++)
+    rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
+
+  // Pseudo condition flags
+  for (int i = 0; i < 3; i++)
+    rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
 
   // Create MEMORY instructions for the global variables we saw in the
   // GIMPLE IR.

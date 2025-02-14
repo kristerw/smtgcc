@@ -523,6 +523,11 @@ struct Aarch64RegIdx {
   static constexpr uint64_t z = 82;
   static constexpr uint64_t c = 83;
   static constexpr uint64_t v = 84;
+
+  // Pseudo condition flags
+  static constexpr uint64_t hi = 85;
+  static constexpr uint64_t lt = 86;
+  static constexpr uint64_t gt = 87;
 };
 
 struct aarch64_state {
