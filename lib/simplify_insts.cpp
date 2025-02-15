@@ -2340,11 +2340,12 @@ void destroy(Inst *inst)
   destroy_instruction(inst);
 }
 
-std::tuple<Inst *, Inst *, Inst *> get_const_ite(Inst *inst)
+// Return the ITE args, or nullptr if this is not an ITE instruction.
+// Here, "zext x" of a boolean x is treated as the ITE instruction
+// "ite x, 1, 0", and "sext x" is treated as "ite x, -1, 0".
+std::tuple<Inst *, Inst *, Inst *> get_ite_args(Inst *inst)
 {
-  if (inst->op == Op::ITE
-      && inst->args[1]->op == Op::VALUE
-      && inst->args[2]->op == Op::VALUE)
+  if (inst->op == Op::ITE)
     return {inst->args[0], inst->args[1], inst->args[2]};
   if (is_boolean_sext(inst))
     {
@@ -2361,6 +2362,84 @@ std::tuple<Inst *, Inst *, Inst *> get_const_ite(Inst *inst)
   return {nullptr, nullptr, nullptr};
 }
 
+// Create and simplify instructions:
+//   ite (op val1) (op val2)
+// where op is the operation of inst. The new instructions are placed
+// before inst.
+Inst *gen_ite_of_op(Inst *inst, Inst *cond, Inst *val1, Inst *val2)
+{
+  val1 = create_inst(inst->op, val1);
+  val1->insert_before(inst);
+  val1 = simplify_inst(val1);
+  val2 = create_inst(inst->op, val2);
+  val2->insert_before(inst);
+  val2 = simplify_inst(val2);
+  Inst *ite = create_inst(Op::ITE, cond, val1, val2);
+  ite->insert_before(inst);
+  ite = simplify_inst(ite);
+  return ite;
+}
+
+// Create and simplify instructions:
+//   ite (op val1, arg) (op val2, arg)
+// where op is the operation of inst and arg1 is the second argument of inst.
+// The new instructions are placed before inst.
+Inst *gen_ite_of_op1(Inst *inst, Inst *cond, Inst *val1, Inst *val2)
+{
+  if (inst->args[0] == inst->args[1])
+    {
+      val1 = create_inst(inst->op, val1, val1);
+      val1->insert_before(inst);
+      val1 = simplify_inst(val1);
+      val2 = create_inst(inst->op, val2, val2);
+      val2->insert_before(inst);
+      val2 = simplify_inst(val2);
+    }
+  else
+    {
+      val1 = create_inst(inst->op, val1, inst->args[1]);
+      val1->insert_before(inst);
+      val1 = simplify_inst(val1);
+      val2 = create_inst(inst->op, val2, inst->args[1]);
+      val2->insert_before(inst);
+      val2 = simplify_inst(val2);
+    }
+  Inst *ite = create_inst(Op::ITE, cond, val1, val2);
+  ite->insert_before(inst);
+  ite = simplify_inst(ite);
+  return ite;
+}
+
+// Create and simplify instructions
+//   ite (op arg, val1) (op arg, val2)
+// where op is the operation of inst and arg1 is the first argument of inst.
+// The new instructions are placed before inst.
+Inst *gen_ite_of_op2(Inst *inst, Inst *cond, Inst *val1, Inst *val2)
+{
+  if (inst->args[0] == inst->args[1])
+    {
+      val1 = create_inst(inst->op, val1, val1);
+      val1->insert_before(inst);
+      val1 = simplify_inst(val1);
+      val2 = create_inst(inst->op, val2, val2);
+      val2->insert_before(inst);
+      val2 = simplify_inst(val2);
+    }
+  else
+    {
+      val1 = create_inst(inst->op, inst->args[0], val1);
+      val1->insert_before(inst);
+      val1 = simplify_inst(val1);
+      val2 = create_inst(inst->op, inst->args[0], val2);
+      val2->insert_before(inst);
+      val2 = simplify_inst(val2);
+    }
+  Inst *ite = create_inst(Op::ITE, cond, val1, val2);
+  ite->insert_before(inst);
+  ite = simplify_inst(ite);
+  return ite;
+}
+
 // If one argument is an ITE instruction where both values are
 // constants, and the other argument is also a constant, then
 // the instruction is constant-folded (if possible) into the ITE
@@ -2372,130 +2451,75 @@ Inst *simplify_over_ite_arg(Inst *inst)
   if (!inst->has_lhs())
     return inst;
 
-  switch (inst->iclass())
+  if (inst->iclass() == Inst_class::iunary)
     {
-    case Inst_class::iunary:
-      {
-	auto [cond, val1, val2] = get_const_ite(inst->args[0]);
-	if (cond)
-	  {
-	    val1 = create_inst(inst->op, val1);
-	    val1->insert_before(inst);
-	    val1 = simplify_inst(val1);
-	    val2 = create_inst(inst->op, val2);
-	    val2->insert_before(inst);
-	    val2 = simplify_inst(val2);
-	    Inst *ite = create_inst(Op::ITE, cond, val1, val2);
-	    ite->insert_before(inst);
-	    ite = simplify_inst(ite);
-	    return ite;
-	  }
-      }
-      break;
-    case Inst_class::ibinary:
-      if (inst->args[1]->op == Op::VALUE)
-      {
-	auto [cond, val1, val2] = get_const_ite(inst->args[0]);
-	if (cond)
-	  {
-	    val1 = create_inst(inst->op, val1, inst->args[1]);
-	    val1->insert_before(inst);
-	    val1 = simplify_inst(val1);
-	    val2 = create_inst(inst->op, val2, inst->args[1]);
-	    val2->insert_before(inst);
-	    val2 = simplify_inst(val2);
-	    Inst *ite = create_inst(Op::ITE, cond, val1, val2);
-	    ite->insert_before(inst);
-	    ite = simplify_inst(ite);
-	    return ite;
-	  }
-      }
-      break;
-    default:
-      break;
+      auto [cond, val1, val2] = get_ite_args(inst->args[0]);
+      if (cond && val1->op == Op::VALUE && val2->op == Op::VALUE)
+	return gen_ite_of_op(inst, cond, val1, val2);
     }
+  else if (inst->iclass() == Inst_class::ibinary)
+    {
+      Inst *const arg1 = inst->args[0];
+      Inst *const arg2 = inst->args[1];
+      auto [a1_cond, a1_val1, a1_val2] = get_ite_args(arg1);
+      auto [a2_cond, a2_val1, a2_val2] = get_ite_args(arg2);
 
-  // It makes sense to transform some binary instructions even if the other
-  // argument is not constant. For example, AND if one of the ITE values
-  // is 0 or -1.
-  if (inst->op == Op::AND || inst->op == Op::OR)
-    {
-      Inst *arg1 = inst->args[0];
-      Inst *arg2 = inst->args[1];
-      if (arg1->op != Op::ITE
-	  && !is_boolean_sext(arg1)
-	  && !is_boolean_zext(arg1))
-	std::swap(arg1, arg2);
-      auto [cond, val1, val2] = get_const_ite(arg1);
-      if (cond
-	  && (is_value_zero(val1)
-	      || is_value_zero(val2)
-	      || is_value_m1(val1)
-	      || is_value_m1(val2)))
+      if (inst->args[1]->op == Op::VALUE)
 	{
-	  val1 = create_inst(inst->op, val1, arg2);
-	  val1->insert_before(inst);
-	  val1 = simplify_inst(val1);
-	  val2 = create_inst(inst->op, val2, arg2);
-	  val2->insert_before(inst);
-	  val2 = simplify_inst(val2);
-	  Inst *ite = create_inst(Op::ITE, cond, val1, val2);
-	  ite->insert_before(inst);
-	  ite = simplify_inst(ite);
-	  return ite;
+	  if (a1_cond && a1_val1->op == Op::VALUE && a1_val2->op == Op::VALUE)
+	    return gen_ite_of_op1(inst, a1_cond, a1_val1, a1_val2);
 	}
-    }
-  if (inst->op == Op::ADD || inst->op == Op::SADD_WRAPS)
-    {
-      Inst *arg1 = inst->args[0];
-      Inst *arg2 = inst->args[1];
-      if (arg1->op != Op::ITE
-	  && !is_boolean_sext(arg1)
-	  && !is_boolean_zext(arg1))
-	std::swap(arg1, arg2);
-      auto [cond, val1, val2] = get_const_ite(arg1);
-      if (cond
-	  && (is_value_zero(val1) || is_value_zero(val2)))
+
+      // It makes sense to transform some binary instructions even if the
+      // other argument is not constant. For example, AND if one of the ITE
+      // values is 0 or -1.
+      if (inst->op == Op::ADD
+	  || inst->op == Op::SADD_WRAPS
+	  || inst->op == Op::XOR)
 	{
-	  val1 = create_inst(inst->op, val1, arg2);
-	  val1->insert_before(inst);
-	  val1 = simplify_inst(val1);
-	  val2 = create_inst(inst->op, val2, arg2);
-	  val2->insert_before(inst);
-	  val2 = simplify_inst(val2);
-	  Inst *ite = create_inst(Op::ITE, cond, val1, val2);
-	  ite->insert_before(inst);
-	  ite = simplify_inst(ite);
-	  return ite;
+	  if (a1_cond && (is_value_zero(a1_val1) || is_value_zero(a1_val2)))
+	    return gen_ite_of_op1(inst, a1_cond, a1_val1, a1_val2);
+	  if (a2_cond && (is_value_zero(a2_val1) || is_value_zero(a2_val2)))
+	    return gen_ite_of_op2(inst, a2_cond, a2_val1, a2_val2);
 	}
-    }
-  if (inst->op == Op::MUL || inst->op == Op::SMUL_WRAPS)
-    {
-      Inst *arg1 = inst->args[0];
-      Inst *arg2 = inst->args[1];
-      if (arg1->op != Op::ITE
-	  && !is_boolean_sext(arg1)
-	  && !is_boolean_zext(arg1))
-	std::swap(arg1, arg2);
-      auto [cond, val1, val2] = get_const_ite(arg1);
-      if (cond
-	  && (is_value_zero(val1)
-	      || is_value_zero(val2)
-	      || is_value_m1(val1)
-	      || is_value_m1(val2)
-	      || is_value_one(val1)
-	      || is_value_one(val2)))
+      else if (inst->op == Op::AND || inst->op == Op::OR)
 	{
-	  val1 = create_inst(inst->op, val1, arg2);
-	  val1->insert_before(inst);
-	  val1 = simplify_inst(val1);
-	  val2 = create_inst(inst->op, val2, arg2);
-	  val2->insert_before(inst);
-	  val2 = simplify_inst(val2);
-	  Inst *ite = create_inst(Op::ITE, cond, val1, val2);
-	  ite->insert_before(inst);
-	  ite = simplify_inst(ite);
-	  return ite;
+	  if (a1_cond
+	      && (is_value_zero(a1_val1)
+		  || is_value_zero(a1_val2)
+		  || is_value_m1(a1_val1)
+		  || is_value_m1(a1_val2)))
+	    return gen_ite_of_op1(inst, a1_cond, a1_val1, a1_val2);
+	  if (a2_cond
+	      && (is_value_zero(a2_val1)
+		  || is_value_zero(a2_val2)
+		  || is_value_m1(a2_val1)
+		  || is_value_m1(a2_val2)))
+	    return gen_ite_of_op2(inst, a2_cond, a2_val1, a2_val2);
+	}
+      else if (inst->op == Op::MUL || inst->op == Op::SMUL_WRAPS)
+	{
+	  if (a1_cond
+	      && (is_value_zero(a1_val1)
+		  || is_value_zero(a1_val2)
+		  || is_value_m1(a1_val1)
+		  || is_value_m1(a1_val2)
+		  || is_value_one(a1_val1)
+		  || is_value_one(a1_val2)))
+	    return gen_ite_of_op1(inst, a1_cond, a1_val1, a1_val2);
+	  if (a2_cond
+	      && (is_value_zero(a2_val1)
+		  || is_value_zero(a2_val2)
+		  || is_value_m1(a2_val1)
+		  || is_value_m1(a2_val2)
+		  || is_value_one(a2_val1)
+		  || is_value_one(a2_val2)))
+	    return gen_ite_of_op2(inst, a2_cond, a2_val1, a2_val2);
+	}
+      else if (inst->op == Op::SUB || inst->op == Op::SSUB_WRAPS)
+	{
+	  if (a2_cond && (is_value_zero(a2_val1) || is_value_zero(a2_val2)))
+	    return gen_ite_of_op2(inst, a2_cond, a2_val1, a2_val2);
 	}
     }
 
