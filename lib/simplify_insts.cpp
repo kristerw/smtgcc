@@ -910,6 +910,16 @@ Inst *simplify_xor(Inst *inst)
       return new_inst2;
     }
 
+  // xor (xor x, y), x -> y
+  if (arg1->op == Op::XOR && arg1->args[0] == arg2)
+    return arg1->args[1];
+  if (arg1->op == Op::XOR && arg1->args[1] == arg2)
+    return arg1->args[0];
+  if (arg2->op == Op::XOR && arg2->args[0] == arg1)
+    return arg2->args[1];
+  if (arg2->op == Op::XOR && arg2->args[1] == arg1)
+    return arg2->args[0];
+
   return inst;
 }
 
