@@ -1186,9 +1186,10 @@ void Parser::set_nzcv(Inst *n, Inst *z, Inst *c, Inst *v)
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
 
   Inst *not_z = bb->build_inst(Op::NOT, z);
+  Inst *not_lt = bb->build_inst(Op::EQ, n, v);
   Inst *hi = bb->build_inst(Op::AND, not_z, c);
-  Inst *lt = bb->build_inst(Op::NE, n, v);
-  Inst *gt = bb->build_inst(Op::AND, not_z, bb->build_inst(Op::EQ, n, v));
+  Inst *lt = bb->build_inst(Op::NOT, not_lt);
+  Inst *gt = bb->build_inst(Op::AND, not_z, not_lt);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::hi], hi);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::lt], lt);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::gt], gt);
@@ -3054,16 +3055,35 @@ void Parser::process_ccmp(bool is_ccmn)
   Inst *z1 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z]);
   Inst *c1 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::c]);
   Inst *v1 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::v]);
+  Inst *hi1 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::hi]);
+  Inst *lt1 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::lt]);
+  Inst *gt1 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::gt]);
+
   Inst *n2 = bb->build_extract_bit(arg3, 3);
   Inst *z2 = bb->build_extract_bit(arg3, 2);
   Inst *c2 = bb->build_extract_bit(arg3, 1);
   Inst *v2 = bb->build_extract_bit(arg3, 0);
+  Inst *not_z2 = bb->build_inst(Op::NOT, z2);
+  Inst *not_lt2 = bb->build_inst(Op::EQ, n2, v2);
+  Inst *hi2 = bb->build_inst(Op::AND, not_z2, c2);
+  Inst *lt2 = bb->build_inst(Op::NOT, not_lt2);
+  Inst *gt2 = bb->build_inst(Op::AND, not_z2, not_lt2);
+
   Inst *n = bb->build_inst(Op::ITE, cond, n1, n2);
   Inst *z = bb->build_inst(Op::ITE, cond, z1, z2);
   Inst *c = bb->build_inst(Op::ITE, cond, c1, c2);
   Inst *v = bb->build_inst(Op::ITE, cond, v1, v2);
+  Inst *hi = bb->build_inst(Op::ITE, cond, hi1, hi2);
+  Inst *lt = bb->build_inst(Op::ITE, cond, lt1, lt2);
+  Inst *gt = bb->build_inst(Op::ITE, cond, gt1, gt2);
 
-  set_nzcv(n, z, c, v);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::hi], hi);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::lt], lt);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::gt], gt);
 }
 
 void Parser::process_dec_inc(Op op, uint32_t elem_bitsize)
