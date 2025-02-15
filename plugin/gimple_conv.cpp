@@ -3125,21 +3125,17 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       }
     case POINTER_DIFF_EXPR:
       {
+	Inst *res = bb->build_inst(Op::SUB, arg1, arg2);
+
 	// Pointers are treated as unsigned, and the result must fit in
 	// a signed integer of the same width.
 	assert(arg1->bitsize == arg2->bitsize);
 	Inst *earg1 = bb->build_inst(Op::ZEXT, arg1, arg1->bitsize + 1);
 	Inst *earg2 = bb->build_inst(Op::ZEXT, arg2, arg2->bitsize + 1);
-	Inst *eres = bb->build_inst(Op::SUB, earg1, earg2);
-	int bitsize = arg1->bitsize;
-	Inst *etop_bit_idx = bb->value_inst(bitsize, 32);
-	Inst *etop_bit =
-	  bb->build_inst(Op::EXTRACT, eres, etop_bit_idx, etop_bit_idx);
-	Inst *top_bit_idx = bb->value_inst(bitsize - 1, 32);
-	Inst *top_bit =
-	  bb->build_inst(Op::EXTRACT, eres, top_bit_idx, top_bit_idx);
-	Inst *cmp = bb->build_inst(Op::NE, top_bit, etop_bit);
-	bb->build_inst(Op::UB, cmp);
+	Inst *esub = bb->build_inst(Op::SUB, earg1, earg2);
+	Inst *eres = bb->build_inst(Op::SEXT, res, arg2->bitsize + 1);
+	Inst *is_ub = bb->build_inst(Op::NE, esub, eres);
+	bb->build_inst(Op::UB, is_ub);
 
 	// TODO: Implement correct indef handling.
 	if (arg1_indef)
@@ -3148,7 +3144,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	  build_ub_if_not_zero(arg2_indef);
 	res_indef = nullptr;
 
-	return {bb->build_trunc(eres, bitsize), res_indef, nullptr};
+	return {res, res_indef, nullptr};
       }
     case RROTATE_EXPR:
       {
