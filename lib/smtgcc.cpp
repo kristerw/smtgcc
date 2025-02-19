@@ -13,7 +13,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 91> inst_info{{
+const std::array<Inst_info, 92> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -50,6 +50,7 @@ const std::array<Inst_info, 91> inst_info{{
   {"not", Op::NOT, Inst_class::iunary, true, false},
   {"read", Op::READ, Inst_class::iunary, true, false},
   {"register", Op::REGISTER, Inst_class::iunary, true, false},
+  {"simp_barrier", Op::SIMP_BARRIER, Inst_class::iunary, true, false},
   {"src_assert", Op::SRC_ASSERT, Inst_class::iunary, false, false},
   {"tgt_assert", Op::TGT_ASSERT, Inst_class::iunary, false, false},
   {"ub", Op::UB, Inst_class::iunary, false, false},

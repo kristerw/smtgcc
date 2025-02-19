@@ -310,6 +310,9 @@ void Converter::build_bv_unary_smt(const Inst *inst)
     case Op::NOT:
       inst2bv.insert({inst, solver.mkTerm(cvc5::BITVECTOR_NOT, {arg1})});
       break;
+    case Op::SIMP_BARRIER:
+      inst2bv.insert({inst, arg1});
+      break;
     case Op::SRC_ASSERT:
       assert(!src_assert);
       src_assert = inst->args[0];

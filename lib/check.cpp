@@ -794,6 +794,8 @@ std::pair<Inst *, Inst *> Converter::simplify_array_access(Inst *array, Inst *ad
 	  value = value_inst(0, array->bb->func->module->ptr_offset_bits);
 	  break;
 	}
+      else if (array->op == Op::SIMP_BARRIER)
+	array = array->args[0];
       else
 	break;
     }
@@ -855,6 +857,8 @@ Inst *Converter::strip_local_mem(Inst *array, std::map<Inst *, Inst *>& cache)
 	    }
 	  break;
 	}
+      else if (array->op == Op::SIMP_BARRIER)
+	array = array->args[0];
       else
 	break;
     }
@@ -1224,6 +1228,16 @@ void Converter::convert_function(Function *func, Function_role role)
 	      Inst *inst = translate.at(phi->phi_args[i].inst);
 	      phi_inst = build_inst(Op::ITE, cond, inst, phi_inst);
 	    }
+	  // simplify_inst may move instructions over Op::ITE. This is
+	  // not always a good idea for the chains of ITE we generate
+	  // here, as it may generate a large number of extra instructions
+	  // for phi nodes with many arguments and/or many users.
+	  // We therefore add a barrier to prevent this optimization for
+	  // large phi nodes.
+	  // TODO: Tune this to better detect when the optimization is
+	  // helpful and avoid adding the barrier in those cases.
+	  if (phi->phi_args.size() > 2)
+	    phi_inst = build_inst(Op::SIMP_BARRIER, phi_inst);
 	  translate.insert({phi, phi_inst});
 	}
 
