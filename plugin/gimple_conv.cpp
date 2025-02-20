@@ -76,6 +76,8 @@ struct Converter {
   std::map<basic_block, Basic_block *> gccbb_top2bb;
   std::map<basic_block, Basic_block *> gccbb_bottom2bb;
   std::map<Basic_block *, std::pair<Inst *, Inst *> > bb2retval;
+  std::set<Basic_block *> bb_abort;
+  std::map<Basic_block *, Inst *> bb2exit;
   std::map<tree, Inst *> tree2instruction;
   std::map<tree, Inst *> tree2indef;
   std::map<tree, Inst *> tree2prov;
@@ -158,6 +160,7 @@ struct Converter {
   void process_cfn_unary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, tree)>& gen_elem);
   void process_cfn_binary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem);
   void process_cfn_abd(gimple *stmt);
+  void process_cfn_abort(gimple *stmt);
   void process_cfn_add_overflow(gimple *stmt);
   void process_cfn_bit_andn(gimple *stmt);
   void process_cfn_bit_iorn(gimple *stmt);
@@ -172,6 +175,7 @@ struct Converter {
   void process_cfn_copysign(gimple *stmt);
   void process_cfn_ctz(gimple *stmt);
   void process_cfn_divmod(gimple *stmt);
+  void process_cfn_exit(gimple *stmt);
   void process_cfn_expect(gimple *stmt);
   void process_cfn_fabs(gimple *stmt);
   void process_cfn_ffs(gimple *stmt);
@@ -224,6 +228,7 @@ struct Converter {
 				Basic_block *bb);
   void process_gimple_switch(gimple *stmt, Basic_block *bb);
   Basic_block *get_phi_arg_bb(gphi *phi, int i);
+  void generate_exit_inst();
   void generate_return_inst();
   void init_var_values(tree initial, Inst *mem_inst);
   void init_var(tree decl, Inst *mem_inst);
@@ -4229,6 +4234,22 @@ void Converter::process_cfn_abd(gimple *stmt)
   process_cfn_binary(stmt, gen_elem);
 }
 
+void Converter::process_cfn_abort(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 0);
+  // We may fail to check the abort call if there is UB after the call
+  // in this basic block. This should not happen, as abort is marked as
+  // noreturn, but it is unclear to me if this is guaranteed in GIMPLE.
+  // We therefore ensure that we branch to the exit block and create a
+  // new dead block for the remaining instructions, if any.
+  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
+  Basic_block *exit_bb = gccbb_top2bb.at(gcc_exit_block);
+  Basic_block *dead_bb = func->build_bb();
+  bb->build_br_inst(bb->value_inst(1, 1), exit_bb, dead_bb);
+  bb_abort.insert(bb);
+  bb = dead_bb;
+}
+
 void Converter::process_cfn_add_overflow(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 2);
@@ -4872,6 +4893,23 @@ void Converter::process_cfn_ctz(gimple *stmt)
     }
   constrain_range(bb, lhs, res);
   tree2instruction.insert({lhs, res});
+}
+
+void Converter::process_cfn_exit(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 1);
+  Inst *arg1 = tree2inst(gimple_call_arg(stmt, 0));
+  // We may fail to check the exit call if there is UB after the call
+  // in this basic block. This should not happen, as exit is marked as
+  // noreturn, but it is unclear to me if this is guaranteed in GIMPLE.
+  // We therefore ensure that we branch to the exit block and create a
+  // new dead block for the remaining instructions, if any.
+  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
+  Basic_block *exit_bb = gccbb_top2bb.at(gcc_exit_block);
+  Basic_block *dead_bb = func->build_bb();
+  bb->build_br_inst(bb->value_inst(1, 1), exit_bb, dead_bb);
+  bb2exit.insert({bb, arg1});
+  bb = dead_bb;
 }
 
 void Converter::process_cfn_divmod(gimple *stmt)
@@ -6474,6 +6512,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BIT_IORN:
       process_cfn_bit_iorn(stmt);
       break;
+    case CFN_BUILT_IN_ABORT:
+      process_cfn_abort(stmt);
+      break;
     case CFN_BUILT_IN_ASSUME_ALIGNED:
       process_cfn_assume_aligned(stmt);
       break;
@@ -6511,6 +6552,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BUILT_IN_CTZLL:
     case CFN_CTZ:
       process_cfn_ctz(stmt);
+      break;
+    case CFN_BUILT_IN_EXIT:
+      process_cfn_exit(stmt);
       break;
     case CFN_BUILT_IN_EXPECT:
     case CFN_BUILT_IN_EXPECT_WITH_PROBABILITY:
@@ -6924,6 +6968,32 @@ Inst *split_phi(Inst *phi, uint64_t elem_bitsize, std::map<std::pair<Inst *, uin
     }
 
   return res;
+}
+
+void Converter::generate_exit_inst()
+{
+  if (bb_abort.empty() && bb2exit.empty())
+    return;
+
+  Inst *abort_called = bb->build_phi_inst(1);
+  Inst *exit_called = bb->build_phi_inst(1);
+  Inst *exit_val = bb->build_phi_inst(bitsize_for_type(integer_type_node));
+  for (Basic_block *pred_bb : bb->preds)
+    {
+      Inst *a = bb->value_inst(bb_abort.contains(pred_bb), 1);
+      abort_called->add_phi_arg(a, pred_bb);
+
+      Inst *e = bb->value_inst(bb2exit.contains(pred_bb), 1);
+      exit_called->add_phi_arg(e, pred_bb);
+
+      Inst *v;
+      if (bb2exit.contains(pred_bb))
+	v = bb2exit[pred_bb];
+      else
+	v = bb->value_inst(0, exit_val->bitsize);
+      exit_val->add_phi_arg(v, pred_bb);
+    }
+  bb->build_inst(Op::EXIT, abort_called, exit_called, exit_val);
 }
 
 void Converter::generate_return_inst()
@@ -7610,7 +7680,10 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	      bb->build_br_inst(gccbb_top2bb.at(gcc_exit_block));
 	    }
 	  else
-	    generate_return_inst();
+	    {
+	      generate_exit_inst();
+	      generate_return_inst();
+	    }
 	}
       else if (cond_stmt)
 	{

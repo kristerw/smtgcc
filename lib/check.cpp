@@ -125,6 +125,9 @@ class Converter {
   Inst *src_retval_indef = nullptr;
   Inst *src_unique_ub = nullptr;
   Inst *src_common_ub = nullptr;
+  Inst *src_abort  = nullptr;
+  Inst *src_exit = nullptr;
+  Inst *src_exit_val  = nullptr;
   Inst *tgt_memory = nullptr;
   Inst *tgt_memory_size = nullptr;
   Inst *tgt_memory_indef = nullptr;
@@ -132,6 +135,9 @@ class Converter {
   Inst *tgt_retval_indef = nullptr;
   Inst *tgt_unique_ub = nullptr;
   Inst *tgt_common_ub = nullptr;
+  Inst *tgt_abort  = nullptr;
+  Inst *tgt_exit = nullptr;
+  Inst *tgt_exit_val  = nullptr;
 
   void add_ub(Basic_block *bb, Inst *cond);
   void add_assert(Basic_block *bb, Inst *cond);
@@ -1144,6 +1150,38 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
 	}
       return;
     }
+  else if (inst->op == Op::EXIT)
+    {
+      Inst *arg1 = translate.at(inst->args[0]);
+      Inst *arg2 = translate.at(inst->args[1]);
+      Inst *arg3 = translate.at(inst->args[2]);
+      if (!is_value_zero(arg1)
+	  || !is_value_zero(arg2)
+	  || !is_value_zero(arg3))
+	{
+	  if (role == Function_role::src)
+	    {
+	      assert(!src_abort);
+	      assert(!src_exit);
+	      assert(!src_exit_val);
+	      src_abort = arg1;
+	      src_exit = arg2;
+	      src_exit_val = arg3;
+	      build_inst(Op::SRC_EXIT, arg1, arg2, arg3);
+	    }
+	  else
+	    {
+	      assert(!tgt_abort);
+	      assert(!tgt_exit);
+	      assert(!tgt_exit_val);
+	      tgt_abort = arg1;
+	      tgt_exit = arg2;
+	      tgt_exit_val = arg3;
+	      build_inst(Op::TGT_EXIT, arg1, arg2, arg3);
+	    }
+	}
+      return;
+    }
   else
     {
       assert(inst->op == Op::PRINT || inst->has_lhs());
@@ -1322,6 +1360,11 @@ bool Converter::need_checking()
   if ((src_common_ub->op == Op::VALUE && src_common_ub->value() != 0)
       || (src_unique_ub->op == Op::VALUE && src_unique_ub->value() != 0))
     return false;
+
+  if (src_abort != tgt_abort
+      || src_exit != tgt_exit
+      || src_exit_val != tgt_exit_val)
+    return true;
 
   if (src_retval != tgt_retval
       || src_retval_indef != tgt_retval_indef)
@@ -1514,11 +1557,11 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
       if (!stats.cvc5.skipped || !stats.z3.skipped)
 	{
 	  fprintf(stderr, "SMTGCC: time: ");
-	  for (int i = 0; i < 3; i++)
+	  for (int i = 0; i < 4; i++)
 	    {
 	      fprintf(stderr, "%s%" PRIu64, i ? "," : "", stats.cvc5.time[i]);
 	    }
-	  for (int i = 0; i < 3; i++)
+	  for (int i = 0; i < 4; i++)
 	    {
 	      fprintf(stderr, "%s%" PRIu64, ",", stats.z3.time[i]);
 	    }

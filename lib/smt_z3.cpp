@@ -60,6 +60,9 @@ public:
   Inst *src_retval_indef = nullptr;
   Inst *src_unique_ub = nullptr;
   Inst *src_common_ub = nullptr;
+  Inst *src_abort  = nullptr;
+  Inst *src_exit = nullptr;
+  Inst *src_exit_val  = nullptr;
 
   Inst *tgt_assert = nullptr;
   Inst *tgt_memory = nullptr;
@@ -69,6 +72,9 @@ public:
   Inst *tgt_retval_indef = nullptr;
   Inst *tgt_unique_ub = nullptr;
   Inst *tgt_common_ub = nullptr;
+  Inst *tgt_abort  = nullptr;
+  Inst *tgt_exit = nullptr;
+  Inst *tgt_exit_val  = nullptr;
 };
 
 z3::expr Converter::ite(z3::expr c, z3::expr a, z3::expr b)
@@ -641,6 +647,22 @@ void Converter::build_ternary_smt(const Inst *inst)
       tgt_memory_size = inst->args[1];
       tgt_memory_indef = inst->args[2];
       return;
+    case Op::SRC_EXIT:
+      assert(!src_abort);
+      assert(!src_exit);
+      assert(!src_exit_val);
+      src_abort = inst->args[0];
+      src_exit = inst->args[1];
+      src_exit_val = inst->args[2];
+      return;
+    case Op::TGT_EXIT:
+      assert(!tgt_abort);
+      assert(!tgt_exit);
+      assert(!tgt_exit_val);
+      tgt_abort = inst->args[0];
+      tgt_exit = inst->args[1];
+      tgt_exit_val = inst->args[2];
+      return;
     default:
       throw Not_implemented("build_ternary_smt: "s + inst->name());
     }
@@ -811,6 +833,21 @@ void Converter::convert_function()
       src_retval_indef = nullptr;
       tgt_retval_indef = nullptr;
     }
+
+  if (!src_abort && tgt_abort)
+    {
+      Basic_block *bb = func->bbs[0];
+      src_abort = bb->value_inst(0, 1);
+      src_exit = bb->value_inst(0, 1);
+      src_exit_val = bb->value_inst(0, tgt_exit_val->bitsize);
+    }
+  if (!tgt_abort && src_abort)
+    {
+      Basic_block *bb = func->bbs[0];
+      tgt_abort = bb->value_inst(0, 1);
+      tgt_exit = bb->value_inst(0, 1);
+      tgt_exit_val = bb->value_inst(0, src_exit_val->bitsize);
+    }
 }
 
 Solver_result run_solver(z3::solver& s, const char *str)
@@ -884,6 +921,49 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 
   std::string warning;
 
+  // Check that the function calls abort/exit identically for src and tgt.
+  if (conv.src_abort != conv.tgt_abort
+      || conv.src_exit != conv.tgt_exit
+      || conv.src_exit_val != conv.tgt_exit_val)
+    {
+      z3::expr src_abort_expr = conv.inst_as_bool(conv.src_abort);
+      z3::expr tgt_abort_expr = conv.inst_as_bool(conv.tgt_abort);
+      z3::expr src_exit_expr = conv.inst_as_bool(conv.src_exit);
+      z3::expr tgt_exit_expr = conv.inst_as_bool(conv.tgt_exit);
+      z3::expr src_exit_val_expr = conv.inst_as_bv(conv.src_exit_val);
+      z3::expr tgt_exit_val_expr = conv.inst_as_bv(conv.tgt_exit_val);
+
+      z3::solver solver(ctx);
+      solver.add(!src_common_ub_expr);
+      solver.add(!src_unique_ub_expr);
+      solver.add(src_abort_expr != tgt_abort_expr
+		 || src_exit_expr != tgt_exit_expr
+		 || (src_exit_expr && (src_exit_val_expr != tgt_exit_val_expr)));
+      uint64_t start_time = get_time();
+      Solver_result solver_result = run_solver(solver, "abort/exit");
+      stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
+      if (solver_result.status == Result_status::incorrect)
+	{
+	  assert(solver_result.message);
+	  z3::model model = solver.get_model();
+	  std::string msg = *solver_result.message;
+	  msg = msg + "src abort: " + model.eval(src_abort_expr).to_string() + "\n";
+	  msg = msg + "tgt abort: " + model.eval(tgt_abort_expr).to_string() + "\n";
+	  msg = msg + "src exit: " + model.eval(src_exit_expr).to_string() + "\n";
+	  msg = msg + "tgt exit: " + model.eval(tgt_exit_expr).to_string() + "\n";
+	  msg = msg + "src exit value: " + model.eval(src_exit_val_expr).to_string() + "\n";
+	  msg = msg + "tgt exit value: " + model.eval(tgt_exit_val_expr).to_string() + "\n";
+	  add_print(msg, conv, solver);
+	  Solver_result result = {Result_status::incorrect, msg};
+	  return std::pair<SStats, Solver_result>(stats, result);
+	}
+      if (solver_result.status == Result_status::unknown)
+	{
+	  assert(solver_result.message);
+	  warning = warning + *solver_result.message;
+	}
+    }
+
   // Check that the returned value (if any) is the same for src and tgt.
   if (conv.src_retval != conv.tgt_retval
       || conv.src_retval_indef != conv.tgt_retval_indef)
@@ -916,10 +996,14 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
       z3::solver solver(ctx);
       solver.add(!src_common_ub_expr);
       solver.add(!src_unique_ub_expr);
+      if (conv.src_abort)
+	solver.add(!conv.inst_as_bool(conv.src_abort));
+      if (conv.src_exit)
+	solver.add(!conv.inst_as_bool(conv.src_exit));
       solver.add((src_expr != tgt_expr) || is_more_indef);
       uint64_t start_time = get_time();
       Solver_result solver_result = run_solver(solver, "retval");
-      stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
+      stats.time[1] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
 	  assert(solver_result.message);
@@ -985,7 +1069,7 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 
     uint64_t start_time = get_time();
     Solver_result solver_result = run_solver(solver, "Memory");
-    stats.time[1] = std::max(get_time() - start_time, (uint64_t)1);
+    stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
     if (solver_result.status == Result_status::incorrect)
       {
 	assert(solver_result.message);
@@ -1023,7 +1107,7 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
     solver.add(tgt_unique_ub_expr);
     uint64_t start_time = get_time();
     Solver_result solver_result = run_solver(solver, "UB");
-    stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
+    stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
     if (solver_result.status == Result_status::incorrect)
       {
 	assert(solver_result.message);

@@ -13,7 +13,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 92> inst_info{{
+const std::array<Inst_info, 95> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -105,10 +105,13 @@ const std::array<Inst_info, 92> inst_info{{
   {"array_set_size", Op::ARRAY_SET_SIZE, Inst_class::ternary, true, false},
   {"array_set_indef", Op::ARRAY_SET_INDEF, Inst_class::ternary, true, false},
   {"array_store", Op::ARRAY_STORE, Inst_class::ternary, true, false},
+  {"exit", Op::EXIT, Inst_class::ternary, false, false},
   {"extract", Op::EXTRACT, Inst_class::ternary, true, false},
   {"ite", Op::ITE, Inst_class::ternary, true, false},
   {"memory", Op::MEMORY, Inst_class::ternary, true, false},
+  {"src_exit", Op::SRC_EXIT, Inst_class::ternary, false, false},
   {"src_mem", Op::SRC_MEM, Inst_class::ternary, false, false},
+  {"tgt_exit", Op::TGT_EXIT, Inst_class::ternary, false, false},
   {"tgt_mem", Op::TGT_MEM, Inst_class::ternary, false, false},
 
   // Conversions
@@ -321,12 +324,17 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
       assert(arg3->op == Op::VALUE);
       inst->bitsize = arg1->bb->func->module->ptr_bits;
     }
-  else
+  else if (op == Op::ITE)
     {
-      assert(op == Op::ITE);
       assert(arg1->bitsize == 1);
       assert(arg2->bitsize == arg3->bitsize);
       inst->bitsize = arg2->bitsize;
+    }
+  else
+    {
+      assert(op == Op::EXIT || op == Op::SRC_EXIT || op == Op::TGT_EXIT);
+      assert(arg1->bitsize == 1);
+      assert(arg2->bitsize == 1);
     }
   return inst;
 }

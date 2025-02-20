@@ -125,10 +125,13 @@ enum class Op : uint8_t {
   ARRAY_SET_SIZE,
   ARRAY_SET_INDEF,
   ARRAY_STORE,
+  EXIT,
   EXTRACT,
   ITE,
   MEMORY,
+  SRC_EXIT,
   SRC_MEM,
+  TGT_EXIT,
   TGT_MEM,
 
   // Conversions
@@ -177,7 +180,7 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 92> inst_info;
+extern const std::array<Inst_info, 95> inst_info;
 
 struct Module;
 struct Function;
@@ -373,7 +376,7 @@ void optimize_func(Function *func, int opt_level);
 void optimize_module(Module *module, int opt_level);
 
 struct SStats {
-  std::array<uint64_t, 3> time = {0, 0, 0};
+  std::array<uint64_t, 4> time = {0, 0, 0, 0};
   bool skipped = true;
 };
 

@@ -819,7 +819,7 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
       solver.assertFormula(res2);
       uint64_t start_time = get_time();
       Solver_result solver_result = run_solver(solver, "retval");
-      stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
+      stats.time[1] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
 	  assert(solver_result.message);
@@ -906,7 +906,7 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
     // hex, etc.
     uint64_t start_time = get_time();
     Solver_result solver_result = run_solver(solver, "Memory");
-    stats.time[1] = std::max(get_time() - start_time, (uint64_t)1);
+    stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
     if (solver_result.status == Result_status::incorrect)
       {
 	assert(solver_result.message);
@@ -945,7 +945,7 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
     solver.assertFormula(tgt_unique_ub_term);
     uint64_t start_time = get_time();
     Solver_result solver_result = run_solver(solver, "UB");
-    stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
+    stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
     if (solver_result.status == Result_status::incorrect)
       return std::pair<SStats, Solver_result>(stats, solver_result);
     if (solver_result.status == Result_status::unknown)
