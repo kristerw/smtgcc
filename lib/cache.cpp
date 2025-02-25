@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstring>
 
 #include "config.h"
 
@@ -6,39 +7,97 @@
 #include <hiredis/hiredis.h>
 #endif
 
-#include "md5.h"
 #include "smtgcc.h"
 
 using namespace std::string_literals;
 namespace smtgcc {
 namespace {
 
+// The xxhash XXH64 algorithm as specified in:
+//   https://github.com/Cyan4973/xxHash/blob/dev/doc/xxhash_spec.md
 struct Hash
 {
-  Hash()
-  {
-    md5_init_ctx(&ctx);
-  }
-
   template <typename T>
-  void add(const T& a)
+  void add(const T& data)
   {
-    md5_process_bytes(&a, sizeof(a), &ctx);
+    uint64_t stripe_size = data_size % sizeof(stripe);
+    char *src = (char *)&data;
+    uint64_t size = sizeof(data);
+    while (size > 0)
+      {
+	uint64_t len = std::min(size, sizeof(stripe) - stripe_size);
+	memcpy((char *)&stripe + stripe_size, src, len);
+	src += len;
+	stripe_size += len;
+	size -= len;
+	if (stripe_size == sizeof(stripe))
+	  {
+	    for (int i = 0; i < 4; i++)
+	      acc[i] = round(acc[i], stripe[i]);
+	    stripe_size = 0;
+	  }
+      }
+    data_size += sizeof(data);
   }
 
   std::string finish()
   {
-    uint8_t result[16];
-    md5_finish_ctx(&ctx, result);
-
-    char str[2 * 16 + 1];
-    char *p = str;
-    for (int i = 0; i < 16; i++)
+    uint64_t a;
+    if (data_size < sizeof(stripe))
+      a = prime5;
+    else
       {
-	*p++ = hex_char((result[i] & 0xf0) >> 4);
-	*p++ = hex_char(result[i] & 0x0f);
+	a = rot(acc[0], 1);
+	a += rot(acc[1], 7);
+	a += rot(acc[2], 12);
+	a += rot(acc[3], 18);
+	for (int i = 0; i < 4; i++)
+	  a = (a ^ round(0, acc[i])) * prime1 + prime4;
       }
+
+    a = a + data_size;
+
+    if (uint64_t remaining = data_size % sizeof(stripe); remaining != 0)
+      {
+	char *src = (char *)&stripe;
+	while (remaining >= 8)
+	  {
+	    uint64_t lane;
+	    memcpy(&lane, src, 8);
+	    src += 8;
+	    remaining -= 8;
+	    a = rot(a ^ round(0, lane), 27) * prime1 + prime4;
+	  }
+	if (remaining >= 4)
+	  {
+	    uint32_t lane;
+	    memcpy(&lane, src, 4);
+	    src += 4;
+	    remaining -= 4;
+	    a = a ^ (lane * prime1);
+	    a = rot(a, 23) * prime2 + prime3;
+	  }
+	while (remaining >= 1)
+	  {
+	    uint8_t lane;
+	    memcpy(&lane, src, 1);
+	    src += 1;
+	    remaining -= 1;
+	    a = a ^ (lane * prime5);
+	    a = rot(a, 11) * prime1;
+	  }
+      }
+
+    a = (a ^ (a >> 33)) * prime2;
+    a = (a ^ (a >> 29)) * prime3;
+    a = a ^ (a >> 32);
+
+    char str[16 + 1];
+    char *p = str;
+    for (int i = 15; i >= 0; i--)
+      *p++ = hex_char((a >> (i * 4)) & 0xf);
     *p++ = 0;
+
     return std::string(str);
   }
 
@@ -51,7 +110,25 @@ private:
       return 'a' + (x - 10);
   }
 
-  md5_ctx ctx;
+  uint64_t rot(uint64_t x, uint64_t n)
+  {
+    return (x << n) | x >> (64 - n);
+  }
+
+  uint64_t round(uint64_t acc, uint64_t lane)
+  {
+    return rot(acc + (lane * prime2), 31) * prime1;
+  }
+
+  const uint64_t prime1 = 0x9E3779B185EBCA87;
+  const uint64_t prime2 = 0xC2B2AE3D27D4EB4F;
+  const uint64_t prime3 = 0x165667B19E3779F9;
+  const uint64_t prime4 = 0x85EBCA77C2B2AE63;
+  const uint64_t prime5 = 0x27D4EB2F165667C5;
+
+  uint64_t data_size = 0;
+  uint64_t acc[4] = {prime1 + prime2, prime2, 0, -prime1};
+  uint64_t stripe[4];
 };
 
 } // end anonymous namespace

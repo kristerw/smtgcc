@@ -28,6 +28,7 @@ else ifeq ($(findstring riscv, $(ARCH)), riscv)
 endif
 
 lib_sources = \
+	lib/cache.cpp \
 	lib/cfg.cpp \
 	lib/check.cpp \
 	lib/dead_code_elimination.cpp \
@@ -87,23 +88,6 @@ $(lib_objects) $(tools_objects): %.o: %.cpp
 $(plugin_objects): config.h lib/smtgcc.h plugin/gimple_conv.h Makefile
 $(plugin_objects): %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -I$(GCCPLUGINS_DIR)/include -c $< -o $@
-
-# Only the plugin files should depend on GCC source code, but we are
-# currently using md5 from GCC to calculate the hash, so we need to
-# special-case cache.cpp.
-# TODO: Implement a better hash in lib and remove this special-casing.
-CFLAGS:=-I. -Ilib -g -fPIC -O2 -Wall -Wextra
-ifeq ($(findstring aarch64, $(ARCH)), aarch64)
-CFLAGS += -DSMTGCC_AARCH64
-else ifeq ($(findstring riscv, $(ARCH)), riscv)
-CFLAGS += -DSMTGCC_RISCV
-endif
-lib/cache.o: config.h lib/smtgcc.h Makefile
-lib/cache.o: lib/cache.cpp
-	$(CXX) $(CXXFLAGS) -I$(GCCPLUGINS_DIR)/include -c $< -o $@
-lib/md5.o: lib/md5.c
-	$(CXX) -xc -DHAVE_CONFIG_H -D HAVE_LIMITS_H -DHAVE_SYS_TYPES_H -DHAVE_STDINT_H -DSTDC_HEADERS -DHAVE_MEMCPY $(CFLAGS) -I$(GCCPLUGINS_DIR)/include -c $< -o $@
-lib_objects += lib/cache.o lib/md5.o
 
 smtgcc-check-refine: tools/smtgcc-check-refine.o $(lib_objects)
 	$(CXX) $(CXXFLAGS) tools/smtgcc-check-refine.o -o $@ $(lib_objects) $(LIBS)
