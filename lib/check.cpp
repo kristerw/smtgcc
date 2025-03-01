@@ -324,6 +324,30 @@ Inst *Converter::simplify(Inst *inst)
   return inst;
 }
 
+bool Converter::is_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
+{
+  if (arg1->op == Op::SLT || arg1->op == Op::ULT)
+    if ((arg1->args[0] == arg2 && arg1->args[1] == arg3)
+	|| (arg1->args[1] == arg2 && arg1->args[0] == arg3))
+      return true;
+  return false;
+}
+
+// min/max can be written in either of two ways:
+//   ite (ult x, y), x, y
+//   ite (ult y, x), y, x
+// Check if we already have an instruction using the other form.
+Inst *Converter::cse_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
+{
+  const Cse_key cmp_key(arg1->op, arg1->args[1], arg1->args[0]);
+  Inst *cmp_inst = get_inst(cmp_key);
+  if (!cmp_inst)
+    return nullptr;
+
+  const Cse_key key(Op::ITE, cmp_inst, arg3, arg2);
+  return get_inst(key);
+}
+
 Inst *Converter::build_inst(Op op)
 {
   const Cse_key key(op);
@@ -368,6 +392,8 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
 {
   const Cse_key key(op, arg1, arg2, arg3);
   Inst *inst = get_inst(key);
+  if (!inst && op == Op::ITE && is_min_max(arg1, arg2, arg3))
+    inst = cse_min_max(arg1, arg2, arg3);
   if (!inst)
     {
       inst = dest_bb->build_inst(op, arg1, arg2, arg3);
