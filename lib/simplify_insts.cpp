@@ -1345,6 +1345,17 @@ Inst *simplify_slt(Inst *inst)
       && !is_nbit_signed_value(arg1, arg2->args[0]->bitsize))
     return inst->bb->value_inst(1, 1);
 
+  // For Boolean x, y: slt x, y -> and x, (not y)
+  if (arg1->bitsize == 1)
+    {
+      Inst *new_inst1 = create_inst(Op::NOT, arg2);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::AND, arg1, new_inst1);
+      new_inst2->insert_before(inst);
+      return new_inst2;
+    }
+
   return inst;
 }
 
@@ -1882,6 +1893,17 @@ Inst *simplify_ult(Inst *inst)
       Inst *new_inst = create_inst(Op::SLE, zero, arg1->args[0]);
       new_inst->insert_before(inst);
       return new_inst;
+    }
+
+  // For Boolean x, y: ult x, y -> and (not x), y
+  if (arg1->bitsize == 1)
+    {
+      Inst *new_inst1 = create_inst(Op::NOT, arg1);
+      new_inst1->insert_before(inst);
+      new_inst1 = simplify_inst(new_inst1);
+      Inst *new_inst2 = create_inst(Op::AND, new_inst1, arg2);
+      new_inst2->insert_before(inst);
+      return new_inst2;
     }
 
   return inst;
