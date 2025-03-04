@@ -160,6 +160,7 @@ private:
   void process_vec_binary(Op op);
   void process_vec_binary_vi(Op op);
   void process_vec_binary_vx(Op op);
+  void process_vec_binary_vf(Op op);
   Inst *gen_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Inst *orig,
 		       Inst *arg1, Inst *arg2, Inst *mask,
 		       uint32_t orig_elem_bitsize, uint32_t elem1_bitsize,
@@ -2163,6 +2164,38 @@ void Parser::process_vec_binary_vx(Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
+void Parser::process_vec_binary_vf(Op op)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_freg_value(5);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
+
+  Inst *res8 = gen_vec_binary(op, orig, arg1, change_prec(arg2, 8), mask, 8);
+  Inst *res16 = gen_vec_binary(op, orig, arg1, change_prec(arg2, 16), mask, 16);
+  Inst *res32 = gen_vec_binary(op, orig, arg1, change_prec(arg2, 32), mask, 32);
+  Inst *res64 = gen_vec_binary(op, orig, arg1, change_prec(arg2, 64), mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
 Inst *gen_vwaddu(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   Inst *e1 = bb->build_inst(Op::ZEXT, elem1, 2 * elem1->bitsize);
@@ -4070,14 +4103,22 @@ void Parser::parse_function()
     process_vec_unary(gen_s2f);
 
   // Floating-point - add/subtract
+  else if (name == "vfadd.vf")
+    process_vec_binary_vf(Op::FADD);
   else if (name == "vfadd.vv")
     process_vec_binary(Op::FADD);
+  else if (name == "vfsub.vf")
+    process_vec_binary_vf(Op::FSUB);
   else if (name == "vfsub.vv")
     process_vec_binary(Op::FSUB);
 
   // Floating-point - multiply/divide
+  else if (name == "vfmul.vf")
+    process_vec_binary_vf(Op::FMUL);
   else if (name == "vfmul.vv")
     process_vec_binary(Op::FMUL);
+  else if (name == "vfdiv.vf")
+    process_vec_binary_vf(Op::FDIV);
   else if (name == "vfdiv.vv")
     process_vec_binary(Op::FDIV);
 
