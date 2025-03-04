@@ -6558,6 +6558,12 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_COND_IOR:
       process_cfn_cond(stmt, BIT_IOR_EXPR);
       break;
+    case CFN_COND_MAX:
+      process_cfn_cond(stmt, MAX_EXPR);
+      break;
+    case CFN_COND_MIN:
+      process_cfn_cond(stmt, MIN_EXPR);
+      break;
     case CFN_COND_MUL:
       process_cfn_cond(stmt, MULT_EXPR);
       break;
@@ -6584,6 +6590,12 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_COND_LEN_IOR:
       process_cfn_cond_len(stmt, BIT_IOR_EXPR);
+      break;
+    case CFN_COND_LEN_MAX:
+      process_cfn_cond_len(stmt, MAX_EXPR);
+      break;
+    case CFN_COND_LEN_MIN:
+      process_cfn_cond_len(stmt, MIN_EXPR);
       break;
     case CFN_COND_LEN_MUL:
       process_cfn_cond_len(stmt, MULT_EXPR);
