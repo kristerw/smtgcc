@@ -169,8 +169,8 @@ struct Converter {
   void process_cfn_clrsb(gimple *stmt);
   void process_cfn_clz(gimple *stmt);
   std::pair<Inst*, Inst*> gen_cfn_cond(tree_code code, Inst *cond, Inst *cond_indef, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *orig, Inst *orig_indef, Inst *len, tree cond_type, tree arg1_type, tree arg2_type, tree orig_type);
-  void process_cfn_cond(gimple *stmt);
-  void process_cfn_cond_len(gimple *stmt);
+  void process_cfn_cond(gimple *stmt, tree_code code);
+  void process_cfn_cond_len(gimple *stmt, tree_code code);
   void process_cfn_cond_fminmax(gimple *stmt);
   void process_cfn_copysign(gimple *stmt);
   void process_cfn_ctz(gimple *stmt);
@@ -205,7 +205,7 @@ struct Converter {
   void process_cfn_select_vl(gimple *stmt);
   void process_cfn_signbit(gimple *stmt);
   void process_cfn_sub_overflow(gimple *stmt);
-  void process_cfn_reduc(gimple *stmt);
+  void process_cfn_reduc(gimple *stmt, tree_code code);
   void process_cfn_reduc_fminmax(gimple *stmt);
   void process_cfn_trap(gimple *stmt);
   void process_cfn_uaddc(gimple *stmt);
@@ -4553,7 +4553,7 @@ std::pair<Inst*, Inst*> Converter::gen_cfn_cond(tree_code code, Inst *cond, Inst
   return {res, res_indef};
 }
 
-void Converter::process_cfn_cond(gimple *stmt)
+void Converter::process_cfn_cond(gimple *stmt, tree_code code)
 {
   assert(gimple_call_num_args(stmt) == 4);
   tree cond_expr = gimple_call_arg(stmt, 0);
@@ -4570,43 +4570,6 @@ void Converter::process_cfn_cond(gimple *stmt)
   auto[orig, orig_indef] = tree2inst_indef(orig_expr);
   tree lhs = gimple_call_lhs(stmt);
 
-  tree_code code;
-  switch (gimple_call_combined_fn(stmt))
-    {
-    case CFN_COND_ADD:
-      code = PLUS_EXPR;
-      break;
-    case CFN_COND_AND:
-      code = BIT_AND_EXPR;
-      break;
-    case CFN_COND_IOR:
-      code = BIT_IOR_EXPR;
-      break;
-    case CFN_COND_MUL:
-      code = MULT_EXPR;
-      break;
-    case CFN_COND_RDIV:
-      code = RDIV_EXPR;
-      break;
-    case CFN_COND_SHL:
-      code = LSHIFT_EXPR;
-      break;
-    case CFN_COND_SHR:
-      code = RSHIFT_EXPR;
-      break;
-    case CFN_COND_SUB:
-      code = MINUS_EXPR;
-      break;
-    case CFN_COND_XOR:
-      code = BIT_XOR_EXPR;
-      break;
-    default:
-      {
-	const char *name = internal_fn_name(gimple_call_internal_fn(stmt));
-	throw Not_implemented("process_cfn_cond: "s + name);
-      }
-    }
-
   auto [res, res_indef] =
     gen_cfn_cond(code, cond, cond_indef, arg1, arg1_indef, arg2, arg2_indef,
 		 orig, orig_indef, nullptr, cond_type, arg1_type, arg2_type,
@@ -4620,7 +4583,7 @@ void Converter::process_cfn_cond(gimple *stmt)
     }
 }
 
-void Converter::process_cfn_cond_len(gimple *stmt)
+void Converter::process_cfn_cond_len(gimple *stmt, tree_code code)
 {
   assert(gimple_call_num_args(stmt) == 6);
   tree cond_expr = gimple_call_arg(stmt, 0);
@@ -4644,43 +4607,6 @@ void Converter::process_cfn_cond_len(gimple *stmt)
   tree bias_type = TREE_TYPE(bias_expr);
 
   tree lhs = gimple_call_lhs(stmt);
-
-  tree_code code;
-  switch (gimple_call_combined_fn(stmt))
-    {
-    case CFN_COND_LEN_ADD:
-      code = PLUS_EXPR;
-      break;
-    case CFN_COND_LEN_AND:
-      code = BIT_AND_EXPR;
-      break;
-    case CFN_COND_LEN_IOR:
-      code = BIT_IOR_EXPR;
-      break;
-    case CFN_COND_LEN_MUL:
-      code = MULT_EXPR;
-      break;
-    case CFN_COND_LEN_RDIV:
-      code = RDIV_EXPR;
-      break;
-    case CFN_COND_LEN_SHL:
-      code = LSHIFT_EXPR;
-      break;
-    case CFN_COND_LEN_SHR:
-      code = RSHIFT_EXPR;
-      break;
-    case CFN_COND_LEN_SUB:
-      code = MINUS_EXPR;
-      break;
-    case CFN_COND_LEN_XOR:
-      code = BIT_XOR_EXPR;
-      break;
-    default:
-      {
-	const char *name = internal_fn_name(gimple_call_internal_fn(stmt));
-	throw Not_implemented("process_cfn_cond: "s + name);
-      }
-    }
 
   bias = type_convert(bias, bias_type, len_type);
   len = bb->build_inst(Op::ADD, len, bias);
@@ -5876,7 +5802,7 @@ void Converter::process_cfn_sub_overflow(gimple *stmt)
     tree2indef.insert({lhs, res_indef});
 }
 
-void Converter::process_cfn_reduc(gimple *stmt)
+void Converter::process_cfn_reduc(gimple *stmt, tree_code code)
 {
   assert(gimple_call_num_args(stmt) == 1);
   tree arg_expr = gimple_call_arg(stmt, 0);
@@ -5885,34 +5811,6 @@ void Converter::process_cfn_reduc(gimple *stmt)
   tree elem_type = TREE_TYPE(arg_type);
   auto[arg, arg_indef, arg_prov] = tree2inst_indef_prov(arg_expr);
   tree lhs = gimple_call_lhs(stmt);
-
-  tree_code code;
-  switch (gimple_call_combined_fn(stmt))
-    {
-    case CFN_REDUC_AND:
-      code = BIT_AND_EXPR;
-      break;
-    case CFN_REDUC_IOR:
-      code = BIT_IOR_EXPR;
-      break;
-    case CFN_REDUC_MAX:
-      code = MAX_EXPR;
-      break;
-    case CFN_REDUC_MIN:
-      code = MIN_EXPR;
-      break;
-    case CFN_REDUC_PLUS:
-      code = PLUS_EXPR;
-      break;
-    case CFN_REDUC_XOR:
-      code = BIT_XOR_EXPR;
-      break;
-    default:
-      {
-	const char *name = internal_fn_name(gimple_call_internal_fn(stmt));
-	throw Not_implemented("process_cfn_reduc: "s + name);
-      }
-    }
 
   uint32_t elem_bitsize = bitsize_for_type(elem_type);
   uint32_t nof_elt = bitsize_for_type(arg_type) / elem_bitsize;
@@ -6652,26 +6550,58 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       process_cfn_unreachable(stmt);
       break;
     case CFN_COND_ADD:
+      process_cfn_cond(stmt, PLUS_EXPR);
+      break;
     case CFN_COND_AND:
+      process_cfn_cond(stmt, BIT_AND_EXPR);
+      break;
     case CFN_COND_IOR:
+      process_cfn_cond(stmt, BIT_IOR_EXPR);
+      break;
     case CFN_COND_MUL:
+      process_cfn_cond(stmt, MULT_EXPR);
+      break;
     case CFN_COND_RDIV:
+      process_cfn_cond(stmt, RDIV_EXPR);
+      break;
     case CFN_COND_SHL:
+      process_cfn_cond(stmt, LSHIFT_EXPR);
+      break;
     case CFN_COND_SHR:
+      process_cfn_cond(stmt, RSHIFT_EXPR);
+      break;
     case CFN_COND_SUB:
+      process_cfn_cond(stmt, MINUS_EXPR);
+      break;
     case CFN_COND_XOR:
-      process_cfn_cond(stmt);
+      process_cfn_cond(stmt, BIT_XOR_EXPR);
       break;
     case CFN_COND_LEN_ADD:
+      process_cfn_cond_len(stmt, PLUS_EXPR);
+      break;
     case CFN_COND_LEN_AND:
+      process_cfn_cond_len(stmt, BIT_AND_EXPR);
+      break;
     case CFN_COND_LEN_IOR:
+      process_cfn_cond_len(stmt, BIT_IOR_EXPR);
+      break;
     case CFN_COND_LEN_MUL:
+      process_cfn_cond_len(stmt, MULT_EXPR);
+      break;
     case CFN_COND_LEN_RDIV:
+      process_cfn_cond_len(stmt, RDIV_EXPR);
+      break;
     case CFN_COND_LEN_SHL:
+      process_cfn_cond_len(stmt, LSHIFT_EXPR);
+      break;
     case CFN_COND_LEN_SHR:
+      process_cfn_cond_len(stmt, RSHIFT_EXPR);
+      break;
     case CFN_COND_LEN_SUB:
+      process_cfn_cond_len(stmt, MINUS_EXPR);
+      break;
     case CFN_COND_LEN_XOR:
-      process_cfn_cond_len(stmt);
+      process_cfn_cond_len(stmt, BIT_XOR_EXPR);
       break;
     case CFN_COND_FMIN:
     case CFN_COND_FMAX:
@@ -6704,12 +6634,22 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       process_cfn_mulh(stmt);
       break;
     case CFN_REDUC_AND:
+      process_cfn_reduc(stmt, BIT_AND_EXPR);
+      break;
     case CFN_REDUC_IOR:
+      process_cfn_reduc(stmt, BIT_IOR_EXPR);
+      break;
     case CFN_REDUC_MAX:
+      process_cfn_reduc(stmt, MAX_EXPR);
+      break;
     case CFN_REDUC_MIN:
+      process_cfn_reduc(stmt, MIN_EXPR);
+      break;
     case CFN_REDUC_PLUS:
+      process_cfn_reduc(stmt, PLUS_EXPR);
+      break;
     case CFN_REDUC_XOR:
-      process_cfn_reduc(stmt);
+      process_cfn_reduc(stmt, BIT_XOR_EXPR);
       break;
     case CFN_REDUC_FMIN:
     case CFN_REDUC_FMAX:
