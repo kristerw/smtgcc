@@ -131,11 +131,11 @@ struct Converter {
   Inst *type_convert(Inst *inst, tree src_type, tree dest_type);
   std::pair<Inst *, Inst *> process_unary_bool(enum tree_code code, Inst *arg1, Inst *arg1_indef, tree lhs_type, tree arg1_type);
   void check_wide_bool(Inst *inst, tree type);
-  std::tuple<Inst *, Inst *, Inst *> process_unary_int(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type);
-  Inst *process_unary_scalar(enum tree_code code, Inst *arg1, tree lhs_type, tree arg1_type);
-  std::tuple<Inst *, Inst *, Inst *> process_unary_scalar(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type);
+  std::tuple<Inst *, Inst *, Inst *> process_unary_int(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type, bool ignore_overflow = false);
+  Inst *process_unary_scalar(enum tree_code code, Inst *arg1, tree lhs_type, tree arg1_type, bool ignore_overflow = false);
+  std::tuple<Inst *, Inst *, Inst *> process_unary_scalar(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type, bool ignore_overflow = false);
   std::pair<Inst *, Inst *> process_vec_duplicate(Inst *arg1, Inst *arg1_indef, tree lhs_elem_type, tree arg1_elem_type);
-  std::pair<Inst *, Inst *> process_unary_vec(enum tree_code code, Inst *arg1, Inst *arg1_indef, tree lhs_elem_type, tree arg1_elem_type);
+  std::pair<Inst *, Inst *> process_unary_vec(enum tree_code code, Inst *arg1, Inst *arg1_indef, tree lhs_elem_type, tree arg1_elem_type, bool ignore_overflow = false);
   std::pair<Inst *, Inst *> process_unary_float(enum tree_code code, Inst *arg1, Inst *arg1_indef, tree lhs_type, tree arg1_type);
   Inst *process_unary_complex(enum tree_code code, Inst *arg1, tree lhs_type);
   std::pair<Inst *, Inst *> process_binary_float(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type);
@@ -168,9 +168,11 @@ struct Converter {
   void process_cfn_bswap(gimple *stmt);
   void process_cfn_clrsb(gimple *stmt);
   void process_cfn_clz(gimple *stmt);
-  std::pair<Inst*, Inst*> gen_cfn_cond(tree_code code, Inst *cond, Inst *cond_indef, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *orig, Inst *orig_indef, Inst *len, tree cond_type, tree arg1_type, tree arg2_type, tree orig_type);
-  void process_cfn_cond(gimple *stmt, tree_code code);
-  void process_cfn_cond_len(gimple *stmt, tree_code code);
+  std::pair<Inst*, Inst*> gen_cfn_cond_unary(tree_code code, Inst *cond, Inst *cond_indef, Inst *arg1, Inst *arg1_indef, Inst *orig, Inst *orig_indef, Inst *len, tree cond_type, tree arg1_type, tree orig_type);
+  std::pair<Inst*, Inst*> gen_cfn_cond_binary(tree_code code, Inst *cond, Inst *cond_indef, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *orig, Inst *orig_indef, Inst *len, tree cond_type, tree arg1_type, tree arg2_type, tree orig_type);
+  void process_cfn_cond_unary(gimple *stmt, tree_code code);
+  void process_cfn_cond_binary(gimple *stmt, tree_code code);
+  void process_cfn_cond_len_binary(gimple *stmt, tree_code code);
   void process_cfn_cond_fminmax(gimple *stmt);
   void process_cfn_copysign(gimple *stmt);
   void process_cfn_ctz(gimple *stmt);
@@ -2292,7 +2294,7 @@ std::pair<Inst *, Inst *> Converter::process_unary_bool(enum tree_code code, Ins
   return {lhs, lhs_indef};
 }
 
-std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_int(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type)
+std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_int(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type, bool ignore_overflow)
 {
   // Handle instructions that have special requirements for the propagation
   // of indef bits.
@@ -2315,7 +2317,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_int(enum tree_code c
     {
     case ABS_EXPR:
       {
-	if (!TYPE_OVERFLOW_WRAPS(lhs_type))
+	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
 	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
 	    Inst *cond = bb->build_inst(Op::EQ, arg1, min_int_inst);
@@ -2338,7 +2340,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_int(enum tree_code c
     case FIX_TRUNC_EXPR:
       return type_convert(arg1, arg1_indef, arg1_prov, arg1_type, lhs_type);
     case NEGATE_EXPR:
-      if (!TYPE_OVERFLOW_WRAPS(lhs_type))
+      if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	{
 	  Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
 	  bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg1, min_int_inst));
@@ -2449,16 +2451,17 @@ Inst *Converter::process_unary_complex(enum tree_code code, Inst *arg1, tree lhs
   throw Not_implemented("process_unary_complex: "s + get_tree_code_name(code));
 }
 
-Inst *Converter::process_unary_scalar(enum tree_code code, Inst *arg1, tree lhs_type, tree arg1_type)
+Inst *Converter::process_unary_scalar(enum tree_code code, Inst *arg1, tree lhs_type, tree arg1_type, bool ignore_overflow)
 {
   auto [inst, indef, prov] =
-    process_unary_scalar(code, arg1, nullptr, nullptr, lhs_type, arg1_type);
+    process_unary_scalar(code, arg1, nullptr, nullptr, lhs_type, arg1_type,
+			 ignore_overflow);
   assert(!indef);
   assert(!prov);
   return inst;
 }
 
-std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_scalar(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type)
+std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_scalar(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, tree lhs_type, tree arg1_type, bool ignore_overflow)
 {
   Inst *inst;
   Inst *indef = nullptr;
@@ -2477,7 +2480,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_unary_scalar(enum tree_cod
     {
       std::tie(inst, indef, prov) =
 	process_unary_int(code, arg1, arg1_indef, arg1_prov, lhs_type,
-			  arg1_type);
+			  arg1_type, ignore_overflow);
     }
   return {inst, indef, prov};
 }
@@ -2498,7 +2501,7 @@ std::pair<Inst *, Inst *> Converter::process_vec_duplicate(Inst *arg1, Inst *arg
   return {res, res_indef};
 }
 
-std::pair<Inst *, Inst *> Converter::process_unary_vec(enum tree_code code, Inst *arg1, Inst *arg1_indef, tree lhs_elem_type, tree arg1_elem_type)
+std::pair<Inst *, Inst *> Converter::process_unary_vec(enum tree_code code, Inst *arg1, Inst *arg1_indef, tree lhs_elem_type, tree arg1_elem_type, bool ignore_overflow)
 {
   uint32_t elem_bitsize = bitsize_for_type(arg1_elem_type);
   uint32_t nof_elt = arg1->bitsize / elem_bitsize;
@@ -2526,7 +2529,7 @@ std::pair<Inst *, Inst *> Converter::process_unary_vec(enum tree_code code, Inst
 	a1_indef = extract_vec_elem(bb, arg1_indef, elem_bitsize, i);
       auto [inst, inst_indef, _] =
 	process_unary_scalar(code, a1, a1_indef, nullptr, lhs_elem_type,
-			     arg1_elem_type);
+			     arg1_elem_type, ignore_overflow);
 
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
@@ -4504,7 +4507,55 @@ void Converter::process_cfn_clz(gimple *stmt)
   tree2instruction.insert({lhs, res});
 }
 
-std::pair<Inst*, Inst*> Converter::gen_cfn_cond(tree_code code, Inst *cond, Inst *cond_indef, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *orig, Inst *orig_indef, Inst *len, tree cond_type, tree arg1_type, tree arg2_type, tree orig_type)
+std::pair<Inst*, Inst*> Converter::gen_cfn_cond_unary(tree_code code, Inst *cond, Inst *cond_indef, Inst *arg1, Inst *arg1_indef, Inst *orig, Inst *orig_indef, Inst *len, tree cond_type, tree arg1_type, tree orig_type)
+{
+  Inst *op_inst;
+  Inst *op_indef = nullptr;
+  // TODO: We ignore overflow for now, but we may need to modify this to
+  // check for oveflow when the condition is true.
+  // TODO: Indef cond is UB.
+  if (VECTOR_TYPE_P(arg1_type))
+    {
+      tree elem_type = TREE_TYPE(arg1_type);
+      std::tie(op_inst, op_indef) =
+	process_unary_vec(code, arg1, arg1_indef, elem_type, elem_type, true);
+    }
+  else
+    {
+      Inst *op_prov;
+      std::tie(op_inst, op_indef, op_prov) =
+	process_unary_scalar(code, arg1, arg1_indef, nullptr,
+			     arg1_type, arg1_type, true);
+    }
+
+  Inst *res;
+  Inst *res_indef = nullptr;
+  if (VECTOR_TYPE_P(cond_type))
+    {
+      std::tie(res, res_indef) =
+	gen_vec_cond(cond, cond_indef, op_inst, op_indef, orig, orig_indef,
+		     cond_type, orig_type, len);
+    }
+  else
+    {
+      assert(TREE_CODE(cond_type) == BOOLEAN_TYPE);
+      if (TYPE_PRECISION(cond_type) != 1)
+	cond = bb->build_extract_bit(cond, 0);
+      res = bb->build_inst(Op::ITE, cond, op_inst, orig);
+      if (op_indef || orig_indef)
+	{
+	  if (!op_indef)
+	    op_indef = bb->value_inst(0, op_inst->bitsize);
+	  if (!orig_indef)
+	    orig_indef = bb->value_inst(0, orig->bitsize);
+	  res_indef = bb->build_inst(Op::ITE, cond, op_indef, orig_indef);
+	}
+    }
+
+  return {res, res_indef};
+}
+
+std::pair<Inst*, Inst*> Converter::gen_cfn_cond_binary(tree_code code, Inst *cond, Inst *cond_indef, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *orig, Inst *orig_indef, Inst *len, tree cond_type, tree arg1_type, tree arg2_type, tree orig_type)
 {
   Inst *op_inst;
   Inst *op_indef = nullptr;
@@ -4553,7 +4604,34 @@ std::pair<Inst*, Inst*> Converter::gen_cfn_cond(tree_code code, Inst *cond, Inst
   return {res, res_indef};
 }
 
-void Converter::process_cfn_cond(gimple *stmt, tree_code code)
+void Converter::process_cfn_cond_unary(gimple *stmt, tree_code code)
+{
+  assert(gimple_call_num_args(stmt) == 3);
+  tree cond_expr = gimple_call_arg(stmt, 0);
+  tree cond_type = TREE_TYPE(cond_expr);
+  auto[cond, cond_indef] = tree2inst_indef(cond_expr);
+  tree arg1_expr = gimple_call_arg(stmt, 1);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  auto[arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  tree orig_expr = gimple_call_arg(stmt, 2);
+  tree orig_type = TREE_TYPE(orig_expr);
+  auto[orig, orig_indef] = tree2inst_indef(orig_expr);
+  tree lhs = gimple_call_lhs(stmt);
+
+  auto [res, res_indef] =
+    gen_cfn_cond_unary(code, cond, cond_indef, arg1, arg1_indef,
+		       orig, orig_indef, nullptr, cond_type, arg1_type,
+		       orig_type);
+
+  if (lhs)
+    {
+      tree2instruction.insert({lhs, res});
+      if (res_indef)
+	tree2indef.insert({lhs, res_indef});
+    }
+}
+
+void Converter::process_cfn_cond_binary(gimple *stmt, tree_code code)
 {
   assert(gimple_call_num_args(stmt) == 4);
   tree cond_expr = gimple_call_arg(stmt, 0);
@@ -4571,9 +4649,9 @@ void Converter::process_cfn_cond(gimple *stmt, tree_code code)
   tree lhs = gimple_call_lhs(stmt);
 
   auto [res, res_indef] =
-    gen_cfn_cond(code, cond, cond_indef, arg1, arg1_indef, arg2, arg2_indef,
-		 orig, orig_indef, nullptr, cond_type, arg1_type, arg2_type,
-		 orig_type);
+    gen_cfn_cond_binary(code, cond, cond_indef, arg1, arg1_indef,
+			arg2, arg2_indef, orig, orig_indef, nullptr,
+			cond_type, arg1_type, arg2_type, orig_type);
 
   if (lhs)
     {
@@ -4583,7 +4661,7 @@ void Converter::process_cfn_cond(gimple *stmt, tree_code code)
     }
 }
 
-void Converter::process_cfn_cond_len(gimple *stmt, tree_code code)
+void Converter::process_cfn_cond_len_binary(gimple *stmt, tree_code code)
 {
   assert(gimple_call_num_args(stmt) == 6);
   tree cond_expr = gimple_call_arg(stmt, 0);
@@ -4611,9 +4689,9 @@ void Converter::process_cfn_cond_len(gimple *stmt, tree_code code)
   bias = type_convert(bias, bias_type, len_type);
   len = bb->build_inst(Op::ADD, len, bias);
   auto [res, res_indef] =
-    gen_cfn_cond(code, cond, cond_indef, arg1, arg1_indef, arg2, arg2_indef,
-		 orig, orig_indef, len, cond_type, arg1_type, arg2_type,
-		 orig_type);
+    gen_cfn_cond_binary(code, cond, cond_indef, arg1, arg1_indef,
+			arg2, arg2_indef, orig, orig_indef, len,
+			cond_type, arg1_type, arg2_type, orig_type);
 
   if (lhs)
     {
@@ -6550,70 +6628,76 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       process_cfn_unreachable(stmt);
       break;
     case CFN_COND_ADD:
-      process_cfn_cond(stmt, PLUS_EXPR);
+      process_cfn_cond_binary(stmt, PLUS_EXPR);
       break;
     case CFN_COND_AND:
-      process_cfn_cond(stmt, BIT_AND_EXPR);
+      process_cfn_cond_binary(stmt, BIT_AND_EXPR);
       break;
     case CFN_COND_IOR:
-      process_cfn_cond(stmt, BIT_IOR_EXPR);
+      process_cfn_cond_binary(stmt, BIT_IOR_EXPR);
       break;
     case CFN_COND_MAX:
-      process_cfn_cond(stmt, MAX_EXPR);
+      process_cfn_cond_binary(stmt, MAX_EXPR);
       break;
     case CFN_COND_MIN:
-      process_cfn_cond(stmt, MIN_EXPR);
+      process_cfn_cond_binary(stmt, MIN_EXPR);
       break;
     case CFN_COND_MUL:
-      process_cfn_cond(stmt, MULT_EXPR);
+      process_cfn_cond_binary(stmt, MULT_EXPR);
+      break;
+    case CFN_COND_NEG:
+      process_cfn_cond_unary(stmt, NEGATE_EXPR);
+      break;
+    case CFN_COND_NOT:
+      process_cfn_cond_unary(stmt, BIT_NOT_EXPR);
       break;
     case CFN_COND_RDIV:
-      process_cfn_cond(stmt, RDIV_EXPR);
+      process_cfn_cond_binary(stmt, RDIV_EXPR);
       break;
     case CFN_COND_SHL:
-      process_cfn_cond(stmt, LSHIFT_EXPR);
+      process_cfn_cond_binary(stmt, LSHIFT_EXPR);
       break;
     case CFN_COND_SHR:
-      process_cfn_cond(stmt, RSHIFT_EXPR);
+      process_cfn_cond_binary(stmt, RSHIFT_EXPR);
       break;
     case CFN_COND_SUB:
-      process_cfn_cond(stmt, MINUS_EXPR);
+      process_cfn_cond_binary(stmt, MINUS_EXPR);
       break;
     case CFN_COND_XOR:
-      process_cfn_cond(stmt, BIT_XOR_EXPR);
+      process_cfn_cond_binary(stmt, BIT_XOR_EXPR);
       break;
     case CFN_COND_LEN_ADD:
-      process_cfn_cond_len(stmt, PLUS_EXPR);
+      process_cfn_cond_len_binary(stmt, PLUS_EXPR);
       break;
     case CFN_COND_LEN_AND:
-      process_cfn_cond_len(stmt, BIT_AND_EXPR);
+      process_cfn_cond_len_binary(stmt, BIT_AND_EXPR);
       break;
     case CFN_COND_LEN_IOR:
-      process_cfn_cond_len(stmt, BIT_IOR_EXPR);
+      process_cfn_cond_len_binary(stmt, BIT_IOR_EXPR);
       break;
     case CFN_COND_LEN_MAX:
-      process_cfn_cond_len(stmt, MAX_EXPR);
+      process_cfn_cond_len_binary(stmt, MAX_EXPR);
       break;
     case CFN_COND_LEN_MIN:
-      process_cfn_cond_len(stmt, MIN_EXPR);
+      process_cfn_cond_len_binary(stmt, MIN_EXPR);
       break;
     case CFN_COND_LEN_MUL:
-      process_cfn_cond_len(stmt, MULT_EXPR);
+      process_cfn_cond_len_binary(stmt, MULT_EXPR);
       break;
     case CFN_COND_LEN_RDIV:
-      process_cfn_cond_len(stmt, RDIV_EXPR);
+      process_cfn_cond_len_binary(stmt, RDIV_EXPR);
       break;
     case CFN_COND_LEN_SHL:
-      process_cfn_cond_len(stmt, LSHIFT_EXPR);
+      process_cfn_cond_len_binary(stmt, LSHIFT_EXPR);
       break;
     case CFN_COND_LEN_SHR:
-      process_cfn_cond_len(stmt, RSHIFT_EXPR);
+      process_cfn_cond_len_binary(stmt, RSHIFT_EXPR);
       break;
     case CFN_COND_LEN_SUB:
-      process_cfn_cond_len(stmt, MINUS_EXPR);
+      process_cfn_cond_len_binary(stmt, MINUS_EXPR);
       break;
     case CFN_COND_LEN_XOR:
-      process_cfn_cond_len(stmt, BIT_XOR_EXPR);
+      process_cfn_cond_len_binary(stmt, BIT_XOR_EXPR);
       break;
     case CFN_COND_FMIN:
     case CFN_COND_FMAX:
