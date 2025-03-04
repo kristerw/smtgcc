@@ -100,7 +100,7 @@ bool flatten_struct(riscv_state *rstate, tree struct_type, std::vector<struct_el
 // Determines if the structure can be handled by the hardware floating-point
 // calling convention, and in that case, splits the structure into
 // instructions for each register the structure will be passed in.
-std::optional<Regs> regs_for_fp_struct(riscv_state *rstate, Inst *value, tree struct_type)
+std::optional<Regs> regs_for_fp_struct(riscv_state *rstate, Inst *value, tree struct_type, int nof_available_fpregs)
 {
   std::vector<struct_elem> elems;
   int nof_r = 0;
@@ -144,41 +144,50 @@ std::optional<Regs> regs_for_fp_struct(riscv_state *rstate, Inst *value, tree st
 	assert(0);
     }
 
+  if (nof_available_fpregs < freg_nbr)
+    return {};
+
   return regs;
 }
 
 // Determines if the value can be passed in registers, and in that case,
 // splits the structure into instructions for each register the structure
 // will be passed in.
-std::optional<Regs> regs_for_value(riscv_state *rstate, Inst *value, tree type)
+std::optional<Regs> regs_for_value(riscv_state *rstate, Inst *value, tree type, int nof_available_fpregs)
 {
   Basic_block *bb = value->bb;
 
   // Handle the hardware floating-point calling convention.
-  if (COMPLEX_FLOAT_TYPE_P(type) && value->bitsize <= 2 * rstate->freg_bitsize)
+  if (nof_available_fpregs > 0)
     {
-      Regs regs;
-      uint64_t elt_bitsize = value->bitsize / 2;
-      assert(elt_bitsize == 16 || elt_bitsize == 32 || elt_bitsize == 64);
-      Inst *reg_value = bb->build_trunc(value, elt_bitsize);
-      regs.fregs[0] = pad_to_freg_size(rstate, reg_value);
-      Inst *high = bb->value_inst(value->bitsize - 1, 32);
-      Inst *low = bb->value_inst(elt_bitsize, 32);
-      reg_value = bb->build_inst(Op::EXTRACT, value, high, low);
-      regs.fregs[1] = pad_to_freg_size(rstate, reg_value);
-      return regs;
-    }
-  if (SCALAR_FLOAT_TYPE_P(type) && value->bitsize <= rstate->freg_bitsize)
-    {
-      Regs regs;
-      regs.fregs[0] = pad_to_freg_size(rstate, value);
-      return regs;
-    }
-  if (TREE_CODE(type) == RECORD_TYPE)
-    {
-      std::optional<Regs> res = regs_for_fp_struct(rstate, value, type);
-      if (res)
-	return res;
+      if (COMPLEX_FLOAT_TYPE_P(type)
+	  && value->bitsize <= 2 * rstate->freg_bitsize
+	  && nof_available_fpregs > 1)
+	{
+	  Regs regs;
+	  uint64_t elt_bitsize = value->bitsize / 2;
+	  assert(elt_bitsize == 16 || elt_bitsize == 32 || elt_bitsize == 64);
+	  Inst *reg_value = bb->build_trunc(value, elt_bitsize);
+	  regs.fregs[0] = pad_to_freg_size(rstate, reg_value);
+	  Inst *high = bb->value_inst(value->bitsize - 1, 32);
+	  Inst *low = bb->value_inst(elt_bitsize, 32);
+	  reg_value = bb->build_inst(Op::EXTRACT, value, high, low);
+	  regs.fregs[1] = pad_to_freg_size(rstate, reg_value);
+	  return regs;
+	}
+      if (SCALAR_FLOAT_TYPE_P(type) && value->bitsize <= rstate->freg_bitsize)
+	{
+	  Regs regs;
+	  regs.fregs[0] = pad_to_freg_size(rstate, value);
+	  return regs;
+	}
+      if (TREE_CODE(type) == RECORD_TYPE)
+	{
+	  std::optional<Regs> res =
+	    regs_for_fp_struct(rstate, value, type, nof_available_fpregs);
+	  if (res)
+	    return res;
+	}
     }
 
   // Handle the integer calling convention.
@@ -459,7 +468,8 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 	  throw Not_implemented("setup_riscv_function: C++ constructors");
 	}
 
-      std::optional<Regs> arg_regs = regs_for_value(&rstate, param, type);
+      std::optional<Regs> arg_regs =
+	regs_for_value(&rstate, param, type, RiscvRegIdx::f18 - freg_nbr);
       if (arg_regs)
 	{
 	  // Ensure the stack is aligned when writing values wider than
@@ -491,33 +501,17 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 		}
 	    }
 
-	  // Ensure the stack is aligned when writing floating-point values
-	  // wider than one register.
-	  if (reg_nbr > RiscvRegIdx::x17
-	       && (*arg_regs).fregs[0]
-	       && (*arg_regs).fregs[1]
-	       && (stack_values.size() & 1))
-	    stack_values.push_back(nullptr);
-
 	  if ((*arg_regs).fregs[0])
 	    {
-	      if (freg_nbr > RiscvRegIdx::f17)
-		stack_values.push_back((*arg_regs).fregs[0]);
-	      else
-		{
-		  Inst *reg = rstate.registers[freg_nbr++];
-		  bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[0]);
-		}
+	      assert(freg_nbr < RiscvRegIdx::f18);
+	      Inst *reg = rstate.registers[freg_nbr++];
+	      bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[0]);
 	    }
 	  if ((*arg_regs).fregs[1])
 	    {
-	      if (freg_nbr > RiscvRegIdx::f17)
-		stack_values.push_back((*arg_regs).fregs[1]);
-	      else
-		{
-		  Inst *reg = rstate.registers[freg_nbr++];
-		  bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[1]);
-		}
+	      assert(freg_nbr < RiscvRegIdx::f18);
+	      Inst *reg = rstate.registers[freg_nbr++];
+	      bb->build_inst(Op::WRITE, reg, (*arg_regs).fregs[1]);
 	    }
 	}
       else
