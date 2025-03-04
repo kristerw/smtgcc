@@ -1536,6 +1536,14 @@ Inst *simplify_sub(Inst *inst)
   if (arg1 == arg2)
     return inst->bb->value_inst(0, inst->bitsize);
 
+  // sub 0, x -> neg x
+  if (is_value_zero(arg1))
+    {
+      Inst *new_inst1 = create_inst(Op::NEG, arg2);
+      new_inst1->insert_before(inst);
+      return new_inst1;
+    }
+
   // sub x, c -> add x, -c
   if (arg2->op == Op::VALUE)
     {
