@@ -671,6 +671,7 @@ struct riscv_state {
   uint32_t freg_bitsize;
   uint32_t vreg_bitsize;
   std::vector<MemoryObject> memory_objects;
+  int next_local_id;
 };
 Function *parse_riscv(std::string const& file_name, riscv_state *state);
 

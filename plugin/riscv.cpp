@@ -341,7 +341,8 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
       // Return of values wider than 2*reg_bitsize are passed in memory,
       // where the address is specified by an implicit first parameter.
       assert((ret_bitsize & 7) == 0);
-      Inst *id = tgt->value_inst(-127, tgt->module->ptr_id_bits);
+      Inst *id =
+	tgt->value_inst(rstate->next_local_id++, tgt->module->ptr_id_bits);
       Inst *mem_size =
 	tgt->value_inst(ret_bitsize / 8, tgt->module->ptr_offset_bits);
       Inst *flags = tgt->value_inst(0, 32);
@@ -430,8 +431,9 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
     }
 
   // Set up the stack.
+  rstate.next_local_id = -128;
   assert(stack_size < (((uint64_t)1) << module->ptr_offset_bits));
-  Inst *id = bb->value_inst(-128, module->ptr_id_bits);
+  Inst *id = bb->value_inst(rstate.next_local_id++, module->ptr_id_bits);
   Inst *mem_size = bb->value_inst(stack_size, module->ptr_offset_bits);
   Inst *flags = bb->value_inst(0, 32);
   Inst *stack = bb->build_inst(Op::MEMORY, id, mem_size, flags);
@@ -470,7 +472,10 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 
       std::optional<Regs> arg_regs =
 	regs_for_value(&rstate, param, type, RiscvRegIdx::f18 - freg_nbr);
-      if (arg_regs)
+      if (arg_regs
+	  && !(TARGET_VECTOR
+	       && VECTOR_TYPE_P(type)
+	       && reg_nbr > RiscvRegIdx::x17))
 	{
 	  // Ensure the stack is aligned when writing values wider than
 	  // one register.
@@ -516,8 +521,31 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 	}
       else
 	{
-	  // TODO: Implement passing of large params in memory.
-	  throw Not_implemented("setup_riscv_function: too wide param type");
+	  // The argument is passed in memory.
+	  assert(param->bitsize % 8 == 0);
+	  if (rstate.next_local_id == 0)
+	    throw Not_implemented("too many local variables");
+	  Inst *id =
+	    bb->value_inst(rstate.next_local_id++, module->ptr_id_bits);
+	  uint64_t size = param->bitsize / 8;
+	  Inst *mem_size = bb->value_inst(size, module->ptr_offset_bits);
+	  Inst *flags = bb->value_inst(0, 32);
+	  Inst *ptr = bb->build_inst(Op::MEMORY, id, mem_size, flags);
+	  for (uint64_t i = 0; i < size; i++)
+	    {
+	      Inst *size_inst = bb->value_inst(i, ptr->bitsize);
+	      Inst *addr = bb->build_inst(Op::ADD, ptr, size_inst);
+	      Inst *byte = bb->build_inst(Op::EXTRACT, param, i * 8 + 7, i * 8);
+	      bb->build_inst(Op::STORE, addr, byte);
+	    }
+
+	  if (reg_nbr > RiscvRegIdx::x17)
+	    stack_values.push_back(ptr);
+	  else
+	    {
+	      Inst *reg = rstate.registers[reg_nbr++];
+	      bb->build_inst(Op::WRITE, reg, ptr);
+	    }
 	}
 
       param_number++;

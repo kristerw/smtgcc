@@ -4778,8 +4778,6 @@ Function *Parser::parse(std::string const& file_name)
 	    bb = func->build_bb();
 	    entry_bb->build_br_inst(bb);
 
-	    // TODO: Do not hard code ID values.
-	    int next_id = -126;
 	    for (const auto& [name, data] : sym_name2data)
 	      {
 		Inst *mem;
@@ -4787,11 +4785,13 @@ Function *Parser::parse(std::string const& file_name)
 		  mem = rstate->sym_name2mem.at(name);
 		else
 		  {
-		    if (next_id == 0)
+		    if (rstate->next_local_id == 0)
 		      throw Not_implemented("too many local variables");
 
 		    Inst *id =
-		      entry_bb->value_inst(next_id++, module->ptr_id_bits);
+		      entry_bb->value_inst(rstate->next_local_id++,
+					   module->ptr_id_bits);
+
 		    Inst *mem_size =
 		      entry_bb->value_inst(data.size(), module->ptr_offset_bits);
 		    Inst *flags = entry_bb->value_inst(MEM_CONST, 32);
