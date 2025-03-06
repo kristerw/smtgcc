@@ -953,6 +953,7 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 	  msg = msg + "tgt exit: " + model.eval(tgt_exit_expr).to_string() + "\n";
 	  msg = msg + "src exit value: " + model.eval(src_exit_val_expr).to_string() + "\n";
 	  msg = msg + "tgt exit value: " + model.eval(tgt_exit_val_expr).to_string() + "\n";
+	  msg = msg +  "tgt ub: " + model.eval(tgt_unique_ub_expr).to_string() + "\n";
 	  add_print(msg, conv, solver);
 	  Solver_result result = {Result_status::incorrect, msg};
 	  return std::pair<SStats, Solver_result>(stats, result);
@@ -1018,6 +1019,7 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 	      msg = msg + "src indef: " + model.eval(src_indef).to_string() + "\n";
 	      msg = msg +  "tgt indef: " + model.eval(tgt_indef).to_string() + "\n";
 	    }
+	  msg = msg +  "tgt ub: " + model.eval(tgt_unique_ub_expr).to_string() + "\n";
 	  add_print(msg, conv, solver);
 	  Solver_result result = {Result_status::incorrect, msg};
 	  return std::pair<SStats, Solver_result>(stats, result);
@@ -1084,6 +1086,7 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 	msg = msg + "tgt *.ptr: " + tgt_byte.to_string() + "\n";
 	msg = msg + "src indef: " + src_indef.to_string() + "\n";
 	msg = msg + "tgt indef: " + tgt_indef.to_string() + "\n";
+	msg = msg +  "tgt ub: " + model.eval(tgt_unique_ub_expr).to_string() + "\n";
 	add_print(msg, conv, solver);
 	Solver_result result = {Result_status::incorrect, msg};
 	return std::pair<SStats, Solver_result>(stats, result);
