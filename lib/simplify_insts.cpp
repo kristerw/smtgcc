@@ -2405,6 +2405,27 @@ std::tuple<Inst *, Inst *, Inst *> get_ite_args(Inst *inst)
   return {nullptr, nullptr, nullptr};
 }
 
+// Return true if this is a VALUE instruction or a chain of ITE instructions
+// with VALUE arguments. Here, "zext x" of a boolean x is treated as the
+// ITE instruction "ite x, 1, 0", and "sext x" is treated as "ite x, -1, 0".
+bool is_value_chain(Inst *inst, int depth = 0)
+{
+  // Limit how deep we search.
+  const int depth_limit = 3;
+
+  if (depth < depth_limit)
+    {
+      if (inst->op == Op::VALUE)
+	return true;
+      if (is_boolean_sext(inst) || is_boolean_zext(inst))
+	return true;
+      if (inst->op == Op::ITE)
+	return is_value_chain(inst->args[1], depth + 1)
+	  && is_value_chain(inst->args[2], depth + 1);
+    }
+  return false;
+}
+
 // Create and simplify instructions:
 //   ite (op val1) (op val2)
 // where op is the operation of inst. The new instructions are placed
@@ -2510,12 +2531,12 @@ Inst *simplify_over_ite_arg(Inst *inst)
 
       if (inst->args[1]->op == Op::VALUE)
 	{
-	  if (a1_cond && a1_val1->op == Op::VALUE && a1_val2->op == Op::VALUE)
+	  if (a1_cond && is_value_chain(a1_val1) && is_value_chain(a1_val2))
 	    return gen_ite_of_op1(inst, a1_cond, a1_val1, a1_val2);
 	}
       if (inst->args[0]->op == Op::VALUE)
 	{
-	  if (a2_cond && a2_val1->op == Op::VALUE && a2_val2->op == Op::VALUE)
+	  if (a2_cond && is_value_chain(a2_val1) && is_value_chain(a2_val2))
 	    return gen_ite_of_op2(inst, a2_cond, a2_val1, a2_val2);
 	}
 
