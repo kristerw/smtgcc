@@ -2500,7 +2500,8 @@ Inst *simplify_over_ite_arg(Inst *inst)
       if (cond && val1->op == Op::VALUE && val2->op == Op::VALUE)
 	return gen_ite_of_op(inst, cond, val1, val2);
     }
-  else if (inst->iclass() == Inst_class::ibinary)
+  else if (inst->iclass() == Inst_class::ibinary
+	   || inst->iclass() == Inst_class::icomparison)
     {
       Inst *const arg1 = inst->args[0];
       Inst *const arg2 = inst->args[1];
@@ -2511,6 +2512,11 @@ Inst *simplify_over_ite_arg(Inst *inst)
 	{
 	  if (a1_cond && a1_val1->op == Op::VALUE && a1_val2->op == Op::VALUE)
 	    return gen_ite_of_op1(inst, a1_cond, a1_val1, a1_val2);
+	}
+      if (inst->args[0]->op == Op::VALUE)
+	{
+	  if (a2_cond && a2_val1->op == Op::VALUE && a2_val2->op == Op::VALUE)
+	    return gen_ite_of_op2(inst, a2_cond, a2_val1, a2_val2);
 	}
 
       // It makes sense to transform some binary instructions even if the
