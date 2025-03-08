@@ -208,6 +208,8 @@ Inst *Converter::get_not(Inst *inst)
 {
   if (inst->op == Op::NOT)
     return inst->args[0];
+  if (inst->op == Op::VALUE)
+    return value_inst(~inst->value(), inst->bitsize);
   const Cse_key key(Op::NOT, inst);
   return get_inst(key);
 }
@@ -400,11 +402,11 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 	  inst = get_inst(key);
 	  if (inst)
 	    {
-	      const Cse_key key(Op::NOT, inst);
-	      Inst *not_inst = get_inst(key);
+	      Inst *not_inst = get_not(inst);
 	      if (not_inst)
 		return not_inst;
 	      not_inst = dest_bb->build_inst(Op::NOT, inst);
+	      const Cse_key key(Op::NOT, inst);
 	      key2inst.insert({key, not_inst});
 	      return not_inst;
 	    }
@@ -420,11 +422,11 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 	  inst = get_inst(key);
 	  if (inst)
 	    {
-	      const Cse_key key(Op::NOT, inst);
-	      Inst *not_inst = get_inst(key);
+	      Inst *not_inst = get_not(inst);
 	      if (not_inst)
 		return not_inst;
 	      not_inst = dest_bb->build_inst(Op::NOT, inst);
+	      const Cse_key key(Op::NOT, inst);
 	      key2inst.insert({key, not_inst});
 	      return not_inst;
 	    }

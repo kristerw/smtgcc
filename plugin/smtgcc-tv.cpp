@@ -82,9 +82,14 @@ void tv_function::check()
       canonicalize_memory(module);
       simplify_mem(module);
       ls_elim(module);
-      simplify_insts(module);
-      dead_code_elimination(module);
-      simplify_cfg(module);
+      bool cfg_modified;
+      do
+	{
+	  simplify_insts(module);
+	  dead_code_elimination(module);
+	  cfg_modified = simplify_cfg(module);
+	}
+      while (cfg_modified);
 
       validate(module);
 

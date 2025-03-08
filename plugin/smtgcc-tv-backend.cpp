@@ -171,9 +171,14 @@ static void finish(void *, void *data)
 	  simplify_cfg(func);
 	  if (loop_unroll(func, unroll_limit + 1))
 	    {
-	      simplify_insts(func);
-	      dead_code_elimination(func);
-	      simplify_cfg(func);
+	      bool cfg_modified;
+	      do
+		{
+		  simplify_insts(func);
+		  dead_code_elimination(func);
+		  cfg_modified = simplify_cfg(func);
+		}
+	      while (cfg_modified);
 	    }
 
 	  eliminate_registers(func);
@@ -189,19 +194,25 @@ static void finish(void *, void *data)
 	  dead_code_elimination(func);
 	  simplify_cfg(func);
 	  vrp(func);
-	  for (int i = 0; i < 2; i++)
+	  bool cfg_modified;
+	  do
 	    {
 	      simplify_insts(func);
 	      dead_code_elimination(func);
-	      simplify_cfg(func);
+	      cfg_modified = simplify_cfg(func);
 	    }
+	  while (cfg_modified);
 
 	  canonicalize_memory(module);
 	  simplify_mem(module);
 	  ls_elim(module);
-	  simplify_insts(module);
-	  dead_code_elimination(module);
-	  simplify_cfg(module);
+	  do
+	    {
+	      simplify_insts(func);
+	      dead_code_elimination(func);
+	      cfg_modified = simplify_cfg(func);
+	    }
+	  while (cfg_modified);
 
 	  Solver_result result = check_refine(module);
 	  if (result.status != Result_status::correct)

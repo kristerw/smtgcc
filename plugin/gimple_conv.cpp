@@ -7884,9 +7884,14 @@ void unroll_and_optimize(Function *func)
   simplify_cfg(func);
   if (loop_unroll(func))
     {
-      simplify_insts(func);
-      dead_code_elimination(func);
-      simplify_cfg(func);
+      bool cfg_modified;
+      do
+	{
+	  simplify_insts(func);
+	  dead_code_elimination(func);
+	  cfg_modified = simplify_cfg(func);
+	}
+      while (cfg_modified);
     }
   vrp(func);
   simplify_insts(func);

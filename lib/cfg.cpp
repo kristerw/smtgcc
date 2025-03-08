@@ -308,8 +308,10 @@ bool has_loops(Function *func)
   return false;
 }
 
-void simplify_cfg(Function *func)
+bool simplify_cfg(Function *func)
 {
+  bool modified = false;
+
   for (auto bb : func->bbs)
     {
       // br 0, .1, .2  ->  br .2
@@ -331,6 +333,7 @@ void simplify_cfg(Function *func)
 		}
 	      destroy_instruction(branch);
 	      bb->build_br_inst(taken_bb);
+	      modified = true;
 	    }
 	}
 
@@ -405,6 +408,7 @@ void simplify_cfg(Function *func)
 
 	  destroy_instruction(bb->last_inst);
 	  bb->build_br_inst(dest_bb);
+	  modified = true;
 	}
 
       // br (not x), .1, .2 -> br x, .2, .1
@@ -426,12 +430,16 @@ void simplify_cfg(Function *func)
     }
 
   reverse_post_order(func);
+
+  return modified;
 }
 
-void simplify_cfg(Module *module)
+bool simplify_cfg(Module *module)
 {
+  bool modified = false;
   for (auto func : module->functions)
-    simplify_cfg(func);
+    modified |= simplify_cfg(func);
+  return modified;
 }
 
 } // end namespace smtgcc
