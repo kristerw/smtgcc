@@ -1487,21 +1487,20 @@ Addr Converter::process_array_ref(tree expr, bool is_mem_access)
 
   Addr addr = process_address(array, is_mem_access);
   Inst *idx = tree2inst(index);
-  if (idx->bitsize < addr.ptr->bitsize)
+  if (!TYPE_UNSIGNED(TREE_TYPE(index)))
     {
-      if (TYPE_UNSIGNED(TREE_TYPE(index)))
-	idx = bb->build_inst(Op::ZEXT, idx, addr.ptr->bitsize);
-      else
-	idx = bb->build_inst(Op::SEXT, idx, addr.ptr->bitsize);
+      Inst *zero = bb->value_inst(0, idx->bitsize);
+      bb->build_inst(Op::UB, bb->build_inst(Op::SLT, idx, zero));
     }
+  if (idx->bitsize < addr.ptr->bitsize)
+    idx = bb->build_inst(Op::ZEXT, idx, addr.ptr->bitsize);
   else if (idx->bitsize > addr.ptr->bitsize)
     {
       Inst *high = bb->value_inst(idx->bitsize - 1, 32);
       Inst *low = bb->value_inst(addr.ptr->bitsize, 32);
       Inst *top = bb->build_inst(Op::EXTRACT, idx, high, low);
       Inst *zero = bb->value_inst(0, top->bitsize);
-      Inst *cond = bb->build_inst(Op::NE, top, zero);
-      bb->build_inst(Op::UB, cond);
+      bb->build_inst(Op::UB, bb->build_inst(Op::NE, top, zero));
       idx = bb->build_trunc(idx, addr.ptr->bitsize);
     }
 
@@ -1539,15 +1538,13 @@ Addr Converter::process_array_ref(tree expr, bool is_mem_access)
     }
   else
     {
-      Op op = TYPE_UNSIGNED(TREE_TYPE(index)) ? Op::ZEXT : Op::SEXT;
-      Inst *eidx = bb->build_inst(op, idx, ptr->bitsize * 2);
+      Inst *eidx = bb->build_inst(Op::ZEXT, idx, ptr->bitsize * 2);
       Inst *eelm_size = bb->value_inst(elem_size, ptr->bitsize * 2);
       Inst *eoffset = bb->build_inst(Op::MUL, eidx, eelm_size);
-      uint32_t ptr_offset_bits = module->ptr_offset_bits;
       Inst *emax_offset =
-	bb->value_inst((uint64_t)1 << ptr_offset_bits, ptr->bitsize * 2);
-      Inst *cond = bb->build_inst(Op::ULE, emax_offset, eoffset);
-      bb->build_inst(Op::UB, cond);
+	bb->value_inst((uint64_t)1 << module->ptr_offset_bits,
+		       eoffset->bitsize);
+      bb->build_inst(Op::UB, bb->build_inst(Op::ULE, emax_offset, eoffset));
       if (is_mem_access)
 	mem_access_ub_check(ptr, addr.prov, elem_size);
     }
