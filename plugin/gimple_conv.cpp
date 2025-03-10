@@ -3054,13 +3054,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	    bb->build_inst(Op::UB, is_ub);
 	  }
 
-	// TODO: Implement correct indef handling.
-	if (arg1_indef)
-	  build_ub_if_not_zero(arg1_indef);
-	if (arg2_indef)
-	  build_ub_if_not_zero(arg2_indef);
-	res_indef = nullptr;
-
 	return {ptr, res_indef, arg1_prov};
       }
     case MINUS_EXPR:
