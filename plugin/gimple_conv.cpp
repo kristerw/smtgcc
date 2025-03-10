@@ -3125,13 +3125,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	Inst *is_ub = bb->build_inst(Op::NE, esub, eres);
 	bb->build_inst(Op::UB, is_ub);
 
-	// TODO: Implement correct indef handling.
-	if (arg1_indef)
-	  build_ub_if_not_zero(arg1_indef);
-	if (arg2_indef)
-	  build_ub_if_not_zero(arg2_indef);
-	res_indef = nullptr;
-
 	return {res, res_indef, nullptr};
       }
     case RROTATE_EXPR:
