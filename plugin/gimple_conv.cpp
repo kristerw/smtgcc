@@ -3035,17 +3035,13 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	// zero if arg2 is zero and arg1 + arg2 == 0), and checking arg2 is
 	// in general more efficient compared to arg1 as arg2 often is constant
 	// and the comparison therefore can be constant folded.
-	//
-	// Note: When doing overflow checks below, this is only needed to
-	// be checked for the sub case, as the add case is already marking
-	// it as UB due to an overflow.
-	Inst *zero_ub_check;
-	{
-	  Inst *zero = bb->value_inst(0, ptr->bitsize);
-	  Inst *cond1 = bb->build_inst(Op::EQ, ptr, zero);
-	  Inst *cond2 = bb->build_inst(Op::NE, arg2, zero);
-	  zero_ub_check = bb->build_inst(Op::AND, cond1, cond2);
-	}
+	if (flag_delete_null_pointer_checks)
+	  {
+	    Inst *zero = bb->value_inst(0, ptr->bitsize);
+	    Inst *cond1 = bb->build_inst(Op::EQ, ptr, zero);
+	    Inst *cond2 = bb->build_inst(Op::NE, arg2, zero);
+	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
+	  }
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
 	  {
@@ -3053,13 +3049,10 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	    Inst *add_overflow = bb->build_inst(Op::ULT, ptr, arg1);
 	    Inst *zero = bb->value_inst(0, arg2->bitsize);
 	    Inst *is_sub = bb->build_inst(Op::SLT, arg2, zero);
-	    sub_overflow = bb->build_inst(Op::OR, sub_overflow, zero_ub_check);
 	    Inst *is_ub =
 	      bb->build_inst(Op::ITE, is_sub, sub_overflow, add_overflow);
 	    bb->build_inst(Op::UB, is_ub);
 	  }
-	else
-	  bb->build_inst(Op::UB, zero_ub_check);
 
 	// TODO: Implement correct indef handling.
 	if (arg1_indef)
