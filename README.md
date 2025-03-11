@@ -169,7 +169,7 @@ It is good practice to check with `-fdump-tree-ssa` that the IR used by the tool
 smtgcc-check-refine has the same limitations as smtgcc-tv. 
 
 # Environment variables
- * `SMTGCC_VERBOSE` — Print debug information while running. Valid value 0-2, higher value prints more information (Default: 0)
+ * `SMTGCC_VERBOSE` — Print debug information while running. Valid value 0-3, higher value prints more information (Default: 0)
  * `SMTGCC_TIMEOUT` — SMT solver timeout (Default: 120000)
  * `SMTGCC_MEMORY_LIMIT` — SMT solver memory use limit in megabytes (Default: 10240)
  * `SMTGCC_CACHE` — Set to "redis" to use a Redis database to cache SMT queries. (Default: not caching)

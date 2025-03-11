@@ -852,6 +852,11 @@ void Converter::convert_function()
 
 Solver_result run_solver(z3::solver& s, const char *str)
 {
+  if (config.verbose > 2)
+    {
+      fprintf(stderr, "SMTGCC: SMTLIB2 for %s:\n", str);
+      fprintf(stderr, "%s", s.to_smt2().c_str());
+    }
   switch (s.check()) {
   case z3::unsat:
     return {Result_status::correct, {}};
