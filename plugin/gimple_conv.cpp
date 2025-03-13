@@ -1593,31 +1593,12 @@ Addr Converter::process_bit_field_ref(tree expr, bool is_mem_access)
 
 void Converter::alignment_check(tree expr, Inst *ptr)
 {
-  // TODO: There are cases where bit_alignment1 and bit_alignment2
-  // are inconsistent -- sometimes bit_alignment1 is larges, and
-  // sometimes bit_alignment2. And they varies in strange ways.
-  // E.g. bit_alignment1 contain info about __builtin_assume_aligned
-  // and is often correct in size of type alignment. But sometimes it
-  // has the element alignment for vectors. Or 128 when bit_alignment2
-  // is 256.
-  uint32_t bit_alignment1 = get_object_alignment(expr);
-  uint32_t bit_alignment2 = TYPE_ALIGN(TREE_TYPE(expr));
-  uint32_t bit_alignment = std::max(bit_alignment1, bit_alignment2);
-  assert((bit_alignment1 & 7) == 0);
-  assert((bit_alignment2 & 7) == 0);
-  uint32_t alignment = bit_alignment / 8;
+  uint32_t alignment = get_object_alignment(expr) / 8;
   if (alignment > 1)
     {
-      uint32_t high_val = 0;
-      for (;;)
-	{
-	  high_val++;
-	  if (alignment == (1u << high_val))
-	    break;
-	}
-
-      Inst *extract = bb->build_trunc(ptr, high_val);
-      Inst *zero = bb->value_inst(0, high_val);
+      assert((alignment & (alignment - 1)) == 0);
+      Inst *extract = bb->build_trunc(ptr, __builtin_ctz(alignment));
+      Inst *zero = bb->value_inst(0, extract->bitsize);
       Inst *cond = bb->build_inst(Op::NE, extract, zero);
       bb->build_inst(Op::UB, cond);
     }
