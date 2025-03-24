@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cinttypes>
+#include <functional>
 
 #include "smtgcc.h"
 
@@ -147,6 +148,7 @@ class Converter {
   void generate_ub();
   Inst *generate_assert(Function *func);
   Inst *get_full_edge_cond(Basic_block *src, Basic_block *dest);
+  Inst *build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic_block *)>& pred2inst);
   void build_mem_state(Basic_block *bb, std::map<Basic_block*, Inst *>& map);
   void generate_bb2cond(Basic_block *bb);
   std::pair<Inst *, Inst *> simplify_array_access(Inst *array, Inst *addr, std::map<Inst *, std::pair<Inst *, Inst *>>& cache);
@@ -798,16 +800,95 @@ Inst *Converter::get_full_edge_cond(Basic_block *src, Basic_block *dest)
   return build_inst(Op::AND, bb2cond.at(src), cond);
 }
 
+void flatten(Inst *inst, std::vector<Inst *>& elems)
+{
+  if (inst->op != Op::AND)
+    elems.push_back(inst);
+  else
+    {
+      flatten(inst->args[1], elems);
+      flatten(inst->args[0], elems);
+    }
+}
+
+// Build a chain of ite instructions for a phi-node.
+//
+// If we have a phi-node with three arguments, where the path conditions for
+// the elements are:
+//   1. a & b & c
+//   2. a & b & !c
+//   3. !a & d
+// we could build the chain as:
+//   ite (!a & d), v3, (ite (a & b & !c), v2, v1)
+// But we know that if the phi-node value is used, then at least one of the
+// paths must be taken. So we can eliminate a & b in the last ite:
+//   ite (!a & d), v3, (ite (!c), v2, v1)
+// because if 3. is not true, then one of 1. or 2. must be true.
+// In general, if all conditions in a sub-chain share the same element,
+// that element can be eliminated.
+// This optimization makes it possible to CSE more between src and tgt for
+// optimizations that modify the CFG.
+Inst *Converter::build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic_block *)>& pred2inst)
+{
+  Inst_comp comp;
+  assert(bb->preds.size() > 0);
+  Inst *inst = pred2inst(bb->preds[0]);
+  if (bb->preds.size() == 1)
+    return inst;
+
+  std::vector<Inst *> common;
+  flatten(get_full_edge_cond(bb->preds[0], bb), common);
+  std::sort(common.begin(), common.end(), comp);
+  common.erase(std::unique(common.begin(), common.end()), common.end());
+
+  for (unsigned i = 1; i < bb->preds.size(); i++)
+    {
+      std::vector<Inst *> conds;
+      Inst *full_cond = get_full_edge_cond(bb->preds[i], bb);
+      flatten(full_cond, conds);
+      std::sort(conds.begin(), conds.end(), comp);
+      conds.erase(std::unique(conds.begin(), conds.end()), conds.end());
+
+      std::vector<Inst*> tmp;
+      std::set_intersection(common.begin(), common.end(),
+			    conds.begin(), conds.end(),
+			    std::back_inserter(tmp), comp);
+      common = std::move(tmp);
+
+      std::vector<Inst*> needed_conds;
+      std::set_difference(conds.begin(), conds.end(),
+			  common.begin(), common.end(),
+			  std::back_inserter(needed_conds), comp);
+
+      // Create the simplified cond. This may be empty if several
+      // successive predecessors have the same condition (this
+      // typically happens when simplification after CSE folds them
+      // to 0 or 1). Use the original condition if that happens.
+      Inst *cond;
+      if (needed_conds.empty())
+	cond = full_cond;
+      else
+	{
+	  cond = needed_conds[0];
+	  for (unsigned j = 0; j < needed_conds.size(); j++)
+	    cond = build_inst(Op::AND, cond, needed_conds[j]);
+	}
+
+      inst = build_inst(Op::ITE, cond, pred2inst(bb->preds[i]), inst);
+    }
+
+  return inst;
+}
+
 void Converter::build_mem_state(Basic_block *bb, std::map<Basic_block*, Inst *>& map)
 {
   assert(bb->preds.size() > 0);
-  Inst *inst = map.at(bb->preds[0]);
-  for (size_t i = 1; i < bb->preds.size(); i++)
+  auto pred2inst =
+    [map](Basic_block *pred)
     {
-      Basic_block *pred_bb = bb->preds[i];
-      Inst *cond = get_full_edge_cond(pred_bb, bb);
-      inst = build_inst(Op::ITE, cond, map.at(pred_bb), inst);
-    }
+      return map.at(pred);
+    };
+  Inst *inst = build_phi_ite(bb, pred2inst);
   map.insert({bb, inst});
 }
 
@@ -1360,22 +1441,13 @@ void Converter::convert_function(Function *func, Function_role role)
 
       for (auto phi : bb->phis)
 	{
-	  Inst *phi_inst = translate.at(phi->phi_args[0].inst);
-	  assert(phi->phi_args.size() == bb->preds.size());
-	  if (phi->phi_args.size() > 1)
+	  auto pred2inst =
+	    [this, phi](Basic_block *pred)
 	    {
-	      Basic_block *pred_bb = phi->phi_args[0].bb;
-	      Inst *cond = get_full_edge_cond(pred_bb, bb);
-	      Inst *inst = translate.at(phi->phi_args[1].inst);
-	      phi_inst = build_inst(Op::ITE, cond, phi_inst, inst);
-	    }
-	  for (unsigned i = 2; i < phi->phi_args.size(); i++)
-	    {
-	      Basic_block *pred_bb = phi->phi_args[i].bb;
-	      Inst *cond = get_full_edge_cond(pred_bb, bb);
-	      Inst *inst = translate.at(phi->phi_args[i].inst);
-	      phi_inst = build_inst(Op::ITE, cond, inst, phi_inst);
-	    }
+	      return translate.at(phi->get_phi_arg(pred));
+	    };
+
+	  Inst *phi_inst = build_phi_ite(bb, pred2inst);
 	  // simplify_inst may move instructions over Op::ITE. This is
 	  // not always a good idea for the chains of ITE we generate
 	  // here, as it may generate a large number of extra instructions
