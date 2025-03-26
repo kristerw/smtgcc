@@ -40,7 +40,7 @@ unsigned int get_object_alignment(tree exp);
 
 // Size of anonymous memory size blocks we may need to introduce (for example,
 // so that function pointer arguments have memory to point to).
-#define ANON_MEM_SIZE 128
+#define ANON_MEM_SIZE 136
 
 using namespace std::string_literals;
 using namespace smtgcc;
