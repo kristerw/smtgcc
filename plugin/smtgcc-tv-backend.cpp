@@ -152,6 +152,10 @@ static void finish(void *, void *data)
   if (seen_error())
     return;
 
+  const char *file_name = getenv("SMTGCC_ASM");
+  if (!file_name)
+    file_name = asm_file_name;
+
   struct tv_pass *my_pass = (struct tv_pass *)data;
   for (auto& state : my_pass->functions)
     {
@@ -162,9 +166,9 @@ static void finish(void *, void *data)
 	{
 	  Module *module = state.module;
 #if defined(SMTGCC_AARCH64)
-	  Function *func = parse_aarch64(asm_file_name, &state);
+	  Function *func = parse_aarch64(file_name, &state);
 #elif defined(SMTGCC_RISCV)
-	  Function *func = parse_riscv(asm_file_name, &state);
+	  Function *func = parse_riscv(file_name, &state);
 #endif
 	  validate(func);
 
@@ -226,7 +230,7 @@ static void finish(void *, void *data)
 	}
       catch (Parse_error error)
 	{
-	  fprintf(stderr, "%s:%d: Parse error: %s\n", asm_file_name, error.line,
+	  fprintf(stderr, "%s:%d: Parse error: %s\n", file_name, error.line,
 		  error.msg.c_str());
 	}
       catch (Not_implemented& error)
