@@ -1416,6 +1416,34 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
   translate.insert({inst, new_inst});
 }
 
+bool need_phi_barrier(Inst *phi, Inst *phi_inst)
+{
+  if (phi->phi_args.size() <= 2)
+    return false;
+
+  // No need for a barrier if most arguments are constants.
+  int nof_nonconst_arg = 0;
+  for (auto [inst, _] : phi->phi_args)
+    {
+      if (inst->op != Op::VALUE)
+	nof_nonconst_arg++;
+    }
+  if (nof_nonconst_arg <= 1)
+    return false;
+
+  // Simplification after expanding the phi-node may reduce the result
+  // so that we no longer need a barrier, even if the original phi-node
+  // looked too complex.
+  if (phi_inst->op != Op::ITE)
+    return false;
+  if (phi_inst->op == Op::ITE
+      && phi_inst->args[1]->op != Op::ITE
+      && phi_inst->args[2]->op != Op::ITE)
+    return false;
+
+  return true;
+}
+
 void Converter::convert_function(Function *func, Function_role role)
 {
   calculate_dominance(func);
@@ -1456,7 +1484,7 @@ void Converter::convert_function(Function *func, Function_role role)
 	  // large phi nodes.
 	  // TODO: Tune this to better detect when the optimization is
 	  // helpful and avoid adding the barrier in those cases.
-	  if (phi->phi_args.size() > 2)
+	  if (need_phi_barrier(phi, phi_inst))
 	    phi_inst = build_inst(Op::SIMP_BARRIER, phi_inst);
 	  translate.insert({phi, phi_inst});
 	}
