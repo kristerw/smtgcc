@@ -564,6 +564,19 @@ Inst *simplify_eq(Inst *inst)
       && !is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
     return inst->bb->value_inst(0, 1);
 
+  // eq (add x, c1), c2 -> eq x, (c2 - c1)
+  if (arg1->op == Op::ADD
+      && arg1->args[1]->op == Op::VALUE
+      && arg2->op == Op::VALUE)
+    {
+      unsigned __int128 c1 = arg1->args[1]->value();
+      unsigned __int128 c2 = arg2->value();
+      Inst *new_const = inst->bb->value_inst(c2 - c1, arg1->bitsize);
+      Inst *new_inst = create_inst(Op::EQ, arg1->args[0], new_const);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   return inst;
 }
 
