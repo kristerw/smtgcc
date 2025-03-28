@@ -697,6 +697,7 @@ std::pair<SStats, Solver_result> check_ub_z3(Function *func);
 uint32_t popcount(unsigned __int128 x);
 uint32_t clz(unsigned __int128 x);
 uint32_t ctz(unsigned __int128 x);
+bool is_pow2(unsigned __int128 x);
 bool is_value_zero(Inst *inst);
 bool is_value_one(Inst *inst);
 bool is_value_signed_min(Inst *inst);

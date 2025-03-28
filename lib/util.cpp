@@ -73,6 +73,11 @@ uint32_t ctz(unsigned __int128 x)
   return result;
 }
 
+bool is_pow2(unsigned __int128 x)
+{
+  return x != 0 && (x & (x - 1)) == 0;
+}
+
 bool is_value_zero(Inst *inst)
 {
   return inst->op == Op::VALUE && inst->value() == 0;
@@ -129,8 +134,7 @@ bool is_value_pow2(Inst *inst)
 {
   if (inst->op != Op::VALUE)
     return false;
-  unsigned __int128 value = inst->value();
-  return value != 0 && (value & (value - 1)) == 0;
+  return is_pow2(inst->value());
 }
 
 Inst *gen_fmin(Basic_block *bb, Inst *elem1, Inst *elem2)

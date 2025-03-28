@@ -1359,6 +1359,18 @@ Inst *simplify_slt(Inst *inst)
       return new_inst2;
     }
 
+  // For c' = (1 << c) - 1: slt (c' - 1), (and x, c') -> eq (and x, c'), c'
+  if (arg1->op == Op::VALUE
+      && arg2->op == Op::AND
+      && arg2->args[1]->op == Op::VALUE
+      && arg2->args[1]->value() == arg1->value() + 1
+      && is_pow2(arg2->args[1]->value() + 1))
+    {
+      Inst *new_inst = create_inst(Op::EQ, arg2, arg2->args[1]);
+      new_inst->insert_before(inst);
+      return new_inst;
+    }
+
   return inst;
 }
 
@@ -1915,6 +1927,18 @@ Inst *simplify_ult(Inst *inst)
       Inst *new_inst2 = create_inst(Op::AND, new_inst1, arg2);
       new_inst2->insert_before(inst);
       return new_inst2;
+    }
+
+  // For c' = (1 << c) - 1: ult (c' - 1), (and x, c') -> eq (and x, c'), c'
+  if (arg1->op == Op::VALUE
+      && arg2->op == Op::AND
+      && arg2->args[1]->op == Op::VALUE
+      && arg2->args[1]->value() == arg1->value() + 1
+      && is_pow2(arg2->args[1]->value() + 1))
+    {
+      Inst *new_inst = create_inst(Op::EQ, arg2, arg2->args[1]);
+      new_inst->insert_before(inst);
+      return new_inst;
     }
 
   return inst;
