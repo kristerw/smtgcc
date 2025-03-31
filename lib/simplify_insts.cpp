@@ -1757,42 +1757,6 @@ Inst *simplify_ite(Inst *inst)
       return new_inst2;
     }
 
-  // ite x, (not y), (not z) -> not (ite x, y, z)
-  if (arg2->op == Op::NOT && arg3->op == Op::NOT)
-    {
-      Inst *new_inst1 =
-	create_inst(Op::ITE, arg1, arg2->args[0], arg3->args[0]);
-      new_inst1->insert_before(inst);
-      new_inst1 = simplify_inst(new_inst1);
-      Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
-      new_inst2->insert_before(inst);
-      return new_inst2;
-    }
-
-  // ite x, c, (not z) -> not (ite x, ~c, z)
-  if (arg2->op == Op::VALUE && arg3->op == Op::NOT)
-    {
-      Inst *new_c = inst->bb->value_inst(~arg2->value(), arg2->bitsize);
-      Inst *new_inst1 = create_inst(Op::ITE, arg1, new_c, arg3->args[0]);
-      new_inst1->insert_before(inst);
-      new_inst1 = simplify_inst(new_inst1);
-      Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
-      new_inst2->insert_before(inst);
-      return new_inst2;
-    }
-
-  // ite x, (not y), c -> not (ite x, y, ~c)
-  if (arg2->op == Op::NOT && arg3->op == Op::VALUE)
-    {
-      Inst *new_c = inst->bb->value_inst(~arg3->value(), arg3->bitsize);
-      Inst *new_inst1 = create_inst(Op::ITE, arg1, arg2->args[0], new_c);
-      new_inst1->insert_before(inst);
-      new_inst1 = simplify_inst(new_inst1);
-      Inst *new_inst2 = create_inst(Op::NOT, new_inst1);
-      new_inst2->insert_before(inst);
-      return new_inst2;
-    }
-
   // ite (slt (neg x), x), x, (neg x) -> abs(x)
   if (arg1->op == Op::SLT
       && arg1->args[0] == arg3
@@ -2442,10 +2406,7 @@ std::tuple<Inst *, Inst *, Inst *> get_ite_args(Inst *inst)
   return {nullptr, nullptr, nullptr};
 }
 
-// Return true if this is a VALUE instruction or a chain of ITE instructions
-// with VALUE arguments. Here, "zext x" of a boolean x is treated as the
-// ITE instruction "ite x, 1, 0", and "sext x" is treated as "ite x, -1, 0".
-bool is_value_chain(Inst *inst, int depth = 0)
+bool is_value_chain__(Inst *inst, int depth = 0)
 {
   // Limit how deep we search.
   const int depth_limit = 3;
@@ -2457,10 +2418,57 @@ bool is_value_chain(Inst *inst, int depth = 0)
       if (is_boolean_sext(inst) || is_boolean_zext(inst))
 	return true;
       if (inst->op == Op::ITE)
-	return is_value_chain(inst->args[1], depth + 1)
-	  && is_value_chain(inst->args[2], depth + 1);
+	return is_value_chain__(inst->args[1], depth + 1)
+	  && is_value_chain__(inst->args[2], depth + 1);
     }
   return false;
+}
+
+bool is_value_chain_(Inst *inst, int& nof_nonconst)
+{
+  if (inst->op == Op::VALUE)
+    return true;
+  if (is_boolean_sext(inst) || is_boolean_zext(inst))
+    return true;
+  if (inst->op == Op::ITE)
+    {
+      if (inst->args[1]->op == Op::ITE
+	  && inst->args[2]->op == Op::ITE)
+	return false;
+      return is_value_chain_(inst->args[1], nof_nonconst)
+	&& is_value_chain_(inst->args[2], nof_nonconst);
+    }
+  if (nof_nonconst == 0)
+    {
+      nof_nonconst++;
+      return true;
+    }
+  return false;
+}
+
+// Return true if this is a chain of ITE instructions with VALUE arguments
+// (where one element may be a non-VALUE). Here, "zext x" of a boolean x is
+// treated as the ITE instruction "ite x, 1, 0", and "sext x" is treated as
+// "ite x, -1, 0".
+//
+// Note: We are doing this optimization in an overly simplistic way, so it
+// explodes on code like:
+//   int f2(unsigned int x, unsigned int y)
+//   {
+//     int t = __builtin_popcount (x&y);
+//     int t1 = __builtin_popcount (x|y);
+//     return t + t1;
+//    }
+// when it recursively creates duplicated instructions. We therefore limit
+// this optimization arbitrarily to handle small, simple cases, and phi-nodes
+// where all except one argument is constant.
+// TODO: Implement a better solution.
+bool is_value_chain(Inst *inst)
+{
+  if (is_value_chain__(inst))
+    return true;
+  int nof_nonconst = 0;
+  return is_value_chain_(inst, nof_nonconst);
 }
 
 // Create and simplify instructions:
@@ -2555,7 +2563,7 @@ Inst *simplify_over_ite_arg(Inst *inst)
   if (inst->iclass() == Inst_class::iunary)
     {
       auto [cond, val1, val2] = get_ite_args(inst->args[0]);
-      if (cond && val1->op == Op::VALUE && val2->op == Op::VALUE)
+      if (cond && is_value_chain(val1) && is_value_chain(val2))
 	return gen_ite_of_op(inst, cond, val1, val2);
     }
   else if (inst->iclass() == Inst_class::ibinary
