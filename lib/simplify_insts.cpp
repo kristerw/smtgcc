@@ -2471,82 +2471,98 @@ bool is_value_chain(Inst *inst)
   return is_value_chain_(inst, nof_nonconst);
 }
 
-// Create and simplify instructions:
+// Recursively create and simplify instructions:
 //   ite (op val1) (op val2)
-// where op is the operation of inst. The new instructions are placed
-// before inst.
-Inst *gen_ite_of_op(Inst *inst, Inst *cond, Inst *val1, Inst *val2)
+// where op is the operation of inst. The recursion is done if pred is true
+// for val1 and val2, and the instructions are built by gen.
+Inst *gen_ite_of_op(Inst *inst, Inst *cond, Inst *val1, Inst *val2, bool(*pred)(Inst*, Inst*), Inst*(*gen)(Inst*, Inst*), std::map<Inst*,Inst*>& cache)
 {
-  val1 = create_inst(inst->op, val1);
-  val1->insert_before(inst);
-  val1 = simplify_inst(val1);
-  val2 = create_inst(inst->op, val2);
-  val2->insert_before(inst);
-  val2 = simplify_inst(val2);
-  Inst *ite = create_inst(Op::ITE, cond, val1, val2);
+  auto [v1_cond, v1_val1, v1_val2] = get_ite_args(val1);
+  auto [v2_cond, v2_val1, v2_val2] = get_ite_args(val2);
+
+  Inst *new_val1;
+  if (cache.contains(val1))
+    new_val1 = cache[val1];
+  else
+    {
+      if (v1_cond && pred(v1_val1, v1_val2))
+	new_val1 = gen_ite_of_op(inst, v1_cond, v1_val1, v1_val2,
+				 pred, gen, cache);
+      else
+	new_val1 = gen(inst, val1);
+      cache.insert({val1, new_val1});
+    }
+
+  Inst *new_val2;
+  if (cache.contains(val2))
+    new_val2 = cache[val2];
+  else
+    {
+      if (v2_cond && pred(v2_val1, v2_val2))
+	new_val2 = gen_ite_of_op(inst, v2_cond, v2_val1, v2_val2,
+				 pred, gen, cache);
+      else
+	new_val2 = gen(inst, val2);
+      cache.insert({val2, new_val2});
+    }
+
+  Inst *ite = create_inst(Op::ITE, cond, new_val1, new_val2);
   ite->insert_before(inst);
   ite = simplify_inst(ite);
   return ite;
 }
 
-// Create and simplify instructions:
-//   ite (op val1, arg) (op val2, arg)
-// where op is the operation of inst and arg1 is the second argument of inst.
-// The new instructions are placed before inst.
-Inst *gen_ite_of_op1(Inst *inst, Inst *cond, Inst *val1, Inst *val2)
+bool pred1(Inst *val1, Inst *val2)
 {
-  if (inst->args[0] == inst->args[1])
-    {
-      val1 = create_inst(inst->op, val1, val1);
-      val1->insert_before(inst);
-      val1 = simplify_inst(val1);
-      val2 = create_inst(inst->op, val2, val2);
-      val2->insert_before(inst);
-      val2 = simplify_inst(val2);
-    }
-  else
-    {
-      val1 = create_inst(inst->op, val1, inst->args[1]);
-      val1->insert_before(inst);
-      val1 = simplify_inst(val1);
-      val2 = create_inst(inst->op, val2, inst->args[1]);
-      val2->insert_before(inst);
-      val2 = simplify_inst(val2);
-    }
-  Inst *ite = create_inst(Op::ITE, cond, val1, val2);
-  ite->insert_before(inst);
-  ite = simplify_inst(ite);
-  return ite;
+  return is_value_chain(val1) && is_value_chain(val2);
 }
 
-// Create and simplify instructions
-//   ite (op arg, val1) (op arg, val2)
-// where op is the operation of inst and arg1 is the first argument of inst.
-// The new instructions are placed before inst.
-Inst *gen_ite_of_op2(Inst *inst, Inst *cond, Inst *val1, Inst *val2)
+bool pred2(Inst *val1, Inst *val2)
+{
+  return is_value_zero(val1) || is_value_zero(val2);
+}
+
+bool pred3(Inst *val1, Inst *val2)
+{
+  return (is_value_zero(val1) || is_value_zero(val2)
+	  || is_value_m1(val1) || is_value_m1(val2));
+}
+
+bool pred4(Inst *val1, Inst *val2)
+{
+  return (is_value_zero(val1) || is_value_zero(val2)
+	  || is_value_m1(val1) || is_value_m1(val2)
+	  || is_value_one(val1) || is_value_one(val2));
+}
+
+Inst *gen0(Inst *inst, Inst *val)
+{
+  val = create_inst(inst->op, val);
+  val->insert_before(inst);
+  val = simplify_inst(val);
+  return val;
+}
+
+Inst *gen1(Inst *inst, Inst *val)
 {
   if (inst->args[0] == inst->args[1])
-    {
-      val1 = create_inst(inst->op, val1, val1);
-      val1->insert_before(inst);
-      val1 = simplify_inst(val1);
-      val2 = create_inst(inst->op, val2, val2);
-      val2->insert_before(inst);
-      val2 = simplify_inst(val2);
-    }
+    val = create_inst(inst->op, val, val);
   else
-    {
-      val1 = create_inst(inst->op, inst->args[0], val1);
-      val1->insert_before(inst);
-      val1 = simplify_inst(val1);
-      val2 = create_inst(inst->op, inst->args[0], val2);
-      val2->insert_before(inst);
-      val2 = simplify_inst(val2);
-    }
-  Inst *ite = create_inst(Op::ITE, cond, val1, val2);
-  ite->insert_before(inst);
-  ite = simplify_inst(ite);
-  return ite;
+    val = create_inst(inst->op, val, inst->args[1]);
+  val->insert_before(inst);
+  val = simplify_inst(val);
+  return val;
+}
+
+Inst *gen2(Inst *inst, Inst *val)
+{
+  if (inst->args[0] == inst->args[1])
+    val = create_inst(inst->op, val, val);
+  else
+    val = create_inst(inst->op, inst->args[0], val);
+  val->insert_before(inst);
+  val = simplify_inst(val);
+  return val;
 }
 
 // If one argument is an ITE instruction where both values are
@@ -2560,11 +2576,13 @@ Inst *simplify_over_ite_arg(Inst *inst)
   if (!inst->has_lhs())
     return inst;
 
+  std::map<Inst*,Inst*> cache;
   if (inst->iclass() == Inst_class::iunary)
     {
       auto [cond, val1, val2] = get_ite_args(inst->args[0]);
-      if (cond && is_value_chain(val1) && is_value_chain(val2))
-	return gen_ite_of_op(inst, cond, val1, val2);
+      if (cond && pred1(val1, val2))
+	return gen_ite_of_op(inst, cond, val1, val2,
+			     pred1, gen0, cache);
     }
   else if (inst->iclass() == Inst_class::ibinary
 	   || inst->iclass() == Inst_class::icomparison)
@@ -2576,13 +2594,15 @@ Inst *simplify_over_ite_arg(Inst *inst)
 
       if (inst->args[1]->op == Op::VALUE)
 	{
-	  if (a1_cond && is_value_chain(a1_val1) && is_value_chain(a1_val2))
-	    return gen_ite_of_op1(inst, a1_cond, a1_val1, a1_val2);
+	  if (a1_cond && pred1(a1_val1, a1_val2))
+	    return gen_ite_of_op(inst, a1_cond, a1_val1, a1_val2,
+				 pred1, gen1, cache);
 	}
       if (inst->args[0]->op == Op::VALUE)
 	{
-	  if (a2_cond && is_value_chain(a2_val1) && is_value_chain(a2_val2))
-	    return gen_ite_of_op2(inst, a2_cond, a2_val1, a2_val2);
+	  if (a2_cond && pred1(a2_val1, a2_val2))
+	    return gen_ite_of_op(inst, a2_cond, a2_val1, a2_val2,
+				 pred1, gen2, cache);
 	}
 
       // It makes sense to transform some binary instructions even if the
@@ -2592,49 +2612,36 @@ Inst *simplify_over_ite_arg(Inst *inst)
 	  || inst->op == Op::SADD_WRAPS
 	  || inst->op == Op::XOR)
 	{
-	  if (a1_cond && (is_value_zero(a1_val1) || is_value_zero(a1_val2)))
-	    return gen_ite_of_op1(inst, a1_cond, a1_val1, a1_val2);
-	  if (a2_cond && (is_value_zero(a2_val1) || is_value_zero(a2_val2)))
-	    return gen_ite_of_op2(inst, a2_cond, a2_val1, a2_val2);
+	  if (a1_cond && pred2(a1_val1, a1_val2))
+	    return gen_ite_of_op(inst, a1_cond, a1_val1, a1_val2,
+				 pred2, gen1, cache);
+	  if (a2_cond && pred2(a2_val1, a2_val2))
+	    return gen_ite_of_op(inst, a2_cond, a2_val1, a2_val2,
+				 pred2, gen2, cache);
 	}
       else if (inst->op == Op::AND || inst->op == Op::OR)
 	{
-	  if (a1_cond
-	      && (is_value_zero(a1_val1)
-		  || is_value_zero(a1_val2)
-		  || is_value_m1(a1_val1)
-		  || is_value_m1(a1_val2)))
-	    return gen_ite_of_op1(inst, a1_cond, a1_val1, a1_val2);
-	  if (a2_cond
-	      && (is_value_zero(a2_val1)
-		  || is_value_zero(a2_val2)
-		  || is_value_m1(a2_val1)
-		  || is_value_m1(a2_val2)))
-	    return gen_ite_of_op2(inst, a2_cond, a2_val1, a2_val2);
+	  if (a1_cond && pred3(a1_val1, a1_val2))
+	    return gen_ite_of_op(inst, a1_cond, a1_val1, a1_val2,
+				 pred3, gen1, cache);
+	  if (a2_cond && pred3(a2_val1, a2_val2))
+	    return gen_ite_of_op(inst, a2_cond, a2_val1, a2_val2,
+				 pred3, gen2, cache);
 	}
       else if (inst->op == Op::MUL || inst->op == Op::SMUL_WRAPS)
 	{
-	  if (a1_cond
-	      && (is_value_zero(a1_val1)
-		  || is_value_zero(a1_val2)
-		  || is_value_m1(a1_val1)
-		  || is_value_m1(a1_val2)
-		  || is_value_one(a1_val1)
-		  || is_value_one(a1_val2)))
-	    return gen_ite_of_op1(inst, a1_cond, a1_val1, a1_val2);
-	  if (a2_cond
-	      && (is_value_zero(a2_val1)
-		  || is_value_zero(a2_val2)
-		  || is_value_m1(a2_val1)
-		  || is_value_m1(a2_val2)
-		  || is_value_one(a2_val1)
-		  || is_value_one(a2_val2)))
-	    return gen_ite_of_op2(inst, a2_cond, a2_val1, a2_val2);
+	  if (a1_cond && pred4(a1_val1, a1_val2))
+	    return gen_ite_of_op(inst, a1_cond, a1_val1, a1_val2,
+				 pred4, gen1, cache);
+	  if (a2_cond && pred4(a2_val1, a2_val2))
+	    return gen_ite_of_op(inst, a2_cond, a2_val1, a2_val2,
+				 pred4, gen2, cache);
 	}
       else if (inst->op == Op::SUB || inst->op == Op::SSUB_WRAPS)
 	{
-	  if (a2_cond && (is_value_zero(a2_val1) || is_value_zero(a2_val2)))
-	    return gen_ite_of_op2(inst, a2_cond, a2_val1, a2_val2);
+	  if (a2_cond && pred2(a2_val1, a2_val2))
+	    return gen_ite_of_op(inst, a2_cond, a2_val1, a2_val2,
+				 pred2, gen2, cache);
 	}
     }
 
