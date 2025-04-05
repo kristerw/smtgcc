@@ -158,7 +158,6 @@ class Converter {
 
   Inst *get_cmp_inst(const Cse_key& key);
   Inst *get_inst(const Cse_key& key);
-  Inst *get_not(Inst *inst);
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   Inst *update_key2inst(Inst *inst);
   bool is_in_key2inst(Inst *inst);
@@ -202,18 +201,6 @@ Inst *Converter::get_inst(const Cse_key& key)
     }
 
   return nullptr;
-}
-
-// Get an instruction caluclating Op::NOT of inst it we alredy have created
-// such an instruction.
-Inst *Converter::get_not(Inst *inst)
-{
-  if (inst->op == Op::NOT)
-    return inst->args[0];
-  if (inst->op == Op::VALUE)
-    return value_inst(~inst->value(), inst->bitsize);
-  const Cse_key key(Op::NOT, inst);
-  return get_inst(key);
 }
 
 Inst *Converter::value_inst(unsigned __int128 value, uint32_t bitsize)
@@ -395,46 +382,6 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 {
   const Cse_key key(op, arg1, arg2);
   Inst *inst = get_inst(key);
-  if (!inst && op == Op::OR)
-    {
-      Inst *not_arg1 = get_not(arg1);
-      Inst *not_arg2 = get_not(arg2);
-      if (not_arg1 && not_arg2)
-	{
-	  const Cse_key key(Op::AND, not_arg1, not_arg2);
-	  inst = get_inst(key);
-	  if (inst)
-	    {
-	      Inst *not_inst = get_not(inst);
-	      if (not_inst)
-		return not_inst;
-	      not_inst = dest_bb->build_inst(Op::NOT, inst);
-	      const Cse_key key(Op::NOT, inst);
-	      key2inst.insert({key, not_inst});
-	      return not_inst;
-	    }
-	}
-    }
-  if (!inst && op == Op::AND)
-    {
-      Inst *not_arg1 = get_not(arg1);
-      Inst *not_arg2 = get_not(arg2);
-      if (not_arg1 && not_arg2)
-	{
-	  const Cse_key key(Op::OR, not_arg1, not_arg2);
-	  inst = get_inst(key);
-	  if (inst)
-	    {
-	      Inst *not_inst = get_not(inst);
-	      if (not_inst)
-		return not_inst;
-	      not_inst = dest_bb->build_inst(Op::NOT, inst);
-	      const Cse_key key(Op::NOT, inst);
-	      key2inst.insert({key, not_inst});
-	      return not_inst;
-	    }
-	}
-    }
   if (!inst)
     {
       inst = dest_bb->build_inst(op, arg1, arg2);
