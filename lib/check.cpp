@@ -221,46 +221,47 @@ Inst *Converter::value_inst(unsigned __int128 value, uint32_t bitsize)
   return dest_bb->value_inst(value, bitsize);
 }
 
-// Checks if we already have an equivalent instruction. If we do,
+// Check if we already have an equivalent instruction. If we do,
 // all uses of 'inst' are changed to use the existing instruction.
-// If not, 'inst' is added to the CSE table.
+// If not, 'inst' is added to the CSE table. We do this by building
+// an equivalent instruction using the build_ API to ensure it gets
+// canonicalized correctly.
 Inst *Converter::update_key2inst(Inst *inst)
 {
-  Cse_key key(inst->op);
+  Inst *new_inst = nullptr;
+  bool orig_run_simplify_inst = run_simplify_inst;
+  run_simplify_inst = false;
   switch (inst->iclass())
     {
     case Inst_class::nullary:
+      new_inst = build_inst(inst->op);
       break;
     case Inst_class::iunary:
     case Inst_class::funary:
-      key.arg1 = inst->args[0];
+      new_inst = build_inst(inst->op, inst->args[0]);
       break;
     case Inst_class::icomparison:
     case Inst_class::fcomparison:
     case Inst_class::ibinary:
     case Inst_class::fbinary:
     case Inst_class::conv:
-      key.arg1 = inst->args[0];
-      key.arg2 = inst->args[1];
+      new_inst = build_inst(inst->op, inst->args[0], inst->args[1]);
       break;
     case Inst_class::ternary:
-      key.arg1 = inst->args[0];
-      key.arg2 = inst->args[1];
-      key.arg3 = inst->args[2];
+      new_inst =
+	build_inst(inst->op, inst->args[0], inst->args[1], inst->args[2]);
       break;
     default:
-      return inst;
+      break;
     }
+  run_simplify_inst = orig_run_simplify_inst;
+  if (!new_inst)
+    return inst;
 
-  Inst *existing_inst = get_inst(key);
-  if (existing_inst)
-    {
-      inst->replace_all_uses_with(existing_inst);
-      return existing_inst;
-    }
-
-  key2inst.insert({key, inst});
-  return inst;
+  inst->replace_all_uses_with(new_inst);
+  if (new_inst == dest_bb->last_inst)
+    new_inst->move_before(inst);
+  return new_inst;
 }
 
 bool Converter::is_in_key2inst(Inst *inst)
