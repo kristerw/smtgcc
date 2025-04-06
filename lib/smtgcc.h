@@ -676,8 +676,32 @@ struct riscv_state {
 Function *parse_riscv(std::string const& file_name, riscv_state *state);
 
 // simplify_insts.cpp
+struct Simplify_config {
+  virtual Inst *get_inst(Op, Inst *)
+  {
+    return nullptr;
+  }
+  virtual Inst *get_inst(Op, Inst *, Inst *)
+  {
+    return nullptr;
+  }
+  virtual Inst *get_inst(Op, Inst *, Inst *, Inst *)
+  {
+    return nullptr;
+  }
+  virtual void set_inst(Inst *, Op, Inst *)
+  {
+  }
+  virtual void set_inst(Inst *, Op, Inst *, Inst *)
+  {
+  }
+  virtual void set_inst(Inst *, Op, Inst *, Inst *, Inst *)
+  {
+  }
+};
+
 Inst *constant_fold_inst(Inst *inst);
-Inst *simplify_inst(Inst *inst);
+Inst *simplify_inst(Inst *inst, Simplify_config *config = nullptr);
 void simplify_insts(Function *func);
 void simplify_insts(Module *module);
 void simplify_mem(Function *func);

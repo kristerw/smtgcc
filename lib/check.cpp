@@ -74,6 +74,60 @@ struct Inst_comp {
   }
 };
 
+struct Cse : Simplify_config {
+private:
+  std::map<Cse_key, Inst *> key2inst;
+
+  Inst *get_inst(const Cse_key& key);
+  bool is_min_max(Inst *arg1, Inst *arg2, Inst *arg3);
+  Inst *cse_min_max(Inst *arg1, Inst *arg2, Inst *arg3);
+
+public:
+  Inst *get_inst(Op op)
+  {
+    const Cse_key key(op);
+    return get_inst(key);
+  }
+  Inst *get_inst(Op op, Inst *arg1) override
+  {
+    const Cse_key key(op, arg1);
+    return get_inst(key);
+  }
+  Inst *get_inst(Op op, Inst *arg1, Inst *arg2) override
+  {
+    const Cse_key key(op, arg1, arg2);
+    return get_inst(key);
+  }
+  Inst *get_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3) override
+  {
+    const Cse_key key(op, arg1, arg2, arg3);
+    Inst *inst = get_inst(key);
+    if (!inst && op == Op::ITE && is_min_max(arg1, arg2, arg3))
+      inst = cse_min_max(arg1, arg2, arg3);
+    return inst;
+  }
+  void set_inst(Inst *inst, Op op)
+  {
+    const Cse_key key(op);
+    key2inst.insert({key, inst});
+  }
+  void set_inst(Inst *inst, Op op, Inst *arg1) override
+  {
+    const Cse_key key(op, arg1);
+    key2inst.insert({key, inst});
+  }
+  void set_inst(Inst *inst, Op op, Inst *arg1, Inst *arg2) override
+  {
+    const Cse_key key(op, arg1, arg2);
+    key2inst.insert({key, inst});
+  }
+  void set_inst(Inst *inst, Op op, Inst *arg1, Inst *arg2, Inst *arg3) override
+  {
+    const Cse_key key(op, arg1, arg2, arg3);
+    key2inst.insert({key, inst});
+  }
+};
+
 // Convert the IR of a function to a form having essentially 1-1
 // correspondence to what the SMT solver is using. In particular
 // eliminate control flow, and change the memory operations to use
@@ -104,7 +158,7 @@ class Converter {
   // instruction in destination function.
   std::map<Inst *, Inst *> translate;
 
-  std::map<Cse_key, Inst *> key2inst;
+  Cse cse;
 
   std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> src_bbcond2ub;
   std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> tgt_bbcond2ub;
@@ -157,13 +211,8 @@ class Converter {
   void convert(Basic_block *bb, Inst *inst, Function_role role);
 
   Inst *get_cmp_inst(const Cse_key& key);
-  Inst *get_inst(const Cse_key& key);
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
-  Inst *update_key2inst(Inst *inst);
-  bool is_in_key2inst(Inst *inst);
   Inst *simplify(Inst *inst);
-  bool is_min_max(Inst *arg1, Inst *arg2, Inst *arg3);
-  Inst *cse_min_max(Inst *arg1, Inst *arg2, Inst *arg3);
   Inst *build_inst(Op op);
   Inst *build_inst(Op op, Inst *arg, bool insert_after = false);
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2);
@@ -185,7 +234,7 @@ public:
   Function *dest_func = nullptr;
 };
 
-Inst *Converter::get_inst(const Cse_key& key)
+Inst *Cse::get_inst(const Cse_key& key)
 {
   auto I = key2inst.find(key);
   if (I != key2inst.end())
@@ -208,80 +257,6 @@ Inst *Converter::value_inst(unsigned __int128 value, uint32_t bitsize)
   return dest_bb->value_inst(value, bitsize);
 }
 
-// Check if we already have an equivalent instruction. If we do,
-// all uses of 'inst' are changed to use the existing instruction.
-// If not, 'inst' is added to the CSE table. We do this by building
-// an equivalent instruction using the build_ API to ensure it gets
-// canonicalized correctly.
-Inst *Converter::update_key2inst(Inst *inst)
-{
-  Inst *new_inst = nullptr;
-  bool orig_run_simplify_inst = run_simplify_inst;
-  run_simplify_inst = false;
-  switch (inst->iclass())
-    {
-    case Inst_class::nullary:
-      new_inst = build_inst(inst->op);
-      break;
-    case Inst_class::iunary:
-    case Inst_class::funary:
-      new_inst = build_inst(inst->op, inst->args[0]);
-      break;
-    case Inst_class::icomparison:
-    case Inst_class::fcomparison:
-    case Inst_class::ibinary:
-    case Inst_class::fbinary:
-    case Inst_class::conv:
-      new_inst = build_inst(inst->op, inst->args[0], inst->args[1]);
-      break;
-    case Inst_class::ternary:
-      new_inst =
-	build_inst(inst->op, inst->args[0], inst->args[1], inst->args[2]);
-      break;
-    default:
-      break;
-    }
-  run_simplify_inst = orig_run_simplify_inst;
-  if (!new_inst)
-    return inst;
-
-  inst->replace_all_uses_with(new_inst);
-  if (new_inst == dest_bb->last_inst)
-    new_inst->move_before(inst);
-  return new_inst;
-}
-
-bool Converter::is_in_key2inst(Inst *inst)
-{
-  Cse_key key(inst->op);
-  switch (inst->iclass())
-    {
-    case Inst_class::nullary:
-      break;
-    case Inst_class::iunary:
-    case Inst_class::funary:
-      key.arg1 = inst->args[0];
-      break;
-    case Inst_class::icomparison:
-    case Inst_class::fcomparison:
-    case Inst_class::ibinary:
-    case Inst_class::fbinary:
-    case Inst_class::conv:
-      key.arg1 = inst->args[0];
-      key.arg2 = inst->args[1];
-      break;
-    case Inst_class::ternary:
-      key.arg1 = inst->args[0];
-      key.arg2 = inst->args[1];
-      key.arg3 = inst->args[2];
-      break;
-    default:
-      return false;
-    }
-
-  return key2inst.contains(key);
-}
-
 Inst *Converter::simplify(Inst *inst)
 {
   if (!run_simplify_inst)
@@ -289,45 +264,10 @@ Inst *Converter::simplify(Inst *inst)
   if (!inst->has_lhs())
     return inst;
 
-  Inst *orig_inst = inst;
-  Inst *prev_inst = inst->prev;
-  inst = simplify_inst(inst);
-  if (inst == orig_inst)
-    return inst;
-
-  // 'simplify_inst' may have added new instructions, so we must add them to
-  // the CSE table (or replace them with an already existing instruction).
-  // The instructions are always inserted right before the instruction
-  // being simplified, so the instructions to examine are between the
-  // 'prev_inst' and 'orig_inst'.
-  //
-  // The simplification may add new instructions, which in turn are simplified.
-  // This leaves unused instructions in the function, so we must remove them
-  // before adding the new instructions; otherwise, we may CSE subsequent
-  // instructions with these unoptimized instructions.
-  for (Inst *i = orig_inst->prev; i != prev_inst;)
-    {
-      Inst *prev = i->prev;
-      assert(i->has_lhs());
-      if (i != inst
-	  && i->op != Op::VALUE
-	  && i->used_by.empty()
-	  && !is_in_key2inst(inst))
-	destroy_instruction(i);
-      i = prev;
-    }
-  for (Inst *i = prev_inst->next; i != orig_inst; i = i->next)
-    {
-      if (i == inst)
-	inst = update_key2inst(i);
-      else
-	update_key2inst(i);
-    }
-
-  return inst;
+  return simplify_inst(inst, &cse);
 }
 
-bool Converter::is_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
+bool Cse::is_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
 {
   if (arg1->op == Op::SLT || arg1->op == Op::ULT)
     if ((arg1->args[0] == arg2 && arg1->args[1] == arg3)
@@ -340,7 +280,7 @@ bool Converter::is_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
 //   ite (ult x, y), x, y
 //   ite (ult y, x), y, x
 // Check if we already have an instruction using the other form.
-Inst *Converter::cse_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
+Inst *Cse::cse_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
 {
   const Cse_key cmp_key(arg1->op, arg1->args[1], arg1->args[0]);
   Inst *cmp_inst = get_inst(cmp_key);
@@ -353,55 +293,49 @@ Inst *Converter::cse_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
 
 Inst *Converter::build_inst(Op op)
 {
-  const Cse_key key(op);
-  Inst *inst = get_inst(key);
+  Inst *inst = cse.get_inst(op);
   if (!inst)
     {
       inst = dest_bb->build_inst(op);
-      key2inst.insert({key, inst});
+      cse.set_inst(inst, op);
     }
   return inst;
 }
 
 Inst *Converter::build_inst(Op op, Inst *arg, bool insert_after)
 {
-  const Cse_key key(op, arg);
-  Inst *inst = get_inst(key);
+  Inst *inst = cse.get_inst(op, arg);
   if (!inst)
     {
       inst = dest_bb->build_inst(op, arg);
       if (insert_after)
 	inst->move_after(arg);
       inst = simplify(inst);
-      key2inst.insert({key, inst});
+      cse.set_inst(inst, op, arg);
     }
   return inst;
 }
 
 Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 {
-  const Cse_key key(op, arg1, arg2);
-  Inst *inst = get_inst(key);
+  Inst *inst = cse.get_inst(op, arg1, arg2);
   if (!inst)
     {
       inst = dest_bb->build_inst(op, arg1, arg2);
       inst = simplify(inst);
-      key2inst.insert({key, inst});
+      cse.set_inst(inst, op, arg1, arg2);
     }
   return inst;
 }
 
 Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
 {
-  const Cse_key key(op, arg1, arg2, arg3);
-  Inst *inst = get_inst(key);
-  if (!inst && op == Op::ITE && is_min_max(arg1, arg2, arg3))
-    inst = cse_min_max(arg1, arg2, arg3);
+  Inst *inst = cse.get_inst(op, arg1, arg2, arg3);
   if (!inst)
     {
       inst = dest_bb->build_inst(op, arg1, arg2, arg3);
       inst = simplify(inst);
-      key2inst.insert({key, inst});
+      cse.set_inst(inst, op, arg1, arg2, arg3);
     }
   return inst;
 }

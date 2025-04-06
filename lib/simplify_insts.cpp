@@ -17,10 +17,11 @@ namespace {
 
 class Simplify {
   Inst *inst;
+  Simplify_config *config;
 
 public:
-  Simplify(Inst *inst)
-    : inst{inst}
+  Simplify(Inst *inst, Simplify_config *config)
+    : inst{inst}, config{config}
   {}
   Inst *simplify();
   Inst *simplify_over_ite_arg();
@@ -74,37 +75,63 @@ Inst *Simplify::value_inst(unsigned __int128 value, uint32_t bitsize)
 
 Inst *Simplify::build_inst(Op op, Inst *arg1)
 {
+  if (config)
+    {
+      Inst *inst = config->get_inst(op, arg1);
+      if (inst)
+	return inst;
+    }
   Inst *new_inst = create_inst(op, arg1);
   new_inst->insert_before(inst);
-  return simplify_inst(new_inst);
+  new_inst = simplify_inst(new_inst, config);
+  if (config)
+    config->set_inst(new_inst, op, arg1);
+  return new_inst;
 }
 
 Inst *Simplify::build_inst(Op op, Inst *arg1, Inst *arg2)
 {
+  if (config)
+    {
+      Inst *inst = config->get_inst(op, arg1, arg2);
+      if (inst)
+	return inst;
+    }
   Inst *new_inst = create_inst(op, arg1, arg2);
   new_inst->insert_before(inst);
-  return simplify_inst(new_inst);
+  new_inst = simplify_inst(new_inst, config);
+  if (config)
+    config->set_inst(new_inst, op, arg1, arg2);
+  return new_inst;
 }
 
 Inst *Simplify::build_inst(Op op, Inst *arg1, uint32_t arg2_val)
 {
-  Inst *new_inst = create_inst(op, arg1, arg2_val);
-  new_inst->insert_before(inst);
-  return simplify_inst(new_inst);
+  Inst *arg2 = arg1->bb->value_inst(arg2_val, 32);
+  return build_inst(op, arg1, arg2);
 }
 
 Inst *Simplify::build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
 {
+  if (config)
+    {
+      Inst *inst = config->get_inst(op, arg1, arg2, arg3);
+      if (inst)
+	return inst;
+    }
   Inst *new_inst = create_inst(op, arg1, arg2, arg3);
   new_inst->insert_before(inst);
-  return simplify_inst(new_inst);
+  new_inst = simplify_inst(new_inst, config);
+  if (config)
+    config->set_inst(new_inst, op, arg1, arg2, arg3);
+  return new_inst;
 }
 
 Inst *Simplify::build_inst(Op op, Inst *arg1, uint32_t arg2_val, uint32_t arg3_val)
 {
-  Inst *new_inst = create_inst(op, arg1, arg2_val, arg3_val);
-  new_inst->insert_before(inst);
-  return simplify_inst(new_inst);
+  Inst *arg2 = arg1->bb->value_inst(arg2_val, 32);
+  Inst *arg3 = arg1->bb->value_inst(arg3_val, 32);
+  return build_inst(op, arg1, arg2, arg3);
 }
 
 bool is_nbit_value(Inst *inst, uint32_t bitsize)
@@ -2493,7 +2520,7 @@ Inst *Simplify::simplify()
   return inst;
 }
 
-Inst *simplify_inst(Inst *inst)
+Inst *simplify_inst(Inst *inst, Simplify_config *config)
 {
   Inst *original_inst = inst;
 
@@ -2509,10 +2536,10 @@ Inst *simplify_inst(Inst *inst)
       && inst->args[1]->op != Op::VALUE)
     std::swap(inst->args[0], inst->args[1]);
 
-  Simplify simplify(inst);
+  Simplify simplify(inst, config);
   inst = simplify.simplify();
 
-  Simplify simplify2(inst);
+  Simplify simplify2(inst, config);
   inst = simplify2.simplify_over_ite_arg();
 
   return inst;
