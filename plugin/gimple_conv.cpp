@@ -1924,24 +1924,9 @@ void Converter::load_store_overlap_ub_check(tree store_expr, tree load_expr)
   if (size <= 1)
     return;
 
-  // TODO: There are cases where bit_alignment1 and bit_alignment2
-  // are inconsistent -- sometimes bit_alignment1 is larges, and
-  // sometimes bit_alignment2. And they varies in strange ways.
-  // E.g. bit_alignment1 contain info about __builtin_assume_aligned
-  // and is often correct in size of type alignment. But sometimes it
-  // has the element alignment for vectors. Or 128 when bit_alignment2
-  // is 256.
-  uint32_t bit_alignment1 = TYPE_ALIGN(TREE_TYPE(load_expr));
-  uint32_t bit_alignment2 = get_object_alignment(load_expr);
-  uint32_t bit_alignment3 = get_object_alignment(store_expr);
-  uint32_t load_bit_alignment = std::max(bit_alignment1, bit_alignment2);
-  uint32_t store_bit_alignment = std::max(bit_alignment1, bit_alignment3);
-  assert((bit_alignment1 & 7) == 0);
-  assert((bit_alignment2 & 7) == 0);
-  assert((bit_alignment3 & 7) == 0);
-  uint32_t load_alignment = load_bit_alignment / 8;
-  uint32_t store_alignment = store_bit_alignment / 8;
-  if (size <= load_alignment || size <= store_alignment)
+  uint32_t load_alignment = get_object_alignment(load_expr) / 8;
+  uint32_t store_alignment = get_object_alignment(store_expr) / 8;
+  if (size <= load_alignment && size <= store_alignment)
     return;
 
   overlap_ub_check(load_addr.ptr, store_addr.ptr, size);
