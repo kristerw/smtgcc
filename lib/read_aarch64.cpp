@@ -1758,6 +1758,9 @@ Inst *Parser::process_address(unsigned idx, unsigned vec_size)
 
 void Parser::store_ub_check(Inst *ptr, uint64_t size)
 {
+  (void)ptr;
+  (void)size;
+#if 0
   Inst *ptr_mem_id = bb->build_extract_id(ptr);
 
   // It is UB to write to constant memory.
@@ -1778,10 +1781,14 @@ void Parser::store_ub_check(Inst *ptr, uint64_t size)
   Inst *offset = bb->build_extract_offset(last_addr);
   Inst *out_of_bound = bb->build_inst(Op::ULE, mem_size, offset);
   bb->build_inst(Op::UB, out_of_bound);
+#endif
 }
 
 void Parser::load_ub_check(Inst *ptr, uint64_t size)
 {
+  (void)ptr;
+  (void)size;
+#if 0
   Inst *ptr_mem_id = bb->build_extract_id(ptr);
 
   // It is UB if the store overflows into a different memory object.
@@ -1812,6 +1819,7 @@ void Parser::load_ub_check(Inst *ptr, uint64_t size)
   Inst *offset = bb->build_extract_offset(ptr);
   Inst *out_of_bound = bb->build_inst(Op::ULE, mem_size, offset);
   bb->build_inst(Op::UB, out_of_bound);
+#endif
 }
 
 void Parser::process_load(uint32_t trunc_size, Op op)
