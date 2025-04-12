@@ -101,7 +101,6 @@ struct Converter {
   Inst *build_memory_inst(uint64_t id, uint64_t size, uint32_t flags);
   void build_ub_if_not_zero(Inst *inst, Inst *cmp = nullptr);
   void constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *indef=nullptr);
-  void mem_access_ub_check(Inst *ptr, Inst *prov, uint64_t size);
   void store_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr);
   void load_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr);
   void overlap_ub_check(Inst *src_ptr, Inst *dst_ptr, uint64_t size);
@@ -696,31 +695,6 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *in
   bb->build_inst(Op::UB, is_ub2);
 }
 
-void Converter::mem_access_ub_check(Inst *ptr, Inst *prov, uint64_t size)
-{
-  assert(size < (uint64_t(1) << module->ptr_offset_bits));
-
-  // It is UB if the pointer provenance does not correspond to the address.
-  Inst *ptr_mem_id = extract_id(ptr);
-  Inst *is_ub = bb->build_inst(Op::NE, prov, ptr_mem_id);
-  bb->build_inst(Op::UB, is_ub);
-
-  // It is UB if the size overflows the offset field.
-  Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
-  Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
-  Inst *end_mem_id = extract_id(end);
-  Inst *overflow = bb->build_inst(Op::NE, prov, end_mem_id);
-  bb->build_inst(Op::UB, overflow);
-
-  // It is UB if the end is outside the memory object.
-  // Note: ptr is within the memory object; otherwise, the provenance check
-  // or the offset overflow check would have failed.
-  Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
-  Inst *offset = bb->build_extract_offset(end);
-  Inst *out_of_bound = bb->build_inst(Op::ULE, mem_size, offset);
-  bb->build_inst(Op::UB, out_of_bound);
-}
-
 void Converter::store_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond)
 {
   // It is UB to write to constant memory.
@@ -1284,7 +1258,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
     case ADDR_EXPR:
       {
 	Addr addr = process_address(TREE_OPERAND(expr, 0), false);
-	assert(addr.bitoffset == 0);
+	assert(!addr.bitoffset);
 	return {addr.ptr, nullptr, addr.prov};
       }
     case BIT_FIELD_REF:
@@ -1486,6 +1460,7 @@ Addr Converter::process_array_ref(tree expr, bool is_mem_access)
   tree domain = TYPE_DOMAIN(array_type);
 
   Addr addr = process_address(array, is_mem_access);
+  assert(!addr.bitoffset);
   Inst *idx = tree2inst(index);
   if (!TYPE_UNSIGNED(TREE_TYPE(index)))
     {
@@ -1545,8 +1520,6 @@ Addr Converter::process_array_ref(tree expr, bool is_mem_access)
 	bb->value_inst((uint64_t)1 << module->ptr_offset_bits,
 		       eoffset->bitsize);
       bb->build_inst(Op::UB, bb->build_inst(Op::ULE, emax_offset, eoffset));
-      if (is_mem_access)
-	mem_access_ub_check(ptr, addr.prov, elem_size);
     }
   return {ptr, 0, addr.prov};
 }
@@ -1568,6 +1541,7 @@ Addr Converter::process_component_ref(tree expr, bool is_mem_access)
   bit_offset &= 7;
 
   Addr addr = process_address(object, is_mem_access);
+  assert(!addr.bitoffset);
   Inst *off = bb->value_inst(offset, addr.ptr->bitsize);
   Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, off);
 
@@ -1580,6 +1554,7 @@ Addr Converter::process_bit_field_ref(tree expr, bool is_mem_access)
   tree position = TREE_OPERAND(expr, 2);
   uint64_t bit_offset = get_int_cst_val(position);
   Addr addr = process_address(object, is_mem_access);
+  assert(!addr.bitoffset);
   Inst *ptr = addr.ptr;
   if (bit_offset > 7)
     {
@@ -1614,11 +1589,7 @@ Addr Converter::process_address(tree expr, bool is_mem_access)
       Inst *arg2 = tree2inst(TREE_OPERAND(expr, 1));
       Inst *ptr = bb->build_inst(Op::ADD, arg1, arg2);
       if (is_mem_access)
-	{
-	  uint64_t size = bytesize_for_type(TREE_TYPE(expr));
-	  mem_access_ub_check(ptr, arg1_prov, size);
-	  alignment_check(expr, ptr);
-	}
+	alignment_check(expr, ptr);
       return {ptr, 0, arg1_prov};
     }
   if (code == TARGET_MEM_REF)
@@ -1645,11 +1616,7 @@ Addr Converter::process_address(tree expr, bool is_mem_access)
 	}
       Inst *ptr = bb->build_inst(Op::ADD, base, off);
       if (is_mem_access)
-	{
-	  uint64_t size = bytesize_for_type(TREE_TYPE(expr));
-	  mem_access_ub_check(ptr, base_prov, size);
-	  alignment_check(expr, ptr);
-	}
+	alignment_check(expr, ptr);
       return {ptr, 0, base_prov};
     }
   if (code == VAR_DECL)
@@ -1662,14 +1629,6 @@ Addr Converter::process_address(tree expr, bool is_mem_access)
       Inst *ptr = decl2instruction.at(expr);
       assert(ptr->op == Op::MEMORY);
       Inst *id = extract_id(ptr);
-      if (is_mem_access)
-	{
-	  // This reads/writes a variable, so we know the access is in range.
-	  // However, we must verify the variable hasn't gone out of scope.
-	  Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, id);
-	  Inst *zero = bb->value_inst(0, mem_size->bitsize);
-	  bb->build_inst(Op::UB, bb->build_inst(Op::EQ, mem_size, zero));
-	}
       return {ptr, 0, id};
     }
   if (code == ARRAY_REF)
@@ -1685,6 +1644,7 @@ Addr Converter::process_address(tree expr, bool is_mem_access)
   if (code == IMAGPART_EXPR)
     {
       Addr addr = process_address(TREE_OPERAND(expr, 0), is_mem_access);
+      assert(!addr.bitoffset);
       uint64_t offset_val = bytesize_for_type(TREE_TYPE(expr));
       Inst *offset = bb->value_inst(offset_val, addr.ptr->bitsize);
       Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
@@ -1762,9 +1722,10 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
     throw Not_implemented("process_load: load size too big");
   Addr addr = process_address(expr, true);
   bool is_bitfield = is_bit_field(expr);
-  assert(is_bitfield || addr.bitoffset == 0);
+  assert(is_bitfield || !addr.bitoffset);
   if (is_bitfield)
     size = (bitsize + addr.bitoffset + 7) / 8;
+  load_ub_check(addr.ptr, addr.prov, size);
   Inst *value = nullptr;
   Inst *indef = nullptr;
   Inst *mem_flags2 = nullptr;
@@ -1970,7 +1931,7 @@ void Converter::process_store(tree addr_expr, tree value_expr)
   tree value_type = TREE_TYPE(value_expr);
   bool is_bitfield = is_bit_field(addr_expr);
   Addr addr = process_address(addr_expr, true);
-  assert(is_bitfield || addr.bitoffset == 0);
+  assert(is_bitfield || !addr.bitoffset);
   assert(addr.bitoffset < 8);
   auto [value, indef, prov] = tree2inst_indef_prov(value_expr);
   if (!indef)
@@ -2072,6 +2033,8 @@ void Converter::process_store(tree addr_expr, tree value_expr)
       std::tie(value, indef) = to_mem_repr(value, indef, value_type);
     }
 
+  store_ub_check(addr.ptr, addr.prov, size);
+
   // TODO: Adjust for bitfield?
   Inst *memory_flagsx = nullptr;
   if (inst2memory_flagsx.contains(value))
@@ -2108,10 +2071,6 @@ void Converter::process_store(tree addr_expr, tree value_expr)
 	memory_flag = bb->value_inst(1, 1);
       bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
     }
-
-  // It is UB to write to constant memory.
-  Inst *is_const = bb->build_inst(Op::IS_CONST_MEM, addr.prov);
-  bb->build_inst(Op::UB, is_const);
 }
 
 // Convert a scalar value of src_type to dest_type.
