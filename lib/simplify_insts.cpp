@@ -2266,6 +2266,9 @@ Inst *Simplify::simplify_over_ite_arg()
   std::map<Inst*,Inst*> cache;
   if (inst->iclass() == Inst_class::iunary)
     {
+      if (inst->op == Op::SIMP_BARRIER)
+	return inst;
+
       auto [cond, val1, val2] = get_ite_args(inst->args[0]);
       if (cond && pred1(val1, val2))
 	return gen_ite_of_op(cond, val1, val2,
