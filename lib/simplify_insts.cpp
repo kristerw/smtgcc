@@ -1568,6 +1568,44 @@ Inst *Simplify::simplify_ite()
       return build_inst(Op::ITE, new_inst, arg2, arg3);
     }
 
+  // ite x, (ite x, y, z), w -> ite x, y, w
+  if (arg2->op == Op::ITE && arg2->args[0] == arg1)
+    return build_inst(Op::ITE, arg1, arg2->args[1], arg3);
+
+  // ite x, w, (ite x, y, z) -> ite x, w, z
+  if (arg3->op == Op::ITE && arg3->args[0] == arg1)
+    return build_inst(Op::ITE, arg1, arg2, arg3->args[2]);
+
+  // ite w, (ite x, y, z), z -> ite (and w, x), y, z
+  if (arg2->op == Op::ITE && arg2->args[2] == arg3)
+    {
+      Inst *new_inst = build_inst(Op::AND, arg1, arg2->args[0]);
+      return build_inst(Op::ITE, new_inst, arg2->args[1], arg3);
+    }
+
+  // ite w, (ite x, y, z), y -> ite (or (not w), x), y, z
+  if (arg2->op == Op::ITE && arg2->args[1] == arg3)
+    {
+      Inst *new_inst1 = build_inst(Op::NOT, arg1);
+      Inst *new_inst2 = build_inst(Op::OR, new_inst1, arg2->args[0]);
+      return build_inst(Op::ITE, new_inst2, arg3, arg2->args[2]);
+    }
+
+  // ite w, z, (ite x, y, z) -> ite (or w, (not x)), z, y
+  if (arg3->op == Op::ITE && arg3->args[2] == arg2)
+    {
+      Inst *new_inst1 = build_inst(Op::NOT, arg3->args[0]);
+      Inst *new_inst2 = build_inst(Op::OR, arg1, new_inst1);
+      return build_inst(Op::ITE, new_inst2, arg2, arg3->args[1]);
+    }
+
+  // ite w, y, (ite x, y, z) -> ite (or w, x), y, z
+  if (arg3->op == Op::ITE && arg3->args[1] == arg2)
+    {
+      Inst *new_inst = build_inst(Op::OR, arg1, arg3->args[0]);
+      return build_inst(Op::ITE, new_inst, arg2, arg3->args[2]);
+    }
+
   return inst;
 }
 
