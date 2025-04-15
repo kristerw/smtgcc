@@ -334,7 +334,7 @@ struct Config
   int timeout = 120000;
 
   // SMT solver memory limit in megabytes.
-  int memory_limit = 10 * 1024;
+  int memory_limit = 5 * 1024;
 
   bool redis_cache = false;
 };
