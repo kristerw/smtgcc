@@ -133,7 +133,13 @@ public:
 // eliminate control flow, and change the memory operations to use
 // arrays.
 class Converter {
+  // True if simplify_inst should be called while building instructions.
   bool run_simplify_inst;
+
+  // True if we are currently canonicalizing Op::AND or Op::OR sequences.
+  // Used by canonicalize_and_or to prevent recursive calls while building
+  // the canonicalized sequence.
+  bool processing_and_or = false;
 
   // Maps basic blocks to an expression telling if it is executed.
   std::map<Basic_block *, Inst *> bb2cond;
@@ -213,6 +219,8 @@ class Converter {
   Inst *get_cmp_inst(const Cse_key& key);
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   Inst *simplify(Inst *inst);
+  void flatten(Op op, Inst *inst, std::vector<Inst *>& elems);
+  Inst *canonicalize_and_or(Inst *inst);
   Inst *build_inst(Op op);
   Inst *build_inst(Op op, Inst *arg, bool insert_after = false);
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2);
@@ -264,7 +272,93 @@ Inst *Converter::simplify(Inst *inst)
   if (!inst->has_lhs())
     return inst;
 
-  return simplify_inst(inst, &cse);
+  if (!processing_and_or
+      && inst->bitsize == 1
+      && ((inst->op == Op::AND
+          && (inst->args[0]->op == Op::AND || inst->args[1]->op == Op::AND))
+         || (inst->op == Op::OR
+             && (inst->args[0]->op == Op::OR || inst->args[1]->op == Op::OR))))
+    inst = canonicalize_and_or(inst);
+  else
+    inst = simplify_inst(inst, &cse);
+
+  return inst;
+}
+
+void Converter::flatten(Op op, Inst *inst, std::vector<Inst *>& elems)
+{
+  if (inst->op == op)
+    {
+      flatten(op, inst->args[1], elems);
+      flatten(op, inst->args[0], elems);
+    }
+  else if (inst->op == Op::NOT
+	   && ((op == Op::AND && inst->args[0]->op == Op::OR)
+	       || (op == Op::OR && inst->args[0]->op == Op::AND)))
+    {
+      flatten(op, build_inst(Op::NOT, inst->args[0]->args[0]), elems);
+      flatten(op, build_inst(Op::NOT, inst->args[0]->args[1]), elems);
+    }
+  else
+    elems.push_back(inst);
+}
+
+// Canonicalize chains of Op::AND or Op::OR to the form:
+//   (and (and (and (and e1, e2), e3), e4) ...
+Inst *Converter::canonicalize_and_or(Inst *inst)
+{
+  assert(inst->op == Op::AND || inst->op == Op::OR);
+  assert(inst->bitsize == 1);
+
+  Inst *arg1 = inst->args[0];
+  Inst *arg2 = inst->args[1];
+
+  // Collect the elements.
+  std::vector<Inst *> elems;
+  if (arg1->op == inst->op)
+    flatten(inst->op, arg1, elems);
+  else
+    elems.push_back(arg1);
+  if (arg2->op == inst->op)
+    flatten(inst->op, arg2, elems);
+  else
+    elems.push_back(arg2);
+
+  // Sort and eliminate duplicated elements. We want the elements sorted
+  // so that we generate the sequence in a consistent way, making it more
+  // likely to CSE with similar sequences.
+  Inst_comp comp;
+  std::sort(elems.begin(), elems.end(), comp);
+  elems.erase(std::unique(elems.begin(), elems.end()), elems.end());
+  assert(!elems.empty());
+
+  if (elems.size() == 1)
+    return elems[0];
+
+  // x & !x -> 0
+  // x | !x -> 1
+  for (auto elem : elems)
+    {
+      if (elem->op == Op::NOT
+         && std::find(elems.begin(), elems.end(), elem->args[0]) != elems.end())
+       {
+         if (inst->op == Op::AND)
+           return value_inst(0, arg1->bitsize);
+         else
+           return value_inst(-1, arg1->bitsize);
+       }
+    }
+
+  // Generate the sequence.
+  processing_and_or = true;
+  Inst *new_inst = build_inst(inst->op, elems[0], elems[1]);
+  for (unsigned i = 2; i < elems.size(); i++)
+    {
+      new_inst = build_inst(inst->op, new_inst, elems[i]);
+    }
+  processing_and_or = false;
+
+  return new_inst;
 }
 
 bool Cse::is_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
@@ -682,17 +776,6 @@ Inst *Converter::get_full_edge_cond(Basic_block *src, Basic_block *dest)
   return build_inst(Op::AND, bb2cond.at(src), cond);
 }
 
-void flatten(Inst *inst, std::vector<Inst *>& elems)
-{
-  if (inst->op != Op::AND)
-    elems.push_back(inst);
-  else
-    {
-      flatten(inst->args[1], elems);
-      flatten(inst->args[0], elems);
-    }
-}
-
 // Build a chain of ite instructions for a phi-node.
 //
 // If we have a phi-node with three arguments, where the path conditions for
@@ -719,7 +802,7 @@ Inst *Converter::build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic
     return inst;
 
   std::vector<Inst *> common;
-  flatten(get_full_edge_cond(bb->preds[0], bb), common);
+  flatten(Op::AND, get_full_edge_cond(bb->preds[0], bb), common);
   std::sort(common.begin(), common.end(), comp);
   common.erase(std::unique(common.begin(), common.end()), common.end());
 
@@ -727,7 +810,7 @@ Inst *Converter::build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic
     {
       std::vector<Inst *> conds;
       Inst *full_cond = get_full_edge_cond(bb->preds[i], bb);
-      flatten(full_cond, conds);
+      flatten(Op::AND, full_cond, conds);
       std::sort(conds.begin(), conds.end(), comp);
       conds.erase(std::unique(conds.begin(), conds.end()), conds.end());
 
