@@ -283,6 +283,7 @@ private:
   void process_sve_preg_unary(Op op);
   void process_sve_preg_binary(Op op);
   void process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_sve_preg_punpk(bool high);
   void process_sve_ext(Op op, uint64_t trunc_bitsize);
   void process_sve_sel();
   void process_sve_eor3();
@@ -4954,6 +4955,27 @@ void Parser::process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*
   write_reg(dest, res);
 }
 
+void Parser::process_sve_preg_punpk(bool high)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  get_comma(2);
+  Inst *arg1 = get_preg_value(3);
+  get_end_of_line(4);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      uint32_t idx = high ? i + nof_elem : i;
+      Inst *elem1 = extract_pred_elem(arg1, elem_bitsize / 2, idx);
+      Inst *inst = bb->build_inst(Op::ZEXT, elem1, elem_bitsize / 8);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_ext(Op op, uint64_t trunc_bitsize)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -5481,6 +5503,10 @@ void Parser::parse_sve_preg_op()
     process_sve_pfalse();
   else if (name == "ptrue")
     process_sve_ptrue();
+  else if (name == "punpkhi")
+    process_sve_preg_punpk(true);
+  else if (name == "punpklo")
+    process_sve_preg_punpk(false);
   else if (name == "str")
     process_sve_str_preg();
   else if (name == "uzp1")
