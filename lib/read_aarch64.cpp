@@ -229,6 +229,7 @@ private:
   void process_ubfiz(Op op);
   void process_addpl();
   void process_addvl();
+  void process_ext_addv(Op op);
   void process_cnt(uint64_t elem_bitsize);
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   Inst *extract_pred_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
@@ -2766,6 +2767,29 @@ void Parser::process_addvl()
   arg2 = arg2 * rstate->registers[Aarch64RegIdx::z0]->bitsize / 8;
   Inst *value = bb->value_inst(arg2, arg1->bitsize);
   Inst *res = bb->build_inst(Op::ADD, arg1, value);
+  write_reg(dest, res);
+}
+
+void Parser::process_ext_addv(Op op)
+{
+  Inst *dest = get_freg(1);
+  get_comma(2);
+  Inst *pred = get_preg_value(3);
+  get_comma(4);
+  auto [arg1_reg, nof_elem, elem_bitsize] = get_zreg(5);
+  Inst *arg1 = get_zreg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = bb->value_inst(0, dest->bitsize);
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      if (elem_bitsize < dest->bitsize)
+	elem1 = bb->build_inst(op, elem1, dest->bitsize);
+      Inst *inst = bb->build_inst(Op::ADD, res, elem1);
+      Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+      res = bb->build_inst(Op::ITE, pred_elem, inst, res);
+    }
   write_reg(dest, res);
 }
 
@@ -6111,10 +6135,14 @@ void Parser::parse_function()
     process_dec_inc(Op::ADD, 64);
   else if (name == "orv")
     process_vec_reduc_zreg(gen_or, Value::umin);
+  else if (name == "saddv")
+    process_ext_addv(Op::SEXT);
   else if (name == "sqadd")
     process_binary(gen_sat_sadd);
   else if (name == "sqsub")
     process_binary(gen_sat_ssub);
+  else if (name == "uaddv")
+    process_ext_addv(Op::ZEXT);
   else if (name == "uqadd")
     process_binary(gen_sat_uadd);
   else if (name == "uqsub")
