@@ -2984,11 +2984,9 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
     case MINUS_EXPR:
       {
 	Inst *prov = nullptr;
-	if (arg1_prov && arg2_prov && arg1_prov != arg2_prov)
-	  throw Not_implemented("two different provenance in MINUS_EXPR");
-	if (arg1_prov)
+	if (arg1_prov && !arg2_prov)
 	  prov = arg1_prov;
-	if (arg2_prov)
+	if (arg2_prov && !arg1_prov)
 	  prov = arg2_prov;
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
