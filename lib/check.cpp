@@ -849,7 +849,7 @@ void Converter::build_mem_state(Basic_block *bb, std::map<Basic_block*, Inst *>&
 {
   assert(bb->preds.size() > 0);
   auto pred2inst =
-    [map](Basic_block *pred)
+    [&map](Basic_block *pred)
     {
       return map.at(pred);
     };
