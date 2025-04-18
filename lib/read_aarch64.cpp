@@ -284,6 +284,7 @@ private:
   void process_sve_preg_binary(Op op);
   void process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_preg_punpk(bool high);
+  void process_sve_preg_ptest();
   void process_sve_ext(Op op, uint64_t trunc_bitsize);
   void process_sve_sel();
   void process_sve_eor3();
@@ -4976,6 +4977,38 @@ void Parser::process_sve_preg_punpk(bool high)
   write_reg(dest, res);
 }
 
+void Parser::process_sve_preg_ptest()
+{
+  Inst *arg1 = get_preg_value(1);
+  get_comma(2);
+  Inst *arg2 = get_preg_value(3);
+  get_end_of_line(4);
+
+  Inst *n = bb->value_inst(0, 1);
+  for (uint64_t i = 0; i < arg1->bitsize; i++)
+    {
+      Inst *p1 = bb->build_extract_bit(arg1, i);
+      Inst *p2 = bb->build_extract_bit(arg2, i);
+      n = bb->build_inst(Op::ITE, p1, p2, n);
+    }
+
+  Inst *inst = bb->build_inst(Op::AND, arg1, arg2);
+  Inst *z = bb->build_inst(Op::EQ, inst, bb->value_inst(0, inst->bitsize));
+
+  Inst *c = bb->value_inst(1, 1);
+  for (uint64_t i = 0; i < arg1->bitsize; i++)
+    {
+      Inst *p1 = bb->build_extract_bit(arg1, arg1->bitsize - 1 - i);
+      Inst *p2 = bb->build_extract_bit(arg2, arg1->bitsize - 1 - i);
+      p2 = bb->build_inst(Op::NOT, p2);
+      c = bb->build_inst(Op::ITE, p1, p2, c);
+    }
+
+  Inst *v = bb->value_inst(0, 1);
+
+  set_nzcv(n, z, c, v);
+}
+
 void Parser::process_sve_ext(Op op, uint64_t trunc_bitsize)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -5501,6 +5534,8 @@ void Parser::parse_sve_preg_op()
     process_sve_preg_binary(Op::OR);
   else if (name == "pfalse")
     process_sve_pfalse();
+  else if (name == "ptest")
+    process_sve_preg_ptest();
   else if (name == "ptrue")
     process_sve_ptrue();
   else if (name == "punpkhi")
