@@ -532,6 +532,11 @@ struct Aarch64RegIdx {
   static constexpr uint64_t hi = 85;
   static constexpr uint64_t lt = 86;
   static constexpr uint64_t gt = 87;
+
+  // Pseudo registers tracking abort/exit
+  static constexpr uint64_t abort = 88;
+  static constexpr uint64_t exit = 89;
+  static constexpr uint64_t exit_val = 90;
 };
 
 struct aarch64_state {

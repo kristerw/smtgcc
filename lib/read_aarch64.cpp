@@ -1660,6 +1660,28 @@ void Parser::process_call()
   std::string_view name = get_name(1);
   get_end_of_line(2);
 
+  if (name == "abort")
+    {
+      Inst *b1 = bb->value_inst(1, 1);
+      bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::abort], b1);
+      bb->build_br_inst(rstate->exit_bb);
+      bb = func->build_bb();
+      return;
+    }
+  if (name == "exit")
+    {
+      Inst *b1 = bb->value_inst(1, 1);
+      Inst *exit_val =
+	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::x0]);
+      exit_val = bb->build_trunc(exit_val, 32);
+      bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::exit], b1);
+      bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::exit_val],
+		     exit_val);
+      bb->build_br_inst(rstate->exit_bb);
+      bb = func->build_bb();
+      return;
+    }
+
   throw Not_implemented("call " + std::string(name));
 }
 

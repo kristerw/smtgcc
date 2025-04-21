@@ -103,6 +103,11 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
   for (int i = 0; i < 3; i++)
     rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
 
+  // Pseudo registers tracking abort/exit
+  rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
+  rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
+  rstate.registers.push_back(bb->build_inst(Op::REGISTER, 32));
+
   // Create MEMORY instructions for the global variables we saw in the
   // GIMPLE IR.
   for (const auto& mem_obj : rstate.memory_objects)
@@ -206,6 +211,26 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
 	    }
 	}
     }
+
+  // Functionality for abort/exit.
+  {
+    Inst *b0 = bb->value_inst(0, 1);
+    Inst *zero = bb->value_inst(0, 32);
+    bb->build_inst(Op::WRITE, rstate.registers[Aarch64RegIdx::abort], b0);
+    bb->build_inst(Op::WRITE, rstate.registers[Aarch64RegIdx::exit], b0);
+    bb->build_inst(Op::WRITE, rstate.registers[Aarch64RegIdx::exit_val], zero);
+
+    Inst *abort_cond =
+      rstate.exit_bb->build_inst(Op::READ,
+				 rstate.registers[Aarch64RegIdx::abort]);
+    Inst *exit_cond =
+      rstate.exit_bb->build_inst(Op::READ,
+				 rstate.registers[Aarch64RegIdx::exit]);
+    Inst *exit_val =
+      rstate.exit_bb->build_inst(Op::READ,
+				 rstate.registers[Aarch64RegIdx::exit_val]);
+    rstate.exit_bb->build_inst(Op::EXIT, abort_cond, exit_cond, exit_val);
+  }
 
   return rstate;
 }
