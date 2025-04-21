@@ -1103,16 +1103,25 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
     case INTEGER_CST:
       {
 	uint32_t precision = bitsize_for_type(TREE_TYPE(expr));
-	unsigned __int128 value = get_int_cst_val(expr);
-	Inst *inst = bb->value_inst(value, precision);
+	Inst *inst = nullptr;
 	Inst *prov = nullptr;
-	if (POINTER_TYPE_P(TREE_TYPE(expr)))
+	int remaining = precision;
+	for (int i = 0; i < TREE_INT_CST_NUNITS(expr); i++)
 	  {
-	    uint32_t ptr_id_bits = module->ptr_id_bits;
-	    uint32_t ptr_id_low = module->ptr_id_low;
-	    uint64_t id = (value >> ptr_id_low) & ((1 << ptr_id_bits) - 1);
-	    prov = bb->value_inst(id, ptr_id_bits);
+	    uint64_t elt_value = TREE_INT_CST_ELT(expr, i);
+	    Inst *elt = bb->value_inst(elt_value, std::min(remaining, 64));
+	    remaining -= elt->bitsize;
+	    if (inst)
+	      inst = bb->build_inst(Op::CONCAT, elt, inst);
+	    else
+	      inst = elt;
 	  }
+	if (inst->bitsize < precision)
+	  inst = bb->build_inst(Op::SEXT, inst, precision);
+
+	if (POINTER_TYPE_P(TREE_TYPE(expr)))
+	  prov = extract_id(inst);
+
 	return {inst, nullptr, prov};
       }
     case POLY_INT_CST:
