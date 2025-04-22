@@ -85,8 +85,6 @@ struct Converter {
   std::map<Inst *, Inst *> inst2memory_flagsx;
   std::map<Inst *, Inst *> inst2id;
   Inst *retval = nullptr;
-  int retval_bitsize;
-  tree retval_type;
 
   bool is_tgt_func;
 
@@ -115,6 +113,7 @@ struct Converter {
   Inst *get_res_indef(Inst *arg1_indef, Inst *arg2_indef, tree lhs_type);
   Inst *get_res_indef(Inst *arg1_indef, Inst *arg2_indef, Inst *arg3_indef, tree lhs_type);
   void alignment_check(tree expr, Inst *ptr);
+  void process_decl(tree decl);
   Addr process_array_ref(tree expr, bool is_mem_access);
   Addr process_component_ref(tree expr, bool is_mem_access);
   Addr process_bit_field_ref(tree expr, bool is_mem_access);
@@ -1588,6 +1587,55 @@ void Converter::alignment_check(tree expr, Inst *ptr)
     }
 }
 
+void Converter::process_decl(tree decl)
+{
+  if (DECL_REGISTER(decl))
+    throw Not_implemented("process_decl: DECL_REGISTER variable");
+  uint64_t size = bytesize_for_type(TREE_TYPE(decl));
+  if (size >= ((uint64_t)1 << module->ptr_offset_bits))
+    throw Not_implemented("process_decl: too large variable");
+  if (size == 0)
+    throw Not_implemented("process_decl: unknown size");
+  uint64_t id;
+  if (state->decl2id.contains(decl))
+    id = state->decl2id.at(decl);
+  else
+    {
+      if (DECL_ARTIFICIAL(decl) || !TREE_PUBLIC(decl))
+	{
+	  if (state->id_local <= state->ptr_id_min)
+	    throw Not_implemented("process_decl: too many local variables");
+	  id = --state->id_local;
+	}
+      else
+	{
+	  if (state->id_global >= state->ptr_id_max)
+	    throw Not_implemented("process_decl: too many global variables");
+	  id = ++state->id_global;
+	}
+      state->decl2id.insert({decl, id});
+    }
+  uint64_t flags = 0;
+  if (TREE_READONLY(decl))
+    flags |= MEM_CONST;
+  if (auto_var_p(decl))
+    {
+      if (size > MAX_MEMORY_UNROLL_LIMIT)
+	throw Not_implemented("process_decl: too large local variable");
+      flags |= MEM_UNINIT;
+    }
+  Inst *memory_inst = build_memory_inst(id, size, flags);
+  decl2instruction.insert({decl, memory_inst});
+  if (TREE_READONLY(decl))
+    init_var(decl, memory_inst);
+
+  if (!auto_var_p(decl) && DECL_ASSEMBLER_NAME(decl))
+    {
+      const char *name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(decl));
+      state->memory_objects.push_back({name, id, size, flags});
+    }
+}
+
 Addr Converter::process_address(tree expr, bool is_mem_access)
 {
   tree_code code = TREE_CODE(expr);
@@ -1630,11 +1678,15 @@ Addr Converter::process_address(tree expr, bool is_mem_access)
     }
   if (code == VAR_DECL)
     {
-      // We are currently not adding RTTI structures, which makes
-      // decl2instruction.at(expr) crash for e.g., g++.dg/analyzer/pr108003.C
-      if (!decl2instruction.contains(expr))
-	throw Not_implemented("process_address: unknown VAR_DECL");
+      if (TREE_STATIC(expr) || DECL_EXTERNAL(expr))
+	{
+	  varpool_node *node = varpool_node::get(expr);
+	  if (node)
+	    expr = node->ultimate_alias_target()->decl;
+	}
 
+      if (!decl2instruction.contains(expr))
+	process_decl(expr);
       Inst *ptr = decl2instruction.at(expr);
       assert(ptr->op == Op::MEMORY);
       Inst *id = extract_id(ptr);
@@ -1667,9 +1719,12 @@ Addr Converter::process_address(tree expr, bool is_mem_access)
     }
   if (code == RESULT_DECL)
     {
+      if (!decl2instruction.contains(expr))
+	process_decl(expr);
       Inst *ptr = decl2instruction.at(expr);
       assert(ptr->op == Op::MEMORY);
-      return {ptr, 0, ptr->args[0]};
+      Inst *id = extract_id(ptr);
+      return {ptr, 0, id};
     }
 
   const char *name = get_tree_code_name(TREE_CODE(expr));
@@ -6939,6 +6994,13 @@ void Converter::generate_exit_inst()
 
 void Converter::generate_return_inst()
 {
+  tree retval_type = TREE_TYPE(DECL_RESULT(fun->decl));
+  if (VOID_TYPE_P(retval_type))
+    {
+      bb->build_ret_inst();
+      return;
+    }
+  int retval_bitsize = bitsize_for_type(retval_type);
   if (!retval_bitsize)
     {
       bb->build_ret_inst();
@@ -7036,11 +7098,10 @@ void Converter::generate_return_inst()
 // Write the values to initialized variables.
 void Converter::init_var_values(tree initial, Inst *mem_inst)
 {
+  assert(bb == func->bbs[0]);
   if (TREE_CODE(initial) == ERROR_MARK)
     throw Not_implemented("init_var_values: ERROR_MARK");
 
-  Basic_block *entry_bb = func->bbs[0];
-  assert(mem_inst->bb == entry_bb);
   tree type = TREE_TYPE(initial);
   uint64_t size = bytesize_for_type(TREE_TYPE(initial));
 
@@ -7060,17 +7121,17 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
 	}
       for (uint64_t i = 0; i < len; i++)
 	{
-	  Inst *offset = entry_bb->value_inst(i, mem_inst->bitsize);
-	  Inst *ptr = entry_bb->build_inst(Op::ADD, mem_inst, offset);
-	  Inst *byte = entry_bb->value_inst(p[i], 8);
-	  entry_bb->build_inst(Op::STORE, ptr, byte);
+	  Inst *offset = bb->value_inst(i, mem_inst->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, mem_inst, offset);
+	  Inst *byte = bb->value_inst(p[i], 8);
+	  bb->build_inst(Op::STORE, ptr, byte);
 	}
       for (uint64_t i = len; i < size; i++)
 	{
-	  Inst *offset = entry_bb->value_inst(i, mem_inst->bitsize);
-	  Inst *ptr = entry_bb->build_inst(Op::ADD, mem_inst, offset);
-	  Inst *byte = entry_bb->value_inst(0, 8);
-	  entry_bb->build_inst(Op::STORE, ptr, byte);
+	  Inst *offset = bb->value_inst(i, mem_inst->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, mem_inst, offset);
+	  Inst *byte = bb->value_inst(0, 8);
+	  bb->build_inst(Op::STORE, ptr, byte);
 	}
       return;
     }
@@ -7115,8 +7176,8 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
 	      off = bb->build_inst(Op::MUL, indx, elm_size);
 	    }
 	  else
-	    off = entry_bb->value_inst(idx * elem_size, mem_inst->bitsize);
-	  Inst *ptr = entry_bb->build_inst(Op::ADD, mem_inst, off);
+	    off = bb->value_inst(idx * elem_size, mem_inst->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, mem_inst, off);
 	  init_var_values(value, ptr);
 	}
       return;
@@ -7136,8 +7197,8 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
 	  uint64_t bit_offset = get_int_cst_val(DECL_FIELD_BIT_OFFSET(index));
 	  offset += bit_offset / 8;
 	  bit_offset &= 7;
-	  Inst *off = entry_bb->value_inst(offset, mem_inst->bitsize);
-	  Inst *ptr = entry_bb->build_inst(Op::ADD, mem_inst, off);
+	  Inst *off = bb->value_inst(offset, mem_inst->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, mem_inst, off);
 	  tree elem_type = TREE_TYPE(value);
 	  if (TREE_CODE(elem_type) == ARRAY_TYPE
 	      || TREE_CODE(elem_type) == RECORD_TYPE
@@ -7152,28 +7213,28 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
 		{
 		  if (bit_offset)
 		    {
-		      Inst *first_byte = entry_bb->build_inst(Op::LOAD, ptr);
+		      Inst *first_byte = bb->build_inst(Op::LOAD, ptr);
 		      Inst *bits =
-			entry_bb->build_trunc(first_byte, bit_offset);
+			bb->build_trunc(first_byte, bit_offset);
 		      value_inst =
-			entry_bb->build_inst(Op::CONCAT, value_inst, bits);
+			bb->build_inst(Op::CONCAT, value_inst, bits);
 		    }
 		  if (bitsize + bit_offset != size * 8)
 		    {
 		      Inst *offset =
-			entry_bb->value_inst(size - 1, ptr->bitsize);
-		      Inst *ptr3 = entry_bb->build_inst(Op::ADD, ptr, offset);
+			bb->value_inst(size - 1, ptr->bitsize);
+		      Inst *ptr3 = bb->build_inst(Op::ADD, ptr, offset);
 
 		      uint64_t remaining = size * 8 - (bitsize + bit_offset);
 		      assert(remaining < 8);
-		      Inst *high = entry_bb->value_inst(7, 32);
-		      Inst *low = entry_bb->value_inst(8 - remaining, 32);
+		      Inst *high = bb->value_inst(7, 32);
+		      Inst *low = bb->value_inst(8 - remaining, 32);
 
-		      Inst *last_byte = entry_bb->build_inst(Op::LOAD, ptr3);
+		      Inst *last_byte = bb->build_inst(Op::LOAD, ptr3);
 		      Inst *bits =
-			entry_bb->build_inst(Op::EXTRACT, last_byte, high, low);
+			bb->build_inst(Op::EXTRACT, last_byte, high, low);
 		      value_inst =
-			entry_bb->build_inst(Op::CONCAT, bits, value_inst);
+			bb->build_inst(Op::CONCAT, bits, value_inst);
 		    }
 		}
 	      else
@@ -7241,7 +7302,10 @@ void Converter::init_var(tree decl, Inst *mem_inst)
 	}
     }
 
+  Basic_block *orig_bb = bb;
+  bb = func->bbs[0];
   init_var_values(initial, mem_inst);
+  bb = orig_bb;
 }
 
 void Converter::make_uninit(Inst *orig_ptr, uint64_t size)
@@ -7257,154 +7321,21 @@ void Converter::make_uninit(Inst *orig_ptr, uint64_t size)
 
 void Converter::process_variables()
 {
-  tree retval_decl = DECL_RESULT(fun->decl);
-  retval_type = TREE_TYPE(retval_decl);
-  if (VOID_TYPE_P(retval_type))
-    retval_bitsize = 0;
-  else
-    {
-      retval_bitsize = bitsize_for_type(TREE_TYPE(DECL_RESULT(fun->decl)));
-
-      uint64_t id;
-      if (state->decl2id.contains(retval_decl))
-	{
-	  id = state->decl2id.at(retval_decl);
-	}
-      else
-	{
-	  id = --state->id_local;
-	  state->decl2id.insert({retval_decl, id});
-	}
-      uint64_t size = bytesize_for_type(retval_type);
-      Inst *memory_inst = build_memory_inst(id, size, MEM_UNINIT);
-      decl2instruction.insert({retval_decl, memory_inst});
-    }
-
-  // Add an anonymous memory as first global.
+  // Add anonymous memory.
   // TODO: Should only be done if we have unconstrained pointers?
   build_memory_inst(2, ANON_MEM_SIZE, MEM_KEEP);
 
-  // Global variables.
-  {
-    varpool_node *var;
-    std::map<std::string, tree> name2decl;
-    FOR_EACH_VARIABLE(var)
-      {
-	tree decl = var->decl;
-	if (lookup_attribute("alias", DECL_ATTRIBUTES(decl)))
-	  continue;
-	if (DECL_REGISTER(decl))
-	  throw Not_implemented("DECL_REGISTER variable");
-	uint64_t size = bytesize_for_type(TREE_TYPE(decl));
-	if (size >= ((uint64_t)1 << module->ptr_offset_bits))
-	  throw Not_implemented("process_function: too large global variable");
-	// TODO: Implement.
-	if (size == 0)
-	  throw Not_implemented("process_function: unknown size");
-
-	uint64_t id;
-	if (state->decl2id.contains(decl))
-	  id = state->decl2id.at(decl);
-	else
-	  {
-	    // Artificial decls are used for data introduced by the compiler
-	    // (such as switch tables), so normal, unconstrained, pointers
-	    // cannot point to them. Give these a local ID.
-	    if (DECL_ARTIFICIAL(decl))
-	      {
-		if (state->id_local <= state->ptr_id_min)
-		  throw Not_implemented("too many local variables");
-		id = --state->id_local;
-	      }
-	    else
-	      {
-		if (state->id_global >= state->ptr_id_max)
-		  throw Not_implemented("too many global variables");
-		id = ++state->id_global;
-	      }
-	    state->decl2id.insert({decl, id});
-	  }
-	uint64_t flags = 0;
-	if (TREE_READONLY(decl))
-	  flags |= MEM_CONST;
-	Inst *memory_inst = build_memory_inst(id, size, flags);
-	decl2instruction.insert({decl, memory_inst});
-	if (DECL_ASSEMBLER_NAME(decl))
-	  {
-	    const char *name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(decl));
-	    name2decl.insert({name, decl});
-	    state->memory_objects.push_back({name, id, size, flags});
-	  }
-      }
-
-    FOR_EACH_VARIABLE(var)
-      {
-	tree decl = var->decl;
-	tree alias = lookup_attribute("alias", DECL_ATTRIBUTES(decl));
-	if (alias)
-	  {
-	    const char *name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(decl));
-	    const char *alias_name =
-	      TREE_STRING_POINTER(TREE_VALUE(TREE_VALUE(alias)));
-	    if (!name2decl.contains(alias_name))
-	      throw Not_implemented("unknown alias");
-	    tree alias_decl = name2decl.at(alias_name);
-	    decl2instruction.insert({decl, decl2instruction.at(alias_decl)});
-	    name2decl.insert({name, alias_decl});
-	  }
-      }
-
-    // Must do this after creating all variables as a pointer may need to
-    // be initialized by an address of a later variable.
-    FOR_EACH_VARIABLE(var)
-      {
-	tree decl = var->decl;
-	if (TREE_READONLY(decl))
-	  init_var(decl, decl2instruction.at(decl));
-      }
-  }
-
-  // Local variables.
-  {
-    tree decl;
-    unsigned ix;
-    FOR_EACH_LOCAL_DECL(fun, ix, decl)
-      {
-	if (DECL_REGISTER(decl))
-	  throw Not_implemented("DECL_REGISTER variable");
-
-	// Local static decls are included in the global decls, so their
-	// memory objects have already been created.
-	if (decl2instruction.contains(decl))
-	  {
-	    assert(TREE_STATIC(decl));
-	    continue;
-	  }
-
-	uint64_t size = bytesize_for_type(TREE_TYPE(decl));
-	if (size > MAX_MEMORY_UNROLL_LIMIT)
-	  throw Not_implemented("process_function: too large local variable");
-
-	int64_t id;
-	if (state->decl2id.contains(decl))
-	  id = state->decl2id.at(decl);
-	else
-	  {
-	    if (state->id_local <= state->ptr_id_min)
-	      throw Not_implemented("too many local variables");
-	    id = --state->id_local;
-	    state->decl2id.insert({decl, id});
-	  }
-	uint64_t flags = MEM_UNINIT;
-	if (TREE_READONLY(decl))
-	  flags |= MEM_CONST;
-	Inst *memory_inst = build_memory_inst(id, size, flags);
-	decl2instruction.insert({decl, memory_inst});
-
-	if (DECL_INITIAL(decl))
-	  init_var(decl, memory_inst);
-      }
-  }
+  // Add global variables.
+  //
+  // Tgt must have the same global constant memory as src, even if it
+  // is not used (for example, when arr[5] has been substituted with
+  // the value from the initialization). We ensure this by always
+  // adding all previously created global constant variables.
+  for (auto [decl, _] : state->decl2id)
+    {
+      if (TREE_PUBLIC(decl) && TREE_READONLY(decl))
+	process_decl(decl);
+    }
 }
 
 void Converter::process_func_args()
@@ -7875,6 +7806,7 @@ uint64_t bitsize_for_type(tree type)
     return 1 << VECTOR_TYPE_CHECK(type)->type_common.precision;
 
   tree size_tree = TYPE_SIZE(type);
+  assert(size_tree);
   if (size_tree == NULL_TREE)
     throw Not_implemented("bitsize_for_type: incomplete type");
   if (TREE_CODE(size_tree) != INTEGER_CST && !POLY_INT_CST_P(size_tree))
