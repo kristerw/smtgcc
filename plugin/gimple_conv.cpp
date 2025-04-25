@@ -101,6 +101,7 @@ struct Converter {
   void constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *indef=nullptr);
   void store_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr);
   void load_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr);
+  void load_vec_ub_check(Inst *ptr, Inst *prov, uint64_t size, tree expr);
   void overlap_ub_check(Inst *src_ptr, Inst *dst_ptr, uint64_t size);
   bool is_extracting_from_value(tree expr);
   std::tuple<Inst *, Inst *, Inst *> extract_component_ref(tree expr);
@@ -787,6 +788,44 @@ void Converter::load_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond)
 	out_of_bound = bb->build_inst(Op::AND, out_of_bound, cond);
       bb->build_inst(Op::UB, out_of_bound);
     }
+}
+
+void Converter::load_vec_ub_check(Inst *ptr, Inst *prov, uint64_t size, tree expr)
+{
+  tree type = TREE_TYPE(expr);
+  assert(VECTOR_TYPE_P(type));
+  tree elem_type = TREE_TYPE(type);
+  uint64_t alignment = get_object_alignment(expr) / 8;
+  uint64_t elem_size = bytesize_for_type(elem_type);
+
+  // It is UB if the pointer provenance does not correspond to the address.
+  Inst *ptr_mem_id = extract_id(ptr);
+  Inst *is_ub = bb->build_inst(Op::NE, prov, ptr_mem_id);
+  bb->build_inst(Op::UB, is_ub);
+
+  // It is UB if the size overflows the offset field.
+  Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
+  Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
+  Inst *end_mem_id = extract_id(end);
+  Inst *overflow = bb->build_inst(Op::NE, prov, end_mem_id);
+  bb->build_inst(Op::UB, overflow);
+
+  // A vector load may read outside the object, as long as the first element
+  // is within the object and the rest of the vector does not cross a page
+  // boundary. The compiler does not, in general, know where the page
+  // boundaries are, so in practice this means that out-of-bounds reads are
+  // valid as long as the extra bytes are within the same alignment line as
+  // the last valid byte.
+  // TODO: Should the bytes read out of bounds be marked as indef?
+  if (size <= alignment)
+    {
+      size_inst = bb->value_inst(elem_size - 1, ptr->bitsize);
+      end = bb->build_inst(Op::ADD, ptr, size_inst);
+    }
+  Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
+  Inst *offset = bb->build_extract_offset(end);
+  Inst *out_of_bound = bb->build_inst(Op::ULE, mem_size, offset);
+  bb->build_inst(Op::UB, out_of_bound);
 }
 
 // Mark the execution as UB if the source and destination ranges overlap
@@ -1789,7 +1828,10 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
   assert(is_bitfield || !addr.bitoffset);
   if (is_bitfield)
     size = (bitsize + addr.bitoffset + 7) / 8;
-  load_ub_check(addr.ptr, addr.prov, size);
+  if (VECTOR_TYPE_P(type))
+    load_vec_ub_check(addr.ptr, addr.prov, size, expr);
+  else
+    load_ub_check(addr.ptr, addr.prov, size);
   Inst *value = nullptr;
   Inst *indef = nullptr;
   Inst *mem_flags2 = nullptr;
