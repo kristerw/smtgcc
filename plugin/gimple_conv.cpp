@@ -2259,6 +2259,14 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	  // that round into range.
 	  Inst *min = tree2inst(TYPE_MIN_VALUE(dest_type));
 	  Inst *max = tree2inst(TYPE_MAX_VALUE(dest_type));
+	  // TODO: Handle dest bitsize > 128
+	  if (inst->bitsize == 16 && max->bitsize <= 128)
+	    {
+	      max = bb->value_inst(65504, max->bitsize);
+	      if (!TYPE_UNSIGNED(dest_type))
+		min = bb->value_inst(-65504, min->bitsize);
+	    }
+
 	  Op op = TYPE_UNSIGNED(dest_type) ? Op::U2F : Op::S2F;
 	  int src_bitsize = TYPE_PRECISION(src_type);
 	  Inst *fmin = bb->build_inst(op, min, src_bitsize);
