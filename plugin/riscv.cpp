@@ -419,6 +419,11 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
   // vl
   rstate.registers.push_back(bb->build_inst(Op::REGISTER, rstate.reg_bitsize));
 
+  // Pseudo registers tracking abort/exit
+  rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
+  rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
+  rstate.registers.push_back(bb->build_inst(Op::REGISTER, 32));
+
   // Create MEMORY instructions for the global variables we saw in the
   // GIMPLE IR.
   for (const auto& mem_obj : rstate.memory_objects)
@@ -582,6 +587,26 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 	    }
 	}
     }
+
+  // Functionality for abort/exit.
+  {
+    Inst *b0 = bb->value_inst(0, 1);
+    Inst *zero = bb->value_inst(0, 32);
+    bb->build_inst(Op::WRITE, rstate.registers[RiscvRegIdx::abort], b0);
+    bb->build_inst(Op::WRITE, rstate.registers[RiscvRegIdx::exit], b0);
+    bb->build_inst(Op::WRITE, rstate.registers[RiscvRegIdx::exit_val], zero);
+
+    Inst *abort_cond =
+      rstate.exit_bb->build_inst(Op::READ,
+				 rstate.registers[RiscvRegIdx::abort]);
+    Inst *exit_cond =
+      rstate.exit_bb->build_inst(Op::READ,
+				 rstate.registers[RiscvRegIdx::exit]);
+    Inst *exit_val =
+      rstate.exit_bb->build_inst(Op::READ,
+				 rstate.registers[RiscvRegIdx::exit_val]);
+    rstate.exit_bb->build_inst(Op::EXIT, abort_cond, exit_cond, exit_val);
+  }
 
   return rstate;
 }

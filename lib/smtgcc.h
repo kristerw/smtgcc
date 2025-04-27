@@ -659,6 +659,11 @@ struct RiscvRegIdx {
 
   static constexpr uint64_t vsew = 96;
   static constexpr uint64_t vl = 97;
+
+  // Pseudo registers tracking abort/exit
+  static constexpr uint64_t abort = 98;
+  static constexpr uint64_t exit = 99;
+  static constexpr uint64_t exit_val = 100;
 };
 
 struct riscv_state {

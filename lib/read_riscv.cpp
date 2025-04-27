@@ -1089,6 +1089,25 @@ void Parser::process_call()
       write_retval(res);
       return;
     }
+  if (name == "abort")
+    {
+      Inst *b1 = bb->value_inst(1, 1);
+      bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::abort], b1);
+      bb->build_br_inst(rstate->exit_bb);
+      bb = func->build_bb();
+      return;
+    }
+  if (name == "exit")
+    {
+      Inst *b1 = bb->value_inst(1, 1);
+      Inst *exit_val = read_arg(RiscvRegIdx::x10, 32);
+      bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::exit], b1);
+      bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::exit_val],
+		     exit_val);
+      bb->build_br_inst(rstate->exit_bb);
+      bb = func->build_bb();
+      return;
+    }
 
   throw Not_implemented("call " + std::string(name));
 }
