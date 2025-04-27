@@ -58,6 +58,7 @@ struct Parser {
 
   std::optional<std::string_view> parse_label_def();
   std::string_view parse_cmd();
+  uint32_t translate_base64_char(uint8_t c);
   void parse_data(std::vector<unsigned char>& data);
   void skip_line();
   void skip_whitespace();
@@ -4366,6 +4367,23 @@ std::string_view Parser::parse_cmd()
   return std::string_view(&buf[start_pos], pos - start_pos);
 }
 
+uint32_t Parser::translate_base64_char(uint8_t c)
+{
+  if ('A' <= c && c <= 'Z')
+    return c - 'A';
+  if ('a' <= c && c <= 'z')
+    return c - 'a' + 26;
+  if ('0' <= c && c <= '9')
+    return c - '0' + 52;
+  if (c == '+')
+    return 62;
+  if (c == '/')
+    return 63;
+  if (c == '=')
+    return 0;
+  throw Parse_error("Invalid .bas64 string", line_number);
+}
+
 void Parser::parse_data(std::vector<unsigned char>& data)
 {
   for (;;)
@@ -4502,7 +4520,33 @@ void Parser::parse_data(std::vector<unsigned char>& data)
 	  skip_line();
 	}
       else if (cmd == ".base64")
-	throw Parse_error(".base64 not supported yet", line_number);
+	{
+	  skip_whitespace();
+
+	  if (buf[pos++] != '"')
+	    throw Parse_error("expected '\"' after " + std::string(cmd),
+			      line_number);
+
+	  while (buf[pos] != '"')
+	    {
+	      uint32_t val = 0;
+	      val |= translate_base64_char(buf[pos]) << 18;
+	      val |= translate_base64_char(buf[pos + 1]) << 12;
+	      val |= translate_base64_char(buf[pos + 2]) << 6;
+	      val |= translate_base64_char(buf[pos + 3]);
+
+	      data.push_back((val >> 16) & 0xff);
+	      if (buf[pos + 2] != '=')
+		data.push_back((val >> 8) & 0xff);
+	      if (buf[pos + 3] != '=')
+		data.push_back(val & 0xff);
+
+	      pos += 4;
+	    }
+	  pos++;
+	  assert(buf[pos] == '\n');
+	  skip_line();
+	}
       else
 	{
 	  pos = start_pos;
