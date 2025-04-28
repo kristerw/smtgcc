@@ -183,6 +183,7 @@ private:
   void process_vec_mask_set(bool value);
   void process_vec_mask_binary(Op op);
   void process_vec_mask_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_mask_pop();
   Inst *gen_vec_reduc(Op op, Inst *orig, Inst *arg1, Inst *arg2, Inst *mask,
 		      uint32_t elem_bitsize);
   void process_vec_reduc(Op op);
@@ -2606,6 +2607,26 @@ void Parser::process_vec_mask_binary(Inst*(*gen_elem)(Basic_block*, Inst*,
   bb->build_inst(Op::WRITE, dest, res);
 }
 
+void Parser::process_vec_mask_pop()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_end_of_line(4);
+
+  Inst *res = bb->value_inst(0, dest->bitsize);
+  Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
+  for (uint32_t i = 0; i < rstate->vreg_bitsize; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, 1, i);
+      Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      Inst *inst = bb->build_inst(Op::AND, elem1, cmp);
+      inst = bb->build_inst(Op::ZEXT, inst, res->bitsize);
+      res = bb->build_inst(Op::ADD, res, inst);
+    }
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
 Inst *Parser::gen_vec_reduc(Op op, Inst *orig, Inst *arg1, Inst *arg2,
 			    Inst *mask, uint32_t elem_bitsize)
 {
@@ -4250,6 +4271,8 @@ void Parser::parse_function()
     process_vec_reduc(Op::XOR);
 
   // Vector mask instructions
+  else if (name == "vcpop.m")
+    process_vec_mask_pop();
   else if (name == "vmand.mm")
     process_vec_mask_binary(Op::AND);
   else if (name == "vmnand.mm")
