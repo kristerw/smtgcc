@@ -140,6 +140,7 @@ private:
   void process_icmp(std::string_view name, Op op, bool swap = false);
   void process_ishift(std::string_view name, Op op);
   void process_zba_sh_add(uint64_t shift_val, bool truncate_arg1);
+  void process_csrr();
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   Inst *change_prec(Inst *inst, uint32_t bitsize);
   void process_vsetvli(bool arg1_is_imm);
@@ -1531,6 +1532,22 @@ void Parser::process_zba_sh_add(uint64_t shift_val, bool truncate_arg1)
   Inst *shift = bb->value_inst(shift_val, reg_bitsize);
   Inst *res = bb->build_inst(Op::SHL, arg1, shift);
   res = bb->build_inst(Op::ADD, res, arg2);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_csrr()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  std::string_view name = get_name(3);
+  get_end_of_line(4);
+
+  Inst *res;
+  if (name == "vlenb")
+    res = bb->value_inst(rstate->vreg_bitsize / 8, dest->bitsize);
+  else
+    throw Parse_error("unhandled instruction: csrr " + std::string(name),
+		      line_number);
   bb->build_inst(Op::WRITE, dest, res);
 }
 
@@ -3897,6 +3914,10 @@ void Parser::parse_function()
       res = bb->build_inst(Op::OR, arg1, res);
       bb->build_inst(Op::WRITE, dest, res);
     }
+
+  // Zicsr
+  else if (name == "csrr")
+    process_csrr();
 
   //
   // Vector instructions
