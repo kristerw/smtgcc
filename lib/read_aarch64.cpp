@@ -1,5 +1,6 @@
 #include <fstream>
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <string>
@@ -40,6 +41,7 @@ struct Parser {
     label_def,
     name,
     integer,
+    fp,
     hex,
     lo12,
     comma,
@@ -95,8 +97,8 @@ private:
   void lex_line(void);
   void lex_label_or_label_def(void);
   void lex_hex(void);
-  void lex_integer(void);
-  void lex_hex_or_integer(void);
+  void lex_integer_or_fp(void);
+  void lex_imm(void);
   void lex_name(void);
   bool is_lo12(void);
 
@@ -125,10 +127,14 @@ private:
   bool is_zreg(unsigned idx);
   bool is_preg(unsigned idx);
   Inst *get_imm(unsigned idx);
+  Inst *get_fpimm(unsigned idx, uint32_t bitsize);
   Inst *get_reg_value(unsigned idx);
   Inst *get_reg_or_imm_value(unsigned idx, uint32_t bitsize);
   Inst *get_freg_value(unsigned idx);
+  Inst *get_freg_or_imm_value(unsigned idx, uint32_t bitsize);
   Inst *get_vreg_value(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
+  Inst *get_vreg_or_imm_value(unsigned idx, uint32_t nof_elem,
+			      uint32_t elem_bitsize);
   Inst *get_zreg_value(unsigned idx);
   Inst *get_zreg_or_imm_value(unsigned idx, uint32_t bitsize);
   Inst *get_preg_value(unsigned idx);
@@ -191,6 +197,7 @@ private:
   void process_fmov();
   void process_smov();
   void process_umov();
+  void process_sqxtn();
   void process_unary(Op op);
   void process_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
   Inst *process_arg_shift(unsigned idx, Inst *arg);
@@ -365,8 +372,9 @@ void Parser::lex_hex(void)
   tokens.emplace_back(Lexeme::hex, start_pos, pos - start_pos);
 }
 
-void Parser::lex_integer(void)
+void Parser::lex_integer_or_fp(void)
 {
+  Lexeme kind = Lexeme::integer;
   int start_pos = pos;
   if (buf[pos] == '-')
     pos++;
@@ -377,17 +385,35 @@ void Parser::lex_integer(void)
   while (isdigit(buf[pos]))
     pos++;
   if (buf[pos] == '.')
-    throw Parse_error("fp constants are not supported yet", line_number);
-  tokens.emplace_back(Lexeme::integer, start_pos, pos - start_pos);
+    {
+      pos++;
+      if (!isdigit(buf[pos]))
+	throw Parse_error("invalid fp constant", line_number);
+      while (isdigit(buf[pos]))
+	pos++;
+      if (buf[pos] == 'e')
+	{
+	  pos++;
+	  if (buf[pos] != '-' && buf[pos] != '+')
+	    throw Parse_error("invalid fp constant", line_number);
+	  pos++;
+	  if (!isdigit(buf[pos]))
+	    throw Parse_error("invalid fp constant", line_number);
+	  while (isdigit(buf[pos]))
+	    pos++;
+	}
+      kind = Lexeme::fp;
+    }
+  tokens.emplace_back(kind, start_pos, pos - start_pos);
 }
 
-void Parser::lex_hex_or_integer(void)
+void Parser::lex_imm(void)
 {
   assert(isdigit(buf[pos]) || buf[pos] == '-');
   if (buf[pos] == '0' && (buf[pos + 1] == 'x' || buf[pos + 1] == 'X'))
     lex_hex();
   else
-    lex_integer();
+    lex_integer_or_fp();
 }
 
 void Parser::lex_name(void)
@@ -613,6 +639,18 @@ Inst *Parser::get_freg_value(unsigned idx)
   return bb->build_trunc(inst, get_reg_bitsize(idx));
 }
 
+Inst *Parser::get_freg_or_imm_value(unsigned idx, uint32_t bitsize)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  Inst *value;
+  if (tokens[idx].kind == Lexeme::fp)
+    value = get_fpimm(idx, bitsize);
+  else
+    value = get_freg_value(idx);
+  return value;
+}
+
 std::tuple<uint64_t, uint32_t, uint32_t> Parser::get_vreg_(unsigned idx)
 {
   if (tokens.size() <= idx)
@@ -709,6 +747,24 @@ Inst *Parser::get_vreg_value(unsigned idx, uint32_t nof_elem,
   return bb->build_trunc(inst, nof_elem * elem_bitsize);
 }
 
+Inst *Parser::get_vreg_or_imm_value(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  if (tokens[idx].kind == Lexeme::fp)
+    {
+      Inst *elem = get_fpimm(idx, elem_bitsize);
+      Inst *res = elem;
+      for (unsigned i = 1; i < nof_elem; i++)
+	{
+	  res = bb->build_inst(Op::CONCAT, res, elem);
+	}
+      return res;
+    }
+  else
+    return get_vreg_value(idx, nof_elem, elem_bitsize);
+}
+
 Inst *Parser::get_zreg_value(unsigned idx)
 {
   auto [dest, dest_nof_elem, dest_elem_bitsize] = get_zreg(idx, true);
@@ -721,6 +777,8 @@ Inst *Parser::get_zreg_or_imm_value(unsigned idx, uint32_t bitsize)
     throw Parse_error("expected more arguments", line_number);
   if (tokens[idx].kind == Lexeme::name)
     return get_zreg_value(idx);
+  else if (tokens[idx].kind == Lexeme::fp)
+    return get_fpimm(idx, bitsize);
   else
     return bb->build_trunc(get_imm(idx), bitsize);
 }
@@ -987,6 +1045,26 @@ Inst *Parser::get_imm(unsigned idx)
   return bb->value_inst(get_hex_or_integer(idx), reg_bitsize);
 }
 
+Inst *Parser::get_fpimm(unsigned idx, uint32_t bitsize)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  if (tokens[idx].kind != Lexeme::fp)
+    throw Parse_error("expected a floating-point constant", line_number);
+
+  char *end;
+  double f = strtod(&buf[tokens[idx].pos], &end);
+  if (end - &buf[tokens[idx].pos] != tokens[idx].size)
+    throw Parse_error("invalid fp constant", line_number);
+  assert(bitsize == 16 || bitsize == 32 || bitsize == 64);
+  if (bitsize == 16)
+    return bb->value_inst(std::bit_cast<uint16_t>((_Float16)f), 16);
+  else if (bitsize == 32)
+    return bb->value_inst(std::bit_cast<uint32_t>((float)f), 32);
+  else
+    return bb->value_inst(std::bit_cast<uint64_t>(f), 64);
+}
+
 Inst *Parser::get_reg_value(unsigned idx)
 {
   if (is_freg(idx))
@@ -1017,6 +1095,8 @@ Inst *Parser::get_reg_or_imm_value(unsigned idx, uint32_t bitsize)
   Inst *value;
   if (tokens[idx].kind == Lexeme::name)
     value = get_reg_value(idx);
+  else if (tokens[idx].kind == Lexeme::fp)
+    value = get_fpimm(idx, bitsize);
   else
     value = get_imm(idx);
   if (value->bitsize > bitsize)
@@ -1453,21 +1533,6 @@ Inst *gen_ushl(Basic_block *bb, Inst *elem1, Inst *elem2)
   lshift = bb->build_inst(Op::SHL, elem1, lshift);
   rshift = bb->build_inst(Op::LSHR, elem1, rshift);
   return bb->build_inst(Op::ITE, is_rshift, rshift, lshift);
-}
-
-Inst *gen_sqxtn(Basic_block *bb, Inst *elem1)
-{
-  __int128 smax_val = (((__int128)1) << (elem1->bitsize / 2 - 1)) - 1;
-  __int128 smin_val = ((__int128)-1) << (elem1->bitsize / 2 - 1);
-  Inst *smax1 = bb->value_inst(smax_val, elem1->bitsize);
-  Inst *smax2 = bb->value_inst(smax_val, elem1->bitsize / 2);
-  Inst *smin1 = bb->value_inst(smin_val, elem1->bitsize);
-  Inst *smin2 = bb->value_inst(smin_val, elem1->bitsize / 2);
-  Inst *res = bb->build_trunc(elem1, elem1->bitsize / 2);
-  Inst *cmp1 = bb->build_inst(Op::SLT, elem1, smin1);
-  Inst *cmp2 = bb->build_inst(Op::SLT, smax1, elem1);
-  res = bb->build_inst(Op::ITE, cmp1, smin2, res);
-  return bb->build_inst(Op::ITE, cmp2, smax2, res);
 }
 
 Inst *gen_cnot(Basic_block *bb, Inst *elem)
@@ -1976,7 +2041,7 @@ void Parser::process_fcmp()
 {
   Inst *arg1 = get_freg_value(1);
   get_comma(2);
-  Inst *arg2 = get_freg_value(3);
+  Inst *arg2 = get_freg_or_imm_value(3, arg1->bitsize);
   get_end_of_line(4);
 
   Inst *b0 = bb->value_inst(0, 1);
@@ -2409,12 +2474,32 @@ void Parser::process_umov()
   write_reg(dest, arg1);
 }
 
+void Parser::process_sqxtn()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_end_of_line(4);
+
+  __int128 smax_val = (((__int128)1) << (arg1->bitsize / 2 - 1)) - 1;
+  __int128 smin_val = ((__int128)-1) << (arg1->bitsize / 2 - 1);
+  Inst *smax1 = bb->value_inst(smax_val, arg1->bitsize);
+  Inst *smax2 = bb->value_inst(smax_val, arg1->bitsize / 2);
+  Inst *smin1 = bb->value_inst(smin_val, arg1->bitsize);
+  Inst *smin2 = bb->value_inst(smin_val, arg1->bitsize / 2);
+  Inst *res = bb->build_trunc(arg1, arg1->bitsize / 2);
+  Inst *cmp1 = bb->build_inst(Op::SLT, arg1, smin1);
+  Inst *cmp2 = bb->build_inst(Op::SLT, smax1, arg1);
+  res = bb->build_inst(Op::ITE, cmp1, smin2, res);
+  res = bb->build_inst(Op::ITE, cmp2, smax2, res);
+  write_reg(dest, res);
+}
+
 void Parser::process_unary(Op op)
 {
   Inst *dest = get_reg(1);
   get_comma(2);
-  bool is_w_reg = buf[tokens[1].pos] == 'w';
-  Inst *arg1 = process_last_arg(3, is_w_reg ? 32 : 64);
+  Inst *arg1 = process_last_arg(3, get_reg_bitsize(1));
 
   Inst *res = bb->build_inst(op, arg1);
   write_reg(dest, res);
@@ -2424,8 +2509,7 @@ void Parser::process_unary(Inst*(*gen_elem)(Basic_block*, Inst*))
 {
   Inst *dest = get_reg(1);
   get_comma(2);
-  bool is_w_reg = buf[tokens[1].pos] == 'w';
-  Inst *arg1 = process_last_arg(3, is_w_reg ? 32 : 64);
+  Inst *arg1 = process_last_arg(3, get_reg_bitsize(1));
 
   Inst *res = gen_elem(bb, arg1);
   write_reg(dest, res);
@@ -3036,8 +3120,7 @@ void Parser::process_negs()
 {
   Inst *dest = get_reg(1);
   get_comma(2);
-  bool is_w_reg = buf[tokens[1].pos] == 'w';
-  Inst *arg1 = process_last_arg(3, is_w_reg ? 32 : 64);
+  Inst *arg1 = process_last_arg(3, get_reg_bitsize(1));
 
   Inst *zero = bb->value_inst(0, arg1->bitsize);
   Inst *res = gen_sub_cond_flags(zero, arg1);
@@ -3174,7 +3257,7 @@ void Parser::process_vec_unary(Op op)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
   get_comma(2);
-  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  Inst *arg1 = get_vreg_or_imm_value(3, nof_elem, elem_bitsize);
   get_end_of_line(4);
 
   Inst *res = nullptr;
@@ -3194,7 +3277,7 @@ void Parser::process_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*))
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
   get_comma(2);
-  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  Inst *arg1 = get_vreg_or_imm_value(3, nof_elem, elem_bitsize);
   get_end_of_line(4);
 
   Inst *res = nullptr;
@@ -6212,7 +6295,7 @@ void Parser::parse_function()
 
   // SIMD unary
   else if (name == "sqxtn")
-    process_unary(gen_sqxtn);
+    process_sqxtn();
 
   // Misc scalar versions of SIMD and SVE instructions
   else if (name == "andv")
@@ -6283,7 +6366,7 @@ void Parser::lex_line(void)
 	  pos++;
 	}
       else if (isdigit(buf[pos]) || buf[pos] == '-')
-	lex_hex_or_integer();
+	lex_imm();
       else if (is_lo12())
 	{
 	  tokens.emplace_back(Lexeme::lo12, pos, 6);
@@ -6298,7 +6381,7 @@ void Parser::lex_line(void)
 	      pos += 6;
 	    }
 	  else
-	    lex_hex_or_integer();
+	    lex_imm();
 	}
       else if (buf[pos] == '.' && buf[pos + 1] == 'L' && isdigit(buf[pos + 2]))
 	lex_label_or_label_def();
