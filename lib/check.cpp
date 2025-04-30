@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cinttypes>
 #include <functional>
+#include <unordered_map>
 
 #include "smtgcc.h"
 
@@ -61,7 +62,26 @@ struct Cse_key
     if (lhs.arg2 > rhs.arg2) return false;
 
     return lhs.arg3 < rhs.arg3;
- }
+  }
+
+  bool operator==(const Cse_key &other) const
+  {
+    return op == other.op
+      && arg1 == other.arg1
+      && arg2 == other.arg2
+      && arg3 == other.arg3;
+  }
+};
+
+struct Cse_key_hash {
+  std::size_t operator()(const Cse_key& key) const
+  {
+    size_t h = (size_t)key.op;
+    h ^= 0x9e3779b9 + (h << 6) + (h >> 2) + (size_t)key.arg1;
+    h ^= 0x9e3779b9 + (h << 6) + (h >> 2) + (size_t)key.arg2;
+    h ^= 0x9e3779b9 + (h << 6) + (h >> 2) + (size_t)key.arg3;
+    return h;
+  }
 };
 
 enum class Function_role {
@@ -76,7 +96,7 @@ struct Inst_comp {
 
 struct Cse : Simplify_config {
 private:
-  std::map<Cse_key, Inst *> key2inst;
+  std::unordered_map<Cse_key, Inst *, Cse_key_hash> key2inst;
 
   Inst *get_inst(const Cse_key& key);
   bool is_min_max(Inst *arg1, Inst *arg2, Inst *arg3);
@@ -162,7 +182,7 @@ class Converter {
 
   // Table for mapping original instructions to the corresponding new
   // instruction in destination function.
-  std::map<Inst *, Inst *> translate;
+  std::unordered_map<Inst *, Inst *> translate;
 
   Cse cse;
 
