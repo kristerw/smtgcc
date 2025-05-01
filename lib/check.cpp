@@ -239,6 +239,7 @@ class Converter {
   Inst *get_cmp_inst(const Cse_key& key);
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   Inst *simplify(Inst *inst);
+  void flatten(Op op, Inst *inst, std::set<Inst *, Inst_comp>& elems);
   void flatten(Op op, Inst *inst, std::vector<Inst *>& elems);
   Inst *canonicalize_and_or(Inst *inst);
   Inst *build_inst(Op op);
@@ -305,6 +306,24 @@ Inst *Converter::simplify(Inst *inst)
   return inst;
 }
 
+void Converter::flatten(Op op, Inst *inst, std::set<Inst *, Inst_comp>& elems)
+{
+  if (inst->op == op)
+    {
+      flatten(op, inst->args[1], elems);
+      flatten(op, inst->args[0], elems);
+    }
+  else if (inst->op == Op::NOT
+	   && ((op == Op::AND && inst->args[0]->op == Op::OR)
+	       || (op == Op::OR && inst->args[0]->op == Op::AND)))
+    {
+      flatten(op, build_inst(Op::NOT, inst->args[0]->args[0]), elems);
+      flatten(op, build_inst(Op::NOT, inst->args[0]->args[1]), elems);
+    }
+  else
+    elems.insert(inst);
+}
+
 void Converter::flatten(Op op, Inst *inst, std::vector<Inst *>& elems)
 {
   if (inst->op == op)
@@ -334,47 +353,41 @@ Inst *Converter::canonicalize_and_or(Inst *inst)
   Inst *arg2 = inst->args[1];
 
   // Collect the elements.
-  std::vector<Inst *> elems;
+  std::set<Inst *, Inst_comp> elems;
   if (arg1->op == inst->op)
     flatten(inst->op, arg1, elems);
   else
-    elems.push_back(arg1);
+    elems.insert(arg1);
   if (arg2->op == inst->op)
     flatten(inst->op, arg2, elems);
   else
-    elems.push_back(arg2);
+    elems.insert(arg2);
 
-  // Sort and eliminate duplicated elements. We want the elements sorted
-  // so that we generate the sequence in a consistent way, making it more
-  // likely to CSE with similar sequences.
-  Inst_comp comp;
-  std::sort(elems.begin(), elems.end(), comp);
-  elems.erase(std::unique(elems.begin(), elems.end()), elems.end());
   assert(!elems.empty());
-
   if (elems.size() == 1)
-    return elems[0];
+    return *elems.begin();
 
   // x & !x -> 0
   // x | !x -> 1
   for (auto elem : elems)
     {
-      if (elem->op == Op::NOT
-         && std::find(elems.begin(), elems.end(), elem->args[0]) != elems.end())
-       {
-         if (inst->op == Op::AND)
-           return value_inst(0, arg1->bitsize);
-         else
-           return value_inst(-1, arg1->bitsize);
-       }
+      if (elem->op == Op::NOT && elems.contains(elem->args[0]))
+	{
+	  if (inst->op == Op::AND)
+	    return value_inst(0, arg1->bitsize);
+	  else
+	    return value_inst(-1, arg1->bitsize);
+	}
     }
 
   // Generate the sequence.
   processing_and_or = true;
-  Inst *new_inst = build_inst(inst->op, elems[0], elems[1]);
-  for (unsigned i = 2; i < elems.size(); i++)
+  auto first = elems.begin();
+  auto second = std::next(first);
+  Inst *new_inst = build_inst(inst->op, *first, *second);
+  for (auto it = std::next(second); it != elems.end(); ++it)
     {
-      new_inst = build_inst(inst->op, new_inst, elems[i]);
+      new_inst = build_inst(inst->op, new_inst, *it);
     }
   processing_and_or = false;
 
