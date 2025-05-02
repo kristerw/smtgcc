@@ -4268,6 +4268,12 @@ void Parser::parse_function()
   else if (name == "vmax.vx")
     process_vec_binary_vx(gen_smax);
 
+  // Floating-point sign-injection
+  else if (name == "vfabs.v")
+    process_vec_unary(Op::FABS);
+  else if (name == "vfneg.v")
+    process_vec_unary(Op::FNEG);
+
   // Integer arithmetic - multiply
   else if (name == "vmul.vv")
     process_vec_binary(Op::MUL);
