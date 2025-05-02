@@ -200,7 +200,7 @@ private:
   void process_vmerge_vi();
   void process_vmerge_vx();
   Inst *gen_vec_cmp(Cond_code ccode, Inst *orig, Inst *arg1, Inst *arg2,
-		    uint32_t elem_bitsize);
+		    Inst *mask, uint32_t elem_bitsize);
   void process_vec_cmp(Cond_code ccode);
   void process_vec_cmp_vi(Cond_code ccode);
   void process_vec_cmp_vx(Cond_code ccode);
@@ -2927,7 +2927,7 @@ void Parser::process_vmerge_vx()
 }
 
 Inst *Parser::gen_vec_cmp(Cond_code ccode, Inst *orig, Inst *arg1, Inst *arg2,
-			  uint32_t elem_bitsize)
+			  Inst *mask, uint32_t elem_bitsize)
 {
   Op op;
   bool inv = false;
@@ -3015,6 +3015,8 @@ Inst *Parser::gen_vec_cmp(Cond_code ccode, Inst *orig, Inst *arg1, Inst *arg2,
 	inst = bb->build_inst(Op::NOT, inst);
       Inst *orig_elem = extract_vec_elem(orig, 1, i);
       Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      if (mask)
+	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
       inst = bb->build_inst(Op::ITE, cmp, inst, orig_elem);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
@@ -3033,12 +3035,20 @@ void Parser::process_vec_cmp(Cond_code ccode)
   Inst *arg1 = get_vreg_value(3);
   get_comma(4);
   Inst *arg2 = get_vreg_value(5);
-  get_end_of_line(6);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
 
-  Inst *res8 = gen_vec_cmp(ccode, orig, arg1, arg2, 8);
-  Inst *res16 = gen_vec_cmp(ccode, orig, arg1, arg2, 16);
-  Inst *res32 = gen_vec_cmp(ccode, orig, arg1, arg2, 32);
-  Inst *res64 = gen_vec_cmp(ccode, orig, arg1, arg2, 64);
+  Inst *res8 = gen_vec_cmp(ccode, orig, arg1, arg2, mask, 8);
+  Inst *res16 = gen_vec_cmp(ccode, orig, arg1, arg2, mask, 16);
+  Inst *res32 = gen_vec_cmp(ccode, orig, arg1, arg2, mask, 32);
+  Inst *res64 = gen_vec_cmp(ccode, orig, arg1, arg2, mask, 64);
   Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
   Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
   Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
@@ -3057,16 +3067,24 @@ void Parser::process_vec_cmp_vi(Cond_code ccode)
   Inst *arg1 = get_vreg_value(3);
   get_comma(4);
   unsigned __int128 arg2 = get_hex_or_integer(5);
-  get_end_of_line(6);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
 
   Inst *imm8 = bb->value_inst(arg2, 8);
   Inst *imm16 = bb->value_inst(arg2, 16);
   Inst *imm32 = bb->value_inst(arg2, 32);
   Inst *imm64 = bb->value_inst(arg2, 64);
-  Inst *res8 = gen_vec_cmp(ccode, orig, arg1, imm8, 8);
-  Inst *res16 = gen_vec_cmp(ccode, orig, arg1, imm16, 16);
-  Inst *res32 = gen_vec_cmp(ccode, orig, arg1, imm32, 32);
-  Inst *res64 = gen_vec_cmp(ccode, orig, arg1, imm64, 64);
+  Inst *res8 = gen_vec_cmp(ccode, orig, arg1, imm8, mask, 8);
+  Inst *res16 = gen_vec_cmp(ccode, orig, arg1, imm16, mask, 16);
+  Inst *res32 = gen_vec_cmp(ccode, orig, arg1, imm32, mask, 32);
+  Inst *res64 = gen_vec_cmp(ccode, orig, arg1, imm64, mask, 64);
   Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
   Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
   Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
@@ -3085,12 +3103,20 @@ void Parser::process_vec_cmp_vx(Cond_code ccode)
   Inst *arg1 = get_vreg_value(3);
   get_comma(4);
   Inst *arg2 = get_reg_value(5);
-  get_end_of_line(6);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
 
-  Inst *res8 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 8), 8);
-  Inst *res16 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 16), 16);
-  Inst *res32 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 32), 32);
-  Inst *res64 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 64), 64);
+  Inst *res8 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 8), mask, 8);
+  Inst *res16 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 16), mask, 16);
+  Inst *res32 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 32), mask, 32);
+  Inst *res64 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 64), mask, 64);
   Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
   Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
   Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
