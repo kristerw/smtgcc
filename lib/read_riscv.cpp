@@ -204,6 +204,7 @@ private:
   void process_vec_cmp(Cond_code ccode);
   void process_vec_cmp_vi(Cond_code ccode);
   void process_vec_cmp_vx(Cond_code ccode);
+  void process_vec_cmp_vf(Cond_code ccode);
   Inst *gen_vid(Inst *orig, uint32_t elem_bitsize);
   void process_vid();
   void process_vmv_xs();
@@ -3127,6 +3128,38 @@ void Parser::process_vec_cmp_vx(Cond_code ccode)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
+void Parser::process_vec_cmp_vf(Cond_code ccode)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_freg_value(5);
+  Inst *mask = nullptr;
+  if (tokens.size() > 6)
+    {
+      get_comma(6);
+      mask = get_vreg_value(7);
+      get_end_of_line(8);
+    }
+  else
+    get_end_of_line(6);
+
+  Inst *res8 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 8), mask, 8);
+  Inst *res16 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 16), mask, 16);
+  Inst *res32 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 32), mask, 32);
+  Inst *res64 = gen_vec_cmp(ccode, orig, arg1, change_prec(arg2, 64), mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
 Inst *Parser::gen_vid(Inst *orig, uint32_t elem_bitsize)
 {
   Inst *res = nullptr;
@@ -4349,27 +4382,27 @@ void Parser::parse_function()
   else if (name == "vmfeq.vv")
     process_vec_cmp(Cond_code::FEQ);
   else if (name == "vmfeq.vf")
-    process_vec_cmp_vx(Cond_code::FEQ);
+    process_vec_cmp_vf(Cond_code::FEQ);
   else if (name == "vmfne.vv")
     process_vec_cmp(Cond_code::FNE);
   else if (name == "vmfne.vf")
-    process_vec_cmp_vx(Cond_code::FNE);
+    process_vec_cmp_vf(Cond_code::FNE);
   else if (name == "vmflt.vv")
     process_vec_cmp(Cond_code::FLT);
   else if (name == "vmflt.vf")
-    process_vec_cmp_vx(Cond_code::FLT);
+    process_vec_cmp_vf(Cond_code::FLT);
   else if (name == "vmfle.vv")
     process_vec_cmp(Cond_code::FLE);
   else if (name == "vmfle.vf")
-    process_vec_cmp_vx(Cond_code::FLE);
+    process_vec_cmp_vf(Cond_code::FLE);
   else if (name == "vmfgt.vv")
     process_vec_cmp(Cond_code::FGT);
   else if (name == "vmfgt.vf")
-    process_vec_cmp_vx(Cond_code::FGT);
+    process_vec_cmp_vf(Cond_code::FGT);
   else if (name == "vmfge.vv")
     process_vec_cmp(Cond_code::FGE);
   else if (name == "vmfge.vf")
-    process_vec_cmp_vx(Cond_code::FGE);
+    process_vec_cmp_vf(Cond_code::FGE);
 
   // Floating-point - move
   else if (name == "vfmv.v.f")
