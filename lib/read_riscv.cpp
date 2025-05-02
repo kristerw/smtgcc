@@ -1797,18 +1797,22 @@ void Parser::process_vle(uint32_t elem_bitsize)
       Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
       if (mask)
 	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
+      Inst *loaded_elem = nullptr;
       for (uint32_t j = 0; j < elem_bitsize / 8; j++)
 	{
 	  Inst *offset_inst = bb->value_inst(j, ptr->bitsize);
 	  Inst *addr = bb->build_inst(Op::ADD, elem_ptr, offset_inst);
 	  Inst *loaded_byte = bb->build_inst(Op::LOAD, addr);
-	  Inst *orig_byte = extract_vec_elem(orig_elem, 8, j);
-	  Inst *byte = bb->build_inst(Op::ITE, cmp, loaded_byte, orig_byte);
-	  if (value)
-	    value = bb->build_inst(Op::CONCAT, byte, value);
+	  if (loaded_elem)
+	    loaded_elem = bb->build_inst(Op::CONCAT, loaded_byte, loaded_elem);
 	  else
-	    value = byte;
+	    loaded_elem = loaded_byte;
 	}
+      Inst *elem = bb->build_inst(Op::ITE, cmp, loaded_elem, orig_elem);
+      if (value)
+	value = bb->build_inst(Op::CONCAT, elem, value);
+      else
+	value = elem;
     }
   bb->build_inst(Op::WRITE, dest, value);
 }
