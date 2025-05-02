@@ -98,6 +98,7 @@ private:
   Inst *get_reg(unsigned idx);
   Inst *get_freg(unsigned idx);
   Inst *get_vreg(unsigned idx);
+  void build_mem(const std::string& name);
   Inst *get_hilo_addr(const Token& tok);
   Inst *get_hi(unsigned idx);
   Inst *get_lo(unsigned idx);
@@ -543,6 +544,34 @@ Inst *Parser::get_vreg(unsigned idx)
   return rstate->registers[RiscvRegIdx::v0 + value];
 }
 
+void Parser::build_mem(const std::string& sym_name)
+{
+  assert(!rstate->sym_name2mem.contains(sym_name));
+  if (!sym_name2data.contains(sym_name))
+    throw Parse_error("unknown symbol " + sym_name, line_number);
+  std::vector<unsigned char>& data = sym_name2data.at(sym_name);
+
+  if (rstate->next_local_id == 0)
+    throw Not_implemented("too many local variables");
+
+  Basic_block *entry_bb = rstate->entry_bb;
+  Inst *id = entry_bb->value_inst(rstate->next_local_id++, module->ptr_id_bits);
+  Inst *mem_size = entry_bb->value_inst(data.size(), module->ptr_offset_bits);
+  Inst *flags = entry_bb->value_inst(MEM_CONST, 32);
+  Inst *mem = entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
+
+  assert(!rstate->sym_name2mem.contains(sym_name));
+  rstate->sym_name2mem.insert({sym_name, mem});
+
+  for (size_t i = 0; i < data.size(); i++)
+    {
+      Inst *off = entry_bb->value_inst(i, mem->bitsize);
+      Inst *ptr = entry_bb->build_inst(Op::ADD, mem, off);
+      Inst *byte = entry_bb->value_inst(data[i], 8);
+      entry_bb->build_inst(Op::STORE, ptr, byte);
+    }
+}
+
 Inst *Parser::get_hilo_addr(const Token& tok)
 {
   assert(tok.size > 5);
@@ -558,7 +587,7 @@ Inst *Parser::get_hilo_addr(const Token& tok)
   if (sym_alias.contains(sym_name))
     std::tie(sym_name, offset) = sym_alias[sym_name];
   if (!rstate->sym_name2mem.contains(sym_name))
-    throw Parse_error("unknown symbol " + sym_name, line_number);
+    build_mem(sym_name);
   Inst *addr = rstate->sym_name2mem.at(sym_name);
   if (offset)
     addr = bb->build_inst(Op::ADD, addr, bb->value_inst(offset, addr->bitsize));
@@ -4893,28 +4922,11 @@ Function *Parser::parse(std::string const& file_name)
 	    bb = func->build_bb();
 	    entry_bb->build_br_inst(bb);
 
-	    for (const auto& [name, data] : sym_name2data)
+	    for (const auto& [name, mem] : rstate->sym_name2mem)
 	      {
-		Inst *mem;
-		if (rstate->sym_name2mem.contains(name))
-		  mem = rstate->sym_name2mem.at(name);
-		else
-		  {
-		    if (rstate->next_local_id == 0)
-		      throw Not_implemented("too many local variables");
-
-		    Inst *id =
-		      entry_bb->value_inst(rstate->next_local_id++,
-					   module->ptr_id_bits);
-
-		    Inst *mem_size =
-		      entry_bb->value_inst(data.size(), module->ptr_offset_bits);
-		    Inst *flags = entry_bb->value_inst(MEM_CONST, 32);
-		    mem = entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
-
-		    assert(!rstate->sym_name2mem.contains(name));
-		    rstate->sym_name2mem.insert({name, mem});
-		  }
+		if (!sym_name2data.contains(name))
+		  continue;
+		std::vector<unsigned char>& data = sym_name2data.at(name);
 		for (size_t i = 0; i < data.size(); i++)
 		  {
 		    Inst *off = entry_bb->value_inst(i, mem->bitsize);
