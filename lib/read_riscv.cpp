@@ -155,6 +155,7 @@ private:
   void process_vec_unary(Op op);
   void process_vec_unary_vi(Op op);
   void process_vec_unary_vx(Op op);
+  void process_vec_unary_vf(Op op);
   Inst *gen_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*), Inst *orig,
 		      Inst *arg1, Inst *mask, uint32_t elem_bitsize);
   void process_vec_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
@@ -2024,6 +2025,37 @@ void Parser::process_vec_unary_vx(Op op)
   else
     get_end_of_line(4);
 
+  Inst *res8 = gen_vec_unary(op, orig, change_prec(arg1, 8), mask, 8);
+  Inst *res16 = gen_vec_unary(op, orig, change_prec(arg1, 16), mask, 16);
+  Inst *res32 = gen_vec_unary(op, orig, change_prec(arg1, 32), mask, 32);
+  Inst *res64 = gen_vec_unary(op, orig, change_prec(arg1, 64), mask, 64);
+  Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
+  Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
+  Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
+  Inst *cmp32 = bb->build_inst(Op::EQ, vsew, bb->value_inst(2, 3));
+  Inst *res = bb->build_inst(Op::ITE, cmp32, res32, res64);
+  res = bb->build_inst(Op::ITE, cmp16, res16, res);
+  res = bb->build_inst(Op::ITE, cmp8, res8, res);
+  bb->build_inst(Op::WRITE, dest, res);
+}
+
+void Parser::process_vec_unary_vf(Op op)
+{
+  Inst *dest = get_vreg(1);
+  Inst *orig = get_vreg_value(1);
+  get_comma(2);
+  Inst *arg1 = get_freg_value(3);
+  Inst *mask = nullptr;
+  if (tokens.size() > 4)
+    {
+      get_comma(4);
+      mask = get_vreg_value(5);
+      get_end_of_line(6);
+    }
+  else
+    get_end_of_line(4);
+
+  // TODO: e8 should probably be UB if we do not support 8-bit floating-point?
   Inst *res8 = gen_vec_unary(op, orig, change_prec(arg1, 8), mask, 8);
   Inst *res16 = gen_vec_unary(op, orig, change_prec(arg1, 16), mask, 16);
   Inst *res32 = gen_vec_unary(op, orig, change_prec(arg1, 32), mask, 32);
@@ -4312,6 +4344,10 @@ void Parser::parse_function()
     process_vec_cmp(Cond_code::FGE);
   else if (name == "vmfge.vf")
     process_vec_cmp_vx(Cond_code::FGE);
+
+  // Floating-point - move
+  else if (name == "vfmv.v.f")
+    process_vec_unary_vf(Op::MOV);
 
   // Vector reduction operations
   else if (name == "vredsum.vs")
