@@ -208,6 +208,7 @@ private:
   void process_vmv_xs();
   Inst *gen_vmv_sx(Inst *orig, Inst *arg1, uint32_t elem_bitsize);
   void process_vmv_sx();
+  void process_vmv1r();
 
   void parse_function();
 
@@ -3162,6 +3163,16 @@ void Parser::process_vmv_sx()
   bb->build_inst(Op::WRITE, dest, res);
 }
 
+void Parser::process_vmv1r()
+{
+  Inst *dest = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3);
+  get_end_of_line(4);
+
+  bb->build_inst(Op::WRITE, dest, arg1);
+}
+
 void Parser::parse_function()
 {
   if (tokens[0].kind == Lexeme::label_def)
@@ -4353,6 +4364,8 @@ void Parser::parse_function()
     process_vmv_xs();
   else if (name == "vmv.s.x")
     process_vmv_sx();
+  else if (name == "vmv1r.v")
+    process_vmv1r();
 
   else
     throw Parse_error("unhandled instruction: "s + std::string(name),
