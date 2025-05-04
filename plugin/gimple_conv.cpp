@@ -1204,56 +1204,18 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	return {res, nullptr, nullptr};
       }
     case VECTOR_CST:
-      if (VECTOR_CST_NELTS(expr).is_constant())
-	{
-	  uint32_t nunits = VECTOR_CST_NELTS(expr).to_constant();
-	  Inst *ret = tree2inst(VECTOR_CST_ELT(expr, 0));
-	  for (uint32_t i = 1; i < nunits; i++)
-	    {
-	      Inst *elem = tree2inst(VECTOR_CST_ELT(expr, i));
-	      ret = bb->build_inst(Op::CONCAT, elem, ret);
-	    }
-	  return {ret, nullptr, nullptr};
-	}
-      if (VECTOR_CST_DUPLICATE_P(expr))
-	{
-	  uint32_t bitsize = bitsize_for_type(TREE_TYPE(expr));
-	  uint32_t elem_bitsize = bitsize_for_type(TREE_TYPE(TREE_TYPE(expr)));
-	  uint32_t nof_elem = bitsize / elem_bitsize;
-	  uint32_t nof_patterns = VECTOR_CST_NPATTERNS(expr);
-	  Inst *ret = nullptr;
-	  for (uint32_t i = 0; i < nof_elem; i += nof_patterns)
-	    {
-	      for (uint32_t j = 0; j < nof_patterns; j++)
-		{
-		  Inst *elem = tree2inst(VECTOR_CST_ELT(expr, j));
-		  if (ret)
-		    ret = bb->build_inst(Op::CONCAT, elem, ret);
-		  else
-		    ret = elem;
-		}
-	    }
-	  return {ret, nullptr, nullptr};
-	}
-      if (VECTOR_CST_STEPPED_P(expr))
-	{
-	  if (VECTOR_CST_NPATTERNS(expr) > 1)
-	    throw Not_implemented("tree2inst: VECTOR_CST_NPATTERNS(expr) > 1");
-	  uint32_t bitsize = bitsize_for_type(TREE_TYPE(expr));
-	  uint32_t elem_bitsize = bitsize_for_type(TREE_TYPE(TREE_TYPE(expr)));
-	  uint32_t nof_elem = bitsize / elem_bitsize;
-	  unsigned __int128 base = tree2inst(VECTOR_CST_ELT(expr, 0))->value();
-	  unsigned __int128 step =
-	    tree2inst(VECTOR_CST_ELT(expr, 1))->value() - base;
-	  Inst *ret = bb->value_inst(base, elem_bitsize);
-	  for (uint32_t i = 1; i < nof_elem; i++)
-	    {
-	      Inst *elem = bb->value_inst(base + i * step, elem_bitsize);;
-	      ret = bb->build_inst(Op::CONCAT, elem, ret);
-	    }
-	  return {ret, nullptr, nullptr};
-	}
-      throw Not_implemented("tree2inst: VECTOR_CST");
+      {
+	uint32_t bitsize = bitsize_for_type(TREE_TYPE(expr));
+	uint32_t elem_bitsize = bitsize_for_type(TREE_TYPE(TREE_TYPE(expr)));
+	uint32_t nof_elem = bitsize / elem_bitsize;
+	Inst *ret = tree2inst(VECTOR_CST_ELT(expr, 0));
+	for (uint32_t i = 1; i < nof_elem; i++)
+	  {
+	    Inst *elem = tree2inst(VECTOR_CST_ELT(expr, i));
+	    ret = bb->build_inst(Op::CONCAT, elem, ret);
+	  }
+	return {ret, nullptr, nullptr};
+      }
     case COMPLEX_CST:
       {
 	tree elem_type = TREE_TYPE(TREE_TYPE(expr));
