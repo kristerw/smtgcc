@@ -130,15 +130,15 @@ static void check(opt_pass *pass, tv_function *tv_fun)
 
   if (tv_fun->module)
     {
-      if (config.verbose > 0)
-	fprintf(stderr, "SMTGCC: Checking %s -> %s : %s\n",
-		tv_fun->prev_pass_name.c_str(), tv_fun->pass_name.c_str(),
-		function_name(cfun));
-
       tv_fun->module->canonicalize();
       next_module->canonicalize();
       if (!identical(tv_fun->module->functions[0], next_module->functions[0]))
 	{
+	  if (config.verbose > 0)
+	    fprintf(stderr, "SMTGCC: Checking %s -> %s : %s\n",
+		    tv_fun->prev_pass_name.c_str(), tv_fun->pass_name.c_str(),
+		    function_name(cfun));
+
 	  Function *func = convert_function(tv_fun->module, tv_fun->state,
 					    tv_fun->errors, true);
 	  if (!func)
