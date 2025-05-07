@@ -1538,7 +1538,7 @@ Inst *gen_ushl(Basic_block *bb, Inst *elem1, Inst *elem2)
 
 Inst *gen_cnot(Basic_block *bb, Inst *elem)
 {
-  Inst *cmp = bb->build_inst(Op::NE, elem, bb->value_inst(0, elem->bitsize));
+  Inst *cmp = bb->build_inst(Op::EQ, elem, bb->value_inst(0, elem->bitsize));
   return bb->build_inst(Op::ZEXT, cmp, elem->bitsize);
 }
 
