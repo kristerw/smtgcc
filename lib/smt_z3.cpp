@@ -926,6 +926,35 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 
   std::string warning;
 
+  // Check that tgt does not have UB that is not in src.
+  assert(conv.src_common_ub == conv.tgt_common_ub);
+  if (config.optimize_ub
+      && conv.src_unique_ub != conv.tgt_unique_ub
+      && !(conv.tgt_unique_ub->op == Op::VALUE
+	   && conv.tgt_unique_ub->value() == 0))
+  {
+    z3::solver solver(ctx);
+    solver.add(!src_common_ub_expr);
+    solver.add(!src_unique_ub_expr);
+    solver.add(tgt_unique_ub_expr);
+    uint64_t start_time = get_time();
+    Solver_result solver_result = run_solver(solver, "UB");
+    stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
+    if (solver_result.status == Result_status::incorrect)
+      {
+	assert(solver_result.message);
+	std::string msg = *solver_result.message;
+	add_print(msg, conv, solver);
+	Solver_result result = {Result_status::incorrect, msg};
+	return std::pair<SStats, Solver_result>(stats, result);
+      }
+    if (solver_result.status == Result_status::unknown)
+      {
+	assert(solver_result.message);
+	warning = warning + *solver_result.message;
+      }
+  }
+
   // Check that the function calls abort/exit identically for src and tgt.
   if (conv.src_abort != conv.tgt_abort
       || conv.src_exit != conv.tgt_exit
@@ -1105,7 +1134,8 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 
   // Check that tgt does not have UB that is not in src.
   assert(conv.src_common_ub == conv.tgt_common_ub);
-  if (conv.src_unique_ub != conv.tgt_unique_ub
+  if (!config.optimize_ub
+      && conv.src_unique_ub != conv.tgt_unique_ub
       && !(conv.tgt_unique_ub->op == Op::VALUE
 	   && conv.tgt_unique_ub->value() == 0))
   {
