@@ -5745,6 +5745,8 @@ void Parser::parse_sve_op()
     process_sve_binary(gen_fmax);
   else if (name == "fminnm")
     process_sve_binary(gen_fmin);
+  else if (name == "fmov")
+    process_sve_mov_zreg();
   else if (name == "fmul")
     process_sve_binary(Op::FMUL);
   else if (name == "fsub")
