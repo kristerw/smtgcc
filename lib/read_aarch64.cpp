@@ -226,6 +226,8 @@ private:
   void process_tst();
   void process_ccmp(bool is_ccmn = false);
   void process_dec_inc(Op op, uint32_t elem_bitsize);
+  void process_dec_inc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
+		       uint32_t elem_bitsize);
   void process_ext(Op op, uint32_t src_bitsize);
   void process_shift(Op op);
   void process_ror();
@@ -3236,6 +3238,17 @@ void Parser::process_dec_inc(Op op, uint32_t elem_bitsize)
 
   Inst *increment = bb->value_inst(nof, arg1->bitsize);
   Inst *res = bb->build_inst(op, arg1, increment);
+  write_reg(dest, res);
+}
+
+void Parser::process_dec_inc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), uint32_t elem_bitsize)
+{
+  Inst *dest = get_reg(1);
+  Inst *arg1 = get_reg_value(1);
+  uint64_t nof = process_last_pattern_mul(2, elem_bitsize);
+
+  Inst *increment = bb->value_inst(nof, arg1->bitsize);
+  Inst *res = gen_elem(bb, arg1, increment);
   write_reg(dest, res);
 }
 
@@ -6378,6 +6391,14 @@ void Parser::parse_function()
     process_binary(gen_sat_ssub);
   else if (name == "uaddv")
     process_ext_addv(Op::ZEXT);
+  else if (name == "uqdecb")
+    process_dec_inc(gen_sat_usub, 8);
+  else if (name == "uqdech")
+    process_dec_inc(gen_sat_usub, 16);
+  else if (name == "uqdecw")
+    process_dec_inc(gen_sat_usub, 32);
+  else if (name == "uqdecd")
+    process_dec_inc(gen_sat_usub, 64);
   else if (name == "uqadd")
     process_binary(gen_sat_uadd);
   else if (name == "uqsub")
