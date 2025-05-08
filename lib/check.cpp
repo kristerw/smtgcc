@@ -381,6 +381,8 @@ Inst *Converter::canonicalize_and_or(Inst *inst)
     }
 
   // Generate the sequence.
+  bool orig_run_simplify_inst = run_simplify_inst;
+  run_simplify_inst = false;
   processing_and_or = true;
   auto first = elems.begin();
   auto second = std::next(first);
@@ -390,6 +392,7 @@ Inst *Converter::canonicalize_and_or(Inst *inst)
       new_inst = build_inst(inst->op, new_inst, *it);
     }
   processing_and_or = false;
+  run_simplify_inst = orig_run_simplify_inst;
 
   return new_inst;
 }
@@ -431,6 +434,9 @@ Inst *Converter::build_inst(Op op)
 
 Inst *Converter::build_inst(Op op, Inst *arg, bool insert_after)
 {
+  if (op == Op::NOT && arg->op == Op::NOT)
+    return arg->args[0];
+
   Inst *inst = cse.get_inst(op, arg);
   if (!inst)
     {
@@ -446,12 +452,58 @@ Inst *Converter::build_inst(Op op, Inst *arg, bool insert_after)
 Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 {
   Inst *inst = cse.get_inst(op, arg1, arg2);
+  if (!inst && (op == Op::AND || op == Op::OR))
+    {
+      if (op == Op::AND)
+	{
+	  if (is_value_m1(arg1))
+	    return arg2;
+	  if (is_value_m1(arg2))
+	    return arg1;
+	  if (is_value_zero(arg1) || is_value_zero(arg2))
+	    return value_inst(0, arg1->bitsize);
+	}
+      else
+	{
+	  if (is_value_zero(arg1))
+	    return arg2;
+	  if (is_value_zero(arg2))
+	    return arg1;
+	  if (is_value_m1(arg1) || is_value_m1(arg2))
+	    return value_inst(-1, arg1->bitsize);
+	}
+
+      // Check if the expression already exists in a different form.
+      Inst *not_arg1 = build_inst(Op::NOT, arg1);
+      Inst *not_arg2 = build_inst(Op::NOT, arg2);
+      if (op == Op::AND)
+	inst = cse.get_inst(Op::OR, not_arg1, not_arg2);
+      else
+	inst = cse.get_inst(Op::AND, not_arg1, not_arg2);
+      if (inst)
+	{
+	  inst = build_inst(Op::NOT, inst);
+	  cse.set_inst(inst, op, arg1, arg2);
+	  return inst;
+	}
+
+      // Use the same argument order as canonicalize_and_or.
+      if (arg1->op != op && arg2->op == op)
+	std::swap(arg1, arg2);
+    }
   if (!inst)
     {
       inst = dest_bb->build_inst(op, arg1, arg2);
       inst = simplify(inst);
       cse.set_inst(inst, op, arg1, arg2);
     }
+
+  // Booleans are often used negated. Create the negated form right after
+  // the instruction to reduce differences in the result, independent of
+  // later simplifications.
+  if (inst->bitsize == 1 && inst->op != Op::NOT)
+    build_inst(Op::NOT, inst);
+
   return inst;
 }
 
@@ -464,6 +516,13 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
       inst = simplify(inst);
       cse.set_inst(inst, op, arg1, arg2, arg3);
     }
+
+  // Booleans are often used negated. Create the negated form right after
+  // the instruction to reduce differences in the result, independent of
+  // later simplifications.
+  if (inst->bitsize == 1 && inst->op != Op::NOT)
+    build_inst(Op::NOT, inst);
+
   return inst;
 }
 
@@ -498,6 +557,11 @@ void Converter::add_ub(Basic_block *bb, Inst *cond)
     {
       add_ub(bb, cond->args[0]);
       add_ub(bb, cond->args[1]);
+    }
+  if (cond->op == Op::NOT && cond->args[0]->op == Op::AND)
+    {
+      add_ub(bb, build_inst(Op::NOT, cond->args[0]->args[0]));
+      add_ub(bb, build_inst(Op::NOT, cond->args[0]->args[1]));
     }
   else
     bb2ub[bb].insert(cond);
@@ -1445,6 +1509,10 @@ bool need_phi_barrier(Inst *phi, Inst *phi_inst)
 void Converter::convert_function(Function *func, Function_role role)
 {
   calculate_dominance(func);
+
+  // Create true and false to give them canonical order when sorted by ID.
+  value_inst(0, 1);
+  value_inst(1, 1);
 
   for (auto bb : func->bbs)
     {

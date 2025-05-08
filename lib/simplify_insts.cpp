@@ -436,13 +436,6 @@ Inst *Simplify::simplify_and()
   if (arg2->op == Op::NOT && arg2->args[0] == arg1)
     return value_inst(0, inst->bitsize);
 
-  // and (not x), (not x) -> not (or x, y)
-  if (arg1->op == Op::NOT && arg2->op == Op::NOT)
-    {
-      Inst *new_inst = build_inst(Op::OR, arg1->args[0], arg2->args[0]);
-      return build_inst(Op::NOT, new_inst);
-    }
-
   // For Boolean x: and (sext x), 1 -> zext x
   if (is_boolean_sext(arg1) && is_value_one(arg2))
     return build_inst(Op::ZEXT, arg1->args[0], arg1->args[1]);
@@ -1085,14 +1078,6 @@ Inst *Simplify::simplify_not()
     {
       Inst *new_inst = build_inst(Op::NOT, arg1->args[0]);
       return build_inst(Op::SEXT, new_inst, arg1->args[1]);
-    }
-
-  // not (and x, y) -> or (not x), (not y)
-  if (arg1->op == Op::AND)
-    {
-      Inst *new_inst1 = build_inst(Op::NOT, arg1->args[0]);
-      Inst *new_inst2 = build_inst(Op::NOT, arg1->args[1]);
-      return build_inst(Op::OR, new_inst1, new_inst2);
     }
 
   return inst;
