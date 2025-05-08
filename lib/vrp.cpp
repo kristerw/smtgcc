@@ -23,6 +23,7 @@ class Vrp
   void handle_ashr(Inst *inst);
   void handle_extract(Inst *inst);
   void handle_concat(Inst *inst);
+  void handle_ite(Inst *inst);
   void handle_lshr(Inst *inst);
   void handle_memory(Inst *inst);
   void handle_mov(Inst *inst);
@@ -201,6 +202,19 @@ void Vrp::handle_concat(Inst *inst)
 	tz += trailing_zeros(arg1);
       trailing_zeros_map.insert({inst, tz});
     }
+}
+
+void Vrp::handle_ite(Inst *inst)
+{
+  Inst *const arg2 = inst->args[1];
+  Inst *const arg3 = inst->args[2];
+
+  uint32_t lz = std::min(leading_zeros(arg2), leading_zeros(arg3));
+  uint32_t tz = std::min(trailing_zeros(arg2), trailing_zeros(arg3));
+  if (tz > 0)
+    trailing_zeros_map.insert({inst, tz});
+  if (lz > 1)
+    leading_zeros_map.insert({inst, lz});
 }
 
 void Vrp::handle_lshr(Inst *inst)
@@ -492,6 +506,9 @@ void Vrp::handle_inst(Inst *inst)
       break;
     case Op::CONCAT:
       handle_concat(inst);
+      break;
+    case Op::ITE:
+      handle_ite(inst);
       break;
     case Op::LSHR:
       handle_lshr(inst);
