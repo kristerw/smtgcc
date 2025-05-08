@@ -198,6 +198,7 @@ private:
   void process_smov();
   void process_umov();
   void process_sqxtn();
+  void process_uqxtn();
   void process_unary(Op op);
   void process_unary(Inst*(*gen_elem)(Basic_block*, Inst*));
   Inst *process_arg_shift(unsigned idx, Inst *arg);
@@ -2495,6 +2496,22 @@ void Parser::process_sqxtn()
   Inst *cmp2 = bb->build_inst(Op::SLT, smax1, arg1);
   res = bb->build_inst(Op::ITE, cmp1, smin2, res);
   res = bb->build_inst(Op::ITE, cmp2, smax2, res);
+  write_reg(dest, res);
+}
+
+void Parser::process_uqxtn()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_end_of_line(4);
+
+  __int128 umax_val = (((__int128)1) << (arg1->bitsize / 2)) - 1;
+  Inst *umax1 = bb->value_inst(umax_val, arg1->bitsize);
+  Inst *umax2 = bb->value_inst(umax_val, arg1->bitsize / 2);
+  Inst *res = bb->build_trunc(arg1, arg1->bitsize / 2);
+  Inst *cmp = bb->build_inst(Op::ULT, umax1, arg1);
+  res = bb->build_inst(Op::ITE, cmp, umax2, res);
   write_reg(dest, res);
 }
 
@@ -6347,6 +6364,8 @@ void Parser::parse_function()
   // SIMD unary
   else if (name == "sqxtn")
     process_sqxtn();
+  else if (name == "uqxtn")
+    process_uqxtn();
 
   // Misc scalar versions of SIMD and SVE instructions
   else if (name == "andv")
