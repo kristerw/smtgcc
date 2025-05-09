@@ -560,6 +560,7 @@ struct aarch64_state {
   uint32_t reg_bitsize;
   uint32_t freg_bitsize;
   std::vector<MemoryObject> memory_objects;
+  int next_local_id;
 };
 Function *parse_aarch64(std::string const& file_name, aarch64_state *state);
 
