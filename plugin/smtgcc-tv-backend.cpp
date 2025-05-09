@@ -212,9 +212,9 @@ static void finish(void *, void *data)
 	  ls_elim(module);
 	  do
 	    {
-	      simplify_insts(func);
-	      dead_code_elimination(func);
-	      cfg_modified = simplify_cfg(func);
+	      simplify_insts(module);
+	      dead_code_elimination(module);
+	      cfg_modified = simplify_cfg(module);
 	    }
 	  while (cfg_modified);
 
