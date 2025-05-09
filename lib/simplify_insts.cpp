@@ -1741,6 +1741,15 @@ Inst *Simplify::simplify_shl()
       return build_inst(Op::MUL, arg1->args[0], c);
     }
 
+  // shl (lshr (memory x, y, z), c), c -> memory x, y, z if c is less
+  // than ptr_offset_bits.
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::LSHR
+      && arg1->args[1] == arg2
+      && arg1->args[0]->op == Op::MEMORY
+      && arg2->value() < inst->bb->func->module->ptr_offset_bits)
+    return arg1->args[0];
+
   return inst;
 }
 

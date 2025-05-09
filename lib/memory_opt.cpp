@@ -451,6 +451,68 @@ void dead_store_elim(Function *func)
     }
 }
 
+Inst *get_value(Inst *inst)
+{
+  if (inst->op != Op::LOAD)
+    return nullptr;
+
+  Inst *ptr = inst->args[0];
+  Inst *memory = nullptr;
+  if (ptr->op == Op::MEMORY)
+    memory = ptr;
+  else if (ptr->op == Op::ADD
+	   && ptr->args[0]->op == Op::MEMORY
+	   && ptr->args[1]->op == Op::VALUE)
+    memory = ptr->args[0];
+  if (!memory)
+    return nullptr;
+
+  if (!(memory->args[2]->value() & MEM_CONST))
+    return nullptr;
+
+  Basic_block *entry_bb = inst->bb->func->bbs[0];
+  for (Inst *inst = entry_bb->last_inst; inst; inst = inst->prev)
+    {
+      if (inst->op == Op::STORE
+	  && (inst->args[0] == ptr
+	      || (inst->args[0]->op == Op::ADD
+		  && ptr->op == Op::ADD
+		  && inst->args[0]->args[0] == ptr->args[0]
+		  && inst->args[0]->args[1] == ptr->args[1])))
+	return inst->args[1];
+    }
+
+  return nullptr;
+}
+
+void forward_const(Function *func)
+{
+  for (auto bb : func->bbs)
+    {
+      if (bb == func->bbs[0])
+	{
+	  // The entry block may, in some cases (such as for bit fields),
+	  // create the value by a sequence where it loads/stores the
+	  // value multiple times, and this naive forwarding implementation
+	  // then creates values that are used before being defined. But
+	  // there is no need to forward within the entry block, so just
+	  // skip it.
+	  continue;
+	}
+
+      for (Inst *inst = bb->first_inst; inst;)
+	{
+	  Inst *next_inst = inst->next;
+	  if (Inst *value = get_value(inst))
+	    {
+	      inst->replace_all_uses_with(value);
+	      destroy_instruction(inst);
+	    }
+	  inst = next_inst;
+	}
+    }
+}
+
 } // end anonymous namespace
 
 // This function makes the memory instructions consistent between src and tgt:
@@ -471,6 +533,20 @@ void canonicalize_memory(Module *module)
       return a->args[0]->value() < b->args[0]->value();
     }
   } comp;
+
+  // Substitute load from constant memory with the actual value. This is
+  // also done by later load-to-store forwarding, but doing it here may
+  // remove the need to set up the constant memory and therefore make
+  // more code CSE and leave less memory for the SMT solver to track.
+  if (config.optimize_ub)
+    {
+      forward_const(src);
+      forward_const(tgt);
+    }
+
+  // Dead instructions using Op::MEMORY may make the code below treat the
+  // memory as used. Run DCE first to ensure we get the intended result.
+  dead_code_elimination(module);
 
   std::vector<Inst *> src_mem = collect_mem(src);
   std::vector<Inst *> tgt_mem = collect_mem(tgt);
