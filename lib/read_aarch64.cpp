@@ -1529,6 +1529,11 @@ Inst *gen_uabd(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::ITE, cmp, neg_inst, inst);
 }
 
+Inst *gen_fadd(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::FADD, elem1, elem2);
+}
+
 Inst *gen_fnmul(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   Inst *res = bb->build_inst(Op::FMUL, elem1, elem2);
@@ -4651,6 +4656,8 @@ void Parser::parse_vector_op()
     process_vec_simd_compare(Vec_cond::FAGT);
   else if (name == "fadd")
     process_vec_binary(Op::FADD);
+  else if (name == "faddp")
+    process_vec_pairwise(gen_fadd);
   else if (name == "fcmeq")
     process_vec_simd_compare(Vec_cond::FEQ);
   else if (name == "fcmge")
@@ -6404,6 +6411,8 @@ void Parser::parse_function()
   // SIMD pairwise arithmetic
   else if (name == "addp")
     process_vec_reduc_vreg(gen_add);
+  else if (name == "faddp")
+    process_vec_reduc_vreg(gen_fadd);
   else if (name == "fmaxnmp")
     process_vec_reduc_vreg(gen_fmax);
   else if (name == "fminnmp")
