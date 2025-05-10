@@ -1529,6 +1529,12 @@ Inst *gen_uabd(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::ITE, cmp, neg_inst, inst);
 }
 
+Inst *gen_fabd(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *inst = bb->build_inst(Op::FSUB, elem1, elem2);
+  return bb->build_inst(Op::FABS, inst);
+}
+
 Inst *gen_fadd(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   return bb->build_inst(Op::FADD, elem1, elem2);
@@ -4648,6 +4654,8 @@ void Parser::parse_vector_op()
     process_vec_binary(Op::XOR);
   else if (name == "ext")
     process_vec_ext();
+  else if (name == "fabd")
+    process_vec_binary(gen_fabd);
   else if (name == "fabs")
     process_vec_unary(Op::FABS);
   else if (name == "facge")
@@ -6431,6 +6439,8 @@ void Parser::parse_function()
     process_addpl();
   else if (name == "addvl")
     process_addvl();
+  else if (name == "fabd")
+    process_binary(gen_fabd);
   else if (name == "cntb")
     process_cnt(8);
   else if (name == "cnth")
