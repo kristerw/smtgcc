@@ -15,7 +15,8 @@ namespace smtgcc {
 namespace {
 
 enum class Vec_cond {
-  FEQ, FGE, FGT, FLE, FLT, FNE, FUO, EQ, GE, GT, HI, HS, LE, LO, LS, LT, NE
+  FEQ, FGE, FGT, FLE, FLT, FNE, FUO, FAGE, FAGT,
+  EQ, GE, GT, HI, HS, LE, LO, LS, LT, NE
 };
 
 enum class Predication_mode {
@@ -1652,6 +1653,20 @@ Inst *gen_elem_compare(Basic_block *bb, Inst *elem1, Inst *elem2, Vec_cond op)
 	Inst *is_nan1 = bb->build_inst(Op::IS_NAN, elem1);
 	Inst *is_nan2 = bb->build_inst(Op::IS_NAN, elem2);
 	cond = bb->build_inst(Op::OR, is_nan1, is_nan2);
+      }
+      break;
+    case Vec_cond::FAGE:
+      {
+	Inst *abs_elem1 = bb->build_inst(Op::FABS, elem1);
+	Inst *abs_elem2 = bb->build_inst(Op::FABS, elem2);
+	cond = bb->build_inst(Op::FLE, abs_elem2, abs_elem1);
+      }
+      break;
+    case Vec_cond::FAGT:
+      {
+	Inst *abs_elem1 = bb->build_inst(Op::FABS, elem1);
+	Inst *abs_elem2 = bb->build_inst(Op::FABS, elem2);
+	cond = bb->build_inst(Op::FLT, abs_elem2, abs_elem1);
       }
       break;
     }
@@ -4630,6 +4645,10 @@ void Parser::parse_vector_op()
     process_vec_ext();
   else if (name == "fabs")
     process_vec_unary(Op::FABS);
+  else if (name == "facge")
+    process_vec_simd_compare(Vec_cond::FAGE);
+  else if (name == "facgt")
+    process_vec_simd_compare(Vec_cond::FAGT);
   else if (name == "fadd")
     process_vec_binary(Op::FADD);
   else if (name == "fcmeq")
