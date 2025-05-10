@@ -1546,6 +1546,11 @@ Inst *gen_fnmul(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::FNEG, res);
 }
 
+Inst *gen_fsubr(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::FSUB, elem2, elem1);
+}
+
 Inst *gen_sshl(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   Inst *zero = bb->value_inst(0, 8);
@@ -5844,6 +5849,8 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::FMUL);
   else if (name == "fsub")
     process_sve_binary(Op::FSUB);
+  else if (name == "fsubr")
+    process_sve_binary(gen_fsubr);
   else if (name == "index")
     process_sve_index();
   else if (name == "inch")
