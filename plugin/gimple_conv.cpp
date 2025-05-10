@@ -165,6 +165,8 @@ struct Converter {
   void process_cfn_bit_iorn(gimple *stmt);
   void process_cfn_assume_aligned(gimple *stmt);
   void process_cfn_bswap(gimple *stmt);
+  void process_cfn_check_war_ptrs(gimple *stmt);
+  void process_cfn_check_raw_ptrs(gimple *stmt);
   void process_cfn_clrsb(gimple *stmt);
   void process_cfn_clz(gimple *stmt);
   std::pair<Inst*, Inst*> gen_cfn_cond_unary(tree_code code, Inst *cond, Inst *cond_indef, Inst *arg1, Inst *arg1_indef, Inst *orig, Inst *orig_indef, Inst *len, tree cond_type, tree arg1_type, tree orig_type);
@@ -4374,6 +4376,51 @@ void Converter::process_cfn_bswap(gimple *stmt)
     tree2prov.insert({lhs, arg_prov});
 }
 
+void Converter::process_cfn_check_war_ptrs(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 4);
+  Inst *arg1 = tree2inst(gimple_call_arg(stmt, 0));
+  Inst *arg2 = tree2inst(gimple_call_arg(stmt, 1));
+  Inst *arg3 = tree2inst(gimple_call_arg(stmt, 1));
+
+  Inst *arg1_len = bb->build_inst(Op::ADD, arg1, arg3);
+  Inst *res = bb->build_inst(Op::ULE, arg2, arg1);
+  Inst *cmp1 = bb->build_inst(Op::ULE, arg1_len, arg2);
+  res = bb->build_inst(Op::EQ, res, cmp1);
+  tree lhs = gimple_call_lhs(stmt);
+  if (lhs)
+    {
+      uint32_t lhs_bitsize = bitsize_for_type(TREE_TYPE(lhs));
+      if (res->bitsize < lhs_bitsize)
+	res = bb->build_inst(Op::ZEXT, res, lhs_bitsize);
+      tree2instruction.insert({lhs, res});
+    }
+}
+
+void Converter::process_cfn_check_raw_ptrs(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 4);
+  Inst *arg1 = tree2inst(gimple_call_arg(stmt, 0));
+  Inst *arg2 = tree2inst(gimple_call_arg(stmt, 1));
+  Inst *arg3 = tree2inst(gimple_call_arg(stmt, 1));
+
+  Inst *arg1_len = bb->build_inst(Op::ADD, arg1, arg3);
+  Inst *arg2_len = bb->build_inst(Op::ADD, arg2, arg3);
+  Inst *res = bb->build_inst(Op::EQ, arg1, arg2);
+  Inst *cmp1 = bb->build_inst(Op::ULE, arg1_len, arg2);
+  res = bb->build_inst(Op::EQ, res, cmp1);
+  Inst *cmp2 = bb->build_inst(Op::ULE, arg2_len, arg1);
+  res = bb->build_inst(Op::EQ, res, cmp2);
+  tree lhs = gimple_call_lhs(stmt);
+  if (lhs)
+    {
+      uint32_t lhs_bitsize = bitsize_for_type(TREE_TYPE(lhs));
+      if (res->bitsize < lhs_bitsize)
+	res = bb->build_inst(Op::ZEXT, res, lhs_bitsize);
+      tree2instruction.insert({lhs, res});
+    }
+}
+
 void Converter::process_cfn_clrsb(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 1);
@@ -6598,6 +6645,12 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BUILT_IN_UNREACHABLE:
     case CFN_BUILT_IN_UNREACHABLE_TRAP:
       process_cfn_unreachable(stmt);
+      break;
+    case CFN_CHECK_RAW_PTRS:
+      process_cfn_check_raw_ptrs(stmt);
+      break;
+    case CFN_CHECK_WAR_PTRS:
+      process_cfn_check_war_ptrs(stmt);
       break;
     case CFN_COND_ADD:
       process_cfn_cond_binary(stmt, PLUS_EXPR);
