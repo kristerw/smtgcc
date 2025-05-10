@@ -242,6 +242,7 @@ private:
   void process_ubfiz(Op op);
   void process_addpl();
   void process_addvl();
+  void process_rdvl();
   void process_ext_addv(Op op);
   void process_cnt(uint64_t elem_bitsize);
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
@@ -2957,6 +2958,18 @@ void Parser::process_addvl()
   arg2 = arg2 * rstate->registers[Aarch64RegIdx::z0]->bitsize / 8;
   Inst *value = bb->value_inst(arg2, arg1->bitsize);
   Inst *res = bb->build_inst(Op::ADD, arg1, value);
+  write_reg(dest, res);
+}
+
+void Parser::process_rdvl()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  unsigned __int128 arg1 = get_hex_or_integer(3);
+  get_end_of_line(4);
+
+  arg1 = arg1 * rstate->registers[Aarch64RegIdx::z0]->bitsize / 8;
+  Inst *res = bb->value_inst(arg1, dest->bitsize);
   write_reg(dest, res);
 }
 
@@ -6476,6 +6489,8 @@ void Parser::parse_function()
     process_dec_inc(Op::ADD, 64);
   else if (name == "orv")
     process_vec_reduc_zreg(gen_or, Value::umin);
+  else if (name == "rdvl")
+    process_rdvl();
   else if (name == "saddv")
     process_ext_addv(Op::SEXT);
   else if (name == "sqadd")
