@@ -4962,10 +4962,6 @@ void Parser::parse_rodata()
 
 	      parse_data(sym_name2data[label_name]);
 
-	      if (sym_name2data[label_name].empty())
-		throw Parse_error("Failed to parse data for " + label_name,
-				  line_number);
-
 	      continue;
 	    }
 	}
