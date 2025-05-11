@@ -113,6 +113,7 @@ private:
   std::tuple<uint64_t, uint32_t, uint32_t> get_vreg_(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_vreg(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_scalar_vreg(unsigned idx);
+  std::tuple<Inst *, uint32_t, uint32_t> get_ld1_vreg(unsigned idx);
   std::tuple<uint64_t, uint32_t, uint32_t> get_zreg_(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_zreg(unsigned idx,
 						  bool allow_no_type = false);
@@ -173,6 +174,8 @@ private:
   void load_ub_check(Inst *ptr, uint64_t size);
   Inst *process_address(unsigned idx, unsigned vec_size = 0);
   void process_load(uint32_t trunc_size = 0, Op op = Op::ZEXT);
+  void process_ld1();
+  void process_ld1r();
   void process_ldp();
   void process_ldpsw();
   void process_store(uint32_t trunc_size = 0);
@@ -770,6 +773,40 @@ std::tuple<Inst *, uint32_t, uint32_t> Parser::get_scalar_vreg(unsigned idx)
   get_right_bracket(idx);
 
   return {reg, elem_bitsize, elem_idx};
+}
+
+std::tuple<Inst *, uint32_t, uint32_t> Parser::get_ld1_vreg(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+
+  if (tokens[idx].kind != Lexeme::name
+      || tokens[idx].size < 4
+      || buf[tokens[idx].pos] != 'v'
+      || !isdigit(buf[tokens[idx].pos + 1]))
+    throw Parse_error("expected a vector register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  uint32_t value = buf[tokens[idx].pos + 1] - '0';
+  uint32_t pos = 2;
+  if (isdigit(buf[tokens[idx].pos + pos]))
+    value = value * 10 + (buf[tokens[idx].pos + pos++] - '0');
+  if (value > 31)
+    throw Parse_error("expected a vector register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  Inst *reg = rstate->registers[Aarch64RegIdx::z0 + value];
+  std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
+  uint32_t elem_bitsize;
+  if (suffix == ".d")
+    elem_bitsize = 64;
+  if (suffix == ".s")
+    elem_bitsize = 32;
+  if (suffix == ".h")
+    elem_bitsize = 16;
+  if (suffix == ".b")
+    elem_bitsize = 8;
+  uint32_t nof_elem = 128 / elem_bitsize;
+
+  return {reg, nof_elem, elem_bitsize};
 }
 
 Inst *Parser::get_vreg_value(unsigned idx, uint32_t nof_elem,
@@ -2003,6 +2040,56 @@ void Parser::process_load(uint32_t trunc_size, Op op)
   if (op != Op::ZEXT)
     value = bb->build_inst(op, value, reg_bitsize);
   write_reg(dest, value);
+}
+
+void Parser::process_ld1()
+{
+  get_left_brace(1);
+  auto [dest, nof_elem, elem_bitsize] = get_ld1_vreg(2);
+  Inst *orig = bb->build_inst(Op::READ, dest);
+  get_right_brace(3);
+  get_left_bracket(4);
+  unsigned idx = get_hex_or_integer(5);
+  get_right_bracket(6);
+  get_comma(7);
+  Inst *ptr = process_address(8);
+
+  unsigned size = elem_bitsize / 8;
+  load_ub_check(ptr, size);
+  Inst *value = load_value(ptr, size);
+  Inst *res = nullptr;
+  for (unsigned i = 0; i < nof_elem; i++)
+    {
+      Inst *elem;
+      if (i == idx)
+	elem = value;
+      else
+	elem = extract_vec_elem(orig, elem_bitsize, i);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, elem, res);
+      else
+	res = elem;
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_ld1r()
+{
+  get_left_brace(1);
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(2);
+  get_right_brace(3);
+  get_comma(4);
+  Inst *ptr = process_address(5);
+
+  unsigned size = elem_bitsize / 8;
+  load_ub_check(ptr, size);
+  Inst *value = load_value(ptr, size);
+  Inst *res = value;
+  for (unsigned i = 1; i < nof_elem; i++)
+    {
+      res = bb->build_inst(Op::CONCAT, value, res);
+    }
+  write_reg(dest, res);
 }
 
 void Parser::process_ldp()
@@ -6487,6 +6574,10 @@ void Parser::parse_function()
     process_dec_inc(Op::ADD, 32);
   else if (name == "incd")
     process_dec_inc(Op::ADD, 64);
+  else if (name == "ld1")
+    process_ld1();
+  else if (name == "ld1r")
+    process_ld1r();
   else if (name == "orv")
     process_vec_reduc_zreg(gen_or, Value::umin);
   else if (name == "rdvl")
