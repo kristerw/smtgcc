@@ -5959,8 +5959,14 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::ASHR, true);
   else if (name == "bic")
     process_sve_binary(gen_bic);
+  else if (name == "cls")
+    process_sve_unary(gen_clrsb);
+  else if (name == "clz")
+    process_sve_unary(gen_clz);
   else if (name == "cnot")
     process_sve_unary(gen_cnot);
+  else if (name == "cnt")
+    process_sve_unary(gen_popcount);
   else if (name == "eor")
     process_sve_binary(Op::XOR);
   else if (name == "eor3")
