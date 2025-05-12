@@ -5971,6 +5971,8 @@ void Parser::parse_sve_op()
     process_sve_dec_inc(Op::SUB, 32);
   else if (name == "decd")
     process_sve_dec_inc(Op::SUB, 64);
+  else if (name == "fabs")
+    process_sve_unary(Op::FABS);
   else if (name == "fadd")
     process_sve_binary(Op::FADD);
   else if (name == "fcvtzs")
