@@ -6053,6 +6053,8 @@ void Parser::parse_sve_op()
     process_sve_unary(Op::NOT);
   else if (name == "orr")
     process_sve_binary(Op::OR);
+  else if (name == "rbit")
+    process_sve_unary(gen_bitreverse);
   else if (name == "sabd")
     process_sve_binary(gen_sabd);
   else if (name == "scvtf")
