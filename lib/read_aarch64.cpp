@@ -302,6 +302,7 @@ private:
   void process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_preg_punpk(bool high);
   void process_sve_preg_ptest();
+  void process_sve_f2i(bool is_unsigned);
   void process_sve_ext(Op op, uint64_t trunc_bitsize);
   void process_sve_sel();
   void process_sve_eor3();
@@ -5314,6 +5315,41 @@ void Parser::process_sve_preg_ptest()
   set_nzcv(n, z, c, v);
 }
 
+void Parser::process_sve_f2i(bool is_unsigned)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  Inst *orig = get_zreg_value(1);
+  get_comma(2);
+  Inst *pred = nullptr;
+  int idx = 3;
+  if (is_preg(3))
+    {
+      pred = get_preg_merging_value(idx++);
+      get_comma(idx++);
+    }
+  Inst *arg1 = get_zreg_value(idx++);
+  get_end_of_line(idx);
+
+  Op op = is_unsigned ? Op::F2U : Op::F2S;
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *inst = bb->build_inst(op, elem1, elem_bitsize);
+      if (pred)
+	{
+	  Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+	  Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
+	  inst = bb->build_inst(Op::ITE, pred_elem, inst, orig_elem);
+	}
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_ext(Op op, uint64_t trunc_bitsize)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -5937,6 +5973,10 @@ void Parser::parse_sve_op()
     process_sve_dec_inc(Op::SUB, 64);
   else if (name == "fadd")
     process_sve_binary(Op::FADD);
+  else if (name == "fcvtzs")
+    process_sve_f2i(false);
+  else if (name == "fcvtzu")
+    process_sve_f2i(true);
   else if (name == "fdiv")
     process_sve_binary(Op::FDIV);
   else if (name == "fmaxnm")
