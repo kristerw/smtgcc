@@ -1650,6 +1650,60 @@ Inst *gen_bic(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::AND, elem1, bb->build_inst(Op::NOT, elem2));
 }
 
+Inst *gen_revb(Basic_block *bb, Inst *elem)
+{
+  const unsigned bitsize = 8;
+  unsigned nof_elem = elem->bitsize / bitsize;
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      unsigned lo = (nof_elem - 1 - i) * bitsize;
+      unsigned hi = lo + bitsize - 1;
+      Inst *inst = bb->build_inst(Op::EXTRACT, elem, hi, lo);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  return res;
+}
+
+Inst *gen_revh(Basic_block *bb, Inst *elem)
+{
+  const unsigned bitsize = 16;
+  unsigned nof_elem = elem->bitsize / bitsize;
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      unsigned lo = (nof_elem - 1 - i) * bitsize;
+      unsigned hi = lo + bitsize - 1;
+      Inst *inst = bb->build_inst(Op::EXTRACT, elem, hi, lo);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  return res;
+}
+
+Inst *gen_revw(Basic_block *bb, Inst *elem)
+{
+  const unsigned bitsize = 32;
+  unsigned nof_elem = elem->bitsize / bitsize;
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      unsigned lo = (nof_elem - 1 - i) * bitsize;
+      unsigned hi = lo + bitsize - 1;
+      Inst *inst = bb->build_inst(Op::EXTRACT, elem, hi, lo);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  return res;
+}
+
 Inst *gen_elem_compare(Basic_block *bb, Inst *elem1, Inst *elem2, Vec_cond op)
 {
   Inst *cond;
@@ -6055,6 +6109,12 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::OR);
   else if (name == "rbit")
     process_sve_unary(gen_bitreverse);
+  else if (name == "revb")
+    process_sve_unary(gen_revb);
+  else if (name == "revh")
+    process_sve_unary(gen_revh);
+  else if (name == "revw")
+    process_sve_unary(gen_revw);
   else if (name == "sabd")
     process_sve_binary(gen_sabd);
   else if (name == "scvtf")
