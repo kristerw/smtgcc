@@ -2808,6 +2808,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
     {
     case BIT_AND_EXPR:
       {
+	Inst *res = bb->build_inst(Op::AND, arg1, arg2);
 	Inst *res_indef = nullptr;
 	if (arg1_indef || arg2_indef)
 	  {
@@ -2836,10 +2837,11 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	if (arg2_prov)
 	  prov = arg2_prov;
 
-	return {bb->build_inst(Op::AND, arg1, arg2), res_indef, prov};
+	return {res, res_indef, prov};
       }
     case BIT_IOR_EXPR:
       {
+	Inst *res = bb->build_inst(Op::OR, arg1, arg2);
 	Inst *res_indef = nullptr;
 	if (arg1_indef || arg2_indef)
 	  {
@@ -2872,7 +2874,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	if (arg2_prov)
 	  prov = arg2_prov;
 
-	return {bb->build_inst(Op::OR, arg1, arg2), res_indef, prov};
+	return {res, res_indef, prov};
       }
     case BIT_XOR_EXPR:
       {
