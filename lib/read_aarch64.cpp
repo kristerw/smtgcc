@@ -2168,14 +2168,7 @@ void Parser::process_ldp()
   Inst *ptr = process_address(5);
 
   load_ub_check(ptr, size * 2);
-  Inst *value = bb->build_inst(Op::LOAD, ptr);
-  for (uint32_t i = 1; i < size * 2; i++)
-    {
-      Inst *offset = bb->value_inst(i, ptr->bitsize);
-      Inst *addr = bb->build_inst(Op::ADD, ptr, offset);
-      Inst *byte = bb->build_inst(Op::LOAD, addr);
-      value = bb->build_inst(Op::CONCAT, byte, value);
-    }
+  Inst *value = load_value(ptr, size * 2);
   uint32_t bitsize = size * 8;
   Inst *value1 = bb->build_trunc(value, bitsize);
   Inst *value2 = bb->build_inst(Op::EXTRACT, value, bitsize * 2 - 1, bitsize);
@@ -2194,14 +2187,7 @@ void Parser::process_ldpsw()
 
   uint32_t size = 4;
   load_ub_check(ptr, size * 2);
-  Inst *value = bb->build_inst(Op::LOAD, ptr);
-  for (uint32_t i = 1; i < size * 2; i++)
-    {
-      Inst *offset = bb->value_inst(i, ptr->bitsize);
-      Inst *addr = bb->build_inst(Op::ADD, ptr, offset);
-      Inst *byte = bb->build_inst(Op::LOAD, addr);
-      value = bb->build_inst(Op::CONCAT, byte, value);
-    }
+  Inst *value = load_value(ptr, size * 2);
   uint32_t bitsize = size * 8;
   Inst *value1 = bb->build_trunc(value, bitsize);
   value1 = bb->build_inst(Op::SEXT, value1, 64);
@@ -2236,13 +2222,7 @@ void Parser::process_stp()
   Inst *value = bb->build_inst(Op::CONCAT, value2, value1);
   uint32_t size = value->bitsize / 8;
   store_ub_check(ptr, size);
-  for (uint32_t i = 0; i < size; i++)
-    {
-      Inst *offset = bb->value_inst(i, ptr->bitsize);
-      Inst *addr = bb->build_inst(Op::ADD, ptr, offset);
-      Inst *byte = bb->build_inst(Op::EXTRACT, value, i * 8 + 7, i * 8);
-      bb->build_inst(Op::STORE, addr, byte);
-    }
+  store_value(ptr, value);
 }
 
 void Parser::process_st1()
