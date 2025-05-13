@@ -266,6 +266,7 @@ private:
   void process_vec_reducl(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op op);
   void process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_widen(Op, bool high = false);
+  void process_vec_dot(Op op);
   void process_vec_bic();
   void process_vec_bif();
   void process_vec_bit();
@@ -4296,6 +4297,40 @@ void Parser::process_vec_tbl()
   write_reg(dest, res);
 }
 
+void Parser::process_vec_dot(Op op)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  Inst *orig = get_vreg_value(1, nof_elem, elem_bitsize);
+  assert(elem_bitsize == 32);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem * 4, 8);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem * 4, 8);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (unsigned i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = extract_vec_elem(orig, elem_bitsize, i);
+      for (unsigned j = 0; j < 4; j++)
+	{
+	  Inst *e1 = extract_vec_elem(elem1, 8, j);
+	  e1 = bb->build_inst(op, e1, elem_bitsize);
+	  Inst *e2 = extract_vec_elem(elem2, 8, j);
+	  e2 = bb->build_inst(op, e2, elem_bitsize);
+	  Inst *mul = bb->build_inst(Op::MUL, e1, e2);
+	  inst = bb->build_inst(Op::ADD, inst, mul);
+	}
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_bic()
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -4917,6 +4952,8 @@ void Parser::parse_vector_op()
     process_vec_widen2_binary(Op::ADD, Op::SEXT, true);
   else if (name == "scvtf")
     process_vec_unary(gen_s2f);
+  else if (name == "sdot")
+    process_vec_dot(Op::SEXT);
   else if (name == "shl")
     process_vec_shift(Op::SHL);
   else if (name == "shrn")
@@ -5009,6 +5046,8 @@ void Parser::parse_vector_op()
     process_vec_widen2_binary(Op::ADD, Op::ZEXT, true);
   else if (name == "ucvtf")
     process_vec_unary(gen_u2f);
+  else if (name == "udot")
+    process_vec_dot(Op::ZEXT);
   else if (name == "umax")
     process_vec_binary(gen_umax);
   else if (name == "umaxp")
