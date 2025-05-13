@@ -474,17 +474,28 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 	}
 
       // Check if the expression already exists in a different form.
-      Inst *not_arg1 = build_inst(Op::NOT, arg1);
-      Inst *not_arg2 = build_inst(Op::NOT, arg2);
-      if (op == Op::AND)
-	inst = cse.get_inst(Op::OR, not_arg1, not_arg2);
+      Inst *not_arg1;
+      if (arg1->op == Op::NOT)
+	not_arg1 = arg1->args[0];
       else
-	inst = cse.get_inst(Op::AND, not_arg1, not_arg2);
-      if (inst)
+	not_arg1 = cse.get_inst(Op::NOT, arg1);
+      Inst *not_arg2;
+      if (arg2->op == Op::NOT)
+	not_arg2 = arg2->args[0];
+      else
+	not_arg2 = cse.get_inst(Op::NOT, arg2);
+      if (not_arg1 && not_arg2)
 	{
-	  inst = build_inst(Op::NOT, inst);
-	  cse.set_inst(inst, op, arg1, arg2);
-	  return inst;
+	  if (op == Op::AND)
+	    inst = cse.get_inst(Op::OR, not_arg1, not_arg2);
+	  else
+	    inst = cse.get_inst(Op::AND, not_arg1, not_arg2);
+	  if (inst)
+	    {
+	      inst = build_inst(Op::NOT, inst);
+	      cse.set_inst(inst, op, arg1, arg2);
+	      return inst;
+	    }
 	}
 
       // Use the same argument order as canonicalize_and_or.
