@@ -180,6 +180,7 @@ private:
   void process_ldpsw();
   void process_store(uint32_t trunc_size = 0);
   void process_stp();
+  void process_st1();
   void process_fcmp();
   void process_fccmp();
   void process_i2f(bool is_unsigned);
@@ -2242,6 +2243,24 @@ void Parser::process_stp()
       Inst *byte = bb->build_inst(Op::EXTRACT, value, i * 8 + 7, i * 8);
       bb->build_inst(Op::STORE, addr, byte);
     }
+}
+
+void Parser::process_st1()
+{
+  get_left_brace(1);
+  auto [reg, nof_elem, elem_bitsize] = get_ld1_vreg(2);
+  Inst *value = bb->build_inst(Op::READ, reg);
+  get_right_brace(3);
+  get_left_bracket(4);
+  unsigned idx = get_hex_or_integer(5);
+  get_right_bracket(6);
+  get_comma(7);
+  Inst *ptr = process_address(8);
+
+  value = extract_vec_elem(value, elem_bitsize, idx);
+  uint32_t size = value->bitsize / 8;
+  store_ub_check(ptr, size);
+  store_value(ptr, value);
 }
 
 void Parser::process_fcmp()
@@ -6694,6 +6713,8 @@ void Parser::parse_function()
     process_rdvl();
   else if (name == "saddv")
     process_ext_addv(Op::SEXT);
+  else if (name == "st1")
+    process_st1();
   else if (name == "sqadd")
     process_binary(gen_sat_sadd);
   else if (name == "sqsub")
