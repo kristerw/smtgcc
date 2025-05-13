@@ -1481,6 +1481,26 @@ Inst *gen_mul(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::MUL, elem1, elem2);
 }
 
+Inst *gen_umulh(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *eelem1 = bb->build_inst(Op::ZEXT, elem1, 2 * elem1->bitsize);
+  Inst *eelem2 = bb->build_inst(Op::ZEXT, elem2, 2 * elem2->bitsize);
+  Inst *res = bb->build_inst(Op::MUL, eelem1, eelem2);
+  uint32_t hi = res->bitsize - 1;
+  uint32_t lo = res->bitsize / 2;
+  return bb->build_inst(Op::EXTRACT, res, hi, lo);
+}
+
+Inst *gen_smulh(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *eelem1 = bb->build_inst(Op::SEXT, elem1, 2 * elem1->bitsize);
+  Inst *eelem2 = bb->build_inst(Op::SEXT, elem2, 2 * elem2->bitsize);
+  Inst *res = bb->build_inst(Op::MUL, eelem1, eelem2);
+  uint32_t hi = res->bitsize - 1;
+  uint32_t lo = res->bitsize / 2;
+  return bb->build_inst(Op::EXTRACT, res, hi, lo);
+}
+
 Inst *gen_sat_uadd(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   Inst *add = bb->build_inst(Op::ADD, elem1, elem2);
@@ -6167,6 +6187,8 @@ void Parser::parse_sve_op()
     process_sve_binary(gen_smax);
   else if (name == "smin")
     process_sve_binary(gen_smin);
+  else if (name == "smulh")
+    process_sve_binary(gen_smulh);
   else if (name == "sqadd")
     process_sve_binary(gen_sat_sadd);
   else if (name == "sqsub")
@@ -6203,6 +6225,8 @@ void Parser::parse_sve_op()
     process_sve_binary(gen_umax);
   else if (name == "umin")
     process_sve_binary(gen_umin);
+  else if (name == "umulh")
+    process_sve_binary(gen_umulh);
   else if (name == "uqadd")
     process_sve_binary(gen_sat_uadd);
   else if (name == "uqsub")
