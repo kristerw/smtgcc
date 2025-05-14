@@ -312,6 +312,8 @@ private:
   void process_sve_preg_uzp(bool odd);
   void process_sve_index();
   void process_sve_while();
+  void process_sve_whilerw();
+  void process_sve_whilewr();
   Inst *load_value(Inst *ptr, uint64_t size);
   void process_sve_ld1(uint32_t load_elem_size, Op op);
   void process_sve_ld1r(uint32_t load_elem_size);
@@ -522,17 +524,17 @@ Parser::Cond_code Parser::get_cc(unsigned idx)
 		      line_number);
   std::string_view name =
     std::string_view(&buf[tokens[idx].pos], tokens[idx].size);
-  if (name == "eq")
+  if (name == "eq" || name == "none")
     return Cond_code::EQ;
-  else if (name == "ne")
+  else if (name == "ne" || name == "any")
     return Cond_code::NE;
-  else if (name == "cs")
+  else if (name == "cs" || name == "nlast")
     return Cond_code::CS;
-  else if (name == "cc")
+  else if (name == "cc" || name == "last")
     return Cond_code::CC;
-  else if (name == "mi")
+  else if (name == "mi" || name == "first")
     return Cond_code::MI;
-  else if (name == "pl")
+  else if (name == "pl" || name == "nfirst")
     return Cond_code::PL;
   else if (name == "vs")
     return Cond_code::VS;
@@ -5658,6 +5660,87 @@ void Parser::process_sve_while()
   write_reg(dest, res);
 }
 
+void Parser::process_sve_whilerw()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_reg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  Inst *last_cmp = nullptr;
+  Inst *z = bb->value_inst(0, 1);
+  Inst *cmp0 = bb->build_inst(Op::EQ, arg1, arg2);
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *curr_size =
+	bb->value_inst((1 + i) * elem_bitsize / 8, arg1->bitsize);
+      Inst *arg1_end = bb->build_inst(Op::ADD, arg1, curr_size);
+      Inst *arg2_end = bb->build_inst(Op::ADD, arg2, curr_size);
+      Inst *cmp1 = bb->build_inst(Op::ULE, arg1_end, arg2);
+      Inst *inst = bb->build_inst(Op::OR, cmp0, cmp1);
+      Inst *cmp2 = bb->build_inst(Op::ULE, arg2_end, arg1);
+      inst = bb->build_inst(Op::OR, inst, cmp2);
+      z = bb->build_inst(Op::OR, z, inst);
+      last_cmp = inst;
+      if (elem_bitsize > 8)
+	inst = bb->build_inst(Op::ZEXT, inst, elem_bitsize / 8);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+
+  Inst *n = extract_vec_elem(res, 1, 0);
+  z = bb->build_inst(Op::NOT, z);
+  Inst *c = bb->build_inst(Op::NOT, last_cmp);
+  Inst *v = bb->value_inst(0, 1);
+
+  set_nzcv(n, z, c, v);
+  write_reg(dest, res);
+}
+
+void Parser::process_sve_whilewr()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  get_comma(2);
+  Inst *arg1 = get_reg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_reg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  Inst *last_cmp = nullptr;
+  Inst *z = bb->value_inst(0, 1);
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *curr_size =
+	bb->value_inst((1 + i) * elem_bitsize / 8, arg1->bitsize);
+      Inst *arg1_end = bb->build_inst(Op::ADD, arg1, curr_size);
+      Inst *inst = bb->build_inst(Op::ULE, arg2, arg1);
+      Inst *cmp1 = bb->build_inst(Op::ULE, arg1_end, arg2);
+      inst = bb->build_inst(Op::OR, inst, cmp1);
+      z = bb->build_inst(Op::OR, z, inst);
+      last_cmp = inst;
+      if (elem_bitsize > 8)
+	inst = bb->build_inst(Op::ZEXT, inst, elem_bitsize / 8);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+
+  Inst *n = extract_vec_elem(res, 1, 0);
+  z = bb->build_inst(Op::NOT, z);
+  Inst *c = bb->build_inst(Op::NOT, last_cmp);
+  Inst *v = bb->value_inst(0, 1);
+
+  set_nzcv(n, z, c, v);
+  write_reg(dest, res);
+}
+
 Inst *Parser::load_value(Inst *ptr, uint64_t size)
 {
   Inst *value = bb->build_inst(Op::LOAD, ptr);
@@ -6030,6 +6113,10 @@ void Parser::parse_sve_preg_op()
     process_sve_preg_uzp(true);
   else if (name == "whilelo")
     process_sve_while();
+  else if (name == "whilerw")
+    process_sve_whilerw();
+  else if (name == "whilewr")
+    process_sve_whilewr();
   else
     throw Parse_error("unhandled sve preg instruction: "s + std::string(name),
 		      line_number);
@@ -6292,13 +6379,13 @@ void Parser::parse_function()
     process_cond_branch(Cond_code::EQ);
   else if (name == "bne" || name == "b.any")
     process_cond_branch(Cond_code::NE);
-  else if (name == "bcs")
+  else if (name == "bcs" || name == "b.nlast")
     process_cond_branch(Cond_code::CS);
-  else if (name == "bcc")
+  else if (name == "bcc" || name == "b.last")
     process_cond_branch(Cond_code::CC);
-  else if (name == "bmi")
+  else if (name == "bmi" || name == "b.first")
     process_cond_branch(Cond_code::MI);
-  else if (name == "bpl")
+  else if (name == "bpl" || name == "b.nfirst")
     process_cond_branch(Cond_code::PL);
   else if (name == "bvs")
     process_cond_branch(Cond_code::VS);

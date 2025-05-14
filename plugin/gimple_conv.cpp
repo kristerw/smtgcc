@@ -4383,12 +4383,12 @@ void Converter::process_cfn_check_war_ptrs(gimple *stmt)
   assert(gimple_call_num_args(stmt) == 4);
   Inst *arg1 = tree2inst(gimple_call_arg(stmt, 0));
   Inst *arg2 = tree2inst(gimple_call_arg(stmt, 1));
-  Inst *arg3 = tree2inst(gimple_call_arg(stmt, 1));
+  Inst *arg3 = tree2inst(gimple_call_arg(stmt, 2));
 
-  Inst *arg1_len = bb->build_inst(Op::ADD, arg1, arg3);
+  Inst *arg1_end = bb->build_inst(Op::ADD, arg1, arg3);
   Inst *res = bb->build_inst(Op::ULE, arg2, arg1);
-  Inst *cmp1 = bb->build_inst(Op::ULE, arg1_len, arg2);
-  res = bb->build_inst(Op::EQ, res, cmp1);
+  Inst *cmp1 = bb->build_inst(Op::ULE, arg1_end, arg2);
+  res = bb->build_inst(Op::OR, res, cmp1);
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
     {
@@ -4404,15 +4404,15 @@ void Converter::process_cfn_check_raw_ptrs(gimple *stmt)
   assert(gimple_call_num_args(stmt) == 4);
   Inst *arg1 = tree2inst(gimple_call_arg(stmt, 0));
   Inst *arg2 = tree2inst(gimple_call_arg(stmt, 1));
-  Inst *arg3 = tree2inst(gimple_call_arg(stmt, 1));
+  Inst *arg3 = tree2inst(gimple_call_arg(stmt, 2));
 
-  Inst *arg1_len = bb->build_inst(Op::ADD, arg1, arg3);
-  Inst *arg2_len = bb->build_inst(Op::ADD, arg2, arg3);
+  Inst *arg1_end = bb->build_inst(Op::ADD, arg1, arg3);
+  Inst *arg2_end = bb->build_inst(Op::ADD, arg2, arg3);
   Inst *res = bb->build_inst(Op::EQ, arg1, arg2);
-  Inst *cmp1 = bb->build_inst(Op::ULE, arg1_len, arg2);
-  res = bb->build_inst(Op::EQ, res, cmp1);
-  Inst *cmp2 = bb->build_inst(Op::ULE, arg2_len, arg1);
-  res = bb->build_inst(Op::EQ, res, cmp2);
+  Inst *cmp1 = bb->build_inst(Op::ULE, arg1_end, arg2);
+  res = bb->build_inst(Op::OR, res, cmp1);
+  Inst *cmp2 = bb->build_inst(Op::ULE, arg2_end, arg1);
+  res = bb->build_inst(Op::OR, res, cmp2);
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
     {
