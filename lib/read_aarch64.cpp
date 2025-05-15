@@ -15,7 +15,7 @@ namespace smtgcc {
 namespace {
 
 enum class Vec_cond {
-  FEQ, FGE, FGT, FLE, FLT, FNE, FUO, FAGE, FAGT,
+  FEQ, FGE, FGT, FLE, FLT, FNE, FUO, FAGE, FAGT, FALE, FALT,
   EQ, GE, GT, HI, HS, LE, LO, LS, LT, NE
 };
 
@@ -1806,6 +1806,20 @@ Inst *gen_elem_compare(Basic_block *bb, Inst *elem1, Inst *elem2, Vec_cond op)
 	Inst *abs_elem1 = bb->build_inst(Op::FABS, elem1);
 	Inst *abs_elem2 = bb->build_inst(Op::FABS, elem2);
 	cond = bb->build_inst(Op::FLT, abs_elem2, abs_elem1);
+      }
+      break;
+    case Vec_cond::FALE:
+      {
+	Inst *abs_elem1 = bb->build_inst(Op::FABS, elem1);
+	Inst *abs_elem2 = bb->build_inst(Op::FABS, elem2);
+	cond = bb->build_inst(Op::FLE, abs_elem1, abs_elem2);
+      }
+      break;
+    case Vec_cond::FALT:
+      {
+	Inst *abs_elem1 = bb->build_inst(Op::FABS, elem1);
+	Inst *abs_elem2 = bb->build_inst(Op::FABS, elem2);
+	cond = bb->build_inst(Op::FLT, abs_elem1, abs_elem2);
       }
       break;
     }
@@ -4884,6 +4898,10 @@ void Parser::parse_vector_op()
     process_vec_simd_compare(Vec_cond::FAGE);
   else if (name == "facgt")
     process_vec_simd_compare(Vec_cond::FAGT);
+  else if (name == "facle")
+    process_vec_simd_compare(Vec_cond::FALE);
+  else if (name == "faclt")
+    process_vec_simd_compare(Vec_cond::FALT);
   else if (name == "fadd")
     process_vec_binary(Op::FADD);
   else if (name == "faddp")
@@ -6122,6 +6140,14 @@ void Parser::parse_sve_preg_op()
     process_sve_compare(Vec_cond::NE);
   else if (name == "eor")
     process_sve_preg_binary(Op::XOR);
+  else if (name == "facge")
+    process_sve_compare(Vec_cond::FAGE);
+  else if (name == "facgt")
+    process_sve_compare(Vec_cond::FAGT);
+  else if (name == "facle")
+    process_sve_compare(Vec_cond::FALE);
+  else if (name == "faclt")
+    process_sve_compare(Vec_cond::FALT);
   else if (name == "fcmeq")
     process_sve_compare(Vec_cond::FEQ);
   else if (name == "fcmge")
