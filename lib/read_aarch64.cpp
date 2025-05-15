@@ -301,7 +301,7 @@ private:
   void process_sve_binary_rev(Op op);
   void process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_preg_unary(Op op);
-  void process_sve_preg_binary(Op op);
+  void process_sve_preg_binary(Op op, bool perform_not = false);
   void process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_preg_punpk(bool high);
   void process_sve_preg_ptest();
@@ -1673,6 +1673,16 @@ Inst *gen_xor(Basic_block *bb, Inst *elem1, Inst *elem2)
 Inst *gen_or(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   return bb->build_inst(Op::OR, elem1, elem2);
+}
+
+Inst *gen_nor(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::NOT, bb->build_inst(Op::OR, elem1, elem2));
+}
+
+Inst *gen_nand(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::NOT, bb->build_inst(Op::AND, elem1, elem2));
 }
 
 Inst *gen_bic(Basic_block *bb, Inst *elem1, Inst *elem2)
@@ -5383,7 +5393,7 @@ void Parser::process_sve_preg_unary(Op op)
   write_reg(dest, res);
 }
 
-void Parser::process_sve_preg_binary(Op op)
+void Parser::process_sve_preg_binary(Op op, bool perform_not)
 {
   auto [dest, nof_elem, elem_bitsize] = get_preg(1);
   get_comma(2);
@@ -5399,6 +5409,8 @@ void Parser::process_sve_preg_binary(Op op)
     {
       Inst *elem1 = extract_pred_elem(arg1, elem_bitsize, i);
       Inst *elem2 = extract_pred_elem(arg2, elem_bitsize, i);
+      if (perform_not)
+	elem2 = bb->build_inst(Op::NOT, elem2);
       Inst *inst = bb->build_inst(op, elem1, elem2);
 
       Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
@@ -6166,8 +6178,14 @@ void Parser::parse_sve_preg_op()
     process_sve_ldr_preg();
   else if (name == "mov")
     process_sve_mov_preg();
+  else if (name == "nand")
+    process_sve_preg_binary(gen_nand);
+  else if (name == "nor")
+    process_sve_preg_binary(gen_nor);
   else if (name == "not")
     process_sve_preg_unary(Op::NOT);
+  else if (name == "orn")
+    process_sve_preg_binary(Op::OR, true);
   else if (name == "orr")
     process_sve_preg_binary(Op::OR);
   else if (name == "pfalse")
