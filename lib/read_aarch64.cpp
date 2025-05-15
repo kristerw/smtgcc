@@ -6194,6 +6194,8 @@ void Parser::parse_sve_op()
     process_sve_mov_zreg();
   else if (name == "fmul")
     process_sve_binary(Op::FMUL);
+  else if (name == "fneg")
+    process_sve_unary(Op::FNEG);
   else if (name == "fsub")
     process_sve_binary(Op::FSUB);
   else if (name == "fsubr")
