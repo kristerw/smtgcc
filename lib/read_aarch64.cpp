@@ -1603,6 +1603,11 @@ Inst *gen_fadd(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::FADD, elem1, elem2);
 }
 
+Inst *gen_fdivr(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  return bb->build_inst(Op::FDIV, elem2, elem1);
+}
+
 Inst *gen_fnmul(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   Inst *res = bb->build_inst(Op::FMUL, elem1, elem2);
@@ -6186,6 +6191,8 @@ void Parser::parse_sve_op()
     process_sve_f2i(true);
   else if (name == "fdiv")
     process_sve_binary(Op::FDIV);
+  else if (name == "fdivr")
+    process_sve_binary(gen_fdivr);
   else if (name == "fmaxnm")
     process_sve_binary(gen_fmax);
   else if (name == "fminnm")
