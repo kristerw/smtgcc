@@ -850,7 +850,11 @@ void Converter::convert_function()
     }
 }
 
-Solver_result run_solver(z3::solver& s, const char *str)
+// ub_expr is used to detect false alarms from a check that actually is an
+// issue where tgt is more UB than src (which should have been detected by
+// an earlier check, but timed out instead of finding the issue).
+// Passing ctx.bool_val(false) for ub_expr disables the detection.
+Solver_result run_solver(z3::solver& s, const char *str, z3::expr& ub_expr)
 {
   if (config.verbose > 2)
     {
@@ -862,8 +866,19 @@ Solver_result run_solver(z3::solver& s, const char *str)
     return {Result_status::correct, {}};
   case z3::sat:
     {
-      std::string msg = "Transformation is not correct ("s + str + ")\n";
       z3::model m = s.get_model();
+      if (config.optimize_ub && m.eval(ub_expr).is_true())
+	{
+	  // We perform the UB check first in order to prevent false alarms
+	  // for retval/memory/etc. when tgt is more UB than src and we
+	  // enable smtgcc optimizations that may change the result
+	  // for cases that are UB. But it is possible that the UB check
+	  // times out, but later checks manage to find a case where
+	  // retval/memory/etc. differ for a case where tgt is more UB
+	  // than src. Report this as a failure found by the UB check.
+	  str = "UB";
+	}
+      std::string msg = "Transformation is not correct ("s + str + ")\n";
       for (unsigned i = 0; i < m.size(); i++)
 	{
 	  z3::func_decl v = m[i];
@@ -923,6 +938,9 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
   z3::expr src_common_ub_expr = conv.inst_as_bool(conv.src_common_ub);
   z3::expr src_unique_ub_expr = conv.inst_as_bool(conv.src_unique_ub);
   z3::expr tgt_unique_ub_expr = conv.inst_as_bool(conv.tgt_unique_ub);
+  z3::expr false_expr = ctx.bool_val(false);
+  z3::expr solver_ub_expr =
+    config.optimize_ub ? tgt_unique_ub_expr : false_expr;
 
   std::string warning;
 
@@ -938,7 +956,7 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
     solver.add(!src_unique_ub_expr);
     solver.add(tgt_unique_ub_expr);
     uint64_t start_time = get_time();
-    Solver_result solver_result = run_solver(solver, "UB");
+    Solver_result solver_result = run_solver(solver, "UB", false_expr);
     stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
     if (solver_result.status == Result_status::incorrect)
       {
@@ -974,7 +992,8 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 		 || src_exit_expr != tgt_exit_expr
 		 || (src_exit_expr && (src_exit_val_expr != tgt_exit_val_expr)));
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "abort/exit");
+      Solver_result solver_result =
+	run_solver(solver, "abort/exit", solver_ub_expr);
       stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
@@ -1037,7 +1056,8 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 	solver.add(!conv.inst_as_bool(conv.src_exit));
       solver.add((src_expr != tgt_expr) || is_more_indef);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "retval");
+      Solver_result solver_result =
+	run_solver(solver, "retval", solver_ub_expr);
       stats.time[1] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
@@ -1104,7 +1124,7 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
     solver.add(src_value != tgt_value || tgt_more_indef);
 
     uint64_t start_time = get_time();
-    Solver_result solver_result = run_solver(solver, "Memory");
+    Solver_result solver_result = run_solver(solver, "Memory", solver_ub_expr);
     stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
     if (solver_result.status == Result_status::incorrect)
       {
@@ -1144,7 +1164,7 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
     solver.add(!src_unique_ub_expr);
     solver.add(tgt_unique_ub_expr);
     uint64_t start_time = get_time();
-    Solver_result solver_result = run_solver(solver, "UB");
+    Solver_result solver_result = run_solver(solver, "UB", false_expr);
     stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
     if (solver_result.status == Result_status::incorrect)
       {
@@ -1195,11 +1215,12 @@ std::pair<SStats, Solver_result> check_ub_z3(Function *func)
   Converter conv(ctx, func);
   z3::expr src_unique_ub_expr = conv.inst_as_bool(conv.src_unique_ub);
   z3::expr src_common_ub_expr = conv.inst_as_bool(conv.src_common_ub);
+  z3::expr false_expr = ctx.bool_val(false);
 
   z3::solver solver(ctx);
   solver.add(src_common_ub_expr || src_unique_ub_expr);
   uint64_t start_time = get_time();
-  Solver_result solver_result = run_solver(solver, "UB");
+  Solver_result solver_result = run_solver(solver, "UB", false_expr);
   stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
   return std::pair<SStats, Solver_result>(stats, solver_result);
 }
@@ -1218,13 +1239,14 @@ std::pair<SStats, Solver_result> check_assert_z3(Function *func)
   z3::expr src_unique_ub_expr = conv.inst_as_bool(conv.src_unique_ub);
   z3::expr src_common_ub_expr = conv.inst_as_bool(conv.src_common_ub);
   z3::expr assert_expr = conv.inst_as_bool(conv.src_assert);
+  z3::expr false_expr = ctx.bool_val(false);
 
   z3::solver solver(ctx);
   solver.add(!src_common_ub_expr);
   solver.add(!src_unique_ub_expr);
   solver.add(assert_expr);
   uint64_t start_time = get_time();
-  Solver_result solver_result = run_solver(solver, "ASSERT");
+  Solver_result solver_result = run_solver(solver, "ASSERT", false_expr);
   stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
   return std::pair<SStats, Solver_result>(stats, solver_result);
 }
