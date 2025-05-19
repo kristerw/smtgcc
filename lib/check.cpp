@@ -88,9 +88,21 @@ enum class Function_role {
   src, tgt
 };
 
+// Comparison function for instructions.
+//
+// This is mostly used for sets etc. where we need a consistent order.
+// But for canonicalization we have higher requirements: We want
+// the instructions in the order they are created, but with Op::VALUE
+// instructions placed after non-Op::VALUE instructions so that we can
+// constant fold the constants without affecting the rest of the sequence.
 struct Inst_comp {
   bool operator()(const Inst *a, const Inst *b) const {
-    return a->id < b->id;
+    if (a->op == Op::VALUE && b->op != Op::VALUE)
+      return false;
+    else if (a->op != Op::VALUE && b->op == Op::VALUE)
+      return true;
+    else
+      return a->id < b->id;
   }
 };
 
@@ -156,10 +168,10 @@ class Converter {
   // True if simplify_inst should be called while building instructions.
   bool run_simplify_inst;
 
-  // True if we are currently canonicalizing Op::AND or Op::OR sequences.
-  // Used by canonicalize_and_or to prevent recursive calls while building
-  // the canonicalized sequence.
-  bool processing_and_or = false;
+  // True if we are currently canonicalizing Op::AND, Op::OR, or Op::ADD
+  // sequences. Used to prevent recursive calls while building the
+  // canonicalized sequence.
+  bool processing_canonicalization = false;
 
   // Maps basic blocks to an expression telling if it is executed.
   std::map<Basic_block *, Inst *> bb2cond;
@@ -242,6 +254,7 @@ class Converter {
   void flatten(Op op, Inst *inst, std::set<Inst *, Inst_comp>& elems);
   void flatten(Op op, Inst *inst, std::vector<Inst *>& elems);
   Inst *canonicalize_and_or(Inst *inst);
+  Inst *canonicalize_add(Inst *inst);
   Inst *build_inst(Op op);
   Inst *build_inst(Op op, Inst *arg, bool insert_after = false);
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2);
@@ -293,13 +306,15 @@ Inst *Converter::simplify(Inst *inst)
   if (!inst->has_lhs())
     return inst;
 
-  if (!processing_and_or
+  if (!processing_canonicalization
       && inst->bitsize == 1
       && ((inst->op == Op::AND
           && (inst->args[0]->op == Op::AND || inst->args[1]->op == Op::AND))
          || (inst->op == Op::OR
              && (inst->args[0]->op == Op::OR || inst->args[1]->op == Op::OR))))
     inst = canonicalize_and_or(inst);
+  else if (!processing_canonicalization && inst->op == Op::ADD)
+    inst = canonicalize_add(inst);
   else
     inst = simplify_inst(inst, &cse);
 
@@ -383,7 +398,7 @@ Inst *Converter::canonicalize_and_or(Inst *inst)
   // Generate the sequence.
   bool orig_run_simplify_inst = run_simplify_inst;
   run_simplify_inst = false;
-  processing_and_or = true;
+  processing_canonicalization = true;
   auto first = elems.begin();
   auto second = std::next(first);
   Inst *new_inst = build_inst(inst->op, *first, *second);
@@ -391,8 +406,48 @@ Inst *Converter::canonicalize_and_or(Inst *inst)
     {
       new_inst = build_inst(inst->op, new_inst, *it);
     }
-  processing_and_or = false;
+  processing_canonicalization = false;
   run_simplify_inst = orig_run_simplify_inst;
+
+  return new_inst;
+}
+
+// Canonicalize chains of Op::ADD to the form:
+//   (add (add (add (add e1, e2), e3), e4) ...
+Inst *Converter::canonicalize_add(Inst *inst)
+{
+  assert(inst->op == Op::ADD);
+
+  Inst *arg1 = inst->args[0];
+  Inst *arg2 = inst->args[1];
+
+  // Collect the elements.
+  std::vector<Inst *> elems;
+  if (arg1->op == inst->op)
+    flatten(inst->op, arg1, elems);
+  else
+    elems.push_back(arg1);
+  if (arg2->op == inst->op)
+    flatten(inst->op, arg2, elems);
+  else
+    elems.push_back(arg2);
+  Inst_comp comp;
+  std::sort(elems.begin(), elems.end(), comp);
+
+  assert(!elems.empty());
+  if (elems.size() == 1)
+    return *elems.begin();
+
+  // Generate the sequence.
+  processing_canonicalization = true;
+  auto first = elems.begin();
+  auto second = std::next(first);
+  Inst *new_inst = build_inst(inst->op, *first, *second);
+  for (auto it = std::next(second); it != elems.end(); ++it)
+    {
+      new_inst = build_inst(inst->op, new_inst, *it);
+    }
+  processing_canonicalization = false;
 
   return new_inst;
 }
