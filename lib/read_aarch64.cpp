@@ -266,7 +266,7 @@ private:
   void process_vec_reducl(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op op);
   void process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_widen(Op, bool high = false);
-  void process_vec_dot(Op op);
+  void process_vec_dot(Op op1, Op op2);
   void process_vec_bic();
   void process_vec_bif();
   void process_vec_bit();
@@ -4349,7 +4349,7 @@ void Parser::process_vec_tbl()
   write_reg(dest, res);
 }
 
-void Parser::process_vec_dot(Op op)
+void Parser::process_vec_dot(Op op1, Op op2)
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
   Inst *orig = get_vreg_value(1, nof_elem, elem_bitsize);
@@ -4369,9 +4369,9 @@ void Parser::process_vec_dot(Op op)
       for (unsigned j = 0; j < 4; j++)
 	{
 	  Inst *e1 = extract_vec_elem(elem1, 8, j);
-	  e1 = bb->build_inst(op, e1, elem_bitsize);
+	  e1 = bb->build_inst(op1, e1, elem_bitsize);
 	  Inst *e2 = extract_vec_elem(elem2, 8, j);
-	  e2 = bb->build_inst(op, e2, elem_bitsize);
+	  e2 = bb->build_inst(op2, e2, elem_bitsize);
 	  Inst *mul = bb->build_inst(Op::MUL, e1, e2);
 	  inst = bb->build_inst(Op::ADD, inst, mul);
 	}
@@ -5009,7 +5009,7 @@ void Parser::parse_vector_op()
   else if (name == "scvtf")
     process_vec_unary(gen_s2f);
   else if (name == "sdot")
-    process_vec_dot(Op::SEXT);
+    process_vec_dot(Op::SEXT, Op::SEXT);
   else if (name == "shl")
     process_vec_shift(Op::SHL);
   else if (name == "shrn")
@@ -5103,7 +5103,7 @@ void Parser::parse_vector_op()
   else if (name == "ucvtf")
     process_vec_unary(gen_u2f);
   else if (name == "udot")
-    process_vec_dot(Op::ZEXT);
+    process_vec_dot(Op::ZEXT, Op::ZEXT);
   else if (name == "umax")
     process_vec_binary(gen_umax);
   else if (name == "umaxp")
@@ -5128,6 +5128,8 @@ void Parser::parse_vector_op()
     process_vec_binary(gen_sat_uadd);
   else if (name == "uqsub")
     process_vec_binary(gen_sat_usub);
+  else if (name == "usdot")
+    process_vec_dot(Op::ZEXT, Op::SEXT);
   else if (name == "ushl")
     process_vec_binary(gen_ushl);
   else if (name == "ushll")
