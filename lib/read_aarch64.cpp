@@ -305,6 +305,7 @@ private:
   void process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_preg_punpk(bool high);
   void process_sve_preg_ptest();
+  void process_sve_dot(Op op1, Op op2);
   void process_sve_f2i(bool is_unsigned);
   void process_sve_ext(Op op, uint64_t trunc_bitsize);
   void process_sve_sel();
@@ -5510,6 +5511,42 @@ void Parser::process_sve_preg_ptest()
   set_nzcv(n, z, c, v);
 }
 
+void Parser::process_sve_dot(Op op1, Op op2)
+{
+  auto [dest, dest_nof_elem, dest_elem_bitsize] = get_zreg(1);
+  Inst *orig = get_zreg_value(1);
+  get_comma(2);
+  auto [src, src_nof_elem, src_elem_bitsize] = get_zreg(3);
+  assert(src_elem_bitsize < dest_elem_bitsize);
+  Inst *arg1 = get_zreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_zreg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  unsigned src_elem_per_dest_elem = dest_elem_bitsize / src_elem_bitsize;
+  for (unsigned i = 0; i < dest_nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, dest_elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(arg2, dest_elem_bitsize, i);
+      Inst *inst = extract_vec_elem(orig, dest_elem_bitsize, i);
+      for (unsigned j = 0; j < src_elem_per_dest_elem; j++)
+	{
+	  Inst *e1 = extract_vec_elem(elem1, src_elem_bitsize, j);
+	  e1 = bb->build_inst(op1, e1, dest_elem_bitsize);
+	  Inst *e2 = extract_vec_elem(elem2, src_elem_bitsize, j);
+	  e2 = bb->build_inst(op2, e2, dest_elem_bitsize);
+	  Inst *mul = bb->build_inst(Op::MUL, e1, e2);
+	  inst = bb->build_inst(Op::ADD, inst, mul);
+	}
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_f2i(bool is_unsigned)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -6367,6 +6404,8 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::SDIV);
   else if (name == "sdivr")
     process_sve_binary_rev(Op::SDIV);
+  else if (name == "sdot")
+    process_sve_dot(Op::SEXT, Op::SEXT);
   else if (name == "sel")
     process_sve_sel();
   else if (name == "smax")
@@ -6407,6 +6446,10 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::UDIV);
   else if (name == "udivr")
     process_sve_binary_rev(Op::UDIV);
+  else if (name == "udot")
+    process_sve_dot(Op::ZEXT, Op::ZEXT);
+  else if (name == "usdot")
+    process_sve_dot(Op::ZEXT, Op::SEXT);
   else if (name == "umax")
     process_sve_binary(gen_umax);
   else if (name == "umin")
