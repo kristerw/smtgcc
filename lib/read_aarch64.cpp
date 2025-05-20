@@ -306,6 +306,7 @@ private:
   void process_sve_preg_punpk(bool high);
   void process_sve_preg_ptest();
   void process_sve_dot(Op op1, Op op2);
+  void process_sve_rev();
   void process_sve_f2i(bool is_unsigned);
   void process_sve_ext(Op op, uint64_t trunc_bitsize);
   void process_sve_sel();
@@ -5547,6 +5548,22 @@ void Parser::process_sve_dot(Op op1, Op op2)
   write_reg(dest, res);
 }
 
+void Parser::process_sve_rev()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1 = get_zreg_value(3);
+  get_end_of_line(4);
+
+  Inst *res = extract_vec_elem(arg1, elem_bitsize, nof_elem - 1);
+  for (uint32_t i = 1; i < nof_elem; i++)
+    {
+      Inst *elem = extract_vec_elem(arg1, elem_bitsize, nof_elem - 1 - i);
+      res = bb->build_inst(Op::CONCAT, elem, res);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_f2i(bool is_unsigned)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -6390,6 +6407,8 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::OR);
   else if (name == "rbit")
     process_sve_unary(gen_bitreverse);
+  else if (name == "rev")
+    process_sve_rev();
   else if (name == "revb")
     process_sve_unary(gen_revb);
   else if (name == "revh")
