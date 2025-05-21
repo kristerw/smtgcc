@@ -307,6 +307,7 @@ private:
   void process_sve_preg_ptest();
   void process_sve_dot(Op op1, Op op2);
   void process_sve_rev();
+  void process_sve_bsl(bool invert_arg1, bool invert_arg2, bool invert_result);
   void process_sve_f2i(bool is_unsigned);
   void process_sve_ext(Op op, uint64_t trunc_bitsize);
   void process_sve_sel();
@@ -5564,6 +5565,41 @@ void Parser::process_sve_rev()
   write_reg(dest, res);
 }
 
+void Parser::process_sve_bsl(bool invert_arg1, bool invert_arg2, bool invert_result)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+
+  Inst *arg1 = get_zreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_zreg_value(5);
+  get_comma(6);
+  Inst *arg3 = get_zreg_value(7);
+  get_end_of_line(8);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      if (invert_arg1)
+	elem1 = bb->build_inst(Op::NOT, elem1);
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      if (invert_arg2)
+	elem2 = bb->build_inst(Op::NOT, elem2);
+      Inst *elem3 = extract_vec_elem(arg3, elem_bitsize, i);
+      Inst *inst = bb->build_inst(Op::XOR, elem2, elem3);
+      inst = bb->build_inst(Op::AND, inst, elem1);
+      inst = bb->build_inst(Op::XOR, inst, elem3);
+      if (invert_result)
+	inst = bb->build_inst(Op::NOT, inst);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_f2i(bool is_unsigned)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -6307,6 +6343,12 @@ void Parser::parse_sve_op()
     process_sve_binary_rev(Op::ASHR);
   else if (name == "bic")
     process_sve_binary(gen_bic);
+  else if (name == "bsl")
+    process_sve_bsl(false, false, false);
+  else if (name == "bsl1n")
+    process_sve_bsl(true, false, false);
+  else if (name == "bsl2n")
+    process_sve_bsl(false, true, false);
   else if (name == "cls")
     process_sve_unary(gen_clrsb);
   else if (name == "clz")
@@ -6399,6 +6441,8 @@ void Parser::parse_sve_op()
     process_sve_movprfx();
   else if (name == "mul")
     process_sve_binary(Op::MUL);
+  else if (name == "nbsl")
+    process_sve_bsl(false, false, true);
   else if (name == "neg")
     process_sve_unary(Op::NEG);
   else if (name == "not")
