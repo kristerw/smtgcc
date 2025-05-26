@@ -289,7 +289,7 @@ static void finish(void *, void *data)
 	  validate(func);
 
 	  simplify_cfg(func);
-	  if (loop_unroll(func, unroll_limit + 1))
+	  if (loop_unroll(func))
 	    {
 	      bool cfg_modified;
 	      do
