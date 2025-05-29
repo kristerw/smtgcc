@@ -5671,15 +5671,12 @@ void Converter::process_cfn_popcount(gimple *stmt)
     [this](Inst *elem1, Inst *elem1_indef, tree lhs_elem_type)
     -> std::pair<Inst *, Inst *>
     {
-      int bitsize = bitsize_for_type(lhs_elem_type);
-      Inst *bit = bb->build_extract_bit(elem1, 0);
-      Inst *res = bb->build_inst(Op::ZEXT, bit, bitsize);
-      for (uint32_t i = 1; i < elem1->bitsize; i++)
-	{
-	  bit = bb->build_extract_bit(elem1, i);
-	  Inst *ext = bb->build_inst(Op::ZEXT, bit, bitsize);
-	  res = bb->build_inst(Op::ADD, res, ext);
-	}
+      unsigned bitsize = bitsize_for_type(lhs_elem_type);
+      Inst *res = gen_popcount(bb, elem1);
+      if (res->bitsize > bitsize)
+	res = bb->build_trunc(res, bitsize);
+      else if (res->bitsize < bitsize)
+	res = bb->build_inst(Op::ZEXT, res, bitsize);
       Inst *res_indef = get_res_indef(elem1_indef, lhs_elem_type);
       return {res, res_indef};
     };

@@ -198,14 +198,16 @@ Inst *gen_clrsb(Basic_block *bb, Inst *arg)
 
 Inst *gen_popcount(Basic_block *bb, Inst *arg)
 {
+  uint32_t bitsize = std::bit_width(arg->bitsize);
   Inst *bit = bb->build_extract_bit(arg, 0);
-  Inst *inst = bb->build_inst(Op::ZEXT, bit, arg->bitsize);
+  Inst *inst = bb->build_inst(Op::ZEXT, bit, bitsize);
   for (uint32_t i = 1; i < arg->bitsize; i++)
     {
       bit = bb->build_extract_bit(arg, i);
-      Inst *ext = bb->build_inst(Op::ZEXT, bit, arg->bitsize);
+      Inst *ext = bb->build_inst(Op::ZEXT, bit, bitsize);
       inst = bb->build_inst(Op::ADD, inst, ext);
     }
+  inst = bb->build_inst(Op::ZEXT, inst, arg->bitsize);
   return inst;
 }
 

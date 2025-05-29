@@ -116,7 +116,6 @@ private:
   void process_cond_branch(Op op, bool swap = false);
   Inst *gen_ffs(Inst *arg);
   Inst *gen_parity(Inst *arg);
-  Inst *gen_popcount(Inst *arg);
   Inst *gen_sdiv(Inst *arg1, Inst *arg2);
   Inst *gen_udiv(Inst *arg1, Inst *arg2);
   Inst *read_arg(uint32_t reg, uint32_t bitsize);
@@ -805,19 +804,6 @@ Inst *Parser::gen_parity(Inst *arg)
   return inst;
 }
 
-Inst *Parser::gen_popcount(Inst *arg)
-{
-  Inst *bit = bb->build_extract_bit(arg, 0);
-  Inst *inst = bb->build_inst(Op::ZEXT, bit, 32);
-  for (uint32_t i = 1; i < arg->bitsize; i++)
-    {
-      bit = bb->build_extract_bit(arg, i);
-      Inst *ext = bb->build_inst(Op::ZEXT, bit, 32);
-      inst = bb->build_inst(Op::ADD, inst, ext);
-    }
-  return inst;
-}
-
 Inst *Parser::gen_sdiv(Inst *arg1, Inst *arg2)
 {
   Inst *zero = bb->value_inst(0, arg2->bitsize);
@@ -1089,15 +1075,14 @@ void Parser::process_call()
   if (name == "__popcountdi2")
     {
       Inst *arg = read_arg(RiscvRegIdx::x10, 64);
-      Inst *res = gen_popcount(arg);
-      res = bb->build_inst(Op::SEXT, res, 64);
+      Inst *res = gen_popcount(bb, arg);
       write_retval(res);
       return;
     }
   if (name == "__popcountsi2" && reg_bitsize == 32)
     {
       Inst *arg = read_arg(RiscvRegIdx::x10, 32);
-      Inst *res = gen_popcount(arg);
+      Inst *res = gen_popcount(bb, arg);
       write_retval(res);
       return;
     }
@@ -3781,7 +3766,7 @@ void Parser::parse_function()
       bool has_w_suffix = name[name.length() - 1] == 'w';
       if (has_w_suffix)
 	arg1 = bb->build_trunc(arg1, 32);
-      Inst *res = gen_popcount(arg1);
+      Inst *res = gen_popcount(bb, arg1);
       if (reg_bitsize == 64 && res->bitsize < reg_bitsize)
 	res = bb->build_inst(Op::ZEXT, res, reg_bitsize);
       bb->build_inst(Op::WRITE, dest, res);
