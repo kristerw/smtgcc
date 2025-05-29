@@ -150,6 +150,11 @@ void remove_empty_bb(Basic_block *bb)
   bb->build_br_inst(bb);
 }
 
+bool is_always_ub(Basic_block *bb)
+{
+  return bb->first_inst->op == Op::UB && is_value_one(bb->first_inst->args[0]);
+}
+
 } // end anonymous namespace
 
 void clear_dominance(Function *func)
@@ -351,6 +356,57 @@ bool simplify_cfg(Function *func)
 	  while (bb->first_inst->op != Op::BR)
 	    {
 	      bb->first_inst->move_before(last_inst);
+	    }
+	}
+
+      // Eliminate conditional branches to always UB BBs. For example:
+      //
+      //   .1:
+      //     br %10, .2, .3
+      //
+      //   .2:
+      //     ub 1
+      //     br .4
+      //
+      //   .3:
+      //     ...
+      //
+      // is optimized to:
+      //
+      //   .1:
+      //     ub %10
+      //     br .3
+      //
+      //   .3:
+      //     ...
+      if (config.optimize_ub
+	  && bb->last_inst->op == Op::BR
+	  && bb->last_inst->nof_args == 1)
+	{
+	  Inst *branch = bb->last_inst;
+	  Basic_block *taken_bb = nullptr;
+	  Basic_block *not_taken_bb = nullptr;
+	  if (is_always_ub(branch->u.br3.true_bb))
+	    {
+	      bb->build_inst(Op::UB, branch->args[0]);
+	      taken_bb = branch->u.br3.false_bb;
+	      not_taken_bb = branch->u.br3.true_bb;
+	    }
+	  else if (is_always_ub(branch->u.br3.false_bb))
+	    {
+	      bb->build_inst(Op::UB, bb->build_inst(Op::NOT, branch->args[0]));
+	      taken_bb = branch->u.br3.true_bb;
+	      not_taken_bb = branch->u.br3.false_bb;
+	    }
+	  if (taken_bb)
+	    {
+	      for (auto phi : not_taken_bb->phis)
+		{
+		  phi->remove_phi_arg(bb);
+		}
+	      destroy_instruction(branch);
+	      bb->build_br_inst(taken_bb);
+	      modified = true;
 	    }
 	}
 
