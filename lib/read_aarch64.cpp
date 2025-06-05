@@ -5587,9 +5587,9 @@ void Parser::process_sve_bsl(bool invert_arg1, bool invert_arg2, bool invert_res
       if (invert_arg2)
 	elem2 = bb->build_inst(Op::NOT, elem2);
       Inst *elem3 = extract_vec_elem(arg3, elem_bitsize, i);
-      Inst *inst = bb->build_inst(Op::XOR, elem2, elem3);
-      inst = bb->build_inst(Op::AND, inst, elem1);
-      inst = bb->build_inst(Op::XOR, inst, elem3);
+      Inst *inst = bb->build_inst(Op::XOR, elem1, elem2);
+      inst = bb->build_inst(Op::AND, inst, elem3);
+      inst = bb->build_inst(Op::XOR, inst, elem2);
       if (invert_result)
 	inst = bb->build_inst(Op::NOT, inst);
       if (res)
