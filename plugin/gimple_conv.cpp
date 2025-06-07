@@ -2216,11 +2216,11 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	  || TREE_CODE(dest_type) == BITINT_TYPE
 	  || TREE_CODE(dest_type) == ENUMERAL_TYPE)
 	{
+	  unsigned src_bitsize = inst->bitsize;
+	  unsigned dest_bitsize = bitsize_for_type(dest_type);
+
 	  // The result is UB if the floating point value is out of range
 	  // for the integer.
-	  // TODO: This is OK for float precsion <= dest precision.
-	  // But for float precision > dest we currently mark as UB cases
-	  // that round into range.
 	  Inst *min = tree2inst(TYPE_MIN_VALUE(dest_type));
 	  Inst *max = tree2inst(TYPE_MAX_VALUE(dest_type));
 	  // TODO: Handle dest bitsize > 128
@@ -2230,9 +2230,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	      if (!TYPE_UNSIGNED(dest_type))
 		min = bb->value_inst(-65504, min->bitsize);
 	    }
-
 	  Op op = TYPE_UNSIGNED(dest_type) ? Op::U2F : Op::S2F;
-	  int src_bitsize = TYPE_PRECISION(src_type);
 	  Inst *fmin = bb->build_inst(op, min, src_bitsize);
 	  Inst *fmax = bb->build_inst(op, max, src_bitsize);
 	  Inst *clow = bb->build_inst(Op::FLE, fmin, inst);
@@ -2242,7 +2240,24 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	  bb->build_inst(Op::UB, is_ub);
 
 	  op = TYPE_UNSIGNED(dest_type) ? Op::F2U : Op::F2S;
-	  Inst *res = bb->build_inst(op, inst, bitsize_for_type(dest_type));
+	  Inst *res = bb->build_inst(op, inst, dest_bitsize);
+
+	  // The UB checks above are not completely correct when the
+	  // floating-point mantissa has fewer bits than the source
+	  // bitsize, as the limit then gets rounded up and the result
+	  // may overflow.
+	  // Check this case by converting to a larger size.
+	  if (src_bitsize <= dest_bitsize)
+	    {
+	      Inst *val = bb->build_inst(op, inst, dest_bitsize + 1);
+	      op = TYPE_UNSIGNED(dest_type) ? Op::ZEXT : Op::SEXT;
+	      Inst *eres = bb->build_inst(op, res, val->bitsize);
+	      Inst *is_ub = bb->build_inst(Op::NE, val, eres);
+	      bb->build_inst(Op::UB, is_ub);
+	    }
+	  // TODO: Implement better UB checks that are both efficient
+	  // and correct.
+
 	  return {res, res_indef, nullptr};
 	}
       if (FLOAT_TYPE_P(dest_type))
