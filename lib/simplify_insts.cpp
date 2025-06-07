@@ -55,6 +55,7 @@ private:
   Inst *simplify_sext();
   Inst *simplify_sle();
   Inst *simplify_slt();
+  Inst *specialize_cond_arg(Inst *cond, Inst *arg, bool true_branch);
   Inst *simplify_ite();
   Inst *simplify_shl();
   Inst *simplify_smul_wraps();
@@ -1423,6 +1424,65 @@ Inst *Simplify::simplify_sub()
   return inst;
 }
 
+// Return true if this is an instruction we should specialize based to
+// the Op::ITE condition cond. (I.e., is any argument is an Op::ITE
+// instructions with cond as its first argument).
+bool can_specialize_cond(Inst *cond, Inst *inst)
+{
+  if (inst->op == Op::ITE || inst->op == Op::SIMP_BARRIER)
+    return false;
+
+  // We cannot duplicate instructions that depend on the order they are done
+  // (unless we update the code to place them next to the original).
+  // TODO: This should be its own Inst_class.
+  if (inst->op == Op::LOAD
+      || inst->op == Op::GET_MEM_FLAG
+      || inst->op == Op::GET_MEM_SIZE
+      || inst->op == Op::GET_MEM_INDEF
+      || inst->op == Op::IS_CONST_MEM)
+    return false;
+
+  for (uint i = 0; i < inst->nof_args; i++)
+    {
+      Inst *arg = inst->args[i];
+      if (arg->op == Op::ITE && arg->args[0] == cond)
+	return true;
+    }
+
+  return false;
+}
+
+Inst *Simplify::specialize_cond_arg(Inst *cond, Inst *arg, bool true_branch)
+{
+  if (!can_specialize_cond(cond, arg))
+    return arg;
+
+  Inst *args[3];
+  assert(arg->nof_args > 0);
+  assert(arg->nof_args <= 3);
+  for (uint i = 0; i < arg->nof_args; i++)
+    {
+      Inst *arg_arg = arg->args[i];
+      if (arg_arg->op == Op::ITE && arg_arg->args[0] == cond)
+	args[i] = true_branch ? arg_arg->args[1] : arg_arg->args[2];
+      else
+	args[i] = arg_arg;
+    }
+
+  switch (arg->nof_args)
+    {
+    case 1:
+      return build_inst(arg->op, args[0]);
+    case 2:
+      return build_inst(arg->op, args[0], args[1]);
+    case 3:
+      return build_inst(arg->op, args[0], args[1], args[2]);
+    default:
+      assert(0);
+      return arg;
+    }
+}
+
 Inst *Simplify::simplify_ite()
 {
   Inst *const arg1 = inst->args[0];
@@ -1590,6 +1650,22 @@ Inst *Simplify::simplify_ite()
       Inst *new_inst = build_inst(Op::OR, arg1, arg3->args[0]);
       return build_inst(Op::ITE, new_inst, arg2, arg3->args[2]);
     }
+
+  // Simplify a sequence of two Op::ITEs with identical conditions and an
+  // unrelated operation in the middle:
+  //
+  //   %1 = ite %a, %b, %c
+  //   %2 = op %1, %d
+  //   %3 = ite %a, %2, %e
+  //
+  // to
+  //
+  //   %2 = op %b, %d
+  //   %3 = ite %a, %2, %e
+  Inst *new_arg2 = specialize_cond_arg(arg1, arg2, true);
+  Inst *new_arg3 = specialize_cond_arg(arg1, arg3, false);
+  if (new_arg2 != arg2 || new_arg3 != arg3)
+    return build_inst(Op::ITE, arg1, new_arg2, new_arg3);
 
   return inst;
 }
