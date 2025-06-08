@@ -24,13 +24,14 @@ class Converter {
   Z3_sort fp_sort(uint32_t bitsize);
   void build_bv_comparison_smt(const Inst *inst);
   void build_fp_comparison_smt(const Inst *inst);
-  void build_nullary_smt(const Inst *inst);
+  void build_memory_state_smt(const Inst *inst);
   void build_bv_unary_smt(const Inst *inst);
   void build_fp_unary_smt(const Inst *inst);
   void build_bv_binary_smt(const Inst *inst);
   void build_fp_binary_smt(const Inst *inst);
   void build_ternary_smt(const Inst *inst);
   void build_conversion_smt(const Inst *inst);
+  void build_solver_smt(const Inst *inst);
   void build_special_smt(const Inst *inst);
   void build_smt(const Inst *inst);
   void convert_function();
@@ -255,7 +256,7 @@ void Converter::build_fp_comparison_smt(const Inst *inst)
     }
 }
 
-void Converter::build_nullary_smt(const Inst *inst)
+void Converter::build_memory_state_smt(const Inst *inst)
 {
   switch (inst->op)
     {
@@ -294,7 +295,7 @@ void Converter::build_nullary_smt(const Inst *inst)
       }
       break;
     default:
-      throw Not_implemented("build_nullary_smt: "s + inst->name());
+      throw Not_implemented("build_memory_state_smt: "s + inst->name());
     }
 }
 
@@ -353,14 +354,6 @@ void Converter::build_bv_unary_smt(const Inst *inst)
     case Op::SIMP_BARRIER:
       inst2bv.insert({inst, arg1});
       break;
-    case Op::SRC_ASSERT:
-      assert(!src_assert);
-      src_assert = inst->args[0];
-      break;
-    case Op::TGT_ASSERT:
-      assert(!tgt_assert);
-      tgt_assert = inst->args[0];
-      break;
     default:
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
     }
@@ -404,28 +397,6 @@ void Converter::build_bv_binary_smt(const Inst *inst)
 	inst2bv.insert({inst, z3::select(arg1, arg2)});
       }
       return;
-    case Op::SRC_RETVAL:
-      assert(!src_retval);
-      assert(!src_retval_indef);
-      src_retval = inst->args[0];
-      src_retval_indef = inst->args[1];
-      return;
-    case Op::TGT_RETVAL:
-      assert(!tgt_retval);
-      assert(!tgt_retval_indef);
-      tgt_retval = inst->args[0];
-      tgt_retval_indef = inst->args[1];
-      return;
-    case Op::SRC_UB:
-      assert(!src_unique_ub && !src_common_ub);
-      src_common_ub = inst->args[0];
-      src_unique_ub = inst->args[1];
-      return;
-    case Op::TGT_UB:
-      assert(!tgt_unique_ub && !tgt_common_ub);
-      tgt_common_ub = inst->args[0];
-      tgt_unique_ub = inst->args[1];
-      return;
     default:
       break;
     }
@@ -464,27 +435,6 @@ void Converter::build_bv_binary_smt(const Inst *inst)
       break;
     case Op::MUL:
       inst2bv.insert({inst, arg1 * arg2});
-      break;
-    case Op::PARAM:
-      {
-	uint32_t index = inst->args[0]->value();
-	char name[100];
-	sprintf(name, ".param%" PRIu32, index);
-	z3::expr param = ctx.bv_const(name, inst->bitsize);
-	inst2bv.insert({inst, param});
-      }
-      break;
-    case Op::PRINT:
-      print.push_back(inst);
-      break;
-    case Op::SYMBOLIC:
-      {
-	uint32_t index = inst->args[0]->value();
-	char name[100];
-	sprintf(name, ".symbolic%" PRIu32, index);
-	z3::expr symbolic = ctx.bv_const(name, inst->bitsize);
-	inst2bv.insert({inst, symbolic});
-      }
       break;
     case Op::SDIV:
       inst2bv.insert({inst, arg1 / arg2});
@@ -633,36 +583,6 @@ void Converter::build_ternary_smt(const Inst *inst)
 	  inst2bv.insert({inst, ite(arg1, arg2, arg3)});
 	}
       break;
-    case Op::SRC_MEM:
-      assert(!src_memory);
-      assert(!src_memory_size);
-      src_memory = inst->args[0];
-      src_memory_size = inst->args[1];
-      src_memory_indef = inst->args[2];
-      return;
-    case Op::TGT_MEM:
-      assert(!tgt_memory);
-      assert(!tgt_memory_size);
-      tgt_memory = inst->args[0];
-      tgt_memory_size = inst->args[1];
-      tgt_memory_indef = inst->args[2];
-      return;
-    case Op::SRC_EXIT:
-      assert(!src_abort);
-      assert(!src_exit);
-      assert(!src_exit_val);
-      src_abort = inst->args[0];
-      src_exit = inst->args[1];
-      src_exit_val = inst->args[2];
-      return;
-    case Op::TGT_EXIT:
-      assert(!tgt_abort);
-      assert(!tgt_exit);
-      assert(!tgt_exit_val);
-      tgt_abort = inst->args[0];
-      tgt_exit = inst->args[1];
-      tgt_exit_val = inst->args[2];
-      return;
     default:
       throw Not_implemented("build_ternary_smt: "s + inst->name());
     }
@@ -756,6 +676,120 @@ void Converter::build_conversion_smt(const Inst *inst)
     }
 }
 
+void Converter::build_solver_smt(const Inst *inst)
+{
+  if (inst->nof_args == 1)
+    {
+      z3::expr arg1 = inst_as_bv(inst->args[0]);
+      switch (inst->op)
+	{
+	case Op::SRC_ASSERT:
+	  assert(!src_assert);
+	  src_assert = inst->args[0];
+	  break;
+	case Op::TGT_ASSERT:
+	  assert(!tgt_assert);
+	  tgt_assert = inst->args[0];
+	  break;
+	default:
+	  throw Not_implemented("build_solver_smt: "s + inst->name());
+	}
+    }
+  else if (inst->nof_args == 2)
+    {
+      z3::expr arg1 = inst_as_bv(inst->args[0]);
+      z3::expr arg2 = inst_as_bv(inst->args[1]);
+      switch (inst->op)
+	{
+	case Op::PARAM:
+	  {
+	    uint32_t index = inst->args[0]->value();
+	    char name[100];
+	    sprintf(name, ".param%" PRIu32, index);
+	    z3::expr param = ctx.bv_const(name, inst->bitsize);
+	    inst2bv.insert({inst, param});
+	  }
+	  break;
+	case Op::PRINT:
+	  print.push_back(inst);
+	  break;
+	case Op::SRC_RETVAL:
+	  assert(!src_retval);
+	  assert(!src_retval_indef);
+	  src_retval = inst->args[0];
+	  src_retval_indef = inst->args[1];
+	  return;
+	case Op::SRC_UB:
+	  assert(!src_unique_ub && !src_common_ub);
+	  src_common_ub = inst->args[0];
+	  src_unique_ub = inst->args[1];
+	  return;
+	case Op::SYMBOLIC:
+	  {
+	    uint32_t index = inst->args[0]->value();
+	    char name[100];
+	    sprintf(name, ".symbolic%" PRIu32, index);
+	    z3::expr symbolic = ctx.bv_const(name, inst->bitsize);
+	    inst2bv.insert({inst, symbolic});
+	  }
+	  break;
+	case Op::TGT_RETVAL:
+	  assert(!tgt_retval);
+	  assert(!tgt_retval_indef);
+	  tgt_retval = inst->args[0];
+	  tgt_retval_indef = inst->args[1];
+	  return;
+	case Op::TGT_UB:
+	  assert(!tgt_unique_ub && !tgt_common_ub);
+	  tgt_common_ub = inst->args[0];
+	  tgt_unique_ub = inst->args[1];
+	  return;
+	default:
+	  throw Not_implemented("build_solver_smt: "s + inst->name());
+	}
+    }
+  else if (inst->nof_args == 3)
+    {
+      switch (inst->op)
+	{
+	case Op::SRC_MEM:
+	  assert(!src_memory);
+	  assert(!src_memory_size);
+	  src_memory = inst->args[0];
+	  src_memory_size = inst->args[1];
+	  src_memory_indef = inst->args[2];
+	  return;
+	case Op::TGT_MEM:
+	  assert(!tgt_memory);
+	  assert(!tgt_memory_size);
+	  tgt_memory = inst->args[0];
+	  tgt_memory_size = inst->args[1];
+	  tgt_memory_indef = inst->args[2];
+	  return;
+	case Op::SRC_EXIT:
+	  assert(!src_abort);
+	  assert(!src_exit);
+	  assert(!src_exit_val);
+	  src_abort = inst->args[0];
+	  src_exit = inst->args[1];
+	  src_exit_val = inst->args[2];
+	  return;
+	case Op::TGT_EXIT:
+	  assert(!tgt_abort);
+	  assert(!tgt_exit);
+	  assert(!tgt_exit_val);
+	  tgt_abort = inst->args[0];
+	  tgt_exit = inst->args[1];
+	  tgt_exit_val = inst->args[2];
+	  return;
+	default:
+	  throw Not_implemented("build_solver_smt: "s + inst->name());
+	}
+    }
+  else
+    throw Not_implemented("build_solver_smt: "s + inst->name());
+}
+
 void Converter::build_special_smt(const Inst *inst)
 {
   switch (inst->op)
@@ -783,8 +817,8 @@ void Converter::build_smt(const Inst *inst)
     case Inst_class::fcomparison:
       build_fp_comparison_smt(inst);
       break;
-    case Inst_class::nullary:
-      build_nullary_smt(inst);
+    case Inst_class::mem_nullary:
+      build_memory_state_smt(inst);
       break;
     case Inst_class::iunary:
       build_bv_unary_smt(inst);
@@ -803,6 +837,11 @@ void Converter::build_smt(const Inst *inst)
       break;
     case Inst_class::conv:
       build_conversion_smt(inst);
+      break;
+    case Inst_class::solver_unary:
+    case Inst_class::solver_binary:
+    case Inst_class::solver_ternary:
+      build_solver_smt(inst);
       break;
     case Inst_class::special:
       build_special_smt(inst);

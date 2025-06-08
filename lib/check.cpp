@@ -1514,11 +1514,12 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       Inst_class iclass = inst->iclass();
       switch (iclass)
 	{
-	case Inst_class::nullary:
+	case Inst_class::mem_nullary:
 	  new_inst = build_inst(inst->op);
 	  break;
 	case Inst_class::iunary:
 	case Inst_class::funary:
+	case Inst_class::reg_unary:
 	  {
 	    Inst *arg = translate.at(inst->args[0]);
 	    new_inst = build_inst(inst->op, arg);
@@ -1529,6 +1530,8 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
 	case Inst_class::ibinary:
 	case Inst_class::fbinary:
 	case Inst_class::conv:
+	case Inst_class::reg_binary:
+	case Inst_class::solver_binary:
 	  {
 	    Inst *arg1 = translate.at(inst->args[0]);
 	    Inst *arg2 = translate.at(inst->args[1]);

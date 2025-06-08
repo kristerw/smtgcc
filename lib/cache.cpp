@@ -188,7 +188,6 @@ std::string Cache::hash(Function *func)
 	    h.add(inst->id);
 	  switch (inst->iclass())
 	    {
-	    case Inst_class::nullary:
 	    case Inst_class::iunary:
 	    case Inst_class::funary:
 	    case Inst_class::ibinary:
@@ -197,6 +196,16 @@ std::string Cache::hash(Function *func)
 	    case Inst_class::fcomparison:
 	    case Inst_class::conv:
 	    case Inst_class::ternary:
+	    case Inst_class::ls_unary:
+	    case Inst_class::ls_binary:
+	    case Inst_class::ls_ternary:
+	    case Inst_class::mem_nullary:
+	    case Inst_class::mem_ternary:
+	    case Inst_class::reg_unary:
+	    case Inst_class::reg_binary:
+	    case Inst_class::solver_unary:
+	    case Inst_class::solver_binary:
+	    case Inst_class::solver_ternary:
 	      for (uint16_t i = 0; i < inst->nof_args; i++)
 		h.add(inst->args[i]->id);
 	      break;

@@ -13,7 +13,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 95> inst_info{{
+const std::array<Inst_info, 97> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -28,32 +28,15 @@ const std::array<Inst_info, 95> inst_info{{
   {"flt", Op::FLT, Inst_class::fcomparison, true, false},
   {"fne", Op::FNE, Inst_class::fcomparison, true, true},
 
-  // Nullary
-  {"mem_array", Op::MEM_ARRAY, Inst_class::nullary, true, false},
-  {"mem_flag_array", Op::MEM_FLAG_ARRAY, Inst_class::nullary, true, false},
-  {"mem_size_array", Op::MEM_SIZE_ARRAY, Inst_class::nullary, true, false},
-  {"mem_indef_array", Op::MEM_INDEF_ARRAY, Inst_class::nullary, true, false},
-
   // Integer unary
-  {"assert", Op::ASSERT, Inst_class::iunary, false, false},
-  {"free", Op::FREE, Inst_class::iunary, false, false},
-  {"get_mem_flag", Op::GET_MEM_FLAG, Inst_class::iunary, true, false},
-  {"get_mem_size", Op::GET_MEM_SIZE, Inst_class::iunary, true, false},
-  {"get_mem_indef", Op::GET_MEM_INDEF, Inst_class::iunary, true, false},
   {"is_const_mem", Op::IS_CONST_MEM, Inst_class::iunary, true, false},
   {"is_inf", Op::IS_INF, Inst_class::iunary, true, false},
   {"is_nan", Op::IS_NAN, Inst_class::iunary, true, false},
   {"is_noncanonical_nan", Op::IS_NONCANONICAL_NAN, Inst_class::iunary, true, false},
-  {"load", Op::LOAD, Inst_class::iunary, true, false},
   {"mov", Op::MOV, Inst_class::iunary, true, false},
   {"neg", Op::NEG, Inst_class::iunary, true, false},
   {"not", Op::NOT, Inst_class::iunary, true, false},
-  {"read", Op::READ, Inst_class::iunary, true, false},
-  {"register", Op::REGISTER, Inst_class::iunary, true, false},
   {"simp_barrier", Op::SIMP_BARRIER, Inst_class::iunary, true, false},
-  {"src_assert", Op::SRC_ASSERT, Inst_class::iunary, false, false},
-  {"tgt_assert", Op::TGT_ASSERT, Inst_class::iunary, false, false},
-  {"ub", Op::UB, Inst_class::iunary, false, false},
 
   // Floating-point unary
   {"fabs", Op::FABS, Inst_class::funary, true, false},
@@ -64,34 +47,23 @@ const std::array<Inst_info, 95> inst_info{{
   {"add", Op::ADD, Inst_class::ibinary, true, true},
   {"and", Op::AND, Inst_class::ibinary, true, true},
   {"array_get_flag", Op::ARRAY_GET_FLAG, Inst_class::ibinary, true, false},
-  {"array_get_size", Op::ARRAY_GET_SIZE, Inst_class::ibinary, true, false},
   {"array_get_indef", Op::ARRAY_GET_INDEF, Inst_class::ibinary, true, false},
+  {"array_get_size", Op::ARRAY_GET_SIZE, Inst_class::ibinary, true, false},
   {"array_load", Op::ARRAY_LOAD, Inst_class::ibinary, true, false},
   {"ashr", Op::ASHR, Inst_class::ibinary, true, false},
   {"concat", Op::CONCAT, Inst_class::ibinary, true, false},
   {"lshr", Op::LSHR, Inst_class::ibinary, true, false},
   {"mul", Op::MUL, Inst_class::ibinary, true, true},
   {"or", Op::OR, Inst_class::ibinary, true, true},
-  {"param", Op::PARAM, Inst_class::ibinary, true, false},
-  {"print", Op::PRINT, Inst_class::ibinary, false, false},
   {"sadd_wraps", Op::SADD_WRAPS, Inst_class::ibinary, true, true},
   {"sdiv", Op::SDIV, Inst_class::ibinary, true, false},
-  {"set_mem_flag", Op::SET_MEM_FLAG, Inst_class::ibinary, false, false},
-  {"set_mem_indef", Op::SET_MEM_INDEF, Inst_class::ibinary, false, false},
   {"shl", Op::SHL, Inst_class::ibinary, true, false},
   {"smul_wraps", Op::SMUL_WRAPS, Inst_class::ibinary, true, true},
-  {"src_retval", Op::SRC_RETVAL, Inst_class::ibinary, false, false},
-  {"src_ub", Op::SRC_UB, Inst_class::ibinary, false, false},
   {"srem", Op::SREM, Inst_class::ibinary, true, false},
   {"ssub_wraps", Op::SSUB_WRAPS, Inst_class::ibinary, true, false},
-  {"store", Op::STORE, Inst_class::ibinary, false, false},
   {"sub", Op::SUB, Inst_class::ibinary, true, false},
-  {"symbolic", Op::SYMBOLIC, Inst_class::ibinary, true, false},
-  {"tgt_retval", Op::TGT_RETVAL, Inst_class::ibinary, false, false},
-  {"tgt_ub", Op::TGT_UB, Inst_class::ibinary, false, false},
   {"udiv", Op::UDIV, Inst_class::ibinary, true, false},
   {"urem", Op::UREM, Inst_class::ibinary, true, false},
-  {"write", Op::WRITE, Inst_class::ibinary, false, false},
   {"xor", Op::XOR, Inst_class::ibinary, true, true},
 
   // Floating-point binary
@@ -102,17 +74,11 @@ const std::array<Inst_info, 95> inst_info{{
 
   // Ternary
   {"array_set_flag", Op::ARRAY_SET_FLAG, Inst_class::ternary, true, false},
-  {"array_set_size", Op::ARRAY_SET_SIZE, Inst_class::ternary, true, false},
   {"array_set_indef", Op::ARRAY_SET_INDEF, Inst_class::ternary, true, false},
+  {"array_set_size", Op::ARRAY_SET_SIZE, Inst_class::ternary, true, false},
   {"array_store", Op::ARRAY_STORE, Inst_class::ternary, true, false},
-  {"exit", Op::EXIT, Inst_class::ternary, false, false},
   {"extract", Op::EXTRACT, Inst_class::ternary, true, false},
   {"ite", Op::ITE, Inst_class::ternary, true, false},
-  {"memory", Op::MEMORY, Inst_class::ternary, true, false},
-  {"src_exit", Op::SRC_EXIT, Inst_class::ternary, false, false},
-  {"src_mem", Op::SRC_MEM, Inst_class::ternary, false, false},
-  {"tgt_exit", Op::TGT_EXIT, Inst_class::ternary, false, false},
-  {"tgt_mem", Op::TGT_MEM, Inst_class::ternary, false, false},
 
   // Conversions
   {"f2s", Op::F2S, Inst_class::conv, true, false},
@@ -122,6 +88,48 @@ const std::array<Inst_info, 95> inst_info{{
   {"sext", Op::SEXT, Inst_class::conv, true, false},
   {"u2f", Op::U2F, Inst_class::conv, true, false},
   {"zext", Op::ZEXT, Inst_class::conv, true, false},
+
+  // Memory state
+  {"memory", Op::MEMORY, Inst_class::mem_ternary, true, false},
+  {"mem_array", Op::MEM_ARRAY, Inst_class::mem_nullary, true, false},
+  {"mem_flag_array", Op::MEM_FLAG_ARRAY, Inst_class::mem_nullary, true, false},
+  {"mem_indef_array", Op::MEM_INDEF_ARRAY, Inst_class::mem_nullary, true, false},
+  {"mem_size_array", Op::MEM_SIZE_ARRAY, Inst_class::mem_nullary, true, false},
+
+  // Load/store
+  {"free", Op::FREE, Inst_class::ls_unary, false, false},
+  {"get_mem_flag", Op::GET_MEM_FLAG, Inst_class::ls_unary, true, false},
+  {"get_mem_indef", Op::GET_MEM_INDEF, Inst_class::ls_unary, true, false},
+  {"get_mem_size", Op::GET_MEM_SIZE, Inst_class::ls_unary, true, false},
+  {"load", Op::LOAD, Inst_class::ls_unary, true, false},
+  {"memmove", Op::MEMMOVE, Inst_class::ls_ternary, false, false},
+  {"memset", Op::MEMSET, Inst_class::ls_ternary, false, false},
+  {"set_mem_flag", Op::SET_MEM_FLAG, Inst_class::ls_binary, false, false},
+  {"set_mem_indef", Op::SET_MEM_INDEF, Inst_class::ls_binary, false, false},
+  {"store", Op::STORE, Inst_class::ls_binary, false, false},
+
+  // Register
+  {"read", Op::READ, Inst_class::reg_unary, true, false},
+  {"register", Op::REGISTER, Inst_class::reg_unary, true, false},
+  {"write", Op::WRITE, Inst_class::reg_binary, false, false},
+
+  // Solver
+  {"assert", Op::ASSERT, Inst_class::solver_unary, false, false},
+  {"exit", Op::EXIT, Inst_class::solver_ternary, false, false},
+  {"param", Op::PARAM, Inst_class::solver_binary, true, false},
+  {"print", Op::PRINT, Inst_class::solver_binary, false, false},
+  {"src_assert", Op::SRC_ASSERT, Inst_class::solver_unary, false, false},
+  {"src_exit", Op::SRC_EXIT, Inst_class::solver_ternary, false, false},
+  {"src_mem", Op::SRC_MEM, Inst_class::solver_ternary, false, false},
+  {"src_retval", Op::SRC_RETVAL, Inst_class::solver_binary, false, false},
+  {"src_ub", Op::SRC_UB, Inst_class::solver_binary, false, false},
+  {"symbolic", Op::SYMBOLIC, Inst_class::solver_binary, true, false},
+  {"tgt_assert", Op::TGT_ASSERT, Inst_class::solver_unary, false, false},
+  {"tgt_exit", Op::TGT_EXIT, Inst_class::solver_ternary, false, false},
+  {"tgt_mem", Op::TGT_MEM, Inst_class::solver_ternary, false, false},
+  {"tgt_retval", Op::TGT_RETVAL, Inst_class::solver_binary, false, false},
+  {"tgt_ub", Op::TGT_UB, Inst_class::solver_binary, false, false},
+  {"ub", Op::UB, Inst_class::solver_unary, false, false},
 
   // Special
   {"br", Op::BR, Inst_class::special, false, false},
@@ -1116,11 +1124,14 @@ Function *Function::clone(Module *dest_module)
 	  Inst_class iclass = src_inst->iclass();
 	  switch (iclass)
 	    {
-	    case Inst_class::nullary:
+	    case Inst_class::mem_nullary:
 	      tgt_inst = tgt_bb->build_inst(src_inst->op);
 	      break;
 	    case Inst_class::iunary:
 	    case Inst_class::funary:
+	    case Inst_class::ls_unary:
+	    case Inst_class::reg_unary:
+	    case Inst_class::solver_unary:
 	      {
 		Inst *arg = src2tgt_inst.at(src_inst->args[0]);
 		tgt_inst = tgt_bb->build_inst(src_inst->op, arg);
@@ -1131,6 +1142,9 @@ Function *Function::clone(Module *dest_module)
 	    case Inst_class::ibinary:
 	    case Inst_class::fbinary:
 	    case Inst_class::conv:
+	    case Inst_class::ls_binary:
+	    case Inst_class::reg_binary:
+	    case Inst_class::solver_binary:
 	      {
 		Inst *arg1 = src2tgt_inst.at(src_inst->args[0]);
 		Inst *arg2 = src2tgt_inst.at(src_inst->args[1]);
@@ -1138,6 +1152,9 @@ Function *Function::clone(Module *dest_module)
 	      }
 	      break;
 	    case Inst_class::ternary:
+	    case Inst_class::ls_ternary:
+	    case Inst_class::mem_ternary:
+	    case Inst_class::solver_ternary:
 	      {
 		Inst *arg1 = src2tgt_inst.at(src_inst->args[0]);
 		Inst *arg2 = src2tgt_inst.at(src_inst->args[1]);

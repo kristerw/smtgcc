@@ -48,32 +48,15 @@ enum class Op : uint8_t {
   FLT,
   FNE,
 
-  // Nullary
-  MEM_ARRAY,
-  MEM_FLAG_ARRAY,
-  MEM_SIZE_ARRAY,
-  MEM_INDEF_ARRAY,
-
   // Integer unary
-  ASSERT,
-  FREE,
-  GET_MEM_FLAG,
-  GET_MEM_SIZE,
-  GET_MEM_INDEF,
   IS_CONST_MEM,
   IS_INF,
   IS_NAN,
   IS_NONCANONICAL_NAN,
-  LOAD,
   MOV,
   NEG,
   NOT,
-  READ,
-  REGISTER,
   SIMP_BARRIER,
-  SRC_ASSERT,
-  TGT_ASSERT,
-  UB,
 
   // Floating-point unary
   FABS,
@@ -84,34 +67,23 @@ enum class Op : uint8_t {
   ADD,
   AND,
   ARRAY_GET_FLAG,
-  ARRAY_GET_SIZE,
   ARRAY_GET_INDEF,
+  ARRAY_GET_SIZE,
   ARRAY_LOAD,
   ASHR,
   CONCAT,
   LSHR,
   MUL,
   OR,
-  PARAM,
-  PRINT,
   SADD_WRAPS,
   SDIV,
-  SET_MEM_FLAG,
-  SET_MEM_INDEF,
   SHL,
   SMUL_WRAPS,
-  SRC_RETVAL,
-  SRC_UB,
   SREM,
   SSUB_WRAPS,
-  STORE,
   SUB,
-  SYMBOLIC,
-  TGT_RETVAL,
-  TGT_UB,
   UDIV,
   UREM,
-  WRITE,
   XOR,
 
   // Floating-point binary
@@ -122,17 +94,11 @@ enum class Op : uint8_t {
 
   // Ternary
   ARRAY_SET_FLAG,
-  ARRAY_SET_SIZE,
   ARRAY_SET_INDEF,
+  ARRAY_SET_SIZE,
   ARRAY_STORE,
-  EXIT,
   EXTRACT,
   ITE,
-  MEMORY,
-  SRC_EXIT,
-  SRC_MEM,
-  TGT_EXIT,
-  TGT_MEM,
 
   // Conversions
   F2S,
@@ -143,6 +109,48 @@ enum class Op : uint8_t {
   U2F,
   ZEXT,
 
+  // Memory state
+  MEMORY,
+  MEM_ARRAY,
+  MEM_FLAG_ARRAY,
+  MEM_INDEF_ARRAY,
+  MEM_SIZE_ARRAY,
+
+  // Load/store
+  FREE,
+  GET_MEM_FLAG,
+  GET_MEM_INDEF,
+  GET_MEM_SIZE,
+  LOAD,
+  MEMMOVE,
+  MEMSET,
+  SET_MEM_FLAG,
+  SET_MEM_INDEF,
+  STORE,
+
+  // Register
+  READ,
+  REGISTER,
+  WRITE,
+
+  // Solver
+  ASSERT,
+  EXIT,
+  PARAM,
+  PRINT,
+  SRC_ASSERT,
+  SRC_EXIT,
+  SRC_MEM,
+  SRC_RETVAL,
+  SRC_UB,
+  SYMBOLIC,
+  TGT_ASSERT,
+  TGT_EXIT,
+  TGT_MEM,
+  TGT_RETVAL,
+  TGT_UB,
+  UB,
+
   // Special
   BR,
   PHI,
@@ -151,9 +159,6 @@ enum class Op : uint8_t {
 };
 
 enum class Inst_class : uint8_t {
-  // Nullary operations
-  nullary,
-
   // Unary operations
   iunary,
   funary,
@@ -168,6 +173,19 @@ enum class Inst_class : uint8_t {
   // Ternary operations
   ternary,
 
+  // Memory
+  mem_nullary,
+  mem_ternary,
+  ls_unary,
+  ls_binary,
+  ls_ternary,
+
+  reg_unary,
+  reg_binary,
+  solver_unary,
+  solver_binary,
+  solver_ternary,
+
   // Misc
   special
 };
@@ -180,7 +198,7 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 95> inst_info;
+extern const std::array<Inst_info, 97> inst_info;
 
 struct Module;
 struct Function;

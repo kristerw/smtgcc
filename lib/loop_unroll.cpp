@@ -410,6 +410,9 @@ void Unroller::duplicate(Inst *inst, Basic_block *bb)
     {
     case Inst_class::iunary:
     case Inst_class::funary:
+    case Inst_class::ls_unary:
+    case Inst_class::reg_unary:
+    case Inst_class::solver_unary:
       {
 	Inst *arg = translate(inst->args[0]);
 	new_inst = bb->build_inst(inst->op, arg);
@@ -420,6 +423,9 @@ void Unroller::duplicate(Inst *inst, Basic_block *bb)
     case Inst_class::ibinary:
     case Inst_class::fbinary:
     case Inst_class::conv:
+    case Inst_class::ls_binary:
+    case Inst_class::reg_binary:
+    case Inst_class::solver_binary:
       {
 	Inst *arg1 = translate(inst->args[0]);
 	Inst *arg2 = translate(inst->args[1]);
@@ -427,6 +433,8 @@ void Unroller::duplicate(Inst *inst, Basic_block *bb)
       }
       break;
     case Inst_class::ternary:
+    case Inst_class::ls_ternary:
+    case Inst_class::solver_ternary:
       {
 	Inst *arg1 = translate(inst->args[0]);
 	Inst *arg2 = translate(inst->args[1]);

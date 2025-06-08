@@ -1434,12 +1434,9 @@ bool can_specialize_cond(Inst *cond, Inst *inst)
 
   // We cannot duplicate instructions that depend on the order they are done
   // (unless we update the code to place them next to the original).
-  // TODO: This should be its own Inst_class.
-  if (inst->op == Op::LOAD
-      || inst->op == Op::GET_MEM_FLAG
-      || inst->op == Op::GET_MEM_SIZE
-      || inst->op == Op::GET_MEM_INDEF
-      || inst->op == Op::IS_CONST_MEM)
+  if (inst->iclass() == Inst_class::ls_unary
+      || inst->iclass() == Inst_class::ls_binary
+      || inst->iclass() == Inst_class::ls_ternary)
     return false;
 
   for (uint i = 0; i < inst->nof_args; i++)

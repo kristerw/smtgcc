@@ -442,14 +442,17 @@ Op parser::parse_instruction()
 	throw Parse_error("redefinition of " + token_string(tokens[0]),
 			  line_number);
 
-      if (info.iclass == Inst_class::nullary)
+      if (info.iclass == Inst_class::mem_nullary)
 	{
 	  get_end_of_line(4);
 
 	  id2inst[lhs_id] = current_bb->build_inst(info.op);
 	}
       else if (info.iclass == Inst_class::iunary
-	       || info.iclass == Inst_class::funary)
+	       || info.iclass == Inst_class::funary
+	       || info.iclass == Inst_class::ls_unary
+	       || info.iclass == Inst_class::reg_unary
+	       || info.iclass == Inst_class::solver_unary)
 	{
 	  Inst *arg1 = get_arg(3);
 	  get_end_of_line(4);
@@ -460,7 +463,10 @@ Op parser::parse_instruction()
 	       || info.iclass == Inst_class::fbinary
 	       || info.iclass == Inst_class::icomparison
 	       || info.iclass == Inst_class::fcomparison
-	       || info.iclass == Inst_class::conv)
+	       || info.iclass == Inst_class::conv
+	       || info.iclass == Inst_class::ls_binary
+	       || info.iclass == Inst_class::reg_binary
+	       || info.iclass == Inst_class::solver_binary)
 	{
 	  Inst *arg1 = get_arg(3);
 	  get_comma(4);
@@ -469,7 +475,9 @@ Op parser::parse_instruction()
 
 	  id2inst[lhs_id] = current_bb->build_inst(info.op, arg1, arg2);
 	}
-      else if (info.iclass == Inst_class::ternary)
+      else if (info.iclass == Inst_class::ternary
+	       || info.iclass == Inst_class::mem_ternary
+	       || info.iclass == Inst_class::solver_ternary)
 	{
 	  Inst *arg1 = get_arg(3);
 	  get_comma(4);
@@ -530,8 +538,11 @@ Op parser::parse_instruction()
     }
   else
     {
-      if (info.iclass == Inst_class::iunary ||
-	  info.iclass == Inst_class::funary)
+      if (info.iclass == Inst_class::iunary
+	  || info.iclass == Inst_class::funary
+	  || info.iclass == Inst_class::ls_unary
+	  || info.iclass == Inst_class::reg_unary
+	  || info.iclass == Inst_class::solver_unary)
 	{
 	  Inst *arg1 = get_arg(1);
 	  get_end_of_line(2);
@@ -541,7 +552,10 @@ Op parser::parse_instruction()
       else if (info.iclass == Inst_class::ibinary
 	       || info.iclass == Inst_class::fbinary
 	       || info.iclass == Inst_class::icomparison
-	       || info.iclass == Inst_class::fcomparison)
+	       || info.iclass == Inst_class::fcomparison
+	       || info.iclass == Inst_class::ls_binary
+	       || info.iclass == Inst_class::reg_binary
+	       || info.iclass == Inst_class::solver_binary)
 	{
 	  Inst *arg1 = get_arg(1);
 	  get_comma(2);
@@ -550,7 +564,8 @@ Op parser::parse_instruction()
 
 	  current_bb->build_inst(info.op, arg1, arg2);
 	}
-      else if (info.iclass == Inst_class::ternary)
+      else if (info.iclass == Inst_class::ternary
+	       || info.iclass == Inst_class::solver_ternary)
 	{
 	  Inst *arg1 = get_arg(1);
 	  get_comma(2);
