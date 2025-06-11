@@ -318,6 +318,8 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
 	   || op == Op::ARRAY_SET_SIZE
 	   || op == Op::ARRAY_SET_INDEF
 	   || op == Op::ARRAY_STORE
+	   || op == Op::MEMMOVE
+	   || op == Op::MEMSET
 	   || op == Op::SRC_MEM
 	   || op == Op::TGT_MEM)
     {

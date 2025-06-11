@@ -513,6 +513,78 @@ void forward_const(Function *func)
     }
 }
 
+void expand_memmove_memset(Function *func)
+{
+  for (auto bb : func->bbs)
+    {
+      for (Inst *inst = bb->first_inst; inst;)
+	{
+	  Inst *next_inst = inst->next;
+
+	  if (inst->op == Op::MEMSET)
+	    {
+	      Inst *orig_ptr = inst->args[0];
+	      Inst *value = inst->args[1];
+	      if (inst->args[2]->op != Op::VALUE)
+		throw smtgcc::Not_implemented("non-constant Op::MEMSET size");
+	      uint64_t size = inst->args[2]->value();
+	      for (uint64_t i = 0; i < size; i++)
+		{
+		  Inst *offset = bb->value_inst(i, orig_ptr->bitsize);
+		  Inst *tmp_ptr = create_inst(Op::ADD, orig_ptr, offset);
+		  tmp_ptr->insert_before(inst);
+		  Inst *ptr = simplify_inst(tmp_ptr);
+		  if (tmp_ptr != ptr)
+		    destroy_instruction(tmp_ptr);
+		  Inst *store = create_inst(Op::STORE, ptr, value);
+		  store->insert_before(inst);
+		}
+	      destroy_instruction(inst);
+	    }
+	  else if (inst->op == Op::MEMMOVE)
+	    {
+	      Inst *orig_dst_ptr = inst->args[0];
+	      Inst *orig_src_ptr = inst->args[1];
+	      if (inst->args[2]->op != Op::VALUE)
+		throw smtgcc::Not_implemented("non-constant Op::MEMMOVE size");
+	      uint64_t size = inst->args[2]->value();
+	      std::vector<std::pair<Inst*, Inst*>> insts;
+	      insts.reserve(size);
+	      for (uint64_t i = 0; i < size; i++)
+		{
+		  Inst *offset = bb->value_inst(i, orig_dst_ptr->bitsize);
+
+		  Inst *tmp_dst_ptr =
+		    create_inst(Op::ADD, orig_dst_ptr, offset);
+		  tmp_dst_ptr->insert_before(inst);
+		  Inst *dst_ptr = simplify_inst(tmp_dst_ptr);
+		  if (tmp_dst_ptr != dst_ptr)
+		    destroy_instruction(tmp_dst_ptr);
+
+		  Inst *tmp_src_ptr =
+		    create_inst(Op::ADD, orig_src_ptr, offset);
+		  tmp_src_ptr->insert_before(inst);
+		  Inst *src_ptr = simplify_inst(tmp_src_ptr);
+		  if (tmp_src_ptr != src_ptr)
+		    destroy_instruction(tmp_src_ptr);
+		  Inst *value = create_inst(Op::LOAD, src_ptr);
+		  value->insert_before(inst);
+
+		  insts.push_back({dst_ptr, value});
+		}
+	      for (auto [ptr, value] : insts)
+		{
+		  Inst *store = create_inst(Op::STORE, ptr, value);
+		  store->insert_before(inst);
+		}
+	      destroy_instruction(inst);
+	    }
+
+	  inst = next_inst;
+	}
+    }
+}
+
 } // end anonymous namespace
 
 // This function makes the memory instructions consistent between src and tgt:
@@ -533,6 +605,10 @@ void canonicalize_memory(Module *module)
       return a->args[0]->value() < b->args[0]->value();
     }
   } comp;
+
+  // Expand Op::MEMMOVE and Op::MEMSET into loads and stores.
+  expand_memmove_memset(src);
+  expand_memmove_memset(tgt);
 
   // Substitute load from constant memory with the actual value. This is
   // also done by later load-to-store forwarding, but doing it here may
