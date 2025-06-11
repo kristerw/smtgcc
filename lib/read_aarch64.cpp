@@ -170,6 +170,7 @@ private:
   void process_cset(Op op = Op::ZEXT);
   void process_cinc();
   void process_call();
+  void process_tail_call();
   void store_ub_check(Inst *ptr, uint64_t size);
   void load_ub_check(Inst *ptr, uint64_t size);
   Inst *process_address(unsigned idx, unsigned vec_size = 0);
@@ -1985,6 +1986,13 @@ void Parser::process_call()
     }
 
   throw Not_implemented("call " + std::string(name));
+}
+
+void Parser::process_tail_call()
+{
+  process_call();
+  bb->build_br_inst(rstate->exit_bb);
+  bb = nullptr;
 }
 
 Inst *Parser::process_address(unsigned idx, unsigned vec_size)
@@ -6640,7 +6648,7 @@ void Parser::parse_function()
   else if (name == "tbz")
     process_tbz();
   else if (name == "b" && tokens.size() > 1 && tokens[1].kind != Lexeme::label)
-    process_call();
+    process_tail_call();
   else if (name == "b")
     {
       Basic_block *dest_bb = get_bb(1);
