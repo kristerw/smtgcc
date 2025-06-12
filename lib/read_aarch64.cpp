@@ -236,6 +236,7 @@ private:
   void process_dec_inc(Op op, uint32_t elem_bitsize);
   void process_dec_inc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
 		       uint32_t elem_bitsize);
+  void process_setp();
   void process_ext(Op op, uint32_t src_bitsize);
   void process_shift(Op op);
   void process_ror();
@@ -3568,6 +3569,38 @@ void Parser::process_dec_inc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), uint3
   Inst *increment = bb->value_inst(nof, arg1->bitsize);
   Inst *res = gen_elem(bb, arg1, increment);
   write_reg(dest, res);
+}
+
+void Parser::process_setp()
+{
+  get_left_bracket(1);
+  Inst *ptr_reg = get_reg(2);
+  Inst *ptr = get_reg_value(2);
+  get_right_bracket(3);
+  get_exclamation(4);
+  get_comma(5);
+  Inst *size_reg = get_reg(6);
+  Inst *size = get_reg_value(6);
+  get_exclamation(7);
+  get_comma(8);
+  Inst *value = get_reg_value(9);
+  get_end_of_line(10);
+
+  Inst *max_size = bb->value_inst(0x7fffffffffffffff, size->bitsize);
+  Inst *cond = bb->build_inst(Op::ULT, max_size, size);
+  size = bb->build_inst(Op::ITE, cond, max_size, size);
+  value = bb->build_trunc(value, 8);
+  bb->build_inst(Op::MEMSET, ptr, value, size);
+
+  ptr = bb->build_inst(Op::ADD, ptr, size);
+  write_reg(ptr_reg, ptr);
+  Inst *zero = bb->value_inst(0, size->bitsize);
+  write_reg(size_reg, zero);
+  Inst *n = bb->value_inst(0, 1);
+  Inst *z = bb->value_inst(0, 1);
+  Inst *c = bb->value_inst(1, 1);
+  Inst *v = bb->value_inst(0, 1);
+  set_nzcv(n, z, c, v);
 }
 
 Inst *Parser::extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx)
@@ -7079,6 +7112,10 @@ void Parser::parse_function()
     process_rdvl();
   else if (name == "saddv")
     process_ext_addv(Op::SEXT);
+  else if (name == "setp")
+    process_setp();
+  else if (name == "setm" || name == "sete")
+    ;
   else if (name == "st1")
     process_st1();
   else if (name == "sqadd")
