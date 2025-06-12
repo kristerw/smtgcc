@@ -237,6 +237,7 @@ private:
   void process_dec_inc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
 		       uint32_t elem_bitsize);
   void process_setp();
+  void process_cpyp();
   void process_ext(Op op, uint32_t src_bitsize);
   void process_shift(Op op);
   void process_ror();
@@ -3597,6 +3598,52 @@ void Parser::process_setp()
   Inst *zero = bb->value_inst(0, size->bitsize);
   write_reg(size_reg, zero);
   Inst *n = bb->value_inst(0, 1);
+  Inst *z = bb->value_inst(0, 1);
+  Inst *c = bb->value_inst(1, 1);
+  Inst *v = bb->value_inst(0, 1);
+  set_nzcv(n, z, c, v);
+}
+
+void Parser::process_cpyp()
+{
+  get_left_bracket(1);
+  Inst *dst_ptr_reg = get_reg(2);
+  Inst *dst_ptr = get_reg_value(2);
+  get_right_bracket(3);
+  get_exclamation(4);
+  get_comma(5);
+
+  get_left_bracket(6);
+  Inst *src_ptr_reg = get_reg(7);
+  Inst *src_ptr = get_reg_value(7);
+  get_right_bracket(8);
+
+  get_exclamation(9);
+  get_comma(10);
+  Inst *size_reg = get_reg(11);
+  Inst *size = get_reg_value(11);
+  get_exclamation(12);
+  get_end_of_line(13);
+
+  Inst *max_size = bb->value_inst(0x007fffffffffffff, size->bitsize);
+  Inst *cond = bb->build_inst(Op::ULT, max_size, size);
+  size = bb->build_inst(Op::ITE, cond, max_size, size);
+  Inst *dst_end_ptr = bb->build_inst(Op::ADD, dst_ptr, size);
+  Inst *src_end_ptr = bb->build_inst(Op::ADD, src_ptr, size);
+  bb->build_inst(Op::MEMMOVE, dst_ptr, src_ptr, size);
+
+  // Direction is forward if dst_ptr < src_ptr && src_ptr < dst_ptr + size.
+  Inst *cond1 = bb->build_inst(Op::ULT, dst_ptr, src_ptr);
+  Inst *cond2 = bb->build_inst(Op::ULT, src_ptr, dst_end_ptr);
+  Inst *forward = bb->build_inst(Op::AND, cond1, cond2);
+
+  dst_ptr = bb->build_inst(Op::ITE, forward, dst_end_ptr, dst_ptr);
+  write_reg(dst_ptr_reg, dst_ptr);
+  src_ptr = bb->build_inst(Op::ITE, forward, src_end_ptr, src_ptr);
+  write_reg(src_ptr_reg, src_ptr);
+  Inst *zero = bb->value_inst(0, size->bitsize);
+  write_reg(size_reg, zero);
+  Inst *n = bb->build_inst(Op::NOT, forward);
   Inst *z = bb->value_inst(0, 1);
   Inst *c = bb->value_inst(1, 1);
   Inst *v = bb->value_inst(0, 1);
@@ -7084,6 +7131,10 @@ void Parser::parse_function()
     process_cnt(32);
   else if (name == "cntd")
     process_cnt(64);
+  else if (name == "cpyp")
+    process_cpyp();
+  else if (name == "cpym" || name == "cpye")
+    ;
   else if (name == "decb")
     process_dec_inc(Op::SUB, 8);
   else if (name == "dech")
