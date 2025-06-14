@@ -1127,6 +1127,29 @@ void Parser::process_call()
       bb = func->build_bb();
       return;
     }
+  if (name == "memcpy" || name == "memmove")
+    {
+      Inst *dest_ptr =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::x10]);
+      Inst *src_ptr =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::x11]);
+      Inst *size =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::x12]);
+      bb->build_inst(Op::MEMMOVE, dest_ptr, src_ptr, size);
+      return;
+    }
+  if (name == "memset")
+    {
+      Inst *ptr =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::x10]);
+      Inst *value =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::x11]);
+      Inst *size =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::x12]);
+      value = bb->build_trunc(value, 8);
+      bb->build_inst(Op::MEMSET, ptr, value, size);
+      return;
+    }
 
   throw Not_implemented("call " + std::string(name));
 }
