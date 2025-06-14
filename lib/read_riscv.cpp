@@ -121,7 +121,7 @@ private:
   Inst *read_arg(uint32_t reg, uint32_t bitsize);
   void write_retval(Inst *retval);
   void process_call();
-  void process_tail();
+  void process_tail_call();
   void store_ub_check(Inst *ptr, uint64_t size);
   void load_ub_check(Inst *ptr, uint64_t size);
   void process_load(int size, LStype lstype = LStype::signed_ls);
@@ -1154,12 +1154,11 @@ void Parser::process_call()
   throw Not_implemented("call " + std::string(name));
 }
 
-void Parser::process_tail()
+void Parser::process_tail_call()
 {
-  std::string_view name = get_name(1);
-  get_end_of_line(2);
-
-  throw Not_implemented("tail " + std::string(name));
+  process_call();
+  bb->build_br_inst(rstate->exit_bb);
+  bb = nullptr;
 }
 
 void Parser::store_ub_check(Inst *ptr, uint64_t size)
@@ -3444,7 +3443,7 @@ void Parser::parse_function()
   else if (name == "call")
     process_call();
   else if (name == "tail")
-    process_tail();
+    process_tail_call();
   else if (name == "ld" && reg_bitsize == 64)
     process_load(8);
   else if (name == "lw")
