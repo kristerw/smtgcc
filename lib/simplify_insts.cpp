@@ -512,6 +512,12 @@ Inst *Simplify::simplify_concat()
   if (is_value_zero(arg1))
     return build_inst(Op::ZEXT, arg2, inst->bitsize);
 
+  // For Boolean x: concat (sext x), (sext x) -> sext x
+  if (is_boolean_sext(arg1)
+      && is_boolean_sext(arg2)
+      && arg1->args[0] == arg2->args[0])
+    return build_inst(Op::SEXT, arg1->args[0], inst->bitsize);
+
   // concat (sext (extract x, x->bitsize-1, x->bitsize-1)), x -> sext x
   if (arg1->op == Op::SEXT
       && arg1->args[0]->op == Op::EXTRACT
