@@ -1949,6 +1949,37 @@ Inst *simplify_phi(Inst *phi)
   return inst;
 }
 
+bool extract_is_zero(Inst *inst, uint32_t high_val, uint32_t low_val, std::set<Inst*>& visited)
+{
+  if (visited.contains(inst))
+    return true;
+  visited.insert(inst);
+
+  if (inst->op == Op::PHI)
+    {
+      for (auto [phi_arg, _] : inst->phi_args)
+	{
+	  if (!extract_is_zero(phi_arg, high_val, low_val, visited))
+	    return false;
+	}
+      return true;
+    }
+  else if (inst->op == Op::ITE)
+    return (extract_is_zero(inst->args[1], high_val, low_val, visited)
+	    && extract_is_zero(inst->args[2], high_val, low_val, visited));
+  else if (inst->op == Op::ZEXT)
+    return low_val >= inst->args[0]->bitsize;
+  else if (inst->op == Op::VALUE)
+    {
+      unsigned __int128 val = inst->value();
+      val >>= low_val;
+      val <<= (128 - inst->bitsize);
+      val >>= (128 - inst->bitsize);
+      return val == 0;
+    }
+  return false;
+}
+
 Inst *Simplify::simplify_extract()
 {
   Inst *const arg1 = inst->args[0];
@@ -2157,6 +2188,12 @@ Inst *Simplify::simplify_extract()
       && arg1->args[1]->op == Op::VALUE
       && (arg1->args[1]->value() << (127 - high_val)) == 0)
     return build_inst(Op::EXTRACT, arg1->args[0], arg2, arg3);
+
+  // If arg1 is an Op::PHI or a chain of Op::ITE where the extracted part of
+  // all arguments is 0, then we substitute the extraction with the constant 0.
+  std::set<Inst*> visited;
+  if (extract_is_zero(arg1, high_val, low_val, visited))
+    return value_inst(0, inst->bitsize);
 
   return inst;
 }
