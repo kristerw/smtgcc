@@ -82,6 +82,7 @@ void tv_function::check()
       canonicalize_memory(module);
       simplify_mem(module);
       ls_elim(module);
+      reduce_bitsize(module);
       bool cfg_modified;
       do
 	{

@@ -37,6 +37,7 @@ lib_sources = \
 	lib/read_aarch64.cpp \
 	lib/read_ir.cpp \
 	lib/read_riscv.cpp \
+	lib/reduce_bitsize.cpp \
 	lib/simplify_insts.cpp \
 	lib/smt_cvc5.cpp \
 	lib/smt_z3.cpp \

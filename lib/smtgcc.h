@@ -453,6 +453,10 @@ void ls_elim(Module *module);
 // read_ir.cpp
 Module *parse_ir(std::string const& file_name);
 
+// reduce_bitsize.cpp
+void reduce_bitsize(Function *func);
+void reduce_bitsize(Module *module);
+
 struct MemoryObject {
   std::string sym_name;
   uint64_t id;

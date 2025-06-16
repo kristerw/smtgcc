@@ -25,6 +25,7 @@ Options:
   -vrp                  Run value range propagation optimization.
   -loop_unroll          Run loop unrolling optimization.
   -ls_elim              Run load/store elimination optimization.
+  -reduce_bitsize       Run bitsize reduction optimization.
   -canonicalize_memory  Harmonize memory between src and tgt.
   -convert              Run the conversion transformation pass.
 
@@ -108,6 +109,7 @@ int main(int argc, char **argv)
 	       || !strcmp(arg, "-vrp")
 	       || !strcmp(arg, "-loop_unroll")
 	       || !strcmp(arg, "-ls_elim")
+	       || !strcmp(arg, "-reduce_bitsize")
 	       || !strcmp(arg, "-canonicalize_memory")
 	       || !strcmp(arg, "-convert"))
 	opts.push_back(arg);
@@ -152,6 +154,8 @@ int main(int argc, char **argv)
 	  loop_unroll(module);
 	else if (opt == "-ls_elim")
 	  ls_elim(module);
+	else if (opt == "-reduce_bitsize")
+	  reduce_bitsize(module);
 	else if (opt == "-canonicalize_memory")
 	  canonicalize_memory(module);
 	else if (opt == "-convert")
