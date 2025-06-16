@@ -80,6 +80,7 @@ void tv_function::check()
     {
       unroll_and_optimize(module);
       canonicalize_memory(module);
+      cse(module);
       simplify_mem(module);
       ls_elim(module);
       reduce_bitsize(module);

@@ -64,6 +64,7 @@ unsigned int tv_pass::execute(function *fun)
 	  // TODO: Is canonicalize memory needed? It should obviously be
 	  // the same globals in both.
 	  canonicalize_memory(module);
+	  cse(module);
 	  simplify_mem(module);
 	  ls_elim(module);
 	  reduce_bitsize(module);

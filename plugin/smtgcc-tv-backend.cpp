@@ -324,6 +324,7 @@ static void finish(void *, void *data)
 	  while (cfg_modified);
 
 	  canonicalize_memory(module);
+	  cse(module);
 	  simplify_mem(module);
 	  ls_elim(module);
 	  reduce_bitsize(module);

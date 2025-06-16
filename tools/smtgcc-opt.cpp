@@ -21,6 +21,7 @@ Options:
   -simplify_inst        Run instruction simplification optimization.
   -simplify_cfg         Run control flow graph simplification optimization.
   -simplify_mem         Run memory simplification optimization.
+  -cse                  Run common subexpression elimination.
   -dce                  Run dead code elimination optimization.
   -vrp                  Run value range propagation optimization.
   -loop_unroll          Run loop unrolling optimization.
@@ -105,6 +106,7 @@ int main(int argc, char **argv)
       else if (!strcmp(arg, "-simplify_inst")
 	       || !strcmp(arg, "-simplify_cfg")
 	       || !strcmp(arg, "-simplify_mem")
+	       || !strcmp(arg, "-cse")
 	       || !strcmp(arg, "-dce")
 	       || !strcmp(arg, "-vrp")
 	       || !strcmp(arg, "-loop_unroll")
@@ -148,6 +150,8 @@ int main(int argc, char **argv)
 	  simplify_mem(module);
 	else if (opt == "-dce")
 	  dead_code_elimination(module);
+	else if (opt == "-cse")
+	  cse(module);
 	else if (opt == "-vrp")
 	  vrp(module);
 	else if (opt == "-loop_unroll")

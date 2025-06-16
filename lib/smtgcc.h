@@ -437,6 +437,10 @@ Solver_result check_assert(Function *func);
 Solver_result check_ub(Function *func);
 void convert(Module *module);
 
+// cse.cpp
+void cse(Function *func);
+void cse(Module *module);
+
 // dead_code_elimination.cpp
 void dead_code_elimination(Function *func);
 void dead_code_elimination(Module *module);

@@ -31,6 +31,7 @@ lib_sources = \
 	lib/cache.cpp \
 	lib/cfg.cpp \
 	lib/check.cpp \
+	lib/cse.cpp \
 	lib/dead_code_elimination.cpp \
 	lib/loop_unroll.cpp \
 	lib/memory_opt.cpp \
