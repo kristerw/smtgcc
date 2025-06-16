@@ -117,6 +117,9 @@ static std::optional<uint32_t> get_phi_elem_bitsize(Inst *phi)
 	return {};
     }
 
+  if (elem_bitsize == phi->bitsize)
+    return {};
+
   return elem_bitsize;
 }
 
@@ -198,6 +201,7 @@ static void eliminate_registers(Function *func)
 	}
     }
 
+  // Add a phi-node for each register.
   for (Basic_block *bb : func->bbs)
     {
       std::map<Inst *, Inst *>& reg_values =
@@ -248,6 +252,7 @@ static void eliminate_registers(Function *func)
       destroy_instruction(inst);
     }
 
+  // Split vector phi-nodes into one phi per element.
   for (int i = func->bbs.size() - 1; i >= 0; i--)
     {
       Basic_block *bb = func->bbs[i];
@@ -260,6 +265,18 @@ static void eliminate_registers(Function *func)
       std::map<std::pair<Inst *, uint64_t>, std::vector<Inst *>> cache;
       for (auto [phi, elem_bitsize] : phis)
 	split_phi(phi, elem_bitsize, cache);
+
+      // Remove dead phi-nodes.
+      std::vector<Inst *> dead_phis;
+      for (auto phi : bb->phis)
+	{
+	  if (phi->used_by.empty())
+	    dead_phis.push_back(phi);
+	}
+      for (auto phi : dead_phis)
+	{
+	  destroy_instruction(phi);
+	}
     }
 }
 
