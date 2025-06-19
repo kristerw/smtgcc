@@ -2340,33 +2340,32 @@ void Parser::process_fcmp()
   Inst *arg2 = get_freg_or_imm_value(3, arg1->bitsize);
   get_end_of_line(4);
 
-  Inst *b0 = bb->value_inst(0, 1);
-  Inst *b1 = bb->value_inst(1, 1);
-
-  Inst *is_inf1 = bb->build_inst(Op::IS_INF, arg1);
-  Inst *is_inf2 = bb->build_inst(Op::IS_INF, arg2);
-  Inst *is_inf = bb->build_inst(Op::AND, is_inf1, is_inf2);
-
   Inst *is_nan1 = bb->build_inst(Op::IS_NAN, arg1);
   Inst *is_nan2 = bb->build_inst(Op::IS_NAN, arg2);
   Inst *any_is_nan = bb->build_inst(Op::OR, is_nan1, is_nan2);
 
-  Inst *cmp_n = bb->build_inst(Op::FLT, arg1, arg2);
-  Inst *n = bb->build_inst(Op::ITE, any_is_nan, b0, cmp_n);
+  Inst *n = bb->build_inst(Op::FLT, arg1, arg2);
 
-  Inst *cmp_z = bb->build_inst(Op::FEQ, arg1, arg2);
-  Inst *cmp_z_inf = bb->build_inst(Op::EQ, arg1, arg2);
-  Inst *z = bb->build_inst(Op::ITE, is_inf, cmp_z_inf, cmp_z);
-  z = bb->build_inst(Op::ITE, any_is_nan, b0, z);
+  Inst *z = bb->build_inst(Op::FEQ, arg1, arg2);
 
-  Inst *cmp_c = bb->build_inst(Op::FLE, arg2, arg1);
-  Inst *cmp_c_inf = bb->build_inst(Op::NOT, cmp_n);
-  Inst *c = bb->build_inst(Op::ITE, is_inf, cmp_c_inf, cmp_c);
-  c = bb->build_inst(Op::ITE, any_is_nan, b1, c);
+  Inst *c = bb->build_inst(Op::FLE, arg2, arg1);
+  c = bb->build_inst(Op::OR, any_is_nan, c);
 
   Inst *v = any_is_nan;
 
-  set_nzcv(n, z, c, v);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
+
+  Inst *not_z = bb->build_inst(Op::NOT, z);
+  Inst *not_lt = bb->build_inst(Op::EQ, n, v);
+  Inst *hi = bb->build_inst(Op::AND, not_z, c);
+  Inst *lt = bb->build_inst(Op::NOT, not_lt);
+  Inst *gt = bb->build_inst(Op::FLT, arg2, arg1);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::hi], hi);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::lt], lt);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::gt], gt);
 }
 
 void Parser::process_fccmp()
@@ -2380,29 +2379,16 @@ void Parser::process_fccmp()
   Cond_code cc = get_cc(7);
   get_end_of_line(8);
 
-  Inst *b0 = bb->value_inst(0, 1);
-  Inst *b1 = bb->value_inst(1, 1);
-
-  Inst *is_inf1 = bb->build_inst(Op::IS_INF, arg1);
-  Inst *is_inf2 = bb->build_inst(Op::IS_INF, arg2);
-  Inst *is_inf = bb->build_inst(Op::AND, is_inf1, is_inf2);
-
   Inst *is_nan1 = bb->build_inst(Op::IS_NAN, arg1);
   Inst *is_nan2 = bb->build_inst(Op::IS_NAN, arg2);
   Inst *any_is_nan = bb->build_inst(Op::OR, is_nan1, is_nan2);
 
-  Inst *cmp_n = bb->build_inst(Op::FLT, arg1, arg2);
-  Inst *n1 = bb->build_inst(Op::ITE, any_is_nan, b0, cmp_n);
+  Inst *n1 = bb->build_inst(Op::FLT, arg1, arg2);
 
-  Inst *cmp_z = bb->build_inst(Op::FEQ, arg1, arg2);
-  Inst *cmp_z_inf = bb->build_inst(Op::EQ, arg1, arg2);
-  Inst *z1 = bb->build_inst(Op::ITE, is_inf, cmp_z_inf, cmp_z);
-  z1 = bb->build_inst(Op::ITE, any_is_nan, b0, z1);
+  Inst *z1 = bb->build_inst(Op::FEQ, arg1, arg2);
 
-  Inst *cmp_c = bb->build_inst(Op::FLE, arg2, arg1);
-  Inst *cmp_c_inf = bb->build_inst(Op::NOT, cmp_n);
-  Inst *c1 = bb->build_inst(Op::ITE, is_inf, cmp_c_inf, cmp_c);
-  c1 = bb->build_inst(Op::ITE, any_is_nan, b1, c1);
+  Inst *c1 = bb->build_inst(Op::FLE, arg2, arg1);
+  c1 = bb->build_inst(Op::OR, any_is_nan, c1);
 
   Inst *v1 = any_is_nan;
 
