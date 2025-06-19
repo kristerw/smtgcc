@@ -2770,11 +2770,22 @@ void simplify_mem(Function *func)
 
   for (Basic_block *bb : func->bbs)
     {
-      for (auto phi : bb->phis)
+      if (!bb->phis.empty())
 	{
-	  Inst *res = simplify_phi(phi);
-	  if (res != phi)
-	    phi->replace_all_uses_with(res);
+	  std::vector<Inst*> dead_phis;
+	  for (uint64_t i = 0; i < bb->phis.size(); i++)
+	    {
+	      Inst *phi = bb->phis[i];
+	      Inst *res = simplify_phi(phi);
+	      if (res != phi)
+		phi->replace_all_uses_with(res);
+	      if (phi->used_by.empty())
+		dead_phis.push_back(phi);
+	    }
+	  for (auto phi : dead_phis)
+	    {
+	      destroy(phi);
+	    }
 	}
       for (Inst *inst = bb->first_inst; inst;)
 	{
