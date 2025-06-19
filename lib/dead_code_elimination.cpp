@@ -29,9 +29,9 @@ void destroy(Inst *inst)
 
 // Remove all instructions (except the "ub 1") for a basic block that
 // is always UB.
-void clear_ub_bb(Basic_block *bb, bool is_loopfree)
+void clear_ub_bb(Basic_block *bb)
 {
-  if (is_loopfree
+  if (bb->func->loop_unrolling_done
       && bb->last_inst->op == Op::BR && bb->last_inst->nof_args == 1)
     {
       // Change the conditional branch to an unconditional branch. It does
@@ -53,7 +53,7 @@ void clear_ub_bb(Basic_block *bb, bool is_loopfree)
 	}
       else if(inst->has_lhs() && !inst->used_by.empty())
 	{
-	  if (is_loopfree)
+	  if (bb->func->loop_unrolling_done)
 	    {
 	      inst->replace_all_uses_with(bb->value_inst(0, inst->bitsize));
 	      destroy(inst);
@@ -81,7 +81,6 @@ void clear_ub_bb(Basic_block *bb, bool is_loopfree)
 
 void dead_code_elimination(Function *func)
 {
-  bool is_loopfree = !has_loops(func);
   uint32_t nof_inst = 0;
   for (int i = func->bbs.size() - 1; i >= 0; i--)
     {
@@ -116,7 +115,7 @@ void dead_code_elimination(Function *func)
 		   && bb != func->bbs[0]
 		   && inst->op == Op::UB && is_true(inst->args[0]))
 	    {
-	      clear_ub_bb(bb, is_loopfree);
+	      clear_ub_bb(bb);
 	      break;
 	    }
 	  else if (inst->op == Op::UB && is_false(inst->args[0]))
@@ -165,7 +164,7 @@ void dead_code_elimination(Function *func)
 	      if (preds_are_ub)
 		{
 		  bb->build_inst(Op::UB, bb->value_inst(1, 1));
-		  clear_ub_bb(bb, is_loopfree);
+		  clear_ub_bb(bb);
 		}
 	    }
 	}

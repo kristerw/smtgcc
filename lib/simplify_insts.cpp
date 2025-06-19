@@ -2191,9 +2191,12 @@ Inst *Simplify::simplify_extract()
 
   // If arg1 is an Op::PHI or a chain of Op::ITE where the extracted part of
   // all arguments is 0, then we substitute the extraction with the constant 0.
-  std::set<Inst*> visited;
-  if (extract_is_zero(arg1, high_val, low_val, visited))
-    return value_inst(0, inst->bitsize);
+  if (inst->bb->func->loop_unrolling_done)
+    {
+      std::set<Inst*> visited;
+      if (extract_is_zero(arg1, high_val, low_val, visited))
+	return value_inst(0, inst->bitsize);
+    }
 
   return inst;
 }

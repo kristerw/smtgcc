@@ -324,6 +324,9 @@ public:
   Function *clone(Module *dest_module);
   void print(FILE *stream) const;
   Module *module;
+
+  bool loop_unrolling_done = false;
+
 private:
   int next_bb_id = 0;
 };

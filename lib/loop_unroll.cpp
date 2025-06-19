@@ -650,6 +650,8 @@ bool loop_unroll(Function *func, int nof_unroll)
   if (has_loops(func))
     throw Not_implemented("loops");
 
+  func->loop_unrolling_done = true;
+
   return unrolled;
 }
 
