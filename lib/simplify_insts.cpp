@@ -770,6 +770,23 @@ Inst *Simplify::simplify_lshr()
   return inst;
 }
 
+bool is_in_chain(Inst *inst, Op op, Inst *chain)
+{
+  Inst *arg1 = chain->args[0];
+  Inst *arg2 = chain->args[1];
+
+  if (inst == arg1)
+    return true;
+  if (inst == arg2)
+    return true;
+  if (arg1->op == op && is_in_chain(inst, op, arg1))
+    return true;
+  if (arg2->op == op && is_in_chain(inst, op, arg2))
+    return true;
+
+  return false;
+}
+
 Inst *Simplify::simplify_or()
 {
   Inst *const arg1 = inst->args[0];
@@ -839,6 +856,12 @@ Inst *Simplify::simplify_or()
 	  return build_inst(Op::NOT, new_inst);
 	}
     }
+
+  // or x, (and x, y) -> x
+  if (arg1->op == Op::AND && is_in_chain(arg2, Op::AND, arg1))
+    return arg2;
+  if (arg2->op == Op::AND && is_in_chain(arg1, Op::AND, arg2))
+    return arg1;
 
   return inst;
 }
