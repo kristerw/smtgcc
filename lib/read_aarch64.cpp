@@ -2353,14 +2353,14 @@ void Parser::process_fcmp()
 
   Inst *v = any_is_nan;
 
+  Inst *ge = bb->build_inst(Op::FLE, arg2, arg1);
+  Inst *ls = bb->build_inst(Op::FLE, arg1, arg2);
+  Inst *gt = bb->build_inst(Op::FLT, arg2, arg1);
+
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
-
-  Inst *ge = bb->build_inst(Op::FLE, arg2, arg1);
-  Inst *ls = bb->build_inst(Op::FLE, arg1, arg2);
-  Inst *gt = bb->build_inst(Op::FLT, arg2, arg1);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::ls], ls);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::ge], ge);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::gt], gt);
@@ -2374,7 +2374,7 @@ void Parser::process_fccmp()
   get_comma(4);
   Inst *arg3 = get_imm(5);
   get_comma(6);
-  Cond_code cc = get_cc(7);
+  Inst *cond = build_cond(get_cc(7));
   get_end_of_line(8);
 
   Inst *is_nan1 = bb->build_inst(Op::IS_NAN, arg1);
@@ -2390,6 +2390,10 @@ void Parser::process_fccmp()
 
   Inst *v1 = any_is_nan;
 
+  Inst *ge1 = bb->build_inst(Op::FLE, arg2, arg1);
+  Inst *ls1 = bb->build_inst(Op::FLE, arg1, arg2);
+  Inst *gt1 = bb->build_inst(Op::FLT, arg2, arg1);
+
   uint32_t flags = arg3->value();
   assert(flags < 16);
 
@@ -2397,14 +2401,26 @@ void Parser::process_fccmp()
   Inst *z2 = bb->value_inst((flags & 4) != 0, 1);
   Inst *c2 = bb->value_inst((flags & 2) != 0, 1);
   Inst *v2 = bb->value_inst((flags & 1) != 0, 1);
+  set_nzcv(n2, z2, c2, v2);
+  Inst *ls2 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::ls]);
+  Inst *ge2 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::ge]);
+  Inst *gt2 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::gt]);
 
-  Inst *cond = build_cond(cc);
   Inst *n = bb->build_inst(Op::ITE, cond, n1, n2);
   Inst *z = bb->build_inst(Op::ITE, cond, z1, z2);
   Inst *c = bb->build_inst(Op::ITE, cond, c1, c2);
   Inst *v = bb->build_inst(Op::ITE, cond, v1, v2);
+  Inst *ls = bb->build_inst(Op::ITE, cond, ls1, ls2);
+  Inst *ge = bb->build_inst(Op::ITE, cond, ge1, ge2);
+  Inst *gt = bb->build_inst(Op::ITE, cond, gt1, gt2);
 
-  set_nzcv(n, z, c, v);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::ls], ls);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::ge], ge);
+  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::gt], gt);
 }
 
 void Parser::process_i2f(bool is_unsigned)
@@ -3320,11 +3336,8 @@ Inst *Parser::gen_sub_cond_flags(Inst *arg1, Inst *arg2)
   Inst *z = bb->build_inst(Op::EQ, arg1, arg2);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
 
-  Inst *c1 = bb->build_inst(Op::AND, is_neg_arg1, is_pos_arg2);
-  Inst *c2 = bb->build_inst(Op::AND, is_neg_arg1, is_pos_res);
-  Inst *c3 = bb->build_inst(Op::AND, is_pos_arg2, is_pos_res);
-  Inst *c = bb->build_inst(Op::OR, c1, c2);
-  c = bb->build_inst(Op::OR, c, c3);
+  Inst *c = bb->build_inst(Op::ULT, arg1, arg2);
+  c = bb->build_inst(Op::NOT, c);
   bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
 
   Inst *v1 = bb->build_inst(Op::AND, is_neg_arg1, is_pos_arg2);
@@ -3492,10 +3505,9 @@ void Parser::process_ccmp(bool is_ccmn)
   get_comma(4);
   Inst *arg3 = get_imm(5);
   get_comma(6);
-  Cond_code cc = get_cc(7);
+  Inst *cond = build_cond(get_cc(7));
   get_end_of_line(8);
 
-  Inst *cond = build_cond(cc);
   if (is_ccmn)
     gen_add_cond_flags(arg1, arg2);
   else
@@ -3508,15 +3520,17 @@ void Parser::process_ccmp(bool is_ccmn)
   Inst *ge1 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::ge]);
   Inst *gt1 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::gt]);
 
-  Inst *n2 = bb->build_extract_bit(arg3, 3);
-  Inst *z2 = bb->build_extract_bit(arg3, 2);
-  Inst *c2 = bb->build_extract_bit(arg3, 1);
-  Inst *v2 = bb->build_extract_bit(arg3, 0);
-  Inst *not_z2 = bb->build_inst(Op::NOT, z2);
-  Inst *not_c2 = bb->build_inst(Op::NOT, c2);
-  Inst *ls2 = bb->build_inst(Op::OR, z2, not_c2);
-  Inst *ge2 = bb->build_inst(Op::EQ, n2, v2);
-  Inst *gt2 = bb->build_inst(Op::AND, not_z2, ge2);
+  uint32_t flags = arg3->value();
+  assert(flags < 16);
+
+  Inst *n2 = bb->value_inst((flags & 8) != 0, 1);
+  Inst *z2 = bb->value_inst((flags & 4) != 0, 1);
+  Inst *c2 = bb->value_inst((flags & 2) != 0, 1);
+  Inst *v2 = bb->value_inst((flags & 1) != 0, 1);
+  set_nzcv(n2, z2, c2, v2);
+  Inst *ls2 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::ls]);
+  Inst *ge2 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::ge]);
+  Inst *gt2 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::gt]);
 
   Inst *n = bb->build_inst(Op::ITE, cond, n1, n2);
   Inst *z = bb->build_inst(Op::ITE, cond, z1, z2);
