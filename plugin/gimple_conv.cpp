@@ -7643,16 +7643,29 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	  tree arg2_expr = gimple_cond_rhs(cond_stmt);
 	  tree arg1_type = TREE_TYPE(arg1_expr);
 	  tree arg2_type = TREE_TYPE(arg2_expr);
-	  Inst *arg1 = tree2inst(arg1_expr);
-	  Inst *arg2 = tree2inst(arg2_expr);
+	  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+	  auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
 	  Inst *cond;
+	  Inst *cond_indef;
 	  if (TREE_CODE(arg1_type) == COMPLEX_TYPE)
-	    cond = process_binary_complex_cmp(code, arg1, arg2,
-					      boolean_type_node,
-					      arg1_type);
+	    {
+	      // TODO: Implement indef aguments.
+	      cond = process_binary_complex_cmp(code, arg1, arg2,
+						boolean_type_node,
+						arg1_type);
+	      cond_indef = nullptr;
+	    }
 	  else
-	    cond = process_binary_scalar(code, arg1, arg2, boolean_type_node,
-					 arg1_type, arg2_type);
+	    {
+	      Inst *cond_prov;
+	      std::tie(cond, cond_indef, cond_prov) =
+		process_binary_scalar(code, arg1, arg1_indef, nullptr,
+				      arg2, arg2_indef, nullptr,
+				      boolean_type_node,
+				      arg1_type, arg2_type);
+	    }
+	  if (cond_indef)
+	    build_ub_if_not_zero(cond_indef);
 	  edge true_edge, false_edge;
 	  extract_true_false_edges_from_block(gcc_bb, &true_edge, &false_edge);
 	  Basic_block *true_bb = gccbb_top2bb.at(true_edge->dest);
