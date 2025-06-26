@@ -118,7 +118,8 @@ void dead_code_elimination(Function *func)
 	      clear_ub_bb(bb);
 	      break;
 	    }
-	  else if (inst->op == Op::UB && is_false(inst->args[0]))
+	  else if (config.optimize_ub
+		   && inst->op == Op::UB && is_false(inst->args[0]))
 	    destroy(inst);
 	  else if (inst->op == Op::ASSERT && is_true(inst->args[0]))
 	    destroy(inst);
