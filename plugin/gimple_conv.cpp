@@ -149,6 +149,7 @@ struct Converter {
   std::pair<Inst *, Inst *> process_widen_mult_evenodd(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type, bool is_odd);
   std::pair<Inst *, Inst *> process_vec_series(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type);
   Inst *process_ternary(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree arg1_type, tree arg2_type, tree arg3_type);
+  std::tuple<Inst *, Inst *, Inst *> process_ternary(enum tree_code code, tree arg1_tree, tree arg2_tree, tree arg3_tree);
   Inst *process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree lhs_type, tree arg1_type, tree arg2_type, tree arg3_type);
   std::pair<Inst *, Inst *> gen_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type, Inst *len = nullptr);
   std::pair<Inst *, Inst *> process_vec_perm_expr(gimple *stmt);
@@ -3503,16 +3504,33 @@ Inst *Converter::process_ternary(enum tree_code code, Inst *arg1, Inst *arg2, In
 	Inst *mul = bb->build_inst(Op::MUL, arg1, arg2);
 	return bb->build_inst(Op::SUB, arg3, mul);
       }
+    default:
+      throw Not_implemented("process_ternary: "s + get_tree_code_name(code));
+    }
+}
+
+std::tuple<Inst *, Inst *, Inst *> Converter::process_ternary(enum tree_code code, tree arg1_tree, tree arg2_tree, tree arg3_tree)
+{
+  switch (code)
+    {
     case WIDEN_MULT_PLUS_EXPR:
       {
-	assert(arg1->bitsize == arg2->bitsize);
-	uint32_t new_bitsize = bitsize_for_type(arg3_type);
-	Op op1 = TYPE_UNSIGNED(arg1_type) ? Op::ZEXT : Op::SEXT;
-	arg1 = bb->build_inst(op1, arg1, new_bitsize);
-	Op op2 = TYPE_UNSIGNED(arg2_type) ? Op::ZEXT : Op::SEXT;
-	arg2 = bb->build_inst(op2, arg2, new_bitsize);
+	tree src_type = TREE_TYPE(arg1_tree);
+	tree dest_type = TREE_TYPE(arg3_tree);
+	auto [arg1, arg1_indef, arg1_prov] = tree2inst_indef_prov(arg1_tree);
+	auto [arg2, arg2_indef, arg2_prov] = tree2inst_indef_prov(arg2_tree);
+	auto [arg3, arg3_indef, arg3_prov] = tree2inst_indef_prov(arg3_tree);
+	std::tie(arg1, arg1_indef, arg1_prov) =
+	  type_convert(arg1, arg1_indef, arg1_prov, src_type, dest_type);
+	std::tie(arg2, arg2_indef, arg2_prov) =
+	  type_convert(arg2, arg2_indef, arg2_prov, src_type, dest_type);
 	Inst *mul = bb->build_inst(Op::MUL, arg1, arg2);
-	return bb->build_inst(Op::ADD, mul, arg3);
+	Inst *res = bb->build_inst(Op::ADD, mul, arg3);
+	if (arg1_prov || arg2_prov)
+	  throw Not_implemented("arg1/arg2 provenance in WIDEN_MULT_PLUS_EXPR");
+	Inst *res_indef =
+	  get_res_indef(arg1_indef, arg2_indef, arg3_indef, dest_type);
+	return {res, res_indef, arg3_prov};
       }
     default:
       throw Not_implemented("process_ternary: "s + get_tree_code_name(code));
@@ -3816,8 +3834,7 @@ void Converter::process_gimple_assign(gimple *stmt)
       {
 	if (code == SAD_EXPR
 	    || code == DOT_PROD_EXPR
-	    || code == WIDEN_MULT_MINUS_EXPR
-	    || code == WIDEN_MULT_PLUS_EXPR)
+	    || code == WIDEN_MULT_MINUS_EXPR)
 	  {
 	    Inst *arg1 = tree2inst(gimple_assign_rhs1(stmt));
 	    Inst *arg2 = tree2inst(gimple_assign_rhs2(stmt));
@@ -3832,6 +3849,18 @@ void Converter::process_gimple_assign(gimple *stmt)
 	    else
 	      inst = process_ternary(code, arg1, arg2, arg3, arg1_type,
 				     arg2_type, arg3_type);
+	  }
+	else if (code == WIDEN_MULT_PLUS_EXPR)
+	  {
+	    tree lhs_type = TREE_TYPE(gimple_assign_lhs(stmt));
+	    if (VECTOR_TYPE_P(lhs_type))
+	      throw Not_implemented("process_gimple_assign: vector "s
+				    + get_tree_code_name(code));
+	    tree arg1_tree = gimple_assign_rhs1(stmt);
+	    tree arg2_tree = gimple_assign_rhs2(stmt);
+	    tree arg3_tree = gimple_assign_rhs3(stmt);
+	    std::tie(inst, indef, prov) =
+	      process_ternary(code, arg1_tree, arg2_tree, arg3_tree);
 	  }
 	else if (code == VEC_PERM_EXPR)
 	  std::tie(inst, indef) = process_vec_perm_expr(stmt);
