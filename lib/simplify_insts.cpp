@@ -1852,6 +1852,18 @@ Inst *Simplify::simplify_shl()
       && arg2->value() < inst->bb->func->module->ptr_offset_bits)
     return arg1->args[0];
 
+  // shl (add x, c2), c1 -> add (shl x, c1), (c2 << c1)
+  if (arg2->op == Op::VALUE &&
+      arg1->op == Op::ADD &&
+      arg1->args[1]->op == Op::VALUE)
+    {
+      unsigned __int128 c1 = arg2->value();
+      unsigned __int128 c2 = arg1->args[1]->value();
+      Inst *new_inst = build_inst(Op::SHL, arg1->args[0], arg2);
+      Inst *val = value_inst(c2 << c1, inst->bitsize);
+      return build_inst(Op::ADD, new_inst, val);
+    }
+
   return inst;
 }
 
