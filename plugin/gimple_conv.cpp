@@ -5153,28 +5153,13 @@ std::tuple<Inst*, Inst*> Converter::mask_len_load(Inst *ptr, Inst *ptr_indef, In
   assert(TREE_CODE(mask_elem_type) == BOOLEAN_TYPE);
   uint64_t mask_elem_bitsize = bitsize_for_type(mask_elem_type);
 
-  if (alignment > 1)
-    {
-      uint32_t high_val = 0;
-      for (;;)
-	{
-	  high_val++;
-	  if (alignment == (1u << high_val))
-	    break;
-	}
-
-      Inst *extract = bb->build_trunc(ptr, high_val);
-      Inst *zero = bb->value_inst(0, high_val);
-      Inst *cond = bb->build_inst(Op::NE, extract, zero);
-      bb->build_inst(Op::UB, cond);
-    }
-
   uint64_t size = bytesize_for_type(lhs_type);
   uint64_t nof_elem = size / elem_size;
   assert((size % elem_size) == 0);
   Inst *inst = nullptr;
   Inst *indef = nullptr;
   Inst *mem_flags = nullptr;
+  Inst *mem_accessed = bb->value_inst(0, 1);
   for (uint64_t i = 0; i < nof_elem; i++)
     {
       Inst *cond = extract_vec_elem(bb, mask, mask_elem_bitsize, i);
@@ -5215,6 +5200,7 @@ std::tuple<Inst*, Inst*> Converter::mask_len_load(Inst *ptr, Inst *ptr_indef, In
       if (!orig_elem_indef)
 	orig_elem_indef = bb->value_inst(0, elem_indef->bitsize);
       elem_indef = bb->build_inst(Op::ITE, cond, elem_indef, orig_elem_indef);
+      mem_accessed = bb->build_inst(Op::OR, mem_accessed, cond);
 
       if (inst)
 	inst = bb->build_inst(Op::CONCAT, elem, inst);
@@ -5228,6 +5214,16 @@ std::tuple<Inst*, Inst*> Converter::mask_len_load(Inst *ptr, Inst *ptr_indef, In
 	mem_flags = bb->build_inst(Op::CONCAT, elem_flags, mem_flags);
       else
 	mem_flags = elem_flags;
+    }
+
+  if (alignment > 1)
+    {
+      assert((alignment & (alignment - 1)) == 0);
+      Inst *extract = bb->build_trunc(ptr, __builtin_ctz(alignment));
+      Inst *zero = bb->value_inst(0, extract->bitsize);
+      Inst *is_misaligned = bb->build_inst(Op::NE, extract, zero);
+      Inst *is_ub = bb->build_inst(Op::AND, mem_accessed, is_misaligned);
+      bb->build_inst(Op::UB, is_ub);
     }
 
   return {inst, indef};
@@ -5306,20 +5302,13 @@ void Converter::mask_len_store(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint6
   assert(TREE_CODE(mask_elem_type) == BOOLEAN_TYPE);
   uint64_t mask_elem_bitsize = bitsize_for_type(mask_elem_type);
 
+  Inst *is_misaligned = nullptr;
   if (alignment > 1)
     {
-      uint32_t high_val = 0;
-      for (;;)
-	{
-	  high_val++;
-	  if (alignment == (1u << high_val))
-	    break;
-	}
-
-      Inst *extract = bb->build_trunc(ptr, high_val);
-      Inst *zero = bb->value_inst(0, high_val);
-      Inst *cond = bb->build_inst(Op::NE, extract, zero);
-      bb->build_inst(Op::UB, cond);
+      assert((alignment & (alignment - 1)) == 0);
+      Inst *extract = bb->build_trunc(ptr, __builtin_ctz(alignment));
+      Inst *zero = bb->value_inst(0, extract->bitsize);
+      is_misaligned = bb->build_inst(Op::NE, extract, zero);
     }
 
   if (!value_indef)
@@ -5363,6 +5352,8 @@ void Converter::mask_len_store(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint6
       Inst *dst_ptr = bb->build_inst(Op::ADD, ptr, offset);
       if (!VECTOR_TYPE_P(value_type))
 	std::tie(elem, elem_indef) = to_mem_repr(elem, elem_indef, elem_type);
+      if (is_misaligned)
+	bb->build_inst(Op::UB, is_misaligned);
       store_ub_check(dst_ptr, ptr_prov, elem_size, cond);
       store_value(dst_ptr, elem, elem_indef);
       bb->build_br_inst(false_bb);
