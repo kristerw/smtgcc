@@ -2638,6 +2638,10 @@ std::pair<Inst *, Inst *> Converter::process_binary_float(enum tree_code code, I
       }
     case RDIV_EXPR:
       return {bb->build_inst(Op::FDIV, arg1, arg2), res_indef};
+    case MAX_EXPR:
+      return {gen_fmax(bb, arg1, arg2), res_indef};
+    case MIN_EXPR:
+      return {gen_fmin(bb, arg1, arg2), res_indef};
     case MINUS_EXPR:
       return {bb->build_inst(Op::FSUB, arg1, arg2), res_indef};
     case MULT_EXPR:
