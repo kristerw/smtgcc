@@ -7767,6 +7767,9 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 
 Function *Converter::process_function()
 {
+  if (!fun->cfg)
+    throw Not_implemented("missing fun->cfg");
+
   if (fun->static_chain_decl)
     {
       // TODO: Should be possible to handle this by treating it as a normal
