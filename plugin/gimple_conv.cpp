@@ -6882,7 +6882,31 @@ void Converter::process_gimple_call(gimple *stmt)
   if (gimple_call_builtin_p(stmt) || gimple_call_internal_p(stmt))
     process_gimple_call_combined_fn(stmt);
   else
-    throw Not_implemented("gimple_call");
+    {
+      std::string name = fndecl_name(gimple_call_fndecl(stmt));
+      if (name.starts_with("__gcov"))
+	{
+	  if (name == "__gcov_average_profiler"
+	      || name == "__gcov_dump"
+	      || name == "__gcov_exit"
+	      || name == "__gcov_indirect_call_profiler_v4"
+	      || name == "__gcov_init"
+	      || name == "__gcov_interval_profiler"
+	      || name == "__gcov_ior_profiler"
+	      || name == "__gcov_pow2_profiler"
+	      || name == "__gcov_reset"
+	      || name == "__gcov_topn_values_profiler"
+	      || name == "__gcov_write_unsigned")
+	    {
+	      // The __gcov functions do not affect the semantics, so they
+	      // can be ignored.
+	    }
+	  else
+	    throw Not_implemented("gimple_call: " + name);
+	}
+      else
+	throw Not_implemented("gimple_call");
+    }
 }
 
 Inst *Converter::build_label_cond(tree index_expr, tree label, Basic_block *bb)
