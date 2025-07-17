@@ -6766,6 +6766,11 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_COND_FMAX:
       process_cfn_cond_fminmax(stmt);
       break;
+    case CFN_DEFERRED_INIT:
+      // DEFERRED_INIT initializes the memory. But the value is still
+      // considered uninitialized, so everything is already handled by
+      // our indef handling. So there is nothing to do here.
+      break;
     case CFN_DIVMOD:
       process_cfn_divmod(stmt);
       break;
