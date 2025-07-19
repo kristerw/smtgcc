@@ -189,26 +189,26 @@ std::optional<Loop> Loop_finder::find_loop()
   size_t nbr = 0;
   {
     std::set<Basic_block *> visited;
-    std::vector<Basic_block *> worklist;
-    worklist.push_back(func->bbs.front());
+    std::vector<std::pair<Basic_block *, bool>> worklist;
+    worklist.reserve(2 * func->bbs.size());
+    worklist.push_back({func->bbs[0], false});
     while (!worklist.empty())
       {
-	Basic_block *bb = worklist.back();
-	if (visited.contains(bb))
-	  {
-	    worklist.pop_back();
-	    nbr2last.insert({bb2nbr.at(bb), nbr - 1});
-	  }
-	else
+	auto [bb, store_last] = worklist.back();
+	worklist.pop_back();
+	if (store_last)
+	  nbr2last.insert({bb2nbr.at(bb), nbr - 1});
+	else if (!visited.contains(bb))
 	  {
 	    visited.insert(bb);
 	    nbr2bb.insert({nbr, bb});
 	    bb2nbr.insert({bb, nbr});
 	    nbr++;
+	    worklist.push_back({bb, true});
 	    for (auto succ : bb->succs)
 	      {
 		if (!visited.contains(succ))
-		  worklist.push_back(succ);
+		  worklist.push_back({succ, false});
 	      }
 	  }
       }
