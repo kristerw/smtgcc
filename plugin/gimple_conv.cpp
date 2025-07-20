@@ -2943,6 +2943,72 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 
 	return {bb->build_inst(Op::MUL, arg1, arg2), res_indef, nullptr};
       }
+    case LSHIFT_EXPR:
+      {
+	if (arg2_indef)
+	  build_ub_if_not_zero(arg2_indef);
+	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
+	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
+	arg2 = type_convert(arg2, arg2_type, arg1_type);
+	Inst *res_indef = arg1_indef;
+	if (res_indef)
+	  res_indef = bb->build_inst(Op::SHL, res_indef, arg2);
+	return {bb->build_inst(Op::SHL, arg1, arg2), res_indef, nullptr};
+      }
+    case RROTATE_EXPR:
+      {
+	if (arg2_indef)
+	  build_ub_if_not_zero(arg2_indef);
+	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
+	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
+	arg2 = type_convert(arg2, arg2_type, arg1_type);
+	Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
+	Inst *shift = bb->build_inst(Op::ZEXT, arg2, concat->bitsize);
+	Inst *shifted = bb->build_inst(Op::LSHR, concat, shift);
+	Inst *res_indef = arg1_indef;
+	if (res_indef)
+	  {
+	    Inst *concat = bb->build_inst(Op::CONCAT, res_indef, res_indef);
+	    Inst *shifted = bb->build_inst(Op::LSHR, concat, shift);
+	    res_indef = bb->build_trunc(shifted, arg1->bitsize);
+	  }
+	return {bb->build_trunc(shifted, arg1->bitsize), res_indef, nullptr};
+      }
+    case LROTATE_EXPR:
+      {
+	if (arg2_indef)
+	  build_ub_if_not_zero(arg2_indef);
+	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
+	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
+	arg2 = type_convert(arg2, arg2_type, arg1_type);
+	Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
+	Inst *shift = bb->build_inst(Op::ZEXT, arg2, concat->bitsize);
+	Inst *shifted = bb->build_inst(Op::SHL, concat, shift);
+	Inst *high = bb->value_inst(2 * arg1->bitsize - 1, 32);
+	Inst *low = bb->value_inst(arg1->bitsize, 32);
+	Inst *ret = bb->build_inst(Op::EXTRACT, shifted, high, low);
+	Inst *res_indef = arg1_indef;
+	if (res_indef)
+	  {
+	    Inst *concat = bb->build_inst(Op::CONCAT, res_indef, res_indef);
+	    Inst *shifted = bb->build_inst(Op::SHL, concat, shift);
+	    res_indef = bb->build_inst(Op::EXTRACT, shifted, high, low);
+	  }
+	return {ret, res_indef, nullptr};
+      }
+    case RSHIFT_EXPR:
+      {
+	if (arg2_indef)
+	  build_ub_if_not_zero(arg2_indef);
+	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
+	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
+	Op op = is_unsigned ? Op::LSHR : Op::ASHR;
+	arg2 = type_convert(arg2, arg2_type, arg1_type);
+	Inst *res_indef = arg1_indef;
+	if (res_indef)
+	  res_indef = bb->build_inst(op, res_indef, arg2);
+	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
+      }
     case NE_EXPR:
     case EQ_EXPR:
       {
@@ -3127,13 +3193,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	Op op = is_unsigned ? Op::ULT : Op::SLT;
 	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
       }
-    case LSHIFT_EXPR:
-      {
-	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
-	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	arg2 = type_convert(arg2, arg2_type, arg1_type);
-	return {bb->build_inst(Op::SHL, arg1, arg2), res_indef, nullptr};
-      }
     case POINTER_DIFF_EXPR:
       {
 	Inst *res = bb->build_inst(Op::SUB, arg1, arg2);
@@ -3149,37 +3208,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	bb->build_inst(Op::UB, is_ub);
 
 	return {res, res_indef, nullptr};
-      }
-    case RROTATE_EXPR:
-      {
-	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
-	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	arg2 = type_convert(arg2, arg2_type, arg1_type);
-	Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
-	Inst *shift = bb->build_inst(Op::ZEXT, arg2, concat->bitsize);
-	Inst *shifted = bb->build_inst(Op::LSHR, concat, shift);
-	return {bb->build_trunc(shifted, arg1->bitsize), res_indef, nullptr};
-      }
-    case LROTATE_EXPR:
-      {
-	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
-	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	arg2 = type_convert(arg2, arg2_type, arg1_type);
-	Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
-	Inst *shift = bb->build_inst(Op::ZEXT, arg2, concat->bitsize);
-	Inst *shifted = bb->build_inst(Op::SHL, concat, shift);
-	Inst *high = bb->value_inst(2 * arg1->bitsize - 1, 32);
-	Inst *low = bb->value_inst(arg1->bitsize, 32);
-	Inst *ret = bb->build_inst(Op::EXTRACT, shifted, high, low);
-	return {ret, res_indef, nullptr};
-      }
-    case RSHIFT_EXPR:
-      {
-	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
-	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	Op op = is_unsigned ? Op::LSHR : Op::ASHR;
-	arg2 = type_convert(arg2, arg2_type, arg1_type);
-	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
       }
     case WIDEN_MULT_EXPR:
       {
