@@ -706,47 +706,7 @@ void Converter::store_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond)
     is_const = bb->build_inst(Op::AND, is_const, cond);
   bb->build_inst(Op::UB, is_const);
 
-  // It is UB if the pointer provenance does not correspond to the address.
-  Inst *ptr_mem_id = extract_id(ptr);
-  Inst *is_ub = bb->build_inst(Op::NE, prov, ptr_mem_id);
-  if (cond)
-    is_ub = bb->build_inst(Op::AND, is_ub, cond);
-  bb->build_inst(Op::UB, is_ub);
-
-  if (size != 0)
-    {
-      // It is UB if the size overflows the offset field.
-      assert(size != 0);
-      Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
-      Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
-      Inst *end_mem_id = extract_id(end);
-      Inst *overflow = bb->build_inst(Op::NE, prov, end_mem_id);
-      if (cond)
-	overflow = bb->build_inst(Op::AND, overflow, cond);
-      bb->build_inst(Op::UB, overflow);
-
-      // It is UB if the end is outside the memory object.
-      // Note: ptr is within the memory object; otherwise, the provenance check
-      // or the offset overflow check would have failed.
-      Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
-      Inst *offset = bb->build_extract_offset(end);
-      Inst *out_of_bound = bb->build_inst(Op::ULE, mem_size, offset);
-      if (cond)
-	out_of_bound = bb->build_inst(Op::AND, out_of_bound, cond);
-      bb->build_inst(Op::UB, out_of_bound);
-    }
-  else
-    {
-      // The pointer must point to valid memory, or be one position past
-      // valid memory.
-      // TODO: Handle zero-sized memory blocks (such as malloc(0)).
-      Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
-      Inst *offset = bb->build_extract_offset(ptr);
-      Inst *out_of_bound = bb->build_inst(Op::ULT, mem_size, offset);
-      if (cond)
-	out_of_bound = bb->build_inst(Op::AND, out_of_bound, cond);
-      bb->build_inst(Op::UB, out_of_bound);
-    }
+  load_ub_check(ptr, prov, size, cond);
 }
 
 void Converter::load_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond)
