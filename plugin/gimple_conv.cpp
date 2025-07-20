@@ -7465,7 +7465,9 @@ void Converter::process_variables()
   // adding all previously created global constant variables.
   for (auto [decl, _] : state->decl2id)
     {
-      if (TREE_PUBLIC(decl) && TREE_READONLY(decl))
+      if (!decl2instruction.contains(decl)
+	  && TREE_PUBLIC(decl)
+	  && TREE_READONLY(decl))
 	process_decl(decl);
     }
 }
