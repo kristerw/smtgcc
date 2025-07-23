@@ -2143,14 +2143,21 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	  || POINTER_TYPE_P(dest_type)
 	  || TREE_CODE(dest_type) == OFFSET_TYPE)
 	{
+	  res_indef = indef;
 	  unsigned src_prec = inst->bitsize;
 	  unsigned dest_prec = bitsize_for_type(dest_type);
 	  if (src_prec > dest_prec)
-	    inst = bb->build_trunc(inst, dest_prec);
+	    {
+	      inst = bb->build_trunc(inst, dest_prec);
+	      if (indef)
+		res_indef = bb->build_trunc(res_indef, dest_prec);
+	    }
 	  else if (src_prec < dest_prec)
 	    {
 	      Op op = TYPE_UNSIGNED(src_type) ? Op::ZEXT : Op::SEXT;
 	      inst =  bb->build_inst(op, inst, dest_prec);
+	      if (indef)
+		res_indef =  bb->build_inst(op, res_indef, dest_prec);
 	      prov = nullptr;
 	    }
 	  if (POINTER_TYPE_P(dest_type))
