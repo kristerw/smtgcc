@@ -1236,6 +1236,9 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
     case BIT_FIELD_REF:
       {
 	tree arg = TREE_OPERAND(expr, 0);
+	if (TREE_CODE(arg) != SSA_NAME)
+	  return process_load(expr);
+
 	auto [value, indef, prov] = tree2inst_indef_prov(arg);
 	uint64_t bitsize = get_int_cst_val(TREE_OPERAND(expr, 1));
 	uint64_t bit_offset = get_int_cst_val(TREE_OPERAND(expr, 2));
