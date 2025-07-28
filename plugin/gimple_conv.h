@@ -20,6 +20,7 @@ struct CommonState {
   int64_t id_local = 0;
   int64_t id_global = 2;
   std::map<tree, int64_t> decl2id;
+  std::vector<smtgcc::Inst*> restrict_ids;
 
   int64_t ptr_id_min;
   int64_t ptr_id_max;

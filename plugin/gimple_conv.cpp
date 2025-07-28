@@ -486,14 +486,24 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
     {
       Inst *id = extract_id(inst);
       Inst *zero = bb->value_inst(0, id->bitsize);
-      Inst *cond = bb->build_inst(Op::SLT, id, zero);
+      Inst *not_written = nullptr;
       if (mem_flags)
 	{
-	  Inst *not_written = extract_id(mem_flags);
+	  not_written = extract_id(mem_flags);
 	  not_written = bb->build_inst(Op::EQ, not_written, zero);
-	  cond = bb->build_inst(Op::AND, cond, not_written);
 	}
+      Inst *cond = bb->build_inst(Op::SLT, id, zero);
+      if (not_written)
+	cond = bb->build_inst(Op::AND, cond, not_written);
       bb->build_inst(Op::UB, cond);
+
+      for (auto restrict_id : state->restrict_ids)
+	{
+	  Inst *cond = bb->build_inst(Op::EQ, id, restrict_id);
+	  if (not_written)
+	    cond = bb->build_inst(Op::AND, cond, not_written);
+	  bb->build_inst(Op::UB, cond);
+	}
       return;
     }
   if (SCALAR_FLOAT_TYPE_P(type))
@@ -7472,6 +7482,7 @@ void Converter::process_variables()
 
 void Converter::process_func_args()
 {
+  std::vector<std::pair<Inst*, tree>> pointers;
   tree fntype = TREE_TYPE(fun->decl);
   bitmap nonnullargs = get_nonnull_args(fntype);
   tree decl;
@@ -7513,14 +7524,39 @@ void Converter::process_func_args()
 	  // TODO: Update all pointer UB checks for this.
 	  if (POINTER_TYPE_P(TREE_TYPE(decl)))
 	    {
-	      Inst *id = extract_id(param_inst);
-	      Inst *zero = entry_bb->value_inst(0, module->ptr_id_bits);
-	      Inst *one = entry_bb->value_inst(1, module->ptr_id_bits);
-	      entry_bb->build_inst(Op::UB, entry_bb->build_inst(Op::SLT, id, zero));
-	      entry_bb->build_inst(Op::UB, entry_bb->build_inst(Op::EQ, id, one));
+	      if (TYPE_RESTRICT(TREE_TYPE(decl)))
+		{
+		  if (!is_tgt_func)
+		    {
+		      // Create a new memory object that is only used for this
+		      // restrict pointer.
+		      if (state->id_global >= state->ptr_id_max)
+			throw Not_implemented("process_func_args: "
+					      "too many global variables");
+		      uint64_t restrict_id = ++state->id_global;
+		      build_memory_inst(restrict_id, ANON_MEM_SIZE, MEM_KEEP);
+
+		      // We force the Op::PARAM to use this memory by making all
+		      // other memory ID UB instead of just setting it to the
+		      // memory directly -- this is needed to ensure we test
+		      // with different alignment/sizes.
+		      Inst *id1 = extract_id(param_inst);
+		      Inst *id2 =
+			entry_bb->value_inst(restrict_id, module->ptr_id_bits);
+		      entry_bb->build_inst(Op::UB,
+					   entry_bb->build_inst(Op::NE, id1, id2));
+		      state->restrict_ids.push_back(id2);
+		    }
+		}
+	      else
+		pointers.push_back({param_inst, decl});
 	    }
 
-	  constrain_src_value(param_inst, TREE_TYPE(decl));
+	  // Constrain the value for non-pointers. Pointers must wait until
+	  // all parameters have been processed so we have found all restrict
+	  // pointers.
+	  if (!POINTER_TYPE_P(TREE_TYPE(decl)))
+	    constrain_src_value(param_inst, TREE_TYPE(decl));
 
 	  // Params marked "nonnull" is UB if NULL.
 	  if (POINTER_TYPE_P(TREE_TYPE(decl))
@@ -7567,6 +7603,17 @@ void Converter::process_func_args()
 
       param_number++;
     }
+
+  for (auto [param_inst, decl] : pointers)
+    {
+      constrain_src_value(param_inst, TREE_TYPE(decl));
+
+      // TODO: This should move into constrain_src_value.
+      Inst *id = extract_id(param_inst);
+      Inst *one = entry_bb->value_inst(1, module->ptr_id_bits);
+      entry_bb->build_inst(Op::UB, entry_bb->build_inst(Op::EQ, id, one));
+    }
+
   BITMAP_FREE(nonnullargs);
 }
 
