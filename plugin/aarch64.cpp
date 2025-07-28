@@ -11,21 +11,24 @@ namespace {
 
 const int stack_size = 1024 * 100;
 
+bool is_short_vector(tree type)
+{
+  uint64_t bitsize = bitsize_for_type(type);
+  return VECTOR_TYPE_P(type) && (bitsize == 128 || bitsize == 64);
+}
+
 void build_return(aarch64_state *rstate, Function *src_func, function *fun)
 {
   Basic_block *bb = rstate->exit_bb;
-  tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
-
   Basic_block *src_last_bb = src_func->bbs.back();
   assert(src_last_bb->last_inst->op == Op::RET);
-  uint64_t ret_bitsize = 0;
-  if (src_last_bb->last_inst->nof_args > 0)
-    ret_bitsize = src_last_bb->last_inst->args[0]->bitsize;
-  if (ret_bitsize == 0)
+  if (src_last_bb->last_inst->nof_args == 0)
     {
       bb->build_ret_inst();
       return;
     }
+  tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
+  uint64_t ret_bitsize = src_last_bb->last_inst->args[0]->bitsize;
 
   if (SCALAR_FLOAT_TYPE_P(ret_type) && ret_bitsize <= rstate->freg_bitsize)
     {
@@ -42,6 +45,16 @@ void build_return(aarch64_state *rstate, Function *src_func, function *fun)
     {
       Inst *retval =
 	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::x0]);
+      if (ret_bitsize < retval->bitsize)
+	retval = bb->build_trunc(retval, ret_bitsize);
+      bb->build_ret_inst(retval);
+      return;
+    }
+
+  if (is_short_vector(ret_type))
+    {
+      Inst *retval =
+	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z0]);
       if (ret_bitsize < retval->bitsize)
 	retval = bb->build_trunc(retval, ret_bitsize);
       bb->build_ret_inst(retval);
@@ -173,6 +186,13 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
 	    throw Not_implemented("setup_aarch64_function: too many params");
 	  write_reg(bb, rstate.registers[Aarch64RegIdx::x0 + reg_nbr], param);
 	  reg_nbr++;
+	}
+      else if (is_short_vector(type))
+	{
+	  if (freg_nbr >= 8)
+	    throw Not_implemented("setup_aarch64_function: too many params");
+	  write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + freg_nbr], param);
+	  freg_nbr++;
 	}
       else
 	throw Not_implemented("setup_aarch64_function: param type not handled");
