@@ -264,6 +264,7 @@ private:
   void process_vec_widen_pairwise_add(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op);
   void process_vec_widen_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Op widen_op);
   void process_vec_widen2_binary(Op op, Op widen_op, bool high);
+  void process_vec_ternary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*, Inst*));
   void process_vec_reduc_vreg(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_reduc_zreg(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Value init_value);
   void process_vec_reduc(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Value init_value);
@@ -271,7 +272,6 @@ private:
   void process_vec_pairwise(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_vec_widen(Op, bool high = false);
   void process_vec_dot(Op op1, Op op2);
-  void process_vec_eor3();
   void process_vec_bic();
   void process_vec_bif();
   void process_vec_bit();
@@ -305,6 +305,7 @@ private:
   void process_sve_binary(Op op);
   void process_sve_binary_rev(Op op);
   void process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_sve_ternary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*, Inst*));
   void process_sve_preg_unary(Op op);
   void process_sve_preg_binary(Op op, bool perform_not = false);
   void process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
@@ -316,7 +317,6 @@ private:
   void process_sve_f2i(bool is_unsigned);
   void process_sve_ext(Op op, uint64_t trunc_bitsize);
   void process_sve_sel();
-  void process_sve_eor3();
   void process_sve_uzp(bool odd);
   void process_sve_preg_uzp(bool odd);
   void process_sve_index();
@@ -1696,6 +1696,12 @@ Inst *gen_nand(Basic_block *bb, Inst *elem1, Inst *elem2)
 Inst *gen_bic(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   return bb->build_inst(Op::AND, elem1, bb->build_inst(Op::NOT, elem2));
+}
+
+Inst *gen_eor3(Basic_block *bb, Inst *elem1, Inst *elem2, Inst *elem3)
+{
+  Inst *inst = bb->build_inst(Op::XOR, elem1, elem2);
+  return bb->build_inst(Op::XOR, inst, elem3);
 }
 
 Inst *gen_revb(Basic_block *bb, Inst *elem)
@@ -3957,6 +3963,32 @@ void Parser::process_vec_widen2_binary(Op op, Op widen_op, bool high)
   write_reg(dest, res);
 }
 
+void Parser::process_vec_ternary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*, Inst*))
+{
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
+  get_comma(2);
+  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
+  get_comma(4);
+  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
+  get_comma(6);
+  Inst *arg3 = get_vreg_value(7, nof_elem, elem_bitsize);
+  get_end_of_line(8);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *elem3 = extract_vec_elem(arg3, elem_bitsize, i);
+      Inst *inst = gen_elem(bb, elem1, elem2, elem3);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_vec_reduc_vreg(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
 {
   Inst *dest = get_reg(1);
@@ -4536,33 +4568,6 @@ void Parser::process_vec_dot(Op op1, Op op2)
   write_reg(dest, res);
 }
 
-void Parser::process_vec_eor3()
-{
-  auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
-  get_comma(2);
-  Inst *arg1 = get_vreg_value(3, nof_elem, elem_bitsize);
-  get_comma(4);
-  Inst *arg2 = get_vreg_value(5, nof_elem, elem_bitsize);
-  get_comma(6);
-  Inst *arg3 = get_vreg_value(7, nof_elem, elem_bitsize);
-  get_end_of_line(8);
-
-  Inst *res = nullptr;
-  for (uint32_t i = 0; i < nof_elem; i++)
-    {
-      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
-      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
-      Inst *elem3 = extract_vec_elem(arg3, elem_bitsize, i);
-      Inst *inst = bb->build_inst(Op::XOR, elem1, elem2);
-      inst = bb->build_inst(Op::XOR, inst, elem3);
-      if (res)
-	res = bb->build_inst(Op::CONCAT, inst, res);
-      else
-	res = inst;
-    }
-  write_reg(dest, res);
-}
-
 void Parser::process_vec_bic()
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
@@ -5079,7 +5084,7 @@ void Parser::parse_vector_op()
   else if (name == "eor")
     process_vec_binary(Op::XOR);
   else if (name == "eor3")
-    process_vec_eor3();
+    process_vec_ternary(gen_eor3);
   else if (name == "ext")
     process_vec_ext();
   else if (name == "fabd")
@@ -5550,6 +5555,32 @@ void Parser::process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
   write_reg(dest, res);
 }
 
+void Parser::process_sve_ternary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*, Inst*))
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1 = get_zreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_zreg_value(5);
+  get_comma(6);
+  Inst *arg3 = get_zreg_value(7);
+  get_end_of_line(8);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *elem3 = extract_vec_elem(arg3, elem_bitsize, i);
+      Inst *inst = gen_elem(bb, elem1, elem2, elem3);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_preg_unary(Op op)
 {
   auto [dest, nof_elem, elem_bitsize] = get_preg(1);
@@ -5867,33 +5898,6 @@ void Parser::process_sve_sel()
       Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
       Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
       Inst *inst = bb->build_inst(Op::ITE, pred_elem, elem1, elem2);
-      if (res)
-	res = bb->build_inst(Op::CONCAT, inst, res);
-      else
-	res = inst;
-    }
-  write_reg(dest, res);
-}
-
-void Parser::process_sve_eor3()
-{
-  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
-  get_comma(2);
-  Inst *arg1 = get_zreg_value(3);
-  get_comma(4);
-  Inst *arg2 = get_zreg_value(5);
-  get_comma(6);
-  Inst *arg3 = get_zreg_value(7);
-  get_end_of_line(8);
-
-  Inst *res = nullptr;
-  for (uint32_t i = 0; i < nof_elem; i++)
-    {
-      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
-      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
-      Inst *elem3 = extract_vec_elem(arg3, elem_bitsize, i);
-      Inst *inst = bb->build_inst(Op::XOR, elem1, elem2);
-      inst = bb->build_inst(Op::XOR, inst, elem3);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
@@ -6539,7 +6543,7 @@ void Parser::parse_sve_op()
   else if (name == "eor")
     process_sve_binary(Op::XOR);
   else if (name == "eor3")
-    process_sve_eor3();
+    process_sve_ternary(gen_eor3);
   else if (name == "dech")
     process_sve_dec_inc(Op::SUB, 16);
   else if (name == "decw")
