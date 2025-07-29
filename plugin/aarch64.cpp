@@ -30,7 +30,8 @@ void build_return(aarch64_state *rstate, Function *src_func, function *fun)
   tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
   uint64_t ret_bitsize = src_last_bb->last_inst->args[0]->bitsize;
 
-  if (SCALAR_FLOAT_TYPE_P(ret_type) && ret_bitsize <= rstate->freg_bitsize)
+  if ((SCALAR_FLOAT_TYPE_P(ret_type) && ret_bitsize <= rstate->freg_bitsize)
+      || TYPE_MAIN_VARIANT(ret_type) == aarch64_mfp8_type_node)
     {
       Inst *retval =
 	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z0]);
@@ -172,7 +173,8 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
 	  throw Not_implemented("setup_aarch64_function: C++ constructors");
 	}
 
-      if (SCALAR_FLOAT_TYPE_P(type) && param->bitsize <= rstate.freg_bitsize)
+      if ((SCALAR_FLOAT_TYPE_P(type) && param->bitsize <= rstate.freg_bitsize)
+	  || TYPE_MAIN_VARIANT(type) == aarch64_mfp8_type_node)
 	{
 	  if (freg_nbr >= 8)
 	    throw Not_implemented("setup_aarch64_function: too many params");
