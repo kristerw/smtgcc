@@ -1704,6 +1704,13 @@ Inst *gen_eor3(Basic_block *bb, Inst *elem1, Inst *elem2, Inst *elem3)
   return bb->build_inst(Op::XOR, inst, elem3);
 }
 
+Inst *gen_bcax(Basic_block *bb, Inst *elem1, Inst *elem2, Inst *elem3)
+{
+  Inst *inst = bb->build_inst(Op::NOT, elem3);
+  inst = bb->build_inst(Op::AND, inst, elem2);
+  return bb->build_inst(Op::XOR, inst, elem1);
+}
+
 Inst *gen_revb(Basic_block *bb, Inst *elem)
 {
   const unsigned bitsize = 8;
@@ -5049,6 +5056,8 @@ void Parser::parse_vector_op()
     process_vec_pairwise(gen_add);
   else if (name == "and")
     process_vec_binary(Op::AND);
+  else if (name == "bcax")
+    process_vec_ternary(gen_bcax);
   else if (name == "bic")
     process_vec_bic();
   else if (name == "bif")
@@ -6524,6 +6533,8 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::ASHR);
   else if (name == "asrr")
     process_sve_binary_rev(Op::ASHR);
+  else if (name == "bcax")
+    process_sve_ternary(gen_bcax);
   else if (name == "bic")
     process_sve_binary(gen_bic);
   else if (name == "bsl")
