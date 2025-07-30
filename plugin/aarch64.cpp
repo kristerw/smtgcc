@@ -11,6 +11,32 @@ namespace {
 
 const int stack_size = 1024 * 100;
 
+// Return true if this is guaranteed not to be a HFA or HVA.
+// This is a hack to enable support for handling some structures in the ABI
+// before we add HFA, HVA, and the full ABI three stage process.
+bool is_not_hfa_hva(tree type)
+{
+  if (INTEGRAL_TYPE_P(type))
+    return true;
+  if (TREE_CODE(type) == COMPLEX_TYPE || TREE_CODE(type) == ARRAY_TYPE)
+    return is_not_hfa_hva(TREE_TYPE(type));
+  if (TREE_CODE(type) == RECORD_TYPE)
+    {
+      for (tree fld = TYPE_FIELDS(type); fld; fld = DECL_CHAIN(fld))
+	{
+	  if (TREE_CODE(fld) != FIELD_DECL)
+	    continue;
+	  if (DECL_BIT_FIELD_TYPE(fld))
+	    return true;
+	  if (is_not_hfa_hva(TREE_TYPE(fld)))
+	    return true;
+	}
+      return false;
+    }
+
+  return false;
+}
+
 bool is_short_vector(tree type)
 {
   uint64_t bitsize = bitsize_for_type(type);
@@ -56,6 +82,26 @@ void build_return(aarch64_state *rstate, Function *src_func, function *fun)
     {
       Inst *retval =
 	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z0]);
+      if (ret_bitsize < retval->bitsize)
+	retval = bb->build_trunc(retval, ret_bitsize);
+      bb->build_ret_inst(retval);
+      return;
+    }
+
+  if (ret_bitsize <= 2 * rstate->reg_bitsize
+      && TREE_CODE(ret_type) == RECORD_TYPE
+      && is_not_hfa_hva(ret_type))
+    {
+      unsigned nof_regs =
+	(ret_bitsize + rstate->reg_bitsize - 1) / rstate->reg_bitsize;
+      Inst *retval =
+	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::x0]);
+      for (unsigned i = 1; i < nof_regs; i++)
+	{
+	  Inst *inst =
+	    bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::x0 + i]);
+	  retval = bb->build_inst(Op::CONCAT, inst, retval);
+	}
       if (ret_bitsize < retval->bitsize)
 	retval = bb->build_trunc(retval, ret_bitsize);
       bb->build_ret_inst(retval);
@@ -195,6 +241,31 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
 	    throw Not_implemented("setup_aarch64_function: too many params");
 	  write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + freg_nbr], param);
 	  freg_nbr++;
+	}
+      else if (param->bitsize <= 2 * rstate.reg_bitsize
+	       && TREE_CODE(type) == RECORD_TYPE
+	       && is_not_hfa_hva(type))
+	{
+	  if (reg_nbr >= 8)
+	    throw Not_implemented("setup_aarch64_function: too many params");
+	  Inst *value = param;
+	  if (value->bitsize > rstate.reg_bitsize)
+	    value = bb->build_trunc(value, rstate.reg_bitsize);
+	  write_reg(bb, rstate.registers[Aarch64RegIdx::x0 + reg_nbr], value);
+	  reg_nbr++;
+
+	  if (param->bitsize > rstate.reg_bitsize)
+	    {
+	      Inst *high = bb->value_inst(param->bitsize - 1, 32);
+	      Inst *low = bb->value_inst(rstate.reg_bitsize, 32);
+	      value = bb->build_inst(Op::EXTRACT, param, high, low);
+	      if (reg_nbr >= 8)
+		throw Not_implemented("setup_aarch64_function: "
+				      "too many params");
+	      write_reg(bb, rstate.registers[Aarch64RegIdx::x0 + reg_nbr],
+			value);
+	      reg_nbr++;
+	    }
 	}
       else
 	throw Not_implemented("setup_aarch64_function: param type not handled");
