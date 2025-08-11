@@ -2319,6 +2319,27 @@ void Parser::process_vec_binary_vf(Op op)
   bb->build_inst(Op::WRITE, dest, res);
 }
 
+Inst *gen_vsll(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  elem2 = bb->build_trunc(elem2, ctz(elem1->bitsize));
+  elem2 = bb->build_inst(Op::ZEXT, elem2, elem1->bitsize);
+  return bb->build_inst(Op::SHL, elem1, elem2);
+}
+
+Inst *gen_vsrl(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  elem2 = bb->build_trunc(elem2, ctz(elem1->bitsize));
+  elem2 = bb->build_inst(Op::ZEXT, elem2, elem1->bitsize);
+  return bb->build_inst(Op::LSHR, elem1, elem2);
+}
+
+Inst *gen_vsra(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  elem2 = bb->build_trunc(elem2, ctz(elem1->bitsize));
+  elem2 = bb->build_inst(Op::ZEXT, elem2, elem1->bitsize);
+  return bb->build_inst(Op::ASHR, elem1, elem2);
+}
+
 Inst *gen_vwaddu(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   Inst *e1 = bb->build_inst(Op::ZEXT, elem1, 2 * elem1->bitsize);
@@ -4179,23 +4200,23 @@ void Parser::parse_function()
 
   // Integer arithmetic - shift instructions
   else if (name == "vsll.vv")
-    process_vec_binary(Op::SHL);
+    process_vec_binary(gen_vsll);
   else if (name == "vsll.vx")
-    process_vec_binary_vx(Op::SHL);
+    process_vec_binary_vx(gen_vsll);
   else if (name == "vsll.vi")
-    process_vec_binary_vi(Op::SHL);
+    process_vec_binary_vi(gen_vsll);
   else if (name == "vsrl.vv")
-    process_vec_binary(Op::LSHR);
+    process_vec_binary(gen_vsrl);
   else if (name == "vsrl.vx")
-    process_vec_binary_vx(Op::LSHR);
+    process_vec_binary_vx(gen_vsrl);
   else if (name == "vsrl.vi")
-    process_vec_binary_vi(Op::LSHR);
+    process_vec_binary_vi(gen_vsrl);
   else if (name == "vsra.vv")
-    process_vec_binary(Op::ASHR);
+    process_vec_binary(gen_vsra);
   else if (name == "vsra.vx")
-    process_vec_binary_vx(Op::ASHR);
+    process_vec_binary_vx(gen_vsra);
   else if (name == "vsra.vi")
-    process_vec_binary_vi(Op::ASHR);
+    process_vec_binary_vi(gen_vsra);
 
   // Integer arithmetic - narrowing shift instructions
 
