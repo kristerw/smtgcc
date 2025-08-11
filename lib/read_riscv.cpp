@@ -168,13 +168,12 @@ private:
 		       Inst *arg1, Inst *arg2, Inst *mask,
 		       uint32_t orig_elem_bitsize, uint32_t elem1_bitsize,
 		       uint32_t elem2_bitsize);
-  Inst *gen_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), Inst *orig,
-		       Inst *arg1, Inst *arg2, Inst *mask,
-		       uint32_t elem_bitsize);
   void process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
 			  uint32_t orig_mult = 1, uint32_t arg1_mult = 1,
 			  uint32_t arg2_mult = 1);
-  void process_vec_binary_vi(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_vec_binary_vi(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
+			     uint32_t orig_mult = 1, uint32_t arg1_mult = 1,
+			     uint32_t arg2_mult = 1);
   void process_vec_binary_vx(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
 			     uint32_t orig_mult = 1, uint32_t arg1_mult = 1,
 			     uint32_t arg2_mult = 1);
@@ -2340,6 +2339,22 @@ Inst *gen_vsra(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::ASHR, elem1, elem2);
 }
 
+Inst *gen_vnsrl(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  elem2 = bb->build_trunc(elem2, ctz(elem1->bitsize));
+  elem2 = bb->build_inst(Op::ZEXT, elem2, elem1->bitsize);
+  Inst *res = bb->build_inst(Op::LSHR, elem1, elem2);
+  return bb->build_trunc(res, res->bitsize / 2);
+}
+
+Inst *gen_vnsra(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  elem2 = bb->build_trunc(elem2, ctz(elem1->bitsize));
+  elem2 = bb->build_inst(Op::ZEXT, elem2, elem1->bitsize);
+  Inst *res = bb->build_inst(Op::ASHR, elem1, elem2);
+  return bb->build_trunc(res, res->bitsize / 2);
+}
+
 Inst *gen_vwaddu(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   Inst *e1 = bb->build_inst(Op::ZEXT, elem1, 2 * elem1->bitsize);
@@ -2423,6 +2438,7 @@ Inst *Parser::gen_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
   uint32_t max_elem_bitsize = std::max(elem1_bitsize, elem2_bitsize);
   max_elem_bitsize = std::max(max_elem_bitsize, orig_elem_bitsize);
   uint32_t nof_elem = rstate->vreg_bitsize / max_elem_bitsize;
+  uint32_t nof_res_elem = rstate->vreg_bitsize / orig_elem_bitsize;
   for (uint32_t i = 0; i < nof_elem; i++)
     {
       Inst *elem1 = extract_vec_elem(arg1, elem1_bitsize, i);
@@ -2442,15 +2458,12 @@ Inst *Parser::gen_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
       else
 	res = inst;
     }
+  for (uint32_t i = nof_elem; i < nof_res_elem; i++)
+    {
+      Inst *orig_elem = extract_vec_elem(orig, orig_elem_bitsize, i);
+      res = bb->build_inst(Op::CONCAT, orig_elem, res);
+    }
   return res;
-}
-
-Inst *Parser::gen_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
-			     Inst *orig, Inst *arg1, Inst *arg2, Inst *mask,
-			     uint32_t elem_bitsize)
-{
-  return gen_vec_binary(gen_elem, orig, arg1, arg2, mask,
-			elem_bitsize, elem_bitsize, elem_bitsize);
 }
 
 void Parser::process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
@@ -2495,7 +2508,7 @@ void Parser::process_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
   bb->build_inst(Op::WRITE, dest, res);
 }
 
-void Parser::process_vec_binary_vi(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+void Parser::process_vec_binary_vi(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), uint32_t orig_mult, uint32_t arg1_mult, uint32_t arg2_mult)
 {
   Inst *dest = get_vreg(1);
   Inst *orig = get_vreg_value(1);
@@ -2513,14 +2526,18 @@ void Parser::process_vec_binary_vi(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
   else
     get_end_of_line(6);
 
-  Inst *imm8 = bb->value_inst(arg2, 8);
-  Inst *imm16 = bb->value_inst(arg2, 16);
-  Inst *imm32 = bb->value_inst(arg2, 32);
-  Inst *imm64 = bb->value_inst(arg2, 64);
-  Inst *res8 = gen_vec_binary(gen_elem, orig, arg1, imm8, mask, 8);
-  Inst *res16 = gen_vec_binary(gen_elem, orig, arg1, imm16, mask, 16);
-  Inst *res32 = gen_vec_binary(gen_elem, orig, arg1, imm32, mask, 32);
-  Inst *res64 = gen_vec_binary(gen_elem, orig, arg1, imm64, mask, 64);
+  Inst *res8 =
+    gen_vec_binary(gen_elem, orig, arg1, bb->value_inst(arg2, 8 * arg2_mult),
+		   mask, 8 * orig_mult, 8 * arg1_mult, 8 * arg2_mult);
+  Inst *res16 =
+    gen_vec_binary(gen_elem, orig, arg1, bb->value_inst(arg2, 16 * arg2_mult),
+		   mask, 16 * orig_mult, 16 * arg1_mult, 16 * arg2_mult);
+  Inst *res32 =
+    gen_vec_binary(gen_elem, orig, arg1, bb->value_inst(arg2, 32 * arg2_mult),
+		   mask, 32 * orig_mult, 32 * arg1_mult, 32 * arg2_mult);
+  Inst *res64 =
+    gen_vec_binary(gen_elem, orig, arg1, bb->value_inst(arg2, 64 * arg2_mult),
+		   mask, 64 * orig_mult, 64 * arg1_mult, 64 * arg2_mult);
   Inst *vsew = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vsew]);
   Inst *cmp8 = bb->build_inst(Op::EQ, vsew, bb->value_inst(0, 3));
   Inst *cmp16 = bb->build_inst(Op::EQ, vsew, bb->value_inst(1, 3));
@@ -4219,6 +4236,18 @@ void Parser::parse_function()
     process_vec_binary_vi(gen_vsra);
 
   // Integer arithmetic - narrowing shift instructions
+  else if (name == "vnsrl.wv")
+    process_vec_binary(gen_vnsrl, 1, 2, 1);
+  else if (name == "vnsrl.wx")
+    process_vec_binary_vx(gen_vnsrl, 1, 2, 1);
+  else if (name == "vnsrl.wi")
+    process_vec_binary_vi(gen_vnsrl, 1, 2, 1);
+  else if (name == "vnsra.wv")
+    process_vec_binary(gen_vnsra, 1, 2, 1);
+  else if (name == "vnsra.wx")
+    process_vec_binary_vx(gen_vnsra, 1, 2, 1);
+  else if (name == "vnsra.wi")
+    process_vec_binary_vi(gen_vnsra, 1, 2, 1);
 
   // Integer arithmetic - compare
   else if (name == "vmseq.vv")
