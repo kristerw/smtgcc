@@ -55,6 +55,7 @@ private:
   Inst *simplify_sext();
   Inst *simplify_sle();
   Inst *simplify_slt();
+  Inst *specialize_cond_array(Inst *cond, Inst *arg, bool true_branch);
   Inst *specialize_cond_arg(Inst *cond, Inst *arg, bool true_branch);
   Inst *simplify_ite();
   Inst *simplify_shl();
@@ -1453,6 +1454,25 @@ Inst *Simplify::simplify_sub()
   return inst;
 }
 
+Inst *Simplify::specialize_cond_array(Inst *cond, Inst *inst, bool true_branch)
+{
+  Inst *arg1 = specialize_cond_arg(cond, inst->args[0], true_branch);
+  Inst *arg2 = specialize_cond_arg(cond, inst->args[1], true_branch);
+  Inst *arg3 = specialize_cond_arg(cond, inst->args[2], true_branch);
+
+  if (arg1 == inst->args[0]
+      && arg2 == inst->args[1]
+      && arg3 == inst->args[2])
+    return inst;
+
+  if (arg1->op == Op::ARRAY_STORE
+      || arg1->op == Op::ARRAY_SET_INDEF
+      || arg1->op == Op::ARRAY_SET_FLAG)
+    arg1 = specialize_cond_array(cond, arg1, true_branch);
+
+  return build_inst(inst->op, arg1, arg2, arg3);
+}
+
 Inst *Simplify::specialize_cond_arg(Inst *cond, Inst *inst, bool true_branch)
 {
   switch (inst->iclass())
@@ -1464,7 +1484,17 @@ Inst *Simplify::specialize_cond_arg(Inst *cond, Inst *inst, bool true_branch)
     case Inst_class::icomparison:
     case Inst_class::fcomparison:
     case Inst_class::conv:
+      break;
     case Inst_class::ternary:
+      // The array store instructions are a bit special as they are chained,
+      // so a store of a 32-bit value consists of four store instructions
+      // where the value may be extracted from Op::ITE. So we need to handle
+      // this as a special case to essentially treat all stores as one
+      // instruction.
+      if (inst->op == Op::ARRAY_STORE
+	  || inst->op == Op::ARRAY_SET_INDEF
+	  || inst->op == Op::ARRAY_SET_FLAG)
+	return specialize_cond_array(cond, inst, true_branch);
       break;
     default:
       return inst;
