@@ -1453,60 +1453,57 @@ Inst *Simplify::simplify_sub()
   return inst;
 }
 
-// Return true if this is an instruction we should specialize based to
-// the Op::ITE condition cond. (I.e., is any argument is an Op::ITE
-// instructions with cond as its first argument).
-bool can_specialize_cond(Inst *cond, Inst *inst)
+Inst *Simplify::specialize_cond_arg(Inst *cond, Inst *inst, bool true_branch)
 {
+  switch (inst->iclass())
+    {
+    case Inst_class::iunary:
+    case Inst_class::funary:
+    case Inst_class::ibinary:
+    case Inst_class::fbinary:
+    case Inst_class::icomparison:
+    case Inst_class::fcomparison:
+    case Inst_class::conv:
+    case Inst_class::ternary:
+      break;
+    default:
+      return inst;
+    }
+
   if (inst->op == Op::ITE || inst->op == Op::SIMP_BARRIER)
-    return false;
+    return inst;
 
-  // We cannot duplicate instructions that depend on the order they are done
-  // (unless we update the code to place them next to the original).
-  if (inst->iclass() == Inst_class::ls_unary
-      || inst->iclass() == Inst_class::ls_binary
-      || inst->iclass() == Inst_class::ls_ternary)
-    return false;
-
+  Inst *args[3];
+  assert(inst->nof_args > 0);
+  assert(inst->nof_args <= 3);
+  bool modified = false;
   for (uint i = 0; i < inst->nof_args; i++)
     {
       Inst *arg = inst->args[i];
       if (arg->op == Op::ITE && arg->args[0] == cond)
-	return true;
+	{
+	  arg = true_branch ? arg->args[1] : arg->args[2];
+	  modified = true;
+	}
+      args[i] = arg;
     }
 
-  return false;
-}
-
-Inst *Simplify::specialize_cond_arg(Inst *cond, Inst *arg, bool true_branch)
-{
-  if (!can_specialize_cond(cond, arg))
-    return arg;
-
-  Inst *args[3];
-  assert(arg->nof_args > 0);
-  assert(arg->nof_args <= 3);
-  for (uint i = 0; i < arg->nof_args; i++)
+  if (modified)
     {
-      Inst *arg_arg = arg->args[i];
-      if (arg_arg->op == Op::ITE && arg_arg->args[0] == cond)
-	args[i] = true_branch ? arg_arg->args[1] : arg_arg->args[2];
-      else
-	args[i] = arg_arg;
+      switch (inst->nof_args)
+	{
+	case 1:
+	  return build_inst(inst->op, args[0]);
+	case 2:
+	  return build_inst(inst->op, args[0], args[1]);
+	case 3:
+	  return build_inst(inst->op, args[0], args[1], args[2]);
+	default:
+	  assert(0);
+	  break;
+	}
     }
-
-  switch (arg->nof_args)
-    {
-    case 1:
-      return build_inst(arg->op, args[0]);
-    case 2:
-      return build_inst(arg->op, args[0], args[1]);
-    case 3:
-      return build_inst(arg->op, args[0], args[1], args[2]);
-    default:
-      assert(0);
-      return arg;
-    }
+  return inst;
 }
 
 Inst *Simplify::simplify_ite()
