@@ -15,6 +15,36 @@ namespace smtgcc {
 
 namespace {
 
+const int max_store_traversal = 100;
+
+bool may_alias(Inst *p1, Inst *p2)
+{
+  if (p1 != p2 && p1->op == Op::VALUE && p2->op == Op::VALUE)
+    return false;
+
+  // p + const1 cannot alias p + const2 if the constants differ.
+  if (p1->op == Op::ADD && p2->op == Op::ADD
+      && p1->args[0] == p2->args[0]
+      && p1->args[1]->op == Op::VALUE
+      && p2->args[1]->op == Op::VALUE
+      && p1->args[1] != p2->args[1])
+    return false;
+
+  // p cannot alias p + const if const != 0.
+  if (p1->op == Op::ADD
+      && p1->args[0] == p2
+      && p1->args[1]->op == Op::VALUE
+      && p1->args[1]->value() != 0)
+    return false;
+  if (p2->op == Op::ADD
+      && p2->args[0] == p1
+      && p2->args[1]->op == Op::VALUE
+      && p2->args[1]->value() != 0)
+    return false;
+
+  return true;
+}
+
 class Simplify {
   Inst *inst;
   Simplify_config *config;
@@ -36,6 +66,9 @@ private:
 
   Inst *simplify_add();
   Inst *simplify_and();
+  Inst *simplify_array_set_flag();
+  Inst *simplify_array_set_indef();
+  Inst *simplify_array_store();
   Inst *simplify_ashr();
   Inst *simplify_concat();
   Inst *simplify_eq();
@@ -450,6 +483,116 @@ Inst *Simplify::simplify_and()
       Inst *c = value_inst(ctz(arg2->value()), inst->bitsize);
       Inst *new_inst = build_inst(Op::LSHR, arg1, c);
       return build_inst(Op::SHL, new_inst, c);
+    }
+
+  return inst;
+}
+
+Inst *Simplify::simplify_array_set_flag()
+{
+  Inst *array = inst->args[0];
+  Inst *addr = inst->args[1];
+  Inst *value = inst->args[2];
+
+  // Traverse the list of previous updates to the array to determine
+  // whether the current value is already the same as 'value'.
+  Inst *tmp_array = array;
+  for (int i = 0; i < max_store_traversal; i++)
+    {
+      if (tmp_array->op == Op::MEM_FLAG_ARRAY
+	  && value->op == Op::VALUE
+	  && value->value() == 0)
+	{
+	  // The array element has the correct value already.
+	  return array;
+	}
+      if (tmp_array->op == Op::ARRAY_SET_FLAG)
+	{
+	  Inst *tmp_addr = tmp_array->args[1];
+	  Inst *tmp_value = tmp_array->args[2];
+	  if (addr == tmp_addr && value == tmp_value)
+	    {
+	      // The array element has the correct value already.
+	      return array;
+	    }
+	  else if (!may_alias(addr, tmp_addr))
+	    {
+	      tmp_array = tmp_array->args[0];
+	      continue;
+	    }
+	}
+      break;
+    }
+
+  return inst;
+}
+
+Inst *Simplify::simplify_array_set_indef()
+{
+  Inst *array = inst->args[0];
+  Inst *addr = inst->args[1];
+  Inst *value = inst->args[2];
+
+  // Traverse the list of previous updates to the array to determine
+  // whether the current value is already the same as 'value'.
+  Inst *tmp_array = array;
+  for (int i = 0; i < max_store_traversal; i++)
+    {
+      if (tmp_array->op == Op::MEM_INDEF_ARRAY
+	  && value->op == Op::VALUE
+	  && value->value() == 0)
+	{
+	  // The array element has the correct value already.
+	  return array;
+	}
+      if (tmp_array->op == Op::ARRAY_SET_INDEF)
+	{
+	  Inst *tmp_addr = tmp_array->args[1];
+	  Inst *tmp_value = tmp_array->args[2];
+	  if (addr == tmp_addr && value == tmp_value)
+	    {
+	      // The array element has the correct value already.
+	      return array;
+	    }
+	  else if (!may_alias(addr, tmp_addr))
+	    {
+	      tmp_array = tmp_array->args[0];
+	      continue;
+	    }
+	}
+      break;
+    }
+
+  return inst;
+}
+
+Inst *Simplify::simplify_array_store()
+{
+  Inst *array = inst->args[0];
+  Inst *addr = inst->args[1];
+  Inst *value = inst->args[2];
+
+  // Traverse the list of previous updates to the array to determine
+  // whether the current value is already the same as 'value'.
+  Inst *tmp_array = array;
+  for (int i = 0; i < max_store_traversal; i++)
+    {
+      if (tmp_array->op == Op::ARRAY_STORE)
+	{
+	  Inst *tmp_addr = tmp_array->args[1];
+	  Inst *tmp_value = tmp_array->args[2];
+	  if (addr == tmp_addr && value == tmp_value)
+	    {
+	      // The array element has the correct value already.
+	      return array;
+	    }
+	  else if (!may_alias(addr, tmp_addr))
+	    {
+	      tmp_array = tmp_array->args[0];
+	      continue;
+	    }
+	}
+      break;
     }
 
   return inst;
@@ -2672,6 +2815,15 @@ Inst *Simplify::simplify()
       break;
     case Op::AND:
       inst = simplify_and();
+      break;
+    case Op::ARRAY_SET_FLAG:
+      inst = simplify_array_set_flag();
+      break;
+    case Op::ARRAY_SET_INDEF:
+      inst = simplify_array_set_indef();
+      break;
+    case Op::ARRAY_STORE:
+      inst = simplify_array_store();
       break;
     case Op::ASHR:
       inst = simplify_ashr();

@@ -22,8 +22,6 @@ using namespace std::string_literals;
 namespace smtgcc {
 namespace {
 
-const int max_store_traversal = 100;
-
 struct Cse_key
 {
   Op op;
@@ -1247,30 +1245,6 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       Inst *array = bb2memory.at(bb);
       Inst *addr = translate.at(inst->args[0]);
       Inst *value = translate.at(inst->args[1]);
-
-      // Traverse the list of previous updates to the array to determine
-      // whether the current value is already the same as 'value'.
-      Inst *tmp_array = array;
-      for (int i = 0; i < max_store_traversal; i++)
-	{
-	  if (tmp_array->op == Op::ARRAY_STORE)
-	    {
-	      Inst *tmp_addr = tmp_array->args[1];
-	      Inst *tmp_value = tmp_array->args[2];
-	      if (addr == tmp_addr && value == tmp_value)
-		{
-		  // The array element has the correct value already.
-		  return;
-		}
-	      else if (!may_alias(addr, tmp_addr))
-		{
-		  tmp_array = tmp_array->args[0];
-		  continue;
-		}
-	    }
-	  break;
-	}
-
       array = build_inst(Op::ARRAY_STORE, array, addr, value);
       bb2memory[bb] = array;
       return;
@@ -1290,37 +1264,6 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       Inst *array = bb2memory_flag.at(bb);
       Inst *addr = translate.at(inst->args[0]);
       Inst *value = translate.at(inst->args[1]);
-
-      // Traverse the list of previous updates to the array to determine
-      // whether the current value is already the same as 'value'.
-      Inst *tmp_array = array;
-      for (int i = 0; i < max_store_traversal; i++)
-	{
-	  if (tmp_array->op == Op::MEM_FLAG_ARRAY
-	      && value->op == Op::VALUE
-	      && value->value() == 0)
-	    {
-	      // The array element has the correct value already.
-	      return;
-	    }
-	  if (tmp_array->op == Op::ARRAY_SET_FLAG)
-	    {
-	      Inst *tmp_addr = tmp_array->args[1];
-	      Inst *tmp_value = tmp_array->args[2];
-	      if (addr == tmp_addr && value == tmp_value)
-		{
-		  // The array element has the correct value already.
-		  return;
-		}
-	      else if (!may_alias(addr, tmp_addr))
-		{
-		  tmp_array = tmp_array->args[0];
-		  continue;
-		}
-	    }
-	  break;
-	}
-
       array = build_inst(Op::ARRAY_SET_FLAG, array, addr, value);
       bb2memory_flag[bb] = array;
       return;
@@ -1330,37 +1273,6 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       Inst *array = bb2memory_indef.at(bb);
       Inst *addr = translate.at(inst->args[0]);
       Inst *value = translate.at(inst->args[1]);
-
-      // Traverse the list of previous updates to the array to determine
-      // whether the current value is already the same as 'value'.
-      Inst *tmp_array = array;
-      for (int i = 0; i < max_store_traversal; i++)
-	{
-	  if (tmp_array->op == Op::MEM_INDEF_ARRAY
-	      && value->op == Op::VALUE
-	      && value->value() == 0)
-	    {
-	      // The array element has the correct value already.
-	      return;
-	    }
-	  if (tmp_array->op == Op::ARRAY_SET_INDEF)
-	    {
-	      Inst *tmp_addr = tmp_array->args[1];
-	      Inst *tmp_value = tmp_array->args[2];
-	      if (addr == tmp_addr && value == tmp_value)
-		{
-		  // The array element has the correct value already.
-		  return;
-		}
-	      else if (!may_alias(addr, tmp_addr))
-		{
-		  tmp_array = tmp_array->args[0];
-		  continue;
-		}
-	    }
-	  break;
-	}
-
       array = build_inst(Op::ARRAY_SET_INDEF, array, addr, value);
       bb2memory_indef[bb] = array;
       return;
