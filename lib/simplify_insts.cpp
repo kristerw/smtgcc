@@ -55,8 +55,9 @@ private:
   Inst *simplify_sext();
   Inst *simplify_sle();
   Inst *simplify_slt();
-  Inst *specialize_cond_array(Inst *cond, Inst *arg, bool true_branch);
-  Inst *specialize_cond_arg(Inst *cond, Inst *arg, bool true_branch);
+  Inst *specialize_cond_array(Inst *cond, Inst *inst, bool true_branch);
+  Inst *specialize_cond_calc(Inst *cond, Inst *inst, bool true_branch);
+  Inst *specialize_cond_arg(Inst *cond, Inst *inst, bool true_branch);
   Inst *simplify_ite();
   Inst *simplify_shl();
   Inst *simplify_smul_wraps();
@@ -1473,6 +1474,25 @@ Inst *Simplify::specialize_cond_array(Inst *cond, Inst *inst, bool true_branch)
   return build_inst(inst->op, arg1, arg2, arg3);
 }
 
+Inst *Simplify::specialize_cond_calc(Inst *cond, Inst *inst, bool true_branch)
+{
+  if (inst == cond)
+    return cond->bb->value_inst(true_branch, 1);
+  else if (inst->op == Op::SEXT || inst->op == Op::ZEXT)
+    {
+      Inst *arg = specialize_cond_calc(cond, inst->args[0], true_branch);
+      if (arg != inst->args[0])
+	return build_inst(inst->op, arg, inst->args[1]);
+    }
+  else if (inst->op == Op::NOT)
+    {
+      Inst *arg = specialize_cond_calc(cond, inst->args[0], true_branch);
+      if (arg != inst->args[0])
+	return build_inst(inst->op, arg);
+    }
+  return inst;
+}
+
 Inst *Simplify::specialize_cond_arg(Inst *cond, Inst *inst, bool true_branch)
 {
   switch (inst->iclass())
@@ -1516,6 +1536,13 @@ Inst *Simplify::specialize_cond_arg(Inst *cond, Inst *inst, bool true_branch)
 	  modified = true;
 	}
       args[i] = arg;
+
+      arg = specialize_cond_calc(cond, args[i], true_branch);
+      if (arg != args[i])
+	{
+	  args[i] = arg;
+	  modified = true;
+	}
     }
 
   if (modified)
