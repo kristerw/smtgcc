@@ -178,6 +178,7 @@ struct Converter {
   void process_cfn_cond_fminmax(gimple *stmt);
   void process_cfn_copysign(gimple *stmt);
   void process_cfn_ctz(gimple *stmt);
+  void process_cfn_div_pow2(gimple *stmt);
   void process_cfn_divmod(gimple *stmt);
   void process_cfn_exit(gimple *stmt);
   void process_cfn_expect(gimple *stmt);
@@ -4993,6 +4994,33 @@ void Converter::process_cfn_exit(gimple *stmt)
   bb = dead_bb;
 }
 
+void Converter::process_cfn_div_pow2(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 2);
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      assert(!TYPE_UNSIGNED(elem_type));
+      Inst *zero_inst = bb->value_inst(0, elem2->bitsize);
+      bb->build_inst(Op::UB, bb->build_inst(Op::EQ, elem2, zero_inst));
+      if (!TYPE_OVERFLOW_WRAPS(elem_type))
+	{
+	  Inst *min_int_inst = build_min_int(bb, elem1->bitsize);
+	  Inst *minus1_inst = bb->value_inst(-1, elem1->bitsize);
+	  Inst *cond1 = bb->build_inst(Op::EQ, elem1, min_int_inst);
+	  Inst *cond2 = bb->build_inst(Op::EQ, elem2, minus1_inst);
+	  bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
+	}
+      Inst *one = bb->value_inst(1, elem1->bitsize);
+      elem2 = bb->build_inst(Op::SHL, one, elem2);
+      Inst *res = bb->build_inst(Op::SDIV, elem1, elem2);
+      Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      return {res, res_indef};
+    };
+  process_cfn_binary(stmt, gen_elem);
+}
+
 void Converter::process_cfn_divmod(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 2);
@@ -6778,6 +6806,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       // DEFERRED_INIT initializes the memory. But the value is still
       // considered uninitialized, so everything is already handled by
       // our indef handling. So there is nothing to do here.
+      break;
+    case CFN_DIV_POW2:
+      process_cfn_div_pow2(stmt);
       break;
     case CFN_DIVMOD:
       process_cfn_divmod(stmt);
