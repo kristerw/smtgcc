@@ -1693,6 +1693,13 @@ Inst *gen_nand(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::NOT, bb->build_inst(Op::AND, elem1, elem2));
 }
 
+Inst *gen_asrd(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *one = bb->value_inst(1, elem1->bitsize);
+  elem2 = bb->build_inst(Op::SHL, one, elem2);
+  return bb->build_inst(Op::SDIV, elem1, elem2);
+}
+
 Inst *gen_bic(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   return bb->build_inst(Op::AND, elem1, bb->build_inst(Op::NOT, elem2));
@@ -6531,6 +6538,8 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::AND);
   else if (name == "asr")
     process_sve_binary(Op::ASHR);
+  else if (name == "asrd")
+    process_sve_binary(gen_asrd);
   else if (name == "asrr")
     process_sve_binary_rev(Op::ASHR);
   else if (name == "bcax")
