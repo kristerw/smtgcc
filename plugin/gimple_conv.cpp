@@ -188,7 +188,11 @@ struct Converter {
   void process_cfn_fmin(gimple *stmt);
   void process_cfn_isfinite(gimple *stmt);
   void process_cfn_isinf(gimple *stmt);
+  void process_cfn_load_lanes(gimple *stmt);
+  void process_cfn_mask_load_lanes(gimple *stmt);
   void process_cfn_loop_vectorized(gimple *stmt);
+  std::tuple<Inst*, Inst*> load_lanes(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, tree lhs_type);
+  std::tuple<Inst*, Inst*> mask_len_load_lanes(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, Inst *mask, Inst *mask_indef, tree mask_type, Inst *len, tree lhs_type, Inst *orig, Inst *orig_indef);
   std::tuple<Inst*, Inst*> mask_len_load(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, Inst *mask, Inst *mask_indef, tree mask_type, Inst *len, tree lhs_type, Inst *orig, Inst *orig_indef);
   void process_cfn_mask_len_load(gimple *stmt);
   void process_cfn_mask_load(gimple *stmt);
@@ -5177,6 +5181,65 @@ void Converter::process_cfn_isinf(gimple *stmt)
   process_cfn_unary(stmt, gen_elem);
 }
 
+void Converter::process_cfn_load_lanes(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 1);
+  tree ptr_expr = gimple_call_arg(stmt, 0);
+  tree lhs = gimple_call_lhs(stmt);
+  assert(lhs);
+  tree lhs_type = TREE_TYPE(lhs);
+  assert(TREE_CODE(lhs_type) == ARRAY_TYPE);
+
+  Inst *ptr, *ptr_indef, *ptr_prov;
+  if (TREE_CODE(ptr_expr) != MEM_REF && TREE_CODE(ptr_expr) != TARGET_MEM_REF)
+    std::tie(ptr, ptr_indef, ptr_prov) = tree2inst_indef_prov(ptr_expr);
+  else
+    {
+      Addr addr = process_address(ptr_expr, false);
+      assert(!addr.bitoffset);
+      ptr = addr.ptr;
+      ptr_indef = nullptr;
+      ptr_prov = addr.prov;
+    }
+  uint32_t alignment = get_object_alignment(ptr_expr) / 8;
+
+  auto [inst, indef] =
+    load_lanes(ptr, ptr_indef, ptr_prov, alignment, lhs_type);
+  std::tie(inst, indef) = from_mem_repr(inst, indef, lhs_type);
+  if (TREE_CODE(lhs) != SSA_NAME)
+    {
+      if (reverse_storage_order_for_component_p(lhs))
+	throw Not_implemented("reverse storage order");
+
+      uint64_t size = inst->bitsize / 8;
+      Addr addr = process_address(lhs, true);
+      assert(!addr.bitoffset);
+      store_ub_check(addr.ptr, addr.prov, size);
+      Inst *memory_flag = bb->value_inst(0, 1);
+      for (uint64_t i = 0; i < size; i++)
+	{
+	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
+	  Inst *high = bb->value_inst(i * 8 + 7, 32);
+	  Inst *low = bb->value_inst(i * 8, 32);
+	  Inst *byte = bb->build_inst(Op::EXTRACT, inst, high, low);
+	  Inst *byte_indef;
+	  if (indef)
+	    byte_indef = bb->build_inst(Op::EXTRACT, indef, high, low);
+	  else
+	    byte_indef = bb->value_inst(0, 8);
+	  bb->build_inst(Op::STORE, ptr, byte);
+	  bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
+	  bb->build_inst(Op::SET_MEM_INDEF, ptr, byte_indef);
+	}
+    }
+  else
+    {
+      tree2instruction.insert({lhs, inst});
+      tree2indef.insert({lhs, indef});
+    }
+}
+
 void Converter::process_cfn_loop_vectorized(gimple *stmt)
 {
   tree lhs = gimple_call_lhs(stmt);
@@ -5254,6 +5317,248 @@ std::tuple<Inst*, Inst*> Converter::mask_len_load(Inst *ptr, Inst *ptr_indef, In
 	mem_flags = bb->build_inst(Op::CONCAT, elem_flags, mem_flags);
       else
 	mem_flags = elem_flags;
+    }
+
+  if (alignment > 1)
+    {
+      assert((alignment & (alignment - 1)) == 0);
+      Inst *extract = bb->build_trunc(ptr, __builtin_ctz(alignment));
+      Inst *zero = bb->value_inst(0, extract->bitsize);
+      Inst *is_misaligned = bb->build_inst(Op::NE, extract, zero);
+      Inst *is_ub = bb->build_inst(Op::AND, mem_accessed, is_misaligned);
+      bb->build_inst(Op::UB, is_ub);
+    }
+
+  return {inst, indef};
+}
+
+std::tuple<Inst*, Inst*> Converter::load_lanes(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, tree lhs_type)
+{
+  uint64_t lhs_size = bytesize_for_type(lhs_type);
+  assert(VECTOR_TYPE_P(TREE_TYPE(lhs_type)));
+  tree vec_type = TREE_TYPE(lhs_type);
+  uint64_t vec_size = bytesize_for_type(vec_type);
+  uint64_t nof_vect = lhs_size / vec_size;
+  tree elem_type = TREE_TYPE(vec_type);
+  uint64_t elem_size = bytesize_for_type(elem_type);
+
+  uint64_t size = bytesize_for_type(lhs_type);
+  uint64_t nof_elem = vec_size / elem_size;
+  assert((size % elem_size) == 0);
+  Inst *mem_flags = nullptr;
+  Inst *mem_accessed = bb->value_inst(0, 1);
+  std::vector<std::pair<Inst*, Inst*>> insts(nof_vect, {nullptr, nullptr});
+  if (ptr_indef)
+    build_ub_if_not_zero(ptr_indef);
+  load_ub_check(ptr, ptr_prov, lhs_size);
+  uint32_t offset = 0;
+  for (uint64_t i = 0; i < nof_elem; i++)
+    {
+      for (auto& [inst, indef] : insts)
+	{
+	  Inst *off = bb->value_inst(offset, ptr->bitsize);
+	  Inst *src_ptr = bb->build_inst(Op::ADD, ptr, off);
+	  auto [elem, elem_indef, elem_flags] = load_value(src_ptr, elem_size);
+	  offset += elem_size;
+
+	  // TODO: We should call constrain_src_value in order to constrain
+	  // non-canonical NaN etc. But this should only be done when not
+	  // masked.
+	  // constrain_src_value(elem, elem_type, elem_flags);
+
+	  if (inst)
+	    inst = bb->build_inst(Op::CONCAT, elem, inst);
+	  else
+	    inst = elem;
+	  if (indef)
+	    indef = bb->build_inst(Op::CONCAT, elem_indef, indef);
+	  else
+	    indef = elem_indef;
+	  if (mem_flags)
+	    mem_flags = bb->build_inst(Op::CONCAT, elem_flags, mem_flags);
+	  else
+	    mem_flags = elem_flags;
+	}
+    }
+
+  Inst *inst = nullptr;
+  Inst *indef = nullptr;
+  for (auto& [elem, elem_indef] : insts)
+    {
+      if (inst)
+	inst = bb->build_inst(Op::CONCAT, elem, inst);
+      else
+	inst = elem;
+      if (indef)
+	indef = bb->build_inst(Op::CONCAT, elem_indef, indef);
+      else
+	indef = elem_indef;
+    }
+
+  if (alignment > 1)
+    {
+      assert((alignment & (alignment - 1)) == 0);
+      Inst *extract = bb->build_trunc(ptr, __builtin_ctz(alignment));
+      Inst *zero = bb->value_inst(0, extract->bitsize);
+      Inst *is_misaligned = bb->build_inst(Op::NE, extract, zero);
+      Inst *is_ub = bb->build_inst(Op::AND, mem_accessed, is_misaligned);
+      bb->build_inst(Op::UB, is_ub);
+    }
+
+  return {inst, indef};
+}
+
+void Converter::process_cfn_mask_load_lanes(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 4);
+  tree ptr_expr = gimple_call_arg(stmt, 0);
+  tree alignment_expr = gimple_call_arg(stmt, 1);
+  tree mask_expr = gimple_call_arg(stmt, 2);
+  tree mask_type = TREE_TYPE(mask_expr);
+  tree orig_expr = gimple_call_arg(stmt, 3);
+  tree lhs = gimple_call_lhs(stmt);
+  assert(lhs);
+  tree lhs_type = TREE_TYPE(lhs);
+  assert(TREE_CODE(lhs_type) == ARRAY_TYPE);
+
+  auto [ptr, ptr_indef, ptr_prov] = tree2inst_indef_prov(ptr_expr);
+  auto [orig, orig_indef] = tree2inst_indef(orig_expr);
+  uint64_t alignment = get_int_cst_val(alignment_expr) / 8;
+  auto [mask, mask_indef] = tree2inst_indef(mask_expr);
+
+  auto [inst, indef] =
+    mask_len_load_lanes(ptr, ptr_indef, ptr_prov, alignment, mask, mask_indef,
+			mask_type, nullptr, lhs_type, orig, orig_indef);
+  std::tie(inst, indef) = from_mem_repr(inst, indef, lhs_type);
+  if (TREE_CODE(lhs) != SSA_NAME)
+    {
+      if (reverse_storage_order_for_component_p(lhs))
+	throw Not_implemented("reverse storage order");
+
+      uint64_t size = inst->bitsize / 8;
+      Addr addr = process_address(lhs, true);
+      assert(!addr.bitoffset);
+      store_ub_check(addr.ptr, addr.prov, size);
+      Inst *memory_flag = bb->value_inst(0, 1);
+      for (uint64_t i = 0; i < size; i++)
+	{
+	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
+	  Inst *high = bb->value_inst(i * 8 + 7, 32);
+	  Inst *low = bb->value_inst(i * 8, 32);
+	  Inst *byte = bb->build_inst(Op::EXTRACT, inst, high, low);
+	  Inst *byte_indef;
+	  if (indef)
+	    byte_indef = bb->build_inst(Op::EXTRACT, indef, high, low);
+	  else
+	    byte_indef = bb->value_inst(0, 8);
+	  bb->build_inst(Op::STORE, ptr, byte);
+	  bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
+	  bb->build_inst(Op::SET_MEM_INDEF, ptr, byte_indef);
+	}
+    }
+  else
+    {
+      tree2instruction.insert({lhs, inst});
+      tree2indef.insert({lhs, indef});
+    }
+}
+
+std::tuple<Inst*, Inst*> Converter::mask_len_load_lanes(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, Inst *mask, Inst *mask_indef, tree mask_type, Inst *len, tree lhs_type, Inst *orig, Inst *orig_indef)
+{
+  uint64_t lhs_size = bytesize_for_type(lhs_type);
+  assert(VECTOR_TYPE_P(TREE_TYPE(lhs_type)));
+  tree vec_type = TREE_TYPE(lhs_type);
+  uint64_t vec_size = bytesize_for_type(vec_type);
+  uint64_t nof_vect = lhs_size / vec_size;
+  tree elem_type = TREE_TYPE(vec_type);
+  assert(VECTOR_TYPE_P(mask_type));
+  tree mask_elem_type = TREE_TYPE(mask_type);
+  uint64_t elem_size = bytesize_for_type(elem_type);
+  uint64_t elem_bitsize = bitsize_for_type(elem_type);
+  assert(TREE_CODE(mask_elem_type) == BOOLEAN_TYPE);
+  uint64_t mask_elem_bitsize = bitsize_for_type(mask_elem_type);
+
+  uint64_t size = bytesize_for_type(lhs_type);
+  uint64_t nof_elem = vec_size / elem_size;
+  assert((size % elem_size) == 0);
+  Inst *mem_flags = nullptr;
+  Inst *mem_accessed = bb->value_inst(0, 1);
+  std::vector<std::pair<Inst*, Inst*>> insts(nof_vect, {nullptr, nullptr});
+  uint32_t offset = 0;
+  for (uint64_t i = 0; i < nof_elem; i++)
+    {
+      for (auto& [inst, indef] : insts)
+	{
+	  Inst *cond = extract_vec_elem(bb, mask, mask_elem_bitsize, i);
+	  if (cond->bitsize != 1)
+	    cond = bb->build_trunc(cond, 1);
+	  Inst *mask_elem_indef = nullptr;
+	  if (mask_indef)
+	    mask_elem_indef =
+	      extract_vec_elem(bb, mask_indef, mask_elem_bitsize, i);
+	  if (len)
+	    {
+	      Inst *i_inst = bb->value_inst(i, len->bitsize);
+	      Inst *cmp = bb->build_inst(Op::ULT, i_inst, len);
+	      if (mask_elem_indef)
+		build_ub_if_not_zero(mask_elem_indef, cmp);
+	      cond = bb->build_inst(Op::AND, cmp, cond);
+	    }
+	  else
+	    {
+	      if (mask_elem_indef)
+		build_ub_if_not_zero(mask_elem_indef);
+	    }
+	  if (ptr_indef)
+	    build_ub_if_not_zero(ptr_indef, cond);
+
+	  Inst *off = bb->value_inst(offset, ptr->bitsize);
+	  Inst *src_ptr = bb->build_inst(Op::ADD, ptr, off);
+	  load_ub_check(src_ptr, ptr_prov, elem_size, cond);
+	  auto [elem, elem_indef, elem_flags] = load_value(src_ptr, elem_size);
+	  offset += elem_size;
+
+	  auto [orig_elem, orig_elem_indef] =
+	    extract_vec_elem(bb, orig, orig_indef, elem_bitsize, i);
+	  // TODO: We should call constrain_src_value in order to constrain
+	  // non-canonical NaN etc. But this should only be done when not
+	  // masked.
+	  // constrain_src_value(elem, elem_type, elem_flags);
+	  elem = bb->build_inst(Op::ITE, cond, elem, orig_elem);
+	  if (!orig_elem_indef)
+	    orig_elem_indef = bb->value_inst(0, elem_indef->bitsize);
+	  elem_indef =
+	    bb->build_inst(Op::ITE, cond, elem_indef, orig_elem_indef);
+	  mem_accessed = bb->build_inst(Op::OR, mem_accessed, cond);
+
+	  if (inst)
+	    inst = bb->build_inst(Op::CONCAT, elem, inst);
+	  else
+	    inst = elem;
+	  if (indef)
+	    indef = bb->build_inst(Op::CONCAT, elem_indef, indef);
+	  else
+	    indef = elem_indef;
+	  if (mem_flags)
+	    mem_flags = bb->build_inst(Op::CONCAT, elem_flags, mem_flags);
+	  else
+	    mem_flags = elem_flags;
+	}
+    }
+
+  Inst *inst = nullptr;
+  Inst *indef = nullptr;
+  for (auto& [elem, elem_indef] : insts)
+    {
+      if (inst)
+	inst = bb->build_inst(Op::CONCAT, elem, inst);
+      else
+	inst = elem;
+      if (indef)
+	indef = bb->build_inst(Op::CONCAT, elem_indef, indef);
+      else
+	indef = elem_indef;
     }
 
   if (alignment > 1)
@@ -6815,6 +7120,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_FALLTHROUGH:
       break;
+    case CFN_LOAD_LANES:
+      process_cfn_load_lanes(stmt);
+      break;
     case CFN_LOOP_VECTORIZED:
       process_cfn_loop_vectorized(stmt);
       break;
@@ -6826,6 +7134,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_MASK_LOAD:
       process_cfn_mask_load(stmt);
+      break;
+    case CFN_MASK_LOAD_LANES:
+      process_cfn_mask_load_lanes(stmt);
       break;
     case CFN_MASK_STORE:
       process_cfn_mask_store(stmt);
