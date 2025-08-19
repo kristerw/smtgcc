@@ -144,6 +144,7 @@ private:
   Inst *get_preg_zeroing_value(unsigned idx);
   Inst *get_preg_merging_value(unsigned idx);
   uint64_t get_vreg_idx(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
+  uint64_t get_zreg_idx(unsigned idx, uint32_t nof_elem, uint32_t elem_bitsize);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
   std::string_view get_name(unsigned idx);
@@ -177,6 +178,8 @@ private:
   void process_load(uint32_t trunc_size = 0, Op op = Op::ZEXT);
   void process_ld1();
   void process_ld1r();
+  void process_vec_ldn(uint64_t n);
+  void process_sve_ldn(uint64_t n, uint64_t elem_size);
   void process_ldp();
   void process_ldpsw();
   void process_store(uint32_t trunc_size = 0);
@@ -911,6 +914,15 @@ uint64_t Parser::get_vreg_idx(unsigned idx, uint32_t nof_elem,
 			      uint32_t elem_bitsize)
 {
   auto [reg_idx, dest_nof_elem, dest_elem_bitsize] = get_vreg_(idx);
+  if (nof_elem != dest_nof_elem || elem_bitsize != dest_elem_bitsize)
+    throw Parse_error("expected same arg vector size as dest", line_number);
+  return reg_idx;
+}
+
+uint64_t Parser::get_zreg_idx(unsigned idx, uint32_t nof_elem,
+			      uint32_t elem_bitsize)
+{
+  auto [reg_idx, dest_nof_elem, dest_elem_bitsize] = get_zreg_(idx);
   if (nof_elem != dest_nof_elem || elem_bitsize != dest_elem_bitsize)
     throw Parse_error("expected same arg vector size as dest", line_number);
   return reg_idx;
@@ -2257,6 +2269,89 @@ void Parser::process_ld1r()
       res = bb->build_inst(Op::CONCAT, value, res);
     }
   write_reg(dest, res);
+}
+
+void Parser::process_vec_ldn(uint64_t n)
+{
+  get_left_brace(1);
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(2);
+  uint64_t start_idx = get_vreg_idx(2, nof_elem, elem_bitsize);
+  get_minus(3);
+  uint64_t end_idx = get_vreg_idx(4, nof_elem, elem_bitsize);
+  get_right_brace(5);
+  get_comma(6);
+  Inst *ptr = process_address(7);
+  uint64_t nof_vect = end_idx - start_idx + 1;
+  if (nof_vect != n)
+    throw Parse_error("Incorrect number of registers", line_number);
+
+  std::vector<Inst*> ress(nof_vect, nullptr);
+  uint64_t elem_size = elem_bitsize / 8;
+  uint64_t offset = 0;
+  for (unsigned i = 0; i < nof_elem; i++)
+    {
+      for (auto& res : ress)
+	{
+	  Inst *off = bb->value_inst(offset, ptr->bitsize);
+	  Inst *elem_ptr = bb->build_inst(Op::ADD, ptr, off);
+	  offset += elem_size;
+
+	  Inst *elem = load_value(elem_ptr, elem_size);
+	  if (res)
+	    res = bb->build_inst(Op::CONCAT, elem, res);
+	  else
+	    res = elem;
+	}
+    }
+
+  for (unsigned i = 0; i < n; i++)
+    {
+      write_reg(rstate->registers[start_idx + i], ress[i]);
+    }
+}
+
+void Parser::process_sve_ldn(uint64_t n, uint64_t elem_size)
+{
+  get_left_brace(1);
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(2);
+  elem_bitsize = elem_size * 8;
+  uint64_t start_idx = get_zreg_idx(2, nof_elem, elem_bitsize);
+  get_minus(3);
+  uint64_t end_idx = get_zreg_idx(4, nof_elem, elem_bitsize);
+  get_right_brace(5);
+  get_comma(6);
+  Inst *pred = get_preg_zeroing_value(7);
+  get_comma(8);
+  Inst *ptr = process_address(9, dest->bitsize / 8);
+  uint64_t nof_vect = end_idx - start_idx + 1;
+  if (nof_vect != n)
+    throw Parse_error("Incorrect number of registers", line_number);
+
+  std::vector<Inst*> ress(nof_vect, nullptr);
+  uint64_t offset = 0;
+  Inst *zero = bb->value_inst(0, elem_bitsize);
+  for (unsigned i = 0; i < nof_elem; i++)
+    {
+      Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+      for (auto& res : ress)
+	{
+	  Inst *off = bb->value_inst(offset, ptr->bitsize);
+	  Inst *elem_ptr = bb->build_inst(Op::ADD, ptr, off);
+	  offset += elem_size;
+
+	  Inst *elem = load_value(elem_ptr, elem_size);
+	  elem = bb->build_inst(Op::ITE, pred_elem, elem, zero);
+	  if (res)
+	    res = bb->build_inst(Op::CONCAT, elem, res);
+	  else
+	    res = elem;
+	}
+    }
+
+  for (unsigned i = 0; i < n; i++)
+    {
+      write_reg(rstate->registers[start_idx + i], ress[i]);
+    }
 }
 
 void Parser::process_ldp()
@@ -7253,6 +7348,36 @@ void Parser::parse_function()
     process_ld1();
   else if (name == "ld1r")
     process_ld1r();
+  else if (name == "ld2")
+    process_vec_ldn(2);
+  else if (name == "ld2b")
+    process_sve_ldn(2, 1);
+  else if (name == "ld2h")
+    process_sve_ldn(2, 2);
+  else if (name == "ld2w")
+    process_sve_ldn(2, 4);
+  else if (name == "ld2d")
+    process_sve_ldn(2, 8);
+  else if (name == "ld3")
+    process_vec_ldn(3);
+  else if (name == "ld3b")
+    process_sve_ldn(3, 1);
+  else if (name == "ld3h")
+    process_sve_ldn(3, 2);
+  else if (name == "ld3w")
+    process_sve_ldn(3, 4);
+  else if (name == "ld3d")
+    process_sve_ldn(3, 8);
+  else if (name == "ld4")
+    process_vec_ldn(4);
+  else if (name == "ld4b")
+    process_sve_ldn(4, 1);
+  else if (name == "ld4h")
+    process_sve_ldn(4, 2);
+  else if (name == "ld4w")
+    process_sve_ldn(4, 4);
+  else if (name == "ld4d")
+    process_sve_ldn(4, 8);
   else if (name == "orv")
     process_vec_reduc_zreg(gen_or, Value::umin);
   else if (name == "rdvl")
