@@ -5241,32 +5241,7 @@ void Converter::process_cfn_load_lanes(gimple *stmt)
     load_lanes(ptr, ptr_indef, ptr_prov, alignment, lhs_type);
   std::tie(inst, indef) = from_mem_repr(inst, indef, lhs_type);
   if (TREE_CODE(lhs) != SSA_NAME)
-    {
-      if (reverse_storage_order_for_component_p(lhs))
-	throw Not_implemented("reverse storage order");
-
-      uint64_t size = inst->bitsize / 8;
-      Addr addr = process_address(lhs, true);
-      assert(!addr.bitoffset);
-      store_ub_check(addr.ptr, addr.prov, size);
-      Inst *memory_flag = bb->value_inst(0, 1);
-      for (uint64_t i = 0; i < size; i++)
-	{
-	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
-	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
-	  Inst *high = bb->value_inst(i * 8 + 7, 32);
-	  Inst *low = bb->value_inst(i * 8, 32);
-	  Inst *byte = bb->build_inst(Op::EXTRACT, inst, high, low);
-	  Inst *byte_indef;
-	  if (indef)
-	    byte_indef = bb->build_inst(Op::EXTRACT, indef, high, low);
-	  else
-	    byte_indef = bb->value_inst(0, 8);
-	  bb->build_inst(Op::STORE, ptr, byte);
-	  bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
-	  bb->build_inst(Op::SET_MEM_INDEF, ptr, byte_indef);
-	}
-    }
+    process_store(lhs, inst, indef);
   else
     {
       tree2instruction.insert({lhs, inst});
@@ -5395,32 +5370,7 @@ void Converter::process_cfn_mask_len_load_lanes(gimple *stmt)
 			mask_type, len, lhs_type, orig, orig_indef);
   std::tie(inst, indef) = from_mem_repr(inst, indef, lhs_type);
   if (TREE_CODE(lhs) != SSA_NAME)
-    {
-      if (reverse_storage_order_for_component_p(lhs))
-	throw Not_implemented("reverse storage order");
-
-      uint64_t size = inst->bitsize / 8;
-      Addr addr = process_address(lhs, true);
-      assert(!addr.bitoffset);
-      store_ub_check(addr.ptr, addr.prov, size);
-      Inst *memory_flag = bb->value_inst(0, 1);
-      for (uint64_t i = 0; i < size; i++)
-	{
-	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
-	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
-	  Inst *high = bb->value_inst(i * 8 + 7, 32);
-	  Inst *low = bb->value_inst(i * 8, 32);
-	  Inst *byte = bb->build_inst(Op::EXTRACT, inst, high, low);
-	  Inst *byte_indef;
-	  if (indef)
-	    byte_indef = bb->build_inst(Op::EXTRACT, indef, high, low);
-	  else
-	    byte_indef = bb->value_inst(0, 8);
-	  bb->build_inst(Op::STORE, ptr, byte);
-	  bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
-	  bb->build_inst(Op::SET_MEM_INDEF, ptr, byte_indef);
-	}
-    }
+    process_store(lhs, inst, indef);
   else
     {
       tree2instruction.insert({lhs, inst});
