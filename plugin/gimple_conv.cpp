@@ -190,6 +190,7 @@ struct Converter {
   void process_cfn_isinf(gimple *stmt);
   void process_cfn_load_lanes(gimple *stmt);
   void process_cfn_mask_load_lanes(gimple *stmt);
+  void process_cfn_mask_len_load_lanes(gimple *stmt);
   void process_cfn_loop_vectorized(gimple *stmt);
   std::tuple<Inst*, Inst*> load_lanes(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, tree lhs_type);
   std::tuple<Inst*, Inst*> mask_len_load_lanes(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, Inst *mask, Inst *mask_indef, tree mask_type, Inst *len, tree lhs_type, Inst *orig, Inst *orig_indef);
@@ -5332,6 +5333,68 @@ std::tuple<Inst*, Inst*> Converter::mask_len_load(Inst *ptr, Inst *ptr_indef, In
   return {inst, indef};
 }
 
+void Converter::process_cfn_mask_len_load_lanes(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 6);
+  tree ptr_expr = gimple_call_arg(stmt, 0);
+  tree alignment_expr = gimple_call_arg(stmt, 1);
+  tree mask_expr = gimple_call_arg(stmt, 2);
+  tree mask_type = TREE_TYPE(mask_expr);
+  tree orig_expr = gimple_call_arg(stmt, 3);
+  tree len_expr = gimple_call_arg(stmt, 4);
+  assert(TYPE_UNSIGNED(TREE_TYPE(len_expr)));
+  tree bias = gimple_call_arg(stmt, 5);
+  if (tree2inst(bias)->value() != 0)
+    throw Not_implemented("process_cfn_mask_len_load: bias != 0");
+  tree lhs = gimple_call_lhs(stmt);
+  assert(lhs);
+  tree lhs_type = TREE_TYPE(lhs);
+  assert(TREE_CODE(lhs_type) == ARRAY_TYPE);
+
+  auto [ptr, ptr_indef, ptr_prov] = tree2inst_indef_prov(ptr_expr);
+  auto [orig, orig_indef] = tree2inst_indef(orig_expr);
+  uint64_t alignment = get_int_cst_val(alignment_expr) / 8;
+  auto [mask, mask_indef] = tree2inst_indef(mask_expr);
+  Inst *len = tree2inst(len_expr);
+
+  auto [inst, indef] =
+    mask_len_load_lanes(ptr, ptr_indef, ptr_prov, alignment, mask, mask_indef,
+			mask_type, len, lhs_type, orig, orig_indef);
+  std::tie(inst, indef) = from_mem_repr(inst, indef, lhs_type);
+  if (TREE_CODE(lhs) != SSA_NAME)
+    {
+      if (reverse_storage_order_for_component_p(lhs))
+	throw Not_implemented("reverse storage order");
+
+      uint64_t size = inst->bitsize / 8;
+      Addr addr = process_address(lhs, true);
+      assert(!addr.bitoffset);
+      store_ub_check(addr.ptr, addr.prov, size);
+      Inst *memory_flag = bb->value_inst(0, 1);
+      for (uint64_t i = 0; i < size; i++)
+	{
+	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
+	  Inst *high = bb->value_inst(i * 8 + 7, 32);
+	  Inst *low = bb->value_inst(i * 8, 32);
+	  Inst *byte = bb->build_inst(Op::EXTRACT, inst, high, low);
+	  Inst *byte_indef;
+	  if (indef)
+	    byte_indef = bb->build_inst(Op::EXTRACT, indef, high, low);
+	  else
+	    byte_indef = bb->value_inst(0, 8);
+	  bb->build_inst(Op::STORE, ptr, byte);
+	  bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
+	  bb->build_inst(Op::SET_MEM_INDEF, ptr, byte_indef);
+	}
+    }
+  else
+    {
+      tree2instruction.insert({lhs, inst});
+      tree2indef.insert({lhs, indef});
+    }
+}
+
 std::tuple<Inst*, Inst*> Converter::load_lanes(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, tree lhs_type)
 {
   uint64_t lhs_size = bytesize_for_type(lhs_type);
@@ -7128,6 +7191,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_MASK_LEN_LOAD:
       process_cfn_mask_len_load(stmt);
+      break;
+    case CFN_MASK_LEN_LOAD_LANES:
+      process_cfn_mask_len_load_lanes(stmt);
       break;
     case CFN_MASK_LEN_STORE:
       process_cfn_mask_len_store(stmt);
