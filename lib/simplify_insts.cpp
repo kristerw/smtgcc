@@ -1938,11 +1938,11 @@ Inst *Simplify::simplify_ult()
   // ult (sext x), c -> ult x, (trunc c) if (zext (trunc c)) == c && c >= 0
   if (arg1->op == Op::SEXT
       && arg2->op == Op::VALUE
-      && arg2->signed_value() >= 0
       && is_nbit_value(arg2, arg1->args[0]->bitsize))
     {
       Inst *new_const = value_inst(arg2->value(), arg1->args[0]->bitsize);
-      return build_inst(Op::ULT, arg1->args[0], new_const);
+      if (new_const->signed_value() >= 0)
+	return build_inst(Op::ULT, arg1->args[0], new_const);
     }
 
   // ult c, (zext x) -> ult (trunc c), x if (zext (trunc c)) == c
@@ -1957,11 +1957,11 @@ Inst *Simplify::simplify_ult()
   // ult c, (sext x) -> ult (trunc c), x if (zext (trunc c)) == c && c >= 0
   if (arg1->op == Op::VALUE
       && arg2->op == Op::SEXT
-      && arg1->signed_value() >= 0
       && is_nbit_value(arg1, arg2->args[0]->bitsize))
     {
       Inst *new_const = value_inst(arg1->value(), arg2->args[0]->bitsize);
-      return build_inst(Op::ULT, new_const, arg2->args[0]);
+      if (new_const->signed_value() >= 0)
+	return build_inst(Op::ULT, new_const, arg2->args[0]);
     }
 
   // ult (zext x), c -> true if (zext (trunc c)) != c
