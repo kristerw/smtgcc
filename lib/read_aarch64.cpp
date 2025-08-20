@@ -185,6 +185,8 @@ private:
   void process_store(uint32_t trunc_size = 0);
   void process_stp();
   void process_st1();
+  void process_vec_stn(uint64_t n);
+  void process_sve_stn(uint64_t n, uint64_t elem_size);
   void process_fcmp();
   void process_fccmp();
   void process_i2f(bool is_unsigned);
@@ -2447,6 +2449,88 @@ void Parser::process_st1()
   uint32_t size = value->bitsize / 8;
   store_ub_check(ptr, size);
   store_value(ptr, value);
+}
+
+void Parser::process_vec_stn(uint64_t n)
+{
+  get_left_brace(1);
+  auto [dest, nof_elem, elem_bitsize] = get_vreg(2);
+  uint64_t start_idx = get_vreg_idx(2, nof_elem, elem_bitsize);
+  get_minus(3);
+  uint64_t end_idx = get_vreg_idx(4, nof_elem, elem_bitsize);
+  get_right_brace(5);
+  get_comma(6);
+  Inst *ptr = process_address(7);
+  uint64_t nof_vect = end_idx - start_idx + 1;
+  if (nof_vect != n)
+    throw Parse_error("Incorrect number of registers", line_number);
+
+  std::vector<Inst*> insts(nof_vect, nullptr);
+  for (uint64_t i = 0; i < nof_vect; i++)
+    {
+      insts[i] = bb->build_inst(Op::READ, rstate->registers[start_idx + i]);
+    }
+
+  uint64_t elem_size = elem_bitsize / 8;
+  uint64_t offset = 0;
+  for (unsigned i = 0; i < nof_elem; i++)
+    {
+      for (auto inst : insts)
+	{
+	  Inst *off = bb->value_inst(offset, ptr->bitsize);
+	  Inst *elem_ptr = bb->build_inst(Op::ADD, ptr, off);
+	  offset += elem_size;
+
+	  Inst *elem = extract_vec_elem(inst, elem_bitsize, i);
+	  store_value(elem_ptr, elem);
+	}
+    }
+}
+
+void Parser::process_sve_stn(uint64_t n, uint64_t elem_size)
+{
+  get_left_brace(1);
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(2);
+  elem_bitsize = elem_size * 8;
+  uint64_t start_idx = get_zreg_idx(2, nof_elem, elem_bitsize);
+  get_minus(3);
+  uint64_t end_idx = get_zreg_idx(4, nof_elem, elem_bitsize);
+  get_right_brace(5);
+  get_comma(6);
+  Inst *pred = get_preg_value(7);
+  get_comma(8);
+  Inst *ptr = process_address(9, dest->bitsize / 8);
+  uint64_t nof_vect = end_idx - start_idx + 1;
+  if (nof_vect != n)
+    throw Parse_error("Incorrect number of registers", line_number);
+
+  std::vector<Inst*> insts(nof_vect, nullptr);
+  for (uint64_t i = 0; i < nof_vect; i++)
+    {
+      insts[i] = bb->build_inst(Op::READ, rstate->registers[start_idx + i]);
+    }
+
+  uint64_t offset = 0;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      for (auto inst : insts)
+	{
+	  Basic_block *true_bb = func->build_bb();
+	  Basic_block *false_bb = func->build_bb();
+	  Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+	  bb->build_br_inst(pred_elem, true_bb, false_bb);
+	  bb = true_bb;
+
+	  Inst *elem_offset = bb->value_inst(offset, ptr->bitsize);
+	  offset += elem_size;
+	  Inst *elem_ptr = bb->build_inst(Op::ADD, ptr, elem_offset);
+	  Inst *elem = extract_vec_elem(inst, elem_bitsize, i);
+	  store_value(elem_ptr, elem);
+
+	  bb->build_br_inst(false_bb);
+	  bb = false_bb;
+	}
+    }
 }
 
 void Parser::process_fcmp()
@@ -7390,6 +7474,36 @@ void Parser::parse_function()
     ;
   else if (name == "st1")
     process_st1();
+  else if (name == "st2")
+    process_vec_stn(2);
+  else if (name == "st2b")
+    process_sve_stn(2, 1);
+  else if (name == "st2h")
+    process_sve_stn(2, 2);
+  else if (name == "st2w")
+    process_sve_stn(2, 4);
+  else if (name == "st2d")
+    process_sve_stn(2, 8);
+  else if (name == "st3")
+    process_vec_stn(3);
+  else if (name == "st3b")
+    process_sve_stn(3, 1);
+  else if (name == "st3h")
+    process_sve_stn(3, 2);
+  else if (name == "st3w")
+    process_sve_stn(3, 4);
+  else if (name == "st3d")
+    process_sve_stn(3, 8);
+  else if (name == "st4")
+    process_vec_stn(4);
+  else if (name == "st4b")
+    process_sve_stn(4, 1);
+  else if (name == "st4h")
+    process_sve_stn(4, 2);
+  else if (name == "st4w")
+    process_sve_stn(4, 4);
+  else if (name == "st4d")
+    process_sve_stn(4, 8);
   else if (name == "sqadd")
     process_binary(gen_sat_sadd);
   else if (name == "sqsub")
