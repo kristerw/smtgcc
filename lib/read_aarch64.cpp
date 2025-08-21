@@ -332,6 +332,7 @@ private:
   Inst *load_value(Inst *ptr, uint64_t size);
   void process_sve_ld1(uint32_t load_elem_size, Op op);
   void process_sve_ld1r(uint32_t load_elem_size);
+  void process_sve_ld1qr(uint32_t load_elem_size);
   void store_value(Inst *ptr, Inst *value);
   void process_sve_st1(uint32_t store_elem_size);
   void process_sve_mov_preg();
@@ -6363,7 +6364,6 @@ void Parser::process_sve_ld1r(uint32_t load_elem_size)
   Inst *arg2 = process_address(5, load_elem_size * nof_elem);
 
   Inst *zero = bb->value_inst(0, elem_bitsize);
-  Inst *step = bb->value_inst(load_elem_size, arg2->bitsize);
   Inst *res = nullptr;
   Inst *loaded_value = load_value(arg2, load_elem_size);
   for (uint32_t i = 0; i < nof_elem; i++)
@@ -6374,7 +6374,33 @@ void Parser::process_sve_ld1r(uint32_t load_elem_size)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
 	res = inst;
-      arg2 = bb->build_inst(Op::ADD, arg2, step);
+    }
+
+  write_reg(dest, res);
+}
+
+void Parser::process_sve_ld1qr(uint32_t load_elem_size)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  assert(elem_bitsize == 8 * load_elem_size);
+  get_comma(2);
+  Inst *arg1 = get_preg_zeroing_value(3);
+  get_comma(4);
+  Inst *arg2 = process_address(5, load_elem_size * nof_elem);
+
+  Inst *zero = bb->value_inst(0, elem_bitsize);
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *offset = bb->value_inst(i * load_elem_size, arg2->bitsize);
+      Inst *ptr = bb->build_inst(Op::ADD, arg2, offset);
+      Inst *loaded_value = load_value(ptr, load_elem_size);
+      Inst *pred = extract_pred_elem(arg1, elem_bitsize, i);
+      Inst *inst = bb->build_inst(Op::ITE, pred, loaded_value, zero);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
     }
 
   write_reg(dest, res);
@@ -6831,6 +6857,14 @@ void Parser::parse_sve_op()
     process_sve_ld1r(4);
   else if (name == "ld1rd")
     process_sve_ld1r(8);
+  else if (name == "ld1rqb")
+    process_sve_ld1qr(1);
+  else if (name == "ld1rqh")
+    process_sve_ld1qr(2);
+  else if (name == "ld1rqw")
+    process_sve_ld1qr(4);
+  else if (name == "ld1rqd")
+    process_sve_ld1qr(8);
   else if (name == "lsl")
     process_sve_binary(Op::SHL);
   else if (name == "lslr")
