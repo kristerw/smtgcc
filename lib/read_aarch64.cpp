@@ -7424,6 +7424,8 @@ void Parser::parse_function()
     process_addvl();
   else if (name == "fabd")
     process_binary(gen_fabd);
+  else if (name == "cmtst")
+    process_binary(gen_cmtst);
   else if (name == "cntb")
     process_cnt(8);
   else if (name == "cnth")
