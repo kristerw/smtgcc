@@ -316,6 +316,7 @@ private:
   void process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_preg_punpk(bool high);
   void process_sve_preg_ptest();
+  void process_sve_widen(Op, bool high);
   void process_sve_dot(Op op1, Op op2);
   void process_sve_rev();
   void process_sve_bsl(bool invert_arg1, bool invert_arg2, bool invert_result);
@@ -5918,6 +5919,27 @@ void Parser::process_sve_preg_ptest()
   set_nzcv(n, z, c, v);
 }
 
+void Parser::process_sve_widen(Op op, bool high)
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1 = get_zreg_value(3);
+  get_end_of_line(4);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      uint32_t idx = high ? i + nof_elem : i;
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize / 2, idx);
+      Inst *inst = bb->build_inst(op, elem1, elem_bitsize);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_dot(Op op1, Op op2)
 {
   auto [dest, dest_nof_elem, dest_elem_bitsize] = get_zreg(1);
@@ -6877,6 +6899,10 @@ void Parser::parse_sve_op()
     process_sve_binary(Op::SUB);
   else if (name == "subr")
     process_sve_binary_rev(Op::SUB);
+  else if (name == "sunpklo")
+    process_sve_widen(Op::SEXT, false);
+  else if (name == "sunpkhi")
+    process_sve_widen(Op::SEXT, true);
   else if (name == "sxtb")
     process_sve_ext(Op::SEXT, 8);
   else if (name == "sxth")
@@ -6905,6 +6931,10 @@ void Parser::parse_sve_op()
     process_sve_binary(gen_sat_uadd);
   else if (name == "uqsub")
     process_sve_binary(gen_sat_usub);
+  else if (name == "uunpklo")
+    process_sve_widen(Op::ZEXT, false);
+  else if (name == "uunpkhi")
+    process_sve_widen(Op::ZEXT, true);
   else if (name == "uxtb")
     process_sve_ext(Op::ZEXT, 8);
   else if (name == "uxth")
