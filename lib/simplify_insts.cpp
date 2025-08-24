@@ -1778,6 +1778,22 @@ Inst *Simplify::simplify_ite()
   if (inst->bitsize == 1 && is_value_m1(arg2))
     return build_inst(Op::OR, arg1, arg3);
 
+  // ite x, y, x -> and x, y
+  if (arg3 == arg1)
+    return build_inst(Op::AND, arg1, arg2);
+
+  // ite x, y, (not x) -> or (not x), y
+  if (arg3->op == Op::NOT && arg3->args[0] == arg1)
+    return build_inst(Op::OR, arg3, arg2);
+
+  // ite x, (not x), y -> and (not x), y
+  if (arg2->op == Op::NOT && arg2->args[0] == arg1)
+    return build_inst(Op::AND, arg2, arg3);
+
+  // ite x, x, y -> or x, y
+  if (arg2 == arg1)
+    return build_inst(Op::OR, arg1, arg3);
+
   // ite x, (sext y), (sext z) -> sext (ite x, y, z)
   // ite x, (zext y), (zext z) -> zext (ite x, y, z)
   if ((arg2->op == Op::SEXT || arg2->op == Op::ZEXT)
