@@ -1127,6 +1127,14 @@ Inst *Simplify::simplify_sext()
       return build_inst(Op::SEXT, new_inst, arg2);
     }
 
+  // sext (ite x, y, z) -> ite x, (sext y), (sext z)
+  if (arg1->op == Op::ITE && arg1->bitsize != 1)
+    {
+      Inst *ite_arg2 = build_inst(Op::SEXT, arg1->args[1], arg2);
+      Inst *ite_arg3 = build_inst(Op::SEXT, arg1->args[2], arg2);
+      return build_inst(Op::ITE, arg1->args[0], ite_arg2, ite_arg3);
+    }
+
   return inst;
 }
 
@@ -1153,6 +1161,14 @@ Inst *Simplify::simplify_zext()
       Inst *low = arg1->args[2];
       Inst *new_inst = build_inst(Op::EXTRACT, x, high, low);
       return build_inst(Op::ZEXT, new_inst, arg2);
+    }
+
+  // zext (ite x, y, z) -> ite x, (zext y), (zext z)
+  if (arg1->op == Op::ITE && arg1->bitsize != 1)
+    {
+      Inst *ite_arg2 = build_inst(Op::ZEXT, arg1->args[1], arg2);
+      Inst *ite_arg3 = build_inst(Op::ZEXT, arg1->args[2], arg2);
+      return build_inst(Op::ITE, arg1->args[0], ite_arg2, ite_arg3);
     }
 
   return inst;
@@ -1793,42 +1809,6 @@ Inst *Simplify::simplify_ite()
   // ite x, x, y -> or x, y
   if (arg2 == arg1)
     return build_inst(Op::OR, arg1, arg3);
-
-  // ite x, (sext y), (sext z) -> sext (ite x, y, z)
-  // ite x, (zext y), (zext z) -> zext (ite x, y, z)
-  if ((arg2->op == Op::SEXT || arg2->op == Op::ZEXT)
-      && arg3->op == arg2->op
-      && arg2->args[0]->bitsize == arg3->args[0]->bitsize)
-    {
-      Inst *new_inst = build_inst(Op::ITE, arg1, arg2->args[0], arg3->args[0]);
-      return build_inst(arg2->op, new_inst, arg2->args[1]);
-    }
-
-  // ite x, (sext y), c -> sext (ite x, y, (trunc c))
-  // ite x, (zext y), c -> zext (ite x, y, (trunc c))
-  if (arg3->op == Op::VALUE
-      && ((arg2->op == Op::SEXT
-	   && is_nbit_signed_value(arg3, arg2->args[0]->bitsize))
-	  || (arg2->op == Op::ZEXT
-	      && is_nbit_value(arg3, arg2->args[0]->bitsize))))
-    {
-      Inst *new_const = value_inst(arg3->value(), arg2->args[0]->bitsize);
-      Inst *new_inst = build_inst(Op::ITE, arg1, arg2->args[0], new_const);
-      return build_inst(arg2->op, new_inst, arg2->args[1]);
-    }
-
-  // ite x, c, (sext y) -> sext (ite x, (trunc c), y)
-  // ite x, c, (zext y) -> zext (ite x, (trunc c), y)
-  if (arg2->op == Op::VALUE
-      && ((arg3->op == Op::SEXT
-	   && is_nbit_signed_value(arg2, arg3->args[0]->bitsize))
-	  || (arg3->op == Op::ZEXT
-	      && is_nbit_value(arg2, arg3->args[0]->bitsize))))
-    {
-      Inst *new_const = value_inst(arg2->value(), arg3->args[0]->bitsize);
-      Inst *new_inst = build_inst(Op::ITE, arg1, new_const, arg3->args[0]);
-      return build_inst(arg3->op, new_inst, arg3->args[1]);
-    }
 
   // ite (slt (neg x), x), x, (neg x) -> abs(x)
   if (arg1->op == Op::SLT
