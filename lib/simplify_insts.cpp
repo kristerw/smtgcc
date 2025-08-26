@@ -88,9 +88,9 @@ private:
   Inst *simplify_sext();
   Inst *simplify_sle();
   Inst *simplify_slt();
-  Inst *specialize_cond_array(Inst *cond, Inst *inst, bool true_branch);
-  Inst *specialize_cond_calc(Inst *cond, Inst *inst, bool true_branch);
-  Inst *specialize_cond_arg(Inst *cond, Inst *inst, bool true_branch);
+  Inst *specialize_cond_calc(Inst *cond, Inst *inst, bool is_true_branch);
+  Inst *specialize_cond_arg(Inst *cond, Inst *inst, bool is_true_branch,
+			    int depth = 0);
   Inst *simplify_ite();
   Inst *simplify_shl();
   Inst *simplify_smul_wraps();
@@ -1597,45 +1597,16 @@ Inst *Simplify::simplify_sub()
   return inst;
 }
 
-Inst *Simplify::specialize_cond_array(Inst *cond, Inst *inst, bool true_branch)
-{
-  Inst *arg1 = specialize_cond_arg(cond, inst->args[0], true_branch);
-  Inst *arg2 = specialize_cond_arg(cond, inst->args[1], true_branch);
-  Inst *arg3 = specialize_cond_arg(cond, inst->args[2], true_branch);
-
-  if (arg1 == inst->args[0]
-      && arg2 == inst->args[1]
-      && arg3 == inst->args[2])
-    return inst;
-
-  if (arg1->op == Op::ARRAY_STORE
-      || arg1->op == Op::ARRAY_SET_INDEF
-      || arg1->op == Op::ARRAY_SET_FLAG)
-    arg1 = specialize_cond_array(cond, arg1, true_branch);
-
-  return build_inst(inst->op, arg1, arg2, arg3);
-}
-
-Inst *Simplify::specialize_cond_calc(Inst *cond, Inst *inst, bool true_branch)
+Inst *Simplify::specialize_cond_calc(Inst *cond, Inst *inst, bool is_true_branch)
 {
   if (inst == cond)
-    return cond->bb->value_inst(true_branch, 1);
-  else if (inst->op == Op::SEXT || inst->op == Op::ZEXT)
-    {
-      Inst *arg = specialize_cond_calc(cond, inst->args[0], true_branch);
-      if (arg != inst->args[0])
-	return build_inst(inst->op, arg, inst->args[1]);
-    }
-  else if (inst->op == Op::NOT)
-    {
-      Inst *arg = specialize_cond_calc(cond, inst->args[0], true_branch);
-      if (arg != inst->args[0])
-	return build_inst(inst->op, arg);
-    }
+    return cond->bb->value_inst(is_true_branch, 1);
+  else if (inst->op == Op::ITE && cond == inst->args[0])
+    return is_true_branch ? inst->args[1] : inst->args[2];
   return inst;
 }
 
-Inst *Simplify::specialize_cond_arg(Inst *cond, Inst *inst, bool true_branch)
+Inst *Simplify::specialize_cond_arg(Inst *cond, Inst *inst, bool is_true_branch, int depth)
 {
   switch (inst->iclass())
     {
@@ -1646,63 +1617,69 @@ Inst *Simplify::specialize_cond_arg(Inst *cond, Inst *inst, bool true_branch)
     case Inst_class::icomparison:
     case Inst_class::fcomparison:
     case Inst_class::conv:
-      break;
     case Inst_class::ternary:
-      // The array store instructions are a bit special as they are chained,
-      // so a store of a 32-bit value consists of four store instructions
-      // where the value may be extracted from Op::ITE. So we need to handle
-      // this as a special case to essentially treat all stores as one
-      // instruction.
-      if (inst->op == Op::ARRAY_STORE
-	  || inst->op == Op::ARRAY_SET_INDEF
-	  || inst->op == Op::ARRAY_SET_FLAG)
-	return specialize_cond_array(cond, inst, true_branch);
       break;
     default:
       return inst;
     }
 
-  if (inst->op == Op::SIMP_BARRIER)
-    return inst;
+  Inst *new_inst = specialize_cond_calc(cond, inst, is_true_branch);
+  if (new_inst != inst)
+    return new_inst;
 
-  if (inst->op == Op::ITE && cond == inst->args[0])
-    return true_branch ? inst->args[1] : inst->args[2];
-
-  Inst *args[3];
-  assert(inst->nof_args > 0);
-  assert(inst->nof_args <= 3);
-  bool modified = false;
-  for (uint i = 0; i < inst->nof_args; i++)
+  if (depth < 1)
     {
-      Inst *arg = inst->args[i];
-      if (arg->op == Op::ITE && arg->args[0] == cond)
+      Inst *args[3];
+      assert(inst->nof_args <= 3);
+      bool modified = false;
+      for (uint i = 0; i < inst->nof_args; i++)
 	{
-	  arg = true_branch ? arg->args[1] : arg->args[2];
-	  modified = true;
-	}
-      args[i] = arg;
+	  Inst *arg = inst->args[i];
+	  args[i] = inst->args[i];
 
-      arg = specialize_cond_calc(cond, args[i], true_branch);
-      if (arg != args[i])
-	{
-	  args[i] = arg;
-	  modified = true;
-	}
-    }
+	  int next_depth = depth + 1;
 
-  if (modified)
-    {
-      switch (inst->nof_args)
+	  // The array store instructions are a bit special as they are
+	  // chained, so a store of a 32-bit value consists of four store
+	  // instructions where the value may be extracted from Op::ITE.
+	  // So we need to handle this as a special case to essentially
+	  // treat all stores as one instruction.
+	  if (inst->op == arg->op
+	      && (inst->op == Op::ARRAY_STORE
+		  || inst->op == Op::ARRAY_SET_INDEF
+		  || inst->op == Op::ARRAY_SET_FLAG))
+	    next_depth = depth;
+
+	  // We often have chains of Op::EXTRACT, Op::ZEXT, etc., between
+	  // the interesting instructions. Exclude them from the depth.
+	  if (arg->iclass() == Inst_class::iunary
+	      || arg->iclass() == Inst_class::funary
+	      || arg->iclass() == Inst_class::conv
+	      || arg->op == Op::EXTRACT)
+	    next_depth = depth;
+
+	  arg = specialize_cond_arg(cond, args[i], is_true_branch, next_depth);
+	  if (arg != args[i])
+	    {
+	      args[i] = arg;
+	      modified = true;
+	    }
+	}
+
+      if (modified)
 	{
-	case 1:
-	  return build_inst(inst->op, args[0]);
-	case 2:
-	  return build_inst(inst->op, args[0], args[1]);
-	case 3:
-	  return build_inst(inst->op, args[0], args[1], args[2]);
-	default:
-	  assert(0);
-	  break;
+	  switch (inst->nof_args)
+	    {
+	    case 1:
+	      return build_inst(inst->op, args[0]);
+	    case 2:
+	      return build_inst(inst->op, args[0], args[1]);
+	    case 3:
+	      return build_inst(inst->op, args[0], args[1], args[2]);
+	    default:
+	      assert(0);
+	      break;
+	    }
 	}
     }
   return inst;
