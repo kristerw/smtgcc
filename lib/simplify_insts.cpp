@@ -825,23 +825,6 @@ Inst *Simplify::simplify_ashr()
   if (arg1->op == Op::ZEXT)
     return build_inst(Op::LSHR, arg1, arg2);
 
-  // ashr x, c -> sext (extract x)
-  //
-  // We only do this if x is a "concat", "sext", "zext", or "extract"
-  // instruction, as it is only then that the transformation has any
-  // real possibility of improving the result.
-  if (arg2->op == Op::VALUE
-      && (arg1->op == Op::CONCAT
-	  || arg1->op == Op::SEXT
-	  || arg1->op == Op::ZEXT
-	  || arg1->op == Op::EXTRACT))
-    {
-      uint64_t c = arg2->value();
-      assert(c > 0 && c < arg1->bitsize);
-      Inst *new_inst = build_inst(Op::EXTRACT, arg1, arg1->bitsize - 1, c);
-      return build_inst(Op::SEXT, new_inst, inst->bitsize);
-    }
-
   return inst;
 }
 
