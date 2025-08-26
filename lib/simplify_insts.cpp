@@ -1679,8 +1679,11 @@ Inst *Simplify::specialize_cond_arg(Inst *cond, Inst *inst, bool true_branch)
       return inst;
     }
 
-  if (inst->op == Op::ITE || inst->op == Op::SIMP_BARRIER)
+  if (inst->op == Op::SIMP_BARRIER)
     return inst;
+
+  if (inst->op == Op::ITE && cond == inst->args[0])
+    return true_branch ? inst->args[1] : inst->args[2];
 
   Inst *args[3];
   assert(inst->nof_args > 0);
