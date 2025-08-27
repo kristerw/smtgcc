@@ -485,6 +485,23 @@ Inst *Simplify::simplify_and()
       return build_inst(Op::SHL, new_inst, c);
     }
 
+  // and (ite x, y, z), x -> and x, y
+  // and x, (ite x, y, z) -> and x, y
+  // and (ite x, y, z), (not x) -> and (not x), z
+  // and (not x), (ite x, y, z) -> and (not x), z
+  if (arg1->op == Op::ITE && arg1->args[0] == arg2)
+    return build_inst(Op::AND, arg1->args[1], arg2);
+  if (arg2->op == Op::ITE && arg2->args[0] == arg1)
+    return build_inst(Op::AND, arg2->args[1], arg1);
+  if (arg1->op == Op::ITE
+      && arg2->op == Op::NOT
+      && arg1->op == Op::ITE && arg1->args[0] == arg2->args[0])
+    return build_inst(Op::AND, arg1->args[2], arg2);
+  if (arg2->op == Op::ITE
+      && arg1->op == Op::NOT
+      && arg2->op == Op::ITE && arg2->args[0] == arg1->args[0])
+    return build_inst(Op::AND, arg2->args[2], arg1);
+
   return inst;
 }
 
