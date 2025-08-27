@@ -297,6 +297,30 @@ Inst *Converter::value_inst(unsigned __int128 value, uint32_t bitsize)
   return dest_bb->value_inst(value, bitsize);
 }
 
+bool is_and(Inst *inst)
+{
+  if (inst->op == Op::AND)
+    return true;
+
+  // This is equivalent to an Op::AND by De Morgan's laws.
+  if (inst->op == Op::NOT && inst->args[0]->op == Op::OR)
+    return true;
+
+  return false;
+}
+
+bool is_or(Inst *inst)
+{
+  if (inst->op == Op::OR)
+    return true;
+
+  // This is equivalent to an Op::OR by De Morgan's laws.
+  if (inst->op == Op::NOT && inst->args[0]->op == Op::AND)
+    return true;
+
+  return false;
+}
+
 Inst *Converter::simplify(Inst *inst)
 {
   if (!run_simplify_inst)
@@ -307,9 +331,9 @@ Inst *Converter::simplify(Inst *inst)
   if (!processing_canonicalization
       && inst->bitsize == 1
       && ((inst->op == Op::AND
-          && (inst->args[0]->op == Op::AND || inst->args[1]->op == Op::AND))
-         || (inst->op == Op::OR
-             && (inst->args[0]->op == Op::OR || inst->args[1]->op == Op::OR))))
+	   && (is_and(inst->args[0]) || is_and(inst->args[1])))
+	  || (inst->op == Op::OR
+	      && (is_or(inst->args[0]) || is_or(inst->args[1])))))
     inst = canonicalize_and_or(inst);
   else if (!processing_canonicalization && inst->op == Op::ADD)
     inst = canonicalize_add(inst);
@@ -367,14 +391,8 @@ Inst *Converter::canonicalize_and_or(Inst *inst)
 
   // Collect the elements.
   std::set<Inst *, Inst_comp> elems;
-  if (arg1->op == inst->op)
-    flatten(inst->op, arg1, elems);
-  else
-    elems.insert(arg1);
-  if (arg2->op == inst->op)
-    flatten(inst->op, arg2, elems);
-  else
-    elems.insert(arg2);
+  flatten(inst->op, arg1, elems);
+  flatten(inst->op, arg2, elems);
 
   assert(!elems.empty());
   if (elems.size() == 1)
