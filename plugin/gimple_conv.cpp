@@ -5205,10 +5205,6 @@ void Converter::process_cfn_isinf(gimple *stmt)
       uint32_t bitsize = bitsize_for_type(elem_type);
       if (bitsize > res->bitsize)
 	res = bb->build_inst(Op::ZEXT, res, bitsize);
-      Inst *neg = bb->build_inst(Op::NEG, res);
-      Inst *zero = bb->value_inst(0, elem1->bitsize);
-      Inst *is_neg = bb->build_inst(Op::FLT, elem1, zero);
-      res = bb->build_inst(Op::ITE, is_neg, neg, res);
       Inst *res_indef = get_res_indef(elem1_indef, elem_type);
       return {res, res_indef};
     };
