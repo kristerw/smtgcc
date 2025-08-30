@@ -111,6 +111,7 @@ private:
   Inst *get_inst(const Cse_key& key);
   bool is_min_max(Inst *arg1, Inst *arg2, Inst *arg3);
   Inst *cse_min_max(Inst *arg1, Inst *arg2, Inst *arg3);
+  Inst *cse_icomparison(Op op, Inst *arg1, Inst *arg2);
 
 public:
   Inst *get_inst(Op op)
@@ -126,7 +127,10 @@ public:
   Inst *get_inst(Op op, Inst *arg1, Inst *arg2) override
   {
     const Cse_key key(op, arg1, arg2);
-    return get_inst(key);
+    Inst *inst = get_inst(key);
+    if (!inst && inst_info[(int)op].iclass == Inst_class::icomparison)
+      inst = cse_icomparison(op, arg1, arg2);
+    return inst;
   }
   Inst *get_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3) override
   {
@@ -637,6 +641,63 @@ Inst *Cse::cse_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
 
   const Cse_key key(Op::ITE, cmp_inst, arg3, arg2);
   return get_inst(key);
+}
+
+Inst *Cse::cse_icomparison(Op op, Inst *arg1, Inst *arg2)
+{
+  // ult x, c <--> not (ult c-1, x)
+  if (op == Op::ULT && arg2->op == Op::VALUE && !is_value_zero(arg2))
+    {
+      Inst *val = arg1->bb->value_inst(arg2->value() - 1, arg1->bitsize);
+      const Cse_key key1(op, val, arg1);
+      Inst *cmp = get_inst(key1);
+      if (cmp)
+	{
+	  const Cse_key key2(Op::NOT, cmp);
+	  return get_inst(key2);
+	}
+    }
+
+  // slt x, c <--> not (slt c-1, x)
+  if (op == Op::SLT && arg2->op == Op::VALUE && !is_value_signed_min(arg2))
+    {
+      Inst *val = arg1->bb->value_inst(arg2->signed_value() - 1, arg1->bitsize);
+      const Cse_key key1(op, val, arg1);
+      Inst *cmp = get_inst(key1);
+      if (cmp)
+	{
+	  const Cse_key key2(Op::NOT, cmp);
+	  return get_inst(key2);
+	}
+    }
+
+  // ult c, x <--> not (ult x, c+1)
+  if (op == Op::ULT && arg1->op == Op::VALUE && !is_value_m1(arg1))
+    {
+      Inst *val = arg1->bb->value_inst(arg1->value() + 1, arg1->bitsize);
+      const Cse_key key1(op, arg2, val);
+      Inst *cmp = get_inst(key1);
+      if (cmp)
+	{
+	  const Cse_key key2(Op::NOT, cmp);
+	  return get_inst(key2);
+	}
+    }
+
+  // slt c, x <--> not (slt x, c+1)
+  if (op == Op::SLT && arg1->op == Op::VALUE && !is_value_signed_max(arg1))
+    {
+      Inst *val = arg1->bb->value_inst(arg1->signed_value() + 1, arg1->bitsize);
+      const Cse_key key1(op, arg2, val);
+      Inst *cmp = get_inst(key1);
+      if (cmp)
+	{
+	  const Cse_key key2(Op::NOT, cmp);
+	  return get_inst(key2);
+	}
+    }
+
+  return nullptr;
 }
 
 Inst *Converter::build_inst(Op op)
