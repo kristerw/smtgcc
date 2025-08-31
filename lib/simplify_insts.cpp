@@ -1644,7 +1644,7 @@ Inst *Simplify::specialize_cond_arg(Inst *cond, Inst *inst, bool is_true_branch,
   if (new_inst != inst)
     return new_inst;
 
-  if (depth < 1)
+  if (depth < 2)
     {
       Inst *args[3];
       assert(inst->nof_args <= 3);
