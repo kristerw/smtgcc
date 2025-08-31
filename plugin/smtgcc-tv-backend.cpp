@@ -280,6 +280,53 @@ static void eliminate_registers(Function *func)
     }
 }
 
+// This eliminates registers in a basic block. It is safe to call this
+// function if the function has loops.
+static void early_eliminate_registers(Function *func)
+{
+  for (Basic_block *bb : func->bbs)
+    {
+      // Forward the value from an Op::WRITE instruction to a following
+      // Op::READ instruction.
+      std::map<Inst*,Inst*> write;
+      for (Inst *inst = bb->first_inst; inst;)
+	{
+	  Inst *next_inst = inst->next;
+
+	  if (inst->op == Op::WRITE)
+	    write[inst->args[0]] = inst->args[1];
+	  else if (inst->op == Op::READ)
+	    {
+	      if (write.contains(inst->args[0]))
+		inst->replace_all_uses_with(write[inst->args[0]]);
+	      if (inst->used_by.empty())
+		destroy_instruction(inst);
+	    }
+
+	  inst = next_inst;
+	}
+
+      // Remove dead Op::WRITE instructions.
+      std::set<Inst*> dead_writes;
+      for (Inst *inst = bb->last_inst; inst;)
+	{
+	  Inst *prev_inst = inst->prev;
+
+	  if (inst->op == Op::WRITE)
+	    {
+	      if (dead_writes.contains(inst->args[0]))
+		destroy_instruction(inst);
+	      else
+		dead_writes.insert(inst->args[0]);
+	    }
+	  else if (inst->op == Op::READ)
+	    dead_writes.erase(inst->args[0]);
+
+	  inst = prev_inst;
+	}
+    }
+}
+
 static void finish(void *, void *data)
 {
   if (seen_error())
@@ -305,6 +352,9 @@ static void finish(void *, void *data)
 #endif
 	  validate(func);
 
+	  early_eliminate_registers(func);
+	  simplify_insts(func);
+	  dead_code_elimination(func);
 	  simplify_cfg(func);
 	  if (loop_unroll(func))
 	    {
