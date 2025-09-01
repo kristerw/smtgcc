@@ -257,6 +257,9 @@ class Converter {
   void flatten(Op op, Inst *inst, std::vector<Inst *>& elems);
   Inst *canonicalize_and_or(Inst *inst);
   Inst *canonicalize_add(Inst *inst);
+  Inst *specialize_cond_calc(Inst *cond, Inst *inst, bool is_true_branch);
+  Inst *specialize_cond_arg(Inst *cond, Inst *inst, bool is_true_branch,
+			    int depth = 0);
   Inst *build_inst(Op op);
   Inst *build_inst(Op op, Inst *arg, bool insert_after = false);
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2);
@@ -316,6 +319,28 @@ Inst *Converter::simplify(Inst *inst)
     inst = canonicalize_add(inst);
   else
     inst = simplify_inst(inst, &cse);
+
+  // Simplify a sequence of two Op::ITEs with identical conditions and an
+  // unrelated operation in the middle:
+  //
+  //   %1 = ite %a, %b, %c
+  //   %2 = op %1, %d
+  //   %3 = ite %a, %2, %e
+  //
+  // to
+  //
+  //   %2 = op %b, %d
+  //   %3 = ite %a, %2, %e
+  if (inst->op == Op::ITE)
+    {
+      Inst *const arg1 = inst->args[0];
+      Inst *const arg2 = inst->args[1];
+      Inst *const arg3 = inst->args[2];
+      Inst *new_arg2 = specialize_cond_arg(arg1, arg2, true);
+      Inst *new_arg3 = specialize_cond_arg(arg1, arg3, false);
+      if (new_arg2 != arg2 || new_arg3 != arg3)
+	return build_inst(Op::ITE, arg1, new_arg2, new_arg3);
+    }
 
   return inst;
 }
@@ -617,6 +642,94 @@ Inst *Converter::canonicalize_add(Inst *inst)
   processing_canonicalization = false;
 
   return new_inst;
+}
+
+Inst *Converter::specialize_cond_calc(Inst *cond, Inst *inst, bool is_true_branch)
+{
+  if (inst == cond)
+    return value_inst(is_true_branch, 1);
+  else if (inst->op == Op::ITE && cond == inst->args[0])
+    return is_true_branch ? inst->args[1] : inst->args[2];
+  return inst;
+}
+
+Inst *Converter::specialize_cond_arg(Inst *cond, Inst *inst, bool is_true_branch, int depth)
+{
+  switch (inst->iclass())
+    {
+    case Inst_class::iunary:
+    case Inst_class::funary:
+    case Inst_class::ibinary:
+    case Inst_class::fbinary:
+    case Inst_class::icomparison:
+    case Inst_class::fcomparison:
+    case Inst_class::conv:
+    case Inst_class::ternary:
+      break;
+    default:
+      return inst;
+    }
+
+  Inst *new_inst = specialize_cond_calc(cond, inst, is_true_branch);
+  if (new_inst != inst)
+    return new_inst;
+
+  if (depth < 2)
+    {
+      Inst *args[3];
+      assert(inst->nof_args <= 3);
+      bool modified = false;
+      for (uint i = 0; i < inst->nof_args; i++)
+	{
+	  Inst *arg = inst->args[i];
+	  args[i] = inst->args[i];
+
+	  int next_depth = depth + 1;
+
+	  // The array store instructions are a bit special as they are
+	  // chained, so a store of a 32-bit value consists of four store
+	  // instructions where the value may be extracted from Op::ITE.
+	  // So we need to handle this as a special case to essentially
+	  // treat all stores as one instruction.
+	  if (inst->op == arg->op
+	      && (inst->op == Op::ARRAY_STORE
+		  || inst->op == Op::ARRAY_SET_INDEF
+		  || inst->op == Op::ARRAY_SET_FLAG))
+	    next_depth = depth;
+
+	  // We often have chains of Op::EXTRACT, Op::ZEXT, etc., between
+	  // the interesting instructions. Exclude them from the depth.
+	  if (arg->iclass() == Inst_class::iunary
+	      || arg->iclass() == Inst_class::funary
+	      || arg->iclass() == Inst_class::conv
+	      || arg->op == Op::EXTRACT)
+	    next_depth = depth;
+
+	  arg = specialize_cond_arg(cond, args[i], is_true_branch, next_depth);
+	  if (arg != args[i])
+	    {
+	      args[i] = arg;
+	      modified = true;
+	    }
+	}
+
+      if (modified)
+	{
+	  switch (inst->nof_args)
+	    {
+	    case 1:
+	      return build_inst(inst->op, args[0]);
+	    case 2:
+	      return build_inst(inst->op, args[0], args[1]);
+	    case 3:
+	      return build_inst(inst->op, args[0], args[1], args[2]);
+	    default:
+	      assert(0);
+	      break;
+	    }
+	}
+    }
+  return inst;
 }
 
 bool Cse::is_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
