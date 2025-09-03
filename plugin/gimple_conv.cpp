@@ -2928,40 +2928,6 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	  }
 	return {bb->build_inst(Op::XOR, arg1, arg2), res_indef, nullptr};
       }
-    case MULT_EXPR:
-      {
-	Inst *res_indef = nullptr;
-	if (arg1_indef || arg2_indef)
-	  {
-	    // The result is defined if no input is uninitialized, or if one of
-	    // the arguments is an initialized zero.
-	    Inst *zero = bb->value_inst(0, arg1->bitsize);
-	    if (!arg1_indef)
-	      arg1_indef = zero;
-	    if (!arg2_indef)
-	      arg2_indef = zero;
-	    Inst *arg1_unini = bb->build_inst(Op::NE, arg1_indef, zero);
-	    Inst *arg1_nonzero = bb->build_inst(Op::NE, arg1, zero);
-	    Inst *arg2_unini = bb->build_inst(Op::NE, arg2_indef, zero);
-	    Inst *arg2_nonzero = bb->build_inst(Op::NE, arg2, zero);
-	    Inst *is_indef =
-	      bb->build_inst(Op::OR,
-			     bb->build_inst(Op::AND,
-					    arg1_unini,
-					    bb->build_inst(Op::OR, arg2_unini,
-							   arg2_nonzero)),
-			     bb->build_inst(Op::AND,
-					    arg2_unini,
-					    bb->build_inst(Op::OR, arg1_unini,
-							   arg1_nonzero)));
-	    res_indef = bb->build_inst(Op::SEXT, is_indef, arg1->bitsize);
-	  }
-
-	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
-	  bb->build_inst(Op::UB, bb->build_inst(Op::SMUL_WRAPS, arg1, arg2));
-
-	return {bb->build_inst(Op::MUL, arg1, arg2), res_indef, nullptr};
-      }
     case LSHIFT_EXPR:
       {
 	if (arg2_indef)
@@ -3244,6 +3210,12 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	Op op1 = TYPE_UNSIGNED(arg1_type) ? Op::ZEXT : Op::SEXT;
 	arg1 = bb->build_inst(op1, arg1, new_bitsize);
 	return {bb->build_inst(Op::ADD, arg1, arg2), res_indef, nullptr};
+      }
+    case MULT_EXPR:
+      {
+	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
+	  bb->build_inst(Op::UB, bb->build_inst(Op::SMUL_WRAPS, arg1, arg2));
+	return {bb->build_inst(Op::MUL, arg1, arg2), res_indef, nullptr};
       }
     case MULT_HIGHPART_EXPR:
       {
