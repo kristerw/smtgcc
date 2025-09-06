@@ -385,9 +385,10 @@ void Converter::flatten(Op op, Inst *inst, std::vector<Inst *>& elems)
 // the largest value of x where this is true.
 std::optional<unsigned __int128> ult_upper_bound(Inst *inst)
 {
-  if (inst->op == Op::ULT && inst->args[1]->op == Op::VALUE)
+  if (inst->op == Op::ULT
+      && inst->args[1]->op == Op::VALUE
+      && !is_value_zero(inst->args[1]))
     {
-      assert(!is_value_zero(inst->args[1]));
       return inst->args[1]->value() - 1;
     }
   if (inst->op == Op::NOT
@@ -403,9 +404,10 @@ std::optional<unsigned __int128> ult_upper_bound(Inst *inst)
 // the smallest value of x where this is true.
 std::optional<unsigned __int128> ult_lower_bound(Inst *inst)
 {
-  if (inst->op == Op::ULT && inst->args[0]->op == Op::VALUE)
+  if (inst->op == Op::ULT
+      && inst->args[0]->op == Op::VALUE
+      && !is_value_m1(inst->args[0]))
     {
-      assert(!is_value_m1(inst->args[0]));
       return inst->args[0]->value() + 1;
     }
   if (inst->op == Op::NOT
