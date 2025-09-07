@@ -318,6 +318,10 @@ void check_type(tree type)
     throw Not_implemented("check_type: DECIMAL_FLOAT_TYPE");
   else if (type == bfloat16_type_node)
     throw Not_implemented("check_type: bfloat16");
+  else if (VECTOR_TYPE_P(type)
+	   && TREE_CODE(TREE_TYPE(type)) == BOOLEAN_TYPE
+	   && lookup_attribute("RVV sizeless type", TYPE_ATTRIBUTES(type)))
+    throw Not_implemented("check_type: RVV sizeless Boolean type");
   else if (VECTOR_TYPE_P(type) || TREE_CODE(type) == COMPLEX_TYPE)
     check_type(TREE_TYPE(type));
   else if (FLOAT_TYPE_P(type))
