@@ -159,7 +159,7 @@ struct Converter {
   void process_gimple_assign(gimple *stmt);
   void process_gimple_asm(gimple *stmt);
   void process_cfn_unary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, tree)>& gen_elem);
-  void process_cfn_binary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem);
+  void process_cfn_binary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem, bool adjust_types = false);
   void process_cfn_abd(gimple *stmt);
   void process_cfn_abort(gimple *stmt);
   void process_cfn_add_overflow(gimple *stmt);
@@ -4137,11 +4137,12 @@ void Converter::process_gimple_asm(gimple *stmt)
     throw Not_implemented("process_function: gimple_asm");
 }
 
-void Converter::process_cfn_binary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem)
+void Converter::process_cfn_binary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem, bool adjust_types)
 {
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
+  tree arg2_type = TREE_TYPE(arg2_expr);
   assert(VECTOR_TYPE_P(TREE_TYPE(arg2_expr)) == VECTOR_TYPE_P(arg1_type));
   auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
   auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
@@ -4165,7 +4166,23 @@ void Converter::process_cfn_binary(gimple *stmt, const std::function<std::pair<I
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
-  assert(VECTOR_TYPE_P(TREE_TYPE(lhs)) == VECTOR_TYPE_P(arg1_type));
+  tree lhs_type = TREE_TYPE(lhs);
+  assert(VECTOR_TYPE_P(lhs_type) == VECTOR_TYPE_P(arg1_type));
+
+  // Some internal functions, such as .SAT_ADD, sometimes have different
+  // types for the arguments. This seems like a bug to me, but adjust the
+  // types to make it work anyway.
+  // TODO: Figure out the rules for type correctness.
+  if (adjust_types && !VECTOR_TYPE_P(lhs_type))
+    {
+      Inst *prov = nullptr;
+      std::tie(arg1, arg1_indef, prov) =
+	type_convert(arg1, arg1_indef, nullptr, arg1_type, lhs_type);
+      std::tie(arg2, arg2_indef, prov) =
+	type_convert(arg2, arg2_indef, nullptr, arg2_type, lhs_type);
+      elem_type = lhs_type;
+      elem_bitsize = arg1->bitsize;
+    }
 
   Inst *res = nullptr;
   Inst *res_indef = nullptr;
@@ -6259,7 +6276,7 @@ void Converter::process_cfn_sat_add(gimple *stmt)
 	}
       return {res, res_indef};
     };
-  process_cfn_binary(stmt, gen_elem);
+  process_cfn_binary(stmt, gen_elem, true);
 }
 
 void Converter::process_cfn_sat_sub(gimple *stmt)
@@ -6297,7 +6314,7 @@ void Converter::process_cfn_sat_sub(gimple *stmt)
 	}
       return {res, res_indef};
     };
-  process_cfn_binary(stmt, gen_elem);
+  process_cfn_binary(stmt, gen_elem, true);
 }
 
 void Converter::process_cfn_sat_trunc(gimple *stmt)
