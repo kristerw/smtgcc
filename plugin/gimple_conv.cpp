@@ -204,6 +204,7 @@ struct Converter {
   void process_cfn_mask_len_store(gimple *stmt);
   void process_cfn_mask_store(gimple *stmt);
   void process_cfn_mask_store_lanes(gimple *stmt);
+  void process_cfn_mask_len_store_lanes(gimple *stmt);
   void process_cfn_store_lanes(gimple *stmt);
   void process_cfn_memcpy(gimple *stmt);
   void process_cfn_memmove(gimple *stmt);
@@ -5915,6 +5916,30 @@ void Converter::process_cfn_mask_store_lanes(gimple *stmt)
 		       mask_type, nullptr, value_type, value, value_indef);
 }
 
+void Converter::process_cfn_mask_len_store_lanes(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 6);
+  tree ptr_expr = gimple_call_arg(stmt, 0);
+  tree alignment_expr = gimple_call_arg(stmt, 1);
+  tree mask_expr = gimple_call_arg(stmt, 2);
+  tree mask_type = TREE_TYPE(mask_expr);
+  tree len_expr = gimple_call_arg(stmt, 3);
+  assert(TYPE_UNSIGNED(TREE_TYPE(len_expr)));
+  tree bias = gimple_call_arg(stmt, 4);
+  if (tree2inst(bias)->value() != 0)
+    throw Not_implemented("process_cfn_mask_len_store_lanes: bias != 0");
+  tree value_expr = gimple_call_arg(stmt, 5);
+  tree value_type = TREE_TYPE(value_expr);
+
+  auto [ptr, ptr_indef, ptr_prov] = tree2inst_indef_prov(ptr_expr);
+  uint64_t alignment = get_int_cst_val(alignment_expr) / 8;
+  auto [mask, mask_indef] = tree2inst_indef(mask_expr);
+  Inst *len = tree2inst(len_expr);
+  auto [value, value_indef] = tree2inst_indef(value_expr);
+  mask_len_store_lanes(ptr, ptr_indef, ptr_prov, alignment, mask, mask_indef,
+		       mask_type, len, value_type, value, value_indef);
+}
+
 void Converter::process_cfn_store_lanes(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 1);
@@ -7324,6 +7349,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_MASK_STORE_LANES:
       process_cfn_mask_store_lanes(stmt);
+      break;
+    case CFN_MASK_LEN_STORE_LANES:
+      process_cfn_mask_len_store_lanes(stmt);
       break;
     case CFN_MUL_OVERFLOW:
       process_cfn_mul_overflow(stmt);
