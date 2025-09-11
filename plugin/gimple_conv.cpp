@@ -216,6 +216,7 @@ struct Converter {
   void process_cfn_parity(gimple *stmt);
   void process_cfn_popcount(gimple *stmt);
   void process_cfn_sat_add(gimple *stmt);
+  void process_cfn_sat_mul(gimple *stmt);
   void process_cfn_sat_sub(gimple *stmt);
   void process_cfn_sat_trunc(gimple *stmt);
   void process_cfn_select_vl(gimple *stmt);
@@ -6304,6 +6305,36 @@ void Converter::process_cfn_sat_add(gimple *stmt)
   process_cfn_binary(stmt, gen_elem, true);
 }
 
+void Converter::process_cfn_sat_mul(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 2);
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      Inst *res = bb->build_inst(Op::MUL, elem1, elem2);
+      Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      if (TYPE_UNSIGNED(elem_type))
+	{
+	  Inst *e1 = bb->build_inst(Op::ZEXT, elem1, 2 * elem1->bitsize);
+	  Inst *e2 = bb->build_inst(Op::ZEXT, elem2, 2 * elem2->bitsize);
+	  Inst *inst = bb->build_inst(Op::MUL, e1, e2);
+	  inst =
+	    bb->build_inst(Op::EXTRACT, inst, e1->bitsize - 1, res->bitsize);
+	  Inst *zero = bb->value_inst(0, inst->bitsize);
+	  Inst *cmp = bb->build_inst(Op::EQ, inst, zero);
+	  Inst *m1 = bb->value_inst(-1, res->bitsize);
+	  res = bb->build_inst(Op::ITE, cmp, res, m1);
+	}
+      else
+	{
+	  throw Not_implemented("process_cfn_sat_mul: signed");
+	}
+      return {res, res_indef};
+    };
+  process_cfn_binary(stmt, gen_elem, true);
+}
+
 void Converter::process_cfn_sat_sub(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 2);
@@ -7205,6 +7236,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_SAT_ADD:
       process_cfn_sat_add(stmt);
+      break;
+    case CFN_SAT_MUL:
+      process_cfn_sat_mul(stmt);
       break;
     case CFN_SAT_SUB:
       process_cfn_sat_sub(stmt);
