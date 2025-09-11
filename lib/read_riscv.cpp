@@ -2480,6 +2480,39 @@ Inst *gen_vwmulsu(Basic_block *bb, Inst *elem1, Inst *elem2)
   return bb->build_inst(Op::MUL, e1, e2);
 }
 
+Inst *gen_fwadd(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *e1 = bb->build_inst(Op::FCHPREC, elem1, 2 * elem1->bitsize);
+  Inst *e2 = bb->build_inst(Op::FCHPREC, elem2, 2 * elem2->bitsize);
+  return bb->build_inst(Op::FADD, e1, e2);
+}
+
+Inst *gen_fwadd_wv(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *e2 = bb->build_inst(Op::FCHPREC, elem2, 2 * elem2->bitsize);
+  return bb->build_inst(Op::FADD, elem1, e2);
+}
+
+Inst *gen_fwsub(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *e1 = bb->build_inst(Op::FCHPREC, elem1, 2 * elem1->bitsize);
+  Inst *e2 = bb->build_inst(Op::FCHPREC, elem2, 2 * elem2->bitsize);
+  return bb->build_inst(Op::FSUB, e1, e2);
+}
+
+Inst *gen_fwsub_wv(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *e2 = bb->build_inst(Op::FCHPREC, elem2, 2 * elem2->bitsize);
+  return bb->build_inst(Op::FSUB, elem1, e2);
+}
+
+Inst *gen_fwmul(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *e1 = bb->build_inst(Op::FCHPREC, elem1, 2 * elem1->bitsize);
+  Inst *e2 = bb->build_inst(Op::FCHPREC, elem2, 2 * elem2->bitsize);
+  return bb->build_inst(Op::FMUL, e1, e2);
+}
+
 Inst *Parser::gen_vec_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
 			     Inst *orig, Inst *arg1, Inst *arg2, Inst *mask,
 			     uint32_t orig_elem_bitsize, uint32_t elem1_bitsize,
@@ -4503,6 +4536,24 @@ void Parser::parse_function()
   else if (name == "vfsub.vv")
     process_vec_binary(Op::FSUB);
 
+  // Floating-point - widening add/subtract
+  else if (name == "vfwadd.vv")
+    process_vec_binary(gen_fwadd, 2, 1, 1);
+  else if (name == "vfwaddu.vf")
+    process_vec_binary_vf(gen_fwadd, 2, 1, 1);
+  else if (name == "vfwadd.wv")
+    process_vec_binary(gen_fwadd_wv, 2, 2, 1);
+  else if (name == "vfwaddu.wf")
+    process_vec_binary_vf(gen_fwadd_wv, 2, 2, 1);
+  else if (name == "vfwsub.vv")
+    process_vec_binary(gen_fwsub, 2, 1, 1);
+  else if (name == "vfwsubu.vf")
+    process_vec_binary_vf(gen_fwsub, 2, 1, 1);
+  else if (name == "vfwsub.wv")
+    process_vec_binary(gen_fwsub_wv, 2, 2, 1);
+  else if (name == "vfwsubu.wf")
+    process_vec_binary_vf(gen_fwsub_wv, 2, 2, 1);
+
   // Floating-point - multiply/divide
   else if (name == "vfmul.vf")
     process_vec_binary_vf(Op::FMUL);
@@ -4512,6 +4563,12 @@ void Parser::parse_function()
     process_vec_binary_vf(Op::FDIV);
   else if (name == "vfdiv.vv")
     process_vec_binary(Op::FDIV);
+
+  // Floating-point - widening multiply
+  else if (name == "vfwmul.vv")
+    process_vec_binary(gen_fwmul, 2, 1, 1);
+  else if (name == "vfwmul.vf")
+    process_vec_binary_vf(gen_fwmul, 2, 1, 1);
 
   // Floating-point - min/max
   else if (name == "vfmax.vv")
