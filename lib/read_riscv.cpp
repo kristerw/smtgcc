@@ -1608,6 +1608,58 @@ Inst *Parser::change_prec(Inst *inst, uint32_t bitsize)
   return inst;
 }
 
+Inst *gen_sadd(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *res = bb->build_inst(Op::ADD, elem1, elem2);
+  Inst *zero = bb->value_inst(0, res->bitsize);
+  Inst *is_neg_elem2 = bb->build_inst(Op::SLT, elem2, zero);
+  Inst *is_pos_elem2 = bb->build_inst(Op::NOT, is_neg_elem2);
+  Inst *is_neg_oflw = bb->build_inst(Op::SLT, elem1, res);
+  is_neg_oflw = bb->build_inst(Op::AND, is_neg_oflw, is_neg_elem2);
+  Inst *is_pos_oflw = bb->build_inst(Op::SLT, res, elem1);
+  is_pos_oflw = bb->build_inst(Op::AND, is_pos_oflw, is_pos_elem2);
+  unsigned __int128 maxint = (((unsigned __int128)1) << (res->bitsize - 1)) - 1;
+  unsigned __int128 minint = ((unsigned __int128)1) << (res->bitsize - 1);
+  Inst *maxint_inst = bb->value_inst(maxint, res->bitsize);
+  Inst *minint_inst = bb->value_inst(minint, res->bitsize);
+  res = bb->build_inst(Op::ITE, is_pos_oflw, maxint_inst, res);
+  return bb->build_inst(Op::ITE, is_neg_oflw, minint_inst, res);
+}
+
+Inst *gen_saddu(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *res = bb->build_inst(Op::ADD, elem1, elem2);
+  Inst *cmp = bb->build_inst(Op::ULT, res, elem1);
+  Inst *m1 = bb->value_inst(-1, res->bitsize);
+  return bb->build_inst(Op::ITE, cmp, m1, res);
+}
+
+Inst *gen_ssub(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *res = bb->build_inst(Op::SUB, elem1, elem2);
+  Inst *zero = bb->value_inst(0, res->bitsize);
+  Inst *is_neg_elem2 = bb->build_inst(Op::SLT, elem2, zero);
+  Inst *is_pos_elem2 = bb->build_inst(Op::NOT, is_neg_elem2);
+  Inst *is_neg_oflw = bb->build_inst(Op::SLT, elem1, res);
+  is_neg_oflw = bb->build_inst(Op::AND, is_neg_oflw, is_pos_elem2);
+  Inst *is_pos_oflw = bb->build_inst(Op::SLT, res, elem1);
+  is_pos_oflw = bb->build_inst(Op::AND, is_pos_oflw, is_neg_elem2);
+  unsigned __int128 maxint = (((unsigned __int128)1) << (res->bitsize - 1)) - 1;
+  unsigned __int128 minint = ((unsigned __int128)1) << (res->bitsize - 1);
+  Inst *maxint_inst = bb->value_inst(maxint, res->bitsize);
+  Inst *minint_inst = bb->value_inst(minint, res->bitsize);
+  res = bb->build_inst(Op::ITE, is_pos_oflw, maxint_inst, res);
+  return bb->build_inst(Op::ITE, is_neg_oflw, minint_inst, res);
+}
+
+Inst *gen_ssubu(Basic_block *bb, Inst *elem1, Inst *elem2)
+{
+  Inst *res = bb->build_inst(Op::SUB, elem1, elem2);
+  Inst *cmp = bb->build_inst(Op::ULT, elem1, res);
+  Inst *zero = bb->value_inst(0, res->bitsize);
+  return bb->build_inst(Op::ITE, cmp, zero, res);
+}
+
 Inst *gen_rsub(Basic_block *bb, Inst *elem1, Inst *elem2)
 {
   return bb->build_inst(Op::SUB, elem2, elem1);
@@ -4404,6 +4456,32 @@ void Parser::parse_function()
     process_vec_unary_vx(Op::MOV);
   else if (name == "vmv.v.i")
     process_vec_unary_vi(Op::MOV);
+
+  // Fixed-point - single-width saturating add and subtract
+  else if (name == "vsadd.vv")
+    process_vec_binary(gen_sadd);
+  else if (name == "vsadd.vx")
+    process_vec_binary_vx(gen_sadd);
+  else if (name == "vsadd.vi")
+    process_vec_binary_vi(gen_sadd);
+  else if (name == "vsaddu.vv")
+    process_vec_binary(gen_saddu);
+  else if (name == "vsaddu.vx")
+    process_vec_binary_vx(gen_saddu);
+  else if (name == "vsaddu.vi")
+    process_vec_binary_vi(gen_saddu);
+  else if (name == "vssub.vv")
+    process_vec_binary(gen_ssub);
+  else if (name == "vssub.vx")
+    process_vec_binary_vx(gen_ssub);
+  else if (name == "vssub.vi")
+    process_vec_binary_vi(gen_ssub);
+  else if (name == "vssubu.vv")
+    process_vec_binary(gen_ssubu);
+  else if (name == "vssubu.vx")
+    process_vec_binary_vx(gen_ssubu);
+  else if (name == "vssubu.vi")
+    process_vec_binary_vi(gen_ssubu);
 
   // Floating-point - single-width  floating-point/integer type-convert
   else if (name == "vfcvt.rtz.xu.f.v")
