@@ -120,6 +120,7 @@ private:
   Inst *gen_udiv(Inst *arg1, Inst *arg2);
   Inst *read_arg(uint32_t reg, uint32_t bitsize);
   void write_retval(Inst *retval);
+  void write_fretval(Inst *retval);
   void process_call();
   void process_tail_call();
   void store_ub_check(Inst *ptr, uint64_t size);
@@ -867,6 +868,14 @@ void Parser::write_retval(Inst *retval)
     }
 }
 
+void Parser::write_fretval(Inst *retval)
+{
+  assert(retval->bitsize <= rstate->freg_bitsize);
+  if (retval->bitsize < rstate->freg_bitsize)
+    retval = bb->build_inst(Op::ZEXT, retval, rstate->freg_bitsize);
+  bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::f10], retval);
+}
+
 void Parser::process_call()
 {
   std::string_view name = get_name(1);
@@ -972,6 +981,15 @@ void Parser::process_call()
       Inst *arg2 = read_arg(RiscvRegIdx::x12, 64);
       Inst *res = gen_udiv(arg1, arg2);
       write_retval(res);
+      return;
+    }
+  if (name == "__extendhfsf2")
+    {
+      Inst *arg1 =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f10]);
+      arg1 = bb->build_trunc(arg1, 16);
+      Inst *res = bb->build_inst(Op::FCHPREC, arg1, 32);
+      write_fretval(res);
       return;
     }
   if (name == "__ffsdi2")
@@ -1147,6 +1165,15 @@ void Parser::process_call()
 	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::x12]);
       value = bb->build_trunc(value, 8);
       bb->build_inst(Op::MEMSET, ptr, value, size);
+      return;
+    }
+  if (name == "__truncsfhf2")
+    {
+      Inst *arg1 =
+	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f10]);
+      arg1 = bb->build_trunc(arg1, 32);
+      Inst *res = bb->build_inst(Op::FCHPREC, arg1, 16);
+      write_fretval(res);
       return;
     }
 
