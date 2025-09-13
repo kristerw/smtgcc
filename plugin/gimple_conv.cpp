@@ -320,10 +320,6 @@ void check_type(tree type)
     throw Not_implemented("check_type: DECIMAL_FLOAT_TYPE");
   else if (type == bfloat16_type_node)
     throw Not_implemented("check_type: bfloat16");
-  else if (VECTOR_TYPE_P(type)
-	   && TREE_CODE(TREE_TYPE(type)) == BOOLEAN_TYPE
-	   && lookup_attribute("RVV sizeless type", TYPE_ATTRIBUTES(type)))
-    throw Not_implemented("check_type: RVV sizeless Boolean type");
   else if (VECTOR_TYPE_P(type) || TREE_CODE(type) == COMPLEX_TYPE)
     check_type(TREE_TYPE(type));
   else if (FLOAT_TYPE_P(type))
@@ -565,6 +561,13 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
       || TREE_CODE(type) == COMPLEX_TYPE
       || TREE_CODE(type) == ARRAY_TYPE)
     {
+      if (VECTOR_TYPE_P(type) && TREE_CODE(TREE_TYPE(type)) == BOOLEAN_TYPE)
+	{
+	  // There is nothing to constrain for Boolean vectors. Special-case
+	  // this, as the general code for vectors below does not handle
+	  // vectors with 1-bit elements.
+	  return;
+	}
       tree elem_type = TREE_TYPE(type);
       uint32_t elem_bitsize = bytesize_for_type(elem_type) * 8;
       assert(inst->bitsize % elem_bitsize == 0);
@@ -852,6 +855,17 @@ std::pair<Inst *, Inst *> Converter::to_mem_repr(Inst *inst, Inst *indef, tree t
       if (indef)
 	indef = bb->build_inst(Op::SEXT, indef, bitsize);
     }
+  else if (VECTOR_TYPE_P(type)
+	   && TREE_CODE(TREE_TYPE(type)) == BOOLEAN_TYPE
+	   && lookup_attribute("RVV sizeless type", TYPE_ATTRIBUTES(type)))
+    {
+      // RISC-V mask types may be smaller than a byte, such as vbool32_t,
+      // which is 4 bits. Add padding bits.
+      inst = bb->build_inst(Op::ZEXT, inst, bitsize);
+      if (indef)
+	indef = bb->build_inst(Op::ZEXT, indef, bitsize);
+    }
+
   return {inst, indef};
 }
 
