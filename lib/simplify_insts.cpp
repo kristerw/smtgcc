@@ -2844,8 +2844,15 @@ Inst *simplify_inst(Inst *inst, Simplify_config *config)
   Simplify simplify(inst, config);
   inst = simplify.simplify();
 
-  Simplify simplify2(inst, config);
-  inst = simplify2.simplify_over_ite_arg();
+  // simplify_over_ite_arg may give inconsistent results for phi-nodes and
+  // Op::REGISTER, so it should only be run from check.cpp. We abuse
+  // config for this, as it is always nullptr when not called from check.cpp.
+  // TODO: Move this to check.cpp instead of abusing config.
+  if (config)
+    {
+      Simplify simplify2(inst, config);
+      inst = simplify2.simplify_over_ite_arg();
+    }
 
   return inst;
 }
