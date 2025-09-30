@@ -1804,6 +1804,17 @@ Inst *Simplify::simplify_ult()
   if (is_value_zero(arg2))
     return value_inst(0, 1);
 
+  // ult x, 1 -> eq x, 0
+  if (arg2->op == Op::VALUE && arg2->value() == 1)
+    {
+      Inst *zero = value_inst(0, arg1->bitsize);
+      return build_inst(Op::EQ, arg1, zero);
+    }
+
+  // ult 0, x -> not (eq x, 0)
+  if (is_value_zero(arg1))
+    return build_inst(Op::NOT, build_inst(Op::EQ, arg2, arg1));
+
   // ult c, x -> false if c == the maximal possible value of x
   if (is_value_m1(arg1))
     return value_inst(0, 1);
