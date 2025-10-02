@@ -112,16 +112,40 @@ Limitations in the current version:
   - Handling of pointer provenance is too restrictive.
   - ...
 
-## smtgcc-tv-backend
+## smtgcc-tv-backend -- RISC-V
 smtgcc-tv-backend compares the IR from the last GIMPLE pass with the generated assembly code and reports an error if the resulting assembly code is not a refinement of the IR (i.e., if the backend has miscompiled the program).
 
-The plugin supports the RISC-V RV32G and RV64G base profiles and the Zba, Zbb, Zbc, and Zbs extensions. It can be invoked as follows:
+The plugin supports the RISC-V RV32G and RV64G base profiles and the bitmanip, compressed, and vector extensions. It can be invoked as follows:
 ```
-riscv64-elf-gcc -O3 -march=rv64gc_zba_zbb_zbs -fno-section-anchors -fno-strict-aliasing -c -fplugin=/path/to/smtgcc-tv-backend.so file.c
+riscv64-elf-gcc -march=rv64gcbv -O3 -fno-section-anchors -fno-strict-aliasing -c -fplugin=/path/to/smtgcc-tv-backend.so file.c
 ```
 ### Limitations
 The limitations of smtgcc-tv-backend include all those listed for smtgcc-tv, with the following additional limitations:
 * You must pass `-fno-section-anchors` to the compiler.
+* Address allocation of local variables differs between the IR and the generated assembly. As a result, the plugin disables checks when a local address is written to memory or cast to an integer type to avoid false positives.
+
+## smtgcc-tv-backend -- AArch64
+smtgcc-tv-backend compares the IR from the last GIMPLE pass with the generated assembly code and reports an error if the resulting assembly code is not a refinement of the IR (i.e., if the backend has miscompiled the program).
+
+The plugin supports up to ARMv9.5-A. It can be invoked as follows:
+```
+aarch64-elf-gcc -march=armv9.5-a -O3 -fno-section-anchors -fno-strict-aliasing -c -fplugin=/path/to/smtgcc-tv-backend.so file.c
+```
+### Limitations
+The limitations of smtgcc-tv-backend include all those listed for smtgcc-tv, with the following additional limitations:
+* You must pass `-fno-section-anchors` to the compiler.
+* Address allocation of local variables differs between the IR and the generated assembly. As a result, the plugin disables checks when a local address is written to memory or cast to an integer type to avoid false positives.
+
+## smtgcc-tv-backend -- BPF
+smtgcc-tv-backend compares the IR from the last GIMPLE pass with the generated assembly code and reports an error if the resulting assembly code is not a refinement of the IR (i.e., if the backend has miscompiled the program).
+
+The plugin can be invoked as follows:
+```
+bpf-unknown-none-gcc -masm=normal -O3 -fno-strict-aliasing -c -fplugin=/path/to/smtgcc-tv-backend.so file.c
+```
+### Limitations
+The limitations of smtgcc-tv-backend include all those listed for smtgcc-tv, with the following additional limitations:
+* You must pass `-masm=normal` to the compiler.
 * Address allocation of local variables differs between the IR and the generated assembly. As a result, the plugin disables checks when a local address is written to memory or cast to an integer type to avoid false positives.
 
 ## smtgcc-check-refine
