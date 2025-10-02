@@ -593,6 +593,43 @@ struct aarch64_state {
 };
 Function *parse_aarch64(std::string const& file_name, aarch64_state *state);
 
+// read_bpf.cpp
+struct BpfRegIdx {
+  static constexpr uint64_t r0 = 0;
+  static constexpr uint64_t r1 = 1;
+  static constexpr uint64_t r2 = 2;
+  static constexpr uint64_t r3 = 3;
+  static constexpr uint64_t r4 = 4;
+  static constexpr uint64_t r5 = 5;
+  static constexpr uint64_t r6 = 6;
+  static constexpr uint64_t r7 = 7;
+  static constexpr uint64_t r8 = 8;
+  static constexpr uint64_t r9 = 9;
+
+  static constexpr uint64_t fp = 10;
+
+  // Pseudo registers tracking abort/exit
+  static constexpr uint64_t abort = 11;
+  static constexpr uint64_t exit = 12;
+  static constexpr uint64_t exit_val = 13;
+};
+
+struct bpf_state {
+  std::vector<Inst *> registers;
+
+  // The memory instruction corresponding to each symbol.
+  std::map<std::string, Inst *> sym_name2mem;
+
+  std::string file_name;
+  std::string func_name;
+  Module *module;
+  Basic_block *entry_bb;
+  Basic_block *exit_bb;
+  std::vector<MemoryObject> memory_objects;
+  int next_local_id;
+};
+Function *parse_bpf(std::string const& file_name, bpf_state *state);
+
 // read_riscv.cpp
 struct RiscvRegIdx {
   static constexpr uint64_t x0 = 0;

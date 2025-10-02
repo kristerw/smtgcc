@@ -9,6 +9,7 @@
 enum class Arch {
   gimple,
   aarch64,
+  bpf,
   riscv
 };
 
@@ -38,6 +39,7 @@ uint64_t bitsize_for_type(tree type);
 unsigned __int128 get_int_cst_val(tree expr);
 
 smtgcc::aarch64_state setup_aarch64_function(CommonState *state, smtgcc::Function *src_func, function *fun);
+smtgcc::bpf_state setup_bpf_function(CommonState *state, smtgcc::Function *src_func, function *fun);
 smtgcc::riscv_state setup_riscv_function(CommonState *state, smtgcc::Function *src_func, function *fun);
 
 #endif
