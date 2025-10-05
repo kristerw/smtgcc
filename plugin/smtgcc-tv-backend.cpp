@@ -44,6 +44,9 @@ struct tv_pass : gimple_opt_pass
 #ifdef SMTGCC_RISCV
   std::vector<riscv_state> functions;
 #endif
+#ifdef SMTGCC_SH
+  std::vector<sh_state> functions;
+#endif
 };
 
 unsigned int tv_pass::execute(function *fun)
@@ -59,6 +62,9 @@ unsigned int tv_pass::execute(function *fun)
 #elif defined(SMTGCC_RISCV)
       CommonState state(Arch::riscv);
       Module *module = create_module(Arch::riscv);
+#elif defined(SMTGCC_SH)
+      CommonState state(Arch::sh);
+      Module *module = create_module(Arch::sh);
 #endif
       Function *src = process_function(module, &state, fun, false);
       src->name = "src";
@@ -70,6 +76,8 @@ unsigned int tv_pass::execute(function *fun)
       bpf_state rstate = setup_bpf_function(&state, src, fun);
 #elif defined(SMTGCC_RISCV)
       riscv_state rstate = setup_riscv_function(&state, src, fun);
+#elif defined(SMTGCC_SH)
+      sh_state rstate = setup_sh_function(&state, src, fun);
 #endif
       functions.push_back(rstate);
     }
@@ -359,6 +367,8 @@ static void finish(void *, void *data)
 	  Function *func = parse_bpf(file_name, &state);
 #elif defined(SMTGCC_RISCV)
 	  Function *func = parse_riscv(file_name, &state);
+#elif defined(SMTGCC_SH)
+	  Function *func = parse_sh(file_name, &state);
 #endif
 	  validate(func);
 

@@ -759,6 +759,61 @@ struct riscv_state {
 };
 Function *parse_riscv(std::string const& file_name, riscv_state *state);
 
+// read_sh.cpp
+struct ShRegIdx {
+  static constexpr uint64_t r0 = 0;
+  static constexpr uint64_t r1 = 1;
+  static constexpr uint64_t r2 = 2;
+  static constexpr uint64_t r3 = 3;
+  static constexpr uint64_t r4 = 4;
+  static constexpr uint64_t r5 = 5;
+  static constexpr uint64_t r6 = 6;
+  static constexpr uint64_t r7 = 7;
+  static constexpr uint64_t r8 = 8;
+  static constexpr uint64_t r9 = 9;
+  static constexpr uint64_t r10 = 10;
+  static constexpr uint64_t r11 = 11;
+  static constexpr uint64_t r12 = 12;
+  static constexpr uint64_t r13 = 13;
+  static constexpr uint64_t r14 = 14;
+  static constexpr uint64_t r15 = 15;
+
+  // System registers
+  static constexpr uint64_t mach = 16;
+  static constexpr uint64_t macl = 17;
+  static constexpr uint64_t pr = 18;
+
+  // FPU system registers
+  static constexpr uint64_t fpsrc = 19;
+  static constexpr uint64_t fpul = 20;
+
+  // Control registers
+  static constexpr uint64_t q = 21;
+  static constexpr uint64_t m = 22;
+  static constexpr uint64_t t = 23;
+
+  // Pseudo registers tracking abort/exit
+  static constexpr uint64_t abort = 24;
+  static constexpr uint64_t exit = 25;
+  static constexpr uint64_t exit_val = 26;
+};
+
+struct sh_state {
+  std::vector<Inst *> registers;
+
+  // The memory instruction corresponding to each symbol.
+  std::map<std::string, Inst *> sym_name2mem;
+
+  std::string file_name;
+  std::string func_name;
+  Module *module;
+  Basic_block *entry_bb;
+  Basic_block *exit_bb;
+  std::vector<MemoryObject> memory_objects;
+  int next_local_id;
+};
+Function *parse_sh(std::string const& file_name, sh_state *state);
+
 // simplify_insts.cpp
 struct Simplify_config {
   virtual Inst *get_inst(Op, Inst *)
