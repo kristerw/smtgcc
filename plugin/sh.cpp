@@ -5,11 +5,58 @@
 
 #include "gimple_conv.h"
 
+unsigned int get_object_alignment(tree exp);
+
 using namespace smtgcc;
 
 namespace {
 
 const int stack_size = 1024 * 100;
+
+bool is_returned_in_fregs(tree expr)
+{
+  tree type = TREE_TYPE(expr);
+  uint64_t bitsize = bitsize_for_type(type);
+  if (SCALAR_FLOAT_TYPE_P(type) && (bitsize == 32 || bitsize == 64))
+    return true;
+
+  if (TREE_CODE(type) == COMPLEX_TYPE)
+    {
+      tree elem_type = TREE_TYPE(type);
+      uint64_t elem_bitsize = bitsize_for_type(elem_type);
+      if (SCALAR_FLOAT_TYPE_P(elem_type)
+	  && (elem_bitsize == 32 || elem_bitsize == 64))
+	return true;
+    }
+
+  return false;
+}
+
+bool is_returned_in_regs(tree expr)
+{
+  tree type = TREE_TYPE(expr);
+  uint64_t bitsize = bitsize_for_type(type);
+  if (!(bitsize == 8
+	|| bitsize == 16
+	|| bitsize == 32
+	|| bitsize == 64))
+    return false;
+
+  if (INTEGRAL_TYPE_P(type) || POINTER_TYPE_P(type))
+    return true;
+
+  if (TREE_CODE(type) == RECORD_TYPE)
+    {
+      uint64_t alignment = get_object_alignment(expr);
+      if ((bitsize == 8 && alignment == 8)
+	  || (bitsize == 16 && alignment == 16)
+	  || (bitsize == 32 && alignment == 32)
+	  || (bitsize == 64 && alignment == 32))
+	return true;
+    }
+
+  return false;
+}
 
 void build_return(sh_state *rstate, Function *src_func, function *fun)
 {
@@ -21,14 +68,24 @@ void build_return(sh_state *rstate, Function *src_func, function *fun)
       bb->build_ret_inst();
       return;
     }
-  tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
+  tree ret_expr = DECL_RESULT(fun->decl);
   uint64_t ret_bitsize = src_last_bb->last_inst->args[0]->bitsize;
 
-  if ((INTEGRAL_TYPE_P(ret_type) || POINTER_TYPE_P(ret_type))
-      && ret_bitsize <= 64)
+  if (is_returned_in_fregs(ret_expr))
     {
-      Inst *retval =
-	bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r0]);
+      Inst *retval = bb->build_inst(Op::READ, rstate->registers[ShRegIdx::fr0]);
+      for (int i = 1; retval->bitsize < ret_bitsize; i++)
+	{
+	  Inst *inst =
+	    bb->build_inst(Op::READ, rstate->registers[ShRegIdx::fr0 + i]);
+	  retval = bb->build_inst(Op::CONCAT, inst, retval);
+	}
+      bb->build_ret_inst(retval);
+      return;
+    }
+  if (is_returned_in_regs(ret_expr))
+    {
+      Inst *retval = bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r0]);
       if (retval->bitsize < ret_bitsize)
 	{
 	  Inst *inst =
@@ -42,6 +99,16 @@ void build_return(sh_state *rstate, Function *src_func, function *fun)
     }
 
   throw Not_implemented("sh: Unhandled return type");
+}
+
+Inst *extract_vec_elem(Basic_block *bb, Inst *inst, uint32_t elem_bitsize, uint32_t idx)
+{
+  if (idx == 0 && inst->bitsize == elem_bitsize)
+    return inst;
+  assert(inst->bitsize % elem_bitsize == 0);
+  Inst *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
+  Inst *low = bb->value_inst(idx * elem_bitsize, 32);
+  return bb->build_inst(Op::EXTRACT, inst, high, low);
 }
 
 } // end anonymous namespace
@@ -64,6 +131,10 @@ sh_state setup_sh_function(CommonState *state, Function *src_func, function *fun
   Basic_block *bb = rstate.entry_bb;
 
   // Registers r0-r15.
+  for (int i = 0; i < 16; i++)
+    rstate.registers.push_back(bb->build_inst(Op::REGISTER, 32));
+
+  // Registers fr0-fr15.
   for (int i = 0; i < 16; i++)
     rstate.registers.push_back(bb->build_inst(Op::REGISTER, 32));
 
@@ -112,38 +183,60 @@ sh_state setup_sh_function(CommonState *state, Function *src_func, function *fun
   // register or memory as required by the ABI.
   int param_number = 0;
   int reg_nr = 0;
+  int freg_nr = 0;
   for (tree decl = DECL_ARGUMENTS(fun->decl); decl; decl = DECL_CHAIN(decl))
     {
       uint32_t bitsize = bitsize_for_type(TREE_TYPE(decl));
       tree type = TREE_TYPE(decl);
-      if ((!INTEGRAL_TYPE_P(type) && !POINTER_TYPE_P(type)) || bitsize > 64)
-	throw Not_implemented("setup_sh_function: param type not handled");
-      if (bitsize <= 0)
-	throw Not_implemented("Parameter size == 0");
-      uint32_t expanded_bitsize = bitsize > 32 ? 64 : 32;
-
+      if (bitsize == 0)
+	throw Not_implemented("setup_sh_function: Parameter size == 0");
       Inst *param_nbr = bb->value_inst(param_number, 32);
       Inst *param_bitsize = bb->value_inst(bitsize, 32);
       Inst *param = bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
-      if (bitsize < expanded_bitsize)
-	{
-	  Op op = TYPE_UNSIGNED(TREE_TYPE(decl)) ? Op::ZEXT : Op::SEXT;
-	  param = bb->build_inst(op, param, expanded_bitsize);
-	}
 
-      if (reg_nr >= 4)
-	throw Not_implemented("setup_sh_function: too many params");
-      Inst *reg = rstate.registers[ShRegIdx::r4 + reg_nr++];
-      Inst *value = bb->build_trunc(param, 32);
-      bb->build_inst(Op::WRITE, reg, value);
-      if (expanded_bitsize == 64)
+      if ((SCALAR_FLOAT_TYPE_P(type) && (bitsize == 32 || bitsize == 64))
+	  || (TREE_CODE(type) == COMPLEX_TYPE
+	      && SCALAR_FLOAT_TYPE_P(TREE_TYPE(type))
+	      && (bitsize == 64 || bitsize == 128)))
 	{
-	  if (reg_nr >= 4)
+	  if (bitsize > 32 && (freg_nr & 1) != 0)
+	    freg_nr++;
+
+	  uint32_t nof_regs = bitsize / 32;
+	  if (freg_nr + nof_regs > 8)
 	    throw Not_implemented("setup_sh_function: too many params");
-	  reg = rstate.registers[ShRegIdx::r4 + reg_nr++];
-	  value = bb->build_inst(Op::EXTRACT, param, 63, 32);
-	  bb->build_inst(Op::WRITE, reg, value);
+
+	  for (uint32_t i = 0; i < nof_regs; i++)
+	    {
+	      Inst *reg = rstate.registers[ShRegIdx::fr4 + freg_nr++];
+	      Inst *value = extract_vec_elem(bb, param, 32, i);
+	      bb->build_inst(Op::WRITE, reg, value);
+	    }
 	}
+      else if ((INTEGRAL_TYPE_P(type)
+		|| POINTER_TYPE_P(type)
+		|| TREE_CODE(type) == RECORD_TYPE)
+	       && bitsize <= 128)
+	{
+	  uint32_t expanded_bitsize = (bitsize + 31) & ~31;
+	  uint32_t nof_regs = expanded_bitsize / 32;
+	  if (reg_nr + nof_regs > 4)
+	    throw Not_implemented("setup_sh_function: too many params");
+
+	  if (bitsize < expanded_bitsize)
+	    {
+	      Op op = TYPE_UNSIGNED(TREE_TYPE(decl)) ? Op::ZEXT : Op::SEXT;
+	      param = bb->build_inst(op, param, expanded_bitsize);
+	    }
+	  for (uint32_t i = 0; i < nof_regs; i++)
+	    {
+	      Inst *reg = rstate.registers[ShRegIdx::r4 + reg_nr++];
+	      Inst *value = extract_vec_elem(bb, param, 32, i);
+	      bb->build_inst(Op::WRITE, reg, value);
+	    }
+	}
+      else
+	throw Not_implemented("setup_sh_function: param type not handled");
 
       param_number++;
     }

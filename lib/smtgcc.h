@@ -778,24 +778,41 @@ struct ShRegIdx {
   static constexpr uint64_t r14 = 14;
   static constexpr uint64_t r15 = 15;
 
+  static constexpr uint64_t fr0 = 16;
+  static constexpr uint64_t fr1 = 17;
+  static constexpr uint64_t fr2 = 18;
+  static constexpr uint64_t fr3 = 19;
+  static constexpr uint64_t fr4 = 20;
+  static constexpr uint64_t fr5 = 21;
+  static constexpr uint64_t fr6 = 22;
+  static constexpr uint64_t fr7 = 23;
+  static constexpr uint64_t fr8 = 24;
+  static constexpr uint64_t fr9 = 25;
+  static constexpr uint64_t fr10 = 26;
+  static constexpr uint64_t fr11 = 27;
+  static constexpr uint64_t fr12 = 28;
+  static constexpr uint64_t fr13 = 29;
+  static constexpr uint64_t fr14 = 30;
+  static constexpr uint64_t fr15 = 31;
+
   // System registers
-  static constexpr uint64_t mach = 16;
-  static constexpr uint64_t macl = 17;
-  static constexpr uint64_t pr = 18;
+  static constexpr uint64_t mach = 32;
+  static constexpr uint64_t macl = 33;
+  static constexpr uint64_t pr = 34;
 
   // FPU system registers
-  static constexpr uint64_t fpsrc = 19;
-  static constexpr uint64_t fpul = 20;
+  static constexpr uint64_t fpsrc = 35;
+  static constexpr uint64_t fpul = 36;
 
   // Control registers
-  static constexpr uint64_t q = 21;
-  static constexpr uint64_t m = 22;
-  static constexpr uint64_t t = 23;
+  static constexpr uint64_t q = 37;
+  static constexpr uint64_t m = 38;
+  static constexpr uint64_t t = 39;
 
   // Pseudo registers tracking abort/exit
-  static constexpr uint64_t abort = 24;
-  static constexpr uint64_t exit = 25;
-  static constexpr uint64_t exit_val = 26;
+  static constexpr uint64_t abort = 40;
+  static constexpr uint64_t exit = 41;
+  static constexpr uint64_t exit_val = 42;
 };
 
 struct sh_state {
