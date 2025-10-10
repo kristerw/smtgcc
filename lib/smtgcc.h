@@ -422,6 +422,27 @@ private:
   std::string hash(Function *func);
 };
 
+// asm_parser.cpp
+struct ParserBase
+{
+protected:
+  std::vector<char> buf;
+  int line_number = 0;
+  size_t pos;
+
+  std::map<std::string, std::vector<unsigned char>, std::less<>> sym_name2data;
+  std::map<std::string, std::pair<std::string, uint64_t>, std::less<>> sym_alias;
+
+  void skip_line();
+  void skip_whitespace();
+  uint32_t translate_base64_char(uint8_t c);
+
+  std::string_view parse_cmd();
+  std::optional<std::string_view> parse_label_def();
+  bool parse_data(std::vector<unsigned char>& data);
+  void parse_rodata();
+};
+
 // cfg.cpp
 void clear_dominance(Function *func);
 void calculate_dominance(Function *func);

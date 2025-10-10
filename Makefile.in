@@ -36,6 +36,7 @@ else ifeq ($(findstring sh, $(ARCH)), sh)
 endif
 
 lib_sources = \
+	lib/asm_parser.cpp \
 	lib/cache.cpp \
 	lib/cfg.cpp \
 	lib/check.cpp \
