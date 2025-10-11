@@ -16,25 +16,96 @@ const int stack_size = 1024 * 100;
 // before we add HFA, HVA, and the full ABI three stage process.
 bool is_not_hfa_hva(tree type)
 {
-  if (INTEGRAL_TYPE_P(type))
-    return true;
-  if (TREE_CODE(type) == COMPLEX_TYPE || TREE_CODE(type) == ARRAY_TYPE)
-    return is_not_hfa_hva(TREE_TYPE(type));
   if (TREE_CODE(type) == RECORD_TYPE)
     {
       for (tree fld = TYPE_FIELDS(type); fld; fld = DECL_CHAIN(fld))
 	{
 	  if (TREE_CODE(fld) != FIELD_DECL)
 	    continue;
-	  if (DECL_BIT_FIELD_TYPE(fld))
-	    return true;
-	  if (is_not_hfa_hva(TREE_TYPE(fld)))
+	  if (!VECTOR_TYPE_P(type))
 	    return true;
 	}
       return false;
     }
 
-  return false;
+  return true;
+}
+
+std::optional<std::pair<unsigned, unsigned>> hfa_size(aarch64_state *rstate, tree type)
+{
+  if (TREE_CODE(type) == COMPLEX_TYPE)
+    {
+      tree elem_type = TREE_TYPE(type);
+      if (!SCALAR_FLOAT_TYPE_P(elem_type))
+	return {};
+      unsigned elem_bitsize = bitsize_for_type(elem_type);
+      if (elem_bitsize > rstate->freg_bitsize)
+	return {};
+      return {{2u, elem_bitsize}};
+    }
+
+  if (TREE_CODE(type) == ARRAY_TYPE)
+    {
+      tree elem_type = TREE_TYPE(type);
+      if (!SCALAR_FLOAT_TYPE_P(elem_type))
+	return {};
+      unsigned elem_bitsize = bitsize_for_type(elem_type);
+      if (elem_bitsize > rstate->freg_bitsize)
+	return {};
+      unsigned nof_elem = bitsize_for_type(type) / elem_bitsize;
+      if (nof_elem > 4)
+	return {};
+      return {{nof_elem, elem_bitsize}};
+    }
+
+  if (TREE_CODE(type) != RECORD_TYPE)
+    return {};
+
+  unsigned nof_elem = 0;
+  unsigned bitsize = 0;
+
+  for (tree fld = TYPE_FIELDS(type); fld; fld = DECL_CHAIN(fld))
+    {
+      if (TREE_CODE(fld) != FIELD_DECL)
+	continue;
+      tree elem_type = TREE_TYPE(fld);
+      if (!SCALAR_FLOAT_TYPE_P(elem_type))
+	{
+	  auto elem_res = hfa_size(rstate, elem_type);
+	  if (!elem_res)
+	    return {};
+	  auto [elem_nof_elem, elem_bitsize] = *elem_res;
+	  if (nof_elem == 0)
+	    {
+	      nof_elem = elem_nof_elem;
+	      bitsize = elem_bitsize;
+	    }
+	  else
+	    {
+	      if (bitsize != elem_bitsize)
+		return {};
+	      nof_elem += elem_nof_elem;
+	      if (nof_elem > 4)
+		return {};
+	    }
+	}
+      else
+	{
+	  if (++nof_elem > 4)
+	    return {};
+	  unsigned elem_bitsize = bitsize_for_type(elem_type);
+	  if (nof_elem == 1)
+	    {
+	      bitsize = elem_bitsize;
+	      if (bitsize > rstate->freg_bitsize)
+		return {};
+	    }
+	  if (bitsize != elem_bitsize)
+	    return {};
+	}
+    }
+
+  return {{nof_elem, bitsize}};
 }
 
 bool is_short_vector(tree type)
@@ -88,8 +159,27 @@ void build_return(aarch64_state *rstate, Function *src_func, function *fun)
       return;
     }
 
+  if (auto hfa = hfa_size(rstate, ret_type); hfa)
+    {
+      auto [nof_regs, elem_bitsize] = *hfa;
+      Inst *retval =
+	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z0]);
+      retval = bb->build_trunc(retval, elem_bitsize);
+      for (unsigned i = 1; i < nof_regs; i++)
+	{
+	  Inst *inst =
+	    bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z0 + i]);
+	  inst = bb->build_trunc(inst, elem_bitsize);
+	  retval = bb->build_inst(Op::CONCAT, inst, retval);
+	}
+      bb->build_ret_inst(retval);
+      return;
+    }
+
   if (ret_bitsize <= 2 * rstate->reg_bitsize
-      && TREE_CODE(ret_type) == RECORD_TYPE
+      && (TREE_CODE(ret_type) == RECORD_TYPE
+	  || TREE_CODE(ret_type) == COMPLEX_TYPE
+	  || INTEGRAL_TYPE_P(ret_type))
       && is_not_hfa_hva(ret_type))
     {
       unsigned nof_regs =
@@ -117,6 +207,16 @@ void write_reg(Basic_block *bb, Inst *reg, Inst *value)
   if (reg->bitsize > value->bitsize)
     value = bb->build_inst(Op::ZEXT, value, reg->bitsize);
   bb->build_inst(Op::WRITE, reg, value);
+}
+
+Inst *extract_vec_elem(Basic_block *bb, Inst *inst, uint32_t elem_bitsize, uint32_t idx)
+{
+  if (idx == 0 && inst->bitsize == elem_bitsize)
+    return inst;
+  assert(inst->bitsize % elem_bitsize == 0);
+  Inst *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
+  Inst *low = bb->value_inst(idx * elem_bitsize, 32);
+  return bb->build_inst(Op::EXTRACT, inst, high, low);
 }
 
 } // end anonymous namespace
@@ -203,7 +303,7 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
     {
       uint32_t bitsize = bitsize_for_type(TREE_TYPE(decl));
       if (bitsize <= 0)
-	throw Not_implemented("Parameter size == 0");
+	throw Not_implemented("setup_aarch64_function: Parameter size == 0");
 
       Inst *param_nbr = bb->value_inst(param_number, 32);
       Inst *param_bitsize = bb->value_inst(bitsize, 32);
@@ -242,8 +342,23 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
 	  write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + freg_nbr], param);
 	  freg_nbr++;
 	}
+      else if (auto hfa = hfa_size(&rstate, type); hfa)
+	{
+	  auto [nof_regs, elem_bitsize] = *hfa;
+	  if (freg_nbr + nof_regs > 8)
+	    throw Not_implemented("setup_aarch64_function: too many params");
+	  for (unsigned i = 0; i < nof_regs; i++)
+	    {
+	      Inst *reg_value = extract_vec_elem(bb, param, elem_bitsize, i);
+	      write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + freg_nbr],
+			reg_value);
+	      freg_nbr++;
+	    }
+	}
       else if (param->bitsize <= 2 * rstate.reg_bitsize
-	       && TREE_CODE(type) == RECORD_TYPE
+	       && (TREE_CODE(type) == RECORD_TYPE
+		   || TREE_CODE(type) == COMPLEX_TYPE
+		   || INTEGRAL_TYPE_P(type))
 	       && is_not_hfa_hva(type))
 	{
 	  if (reg_nbr >= 8)
