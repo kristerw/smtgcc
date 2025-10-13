@@ -109,8 +109,7 @@ bool is_unused_memory(Inst *memory_inst)
 	  if (used_by->op == Op::SET_MEM_INDEF
 	      || used_by->op == Op::STORE)
 	    sinks.push_back(used_by);
-	  else
-	    worklist.push_back(used_by);
+	  worklist.push_back(used_by);
 	}
     }
 
