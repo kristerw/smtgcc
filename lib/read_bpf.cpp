@@ -15,7 +15,9 @@ namespace smtgcc {
 namespace {
 
 struct Parser : public ParserBase {
-  Parser(bpf_state *rstate) : rstate{rstate} {}
+  Parser(bpf_state *rstate)
+    : ParserBase(rstate->sym_name2mem)
+    , rstate{rstate} {}
 
   enum class Cond_code {
     EQ, NE, GT, GE, LT, LE, SGT, SGE, SLT, SLE
@@ -381,7 +383,7 @@ void Parser::build_mem(const std::string& sym_name)
   assert(!rstate->sym_name2mem.contains(sym_name));
   if (!sym_name2data.contains(sym_name))
     throw Parse_error("unknown symbol " + sym_name, line_number);
-  std::vector<unsigned char>& data = sym_name2data.at(sym_name);
+  std::vector<Inst *>& data = sym_name2data.at(sym_name);
 
   if (rstate->next_local_id == 0)
     throw Not_implemented("too many local variables");
@@ -399,8 +401,7 @@ void Parser::build_mem(const std::string& sym_name)
     {
       Inst *off = entry_bb->value_inst(i, mem->bitsize);
       Inst *ptr = entry_bb->build_inst(Op::ADD, mem, off);
-      Inst *byte = entry_bb->value_inst(data[i], 8);
-      entry_bb->build_inst(Op::STORE, ptr, byte);
+      entry_bb->build_inst(Op::STORE, ptr, data[i]);
     }
 }
 
@@ -1096,7 +1097,7 @@ Function *Parser::parse(std::string const& file_name)
   assert(module->functions.size() == 2);
   src_func = module->functions[0];
 
-  parse_rodata();
+  parse_rodata(rstate->entry_bb);
 
   state parser_state = state::global;
   pos = 0;
@@ -1126,13 +1127,12 @@ Function *Parser::parse(std::string const& file_name)
 	      {
 		if (!sym_name2data.contains(name))
 		  continue;
-		std::vector<unsigned char>& data = sym_name2data.at(name);
+		std::vector<Inst *>& data = sym_name2data.at(name);
 		for (size_t i = 0; i < data.size(); i++)
 		  {
 		    Inst *off = entry_bb->value_inst(i, mem->bitsize);
 		    Inst *ptr = entry_bb->build_inst(Op::ADD, mem, off);
-		    Inst *byte = entry_bb->value_inst(data[i], 8);
-		    entry_bb->build_inst(Op::STORE, ptr, byte);
+		    entry_bb->build_inst(Op::STORE, ptr, data[i]);
 		  }
 	      }
 

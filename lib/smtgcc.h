@@ -426,11 +426,14 @@ private:
 struct ParserBase
 {
 protected:
+  ParserBase(std::map<std::string, Inst *, std::less<>>& sym_name2mem);
+
   std::vector<char> buf;
   int line_number = 0;
   size_t pos;
 
-  std::map<std::string, std::vector<unsigned char>, std::less<>> sym_name2data;
+  std::map<std::string, Inst *, std::less<>> sym_name2mem;
+  std::map<std::string, std::vector<Inst *>, std::less<>> sym_name2data;
   std::map<std::string, std::pair<std::string, uint64_t>, std::less<>> sym_alias;
 
   void skip_line();
@@ -439,8 +442,8 @@ protected:
 
   std::string_view parse_cmd();
   std::optional<std::string_view> parse_label_def();
-  bool parse_data(std::vector<unsigned char>& data);
-  void parse_rodata();
+  bool parse_data(Basic_block *bb, std::vector<Inst *>& data);
+  void parse_rodata(Basic_block *bb);
 };
 
 // cfg.cpp
@@ -600,7 +603,7 @@ struct aarch64_state {
   std::vector<Inst *> registers;
 
   // The memory instruction corresponding to each symbol.
-  std::map<std::string, Inst *> sym_name2mem;
+  std::map<std::string, Inst *, std::less<>> sym_name2mem;
 
   std::string file_name;
   std::string func_name;
@@ -639,7 +642,7 @@ struct bpf_state {
   std::vector<Inst *> registers;
 
   // The memory instruction corresponding to each symbol.
-  std::map<std::string, Inst *> sym_name2mem;
+  std::map<std::string, Inst *, std::less<>> sym_name2mem;
 
   std::string file_name;
   std::string func_name;
@@ -765,7 +768,7 @@ struct riscv_state {
   std::vector<Inst *> registers;
 
   // The memory instruction corresponding to each symbol.
-  std::map<std::string, Inst *> sym_name2mem;
+  std::map<std::string, Inst *, std::less<>> sym_name2mem;
 
   std::string file_name;
   std::string func_name;
@@ -840,7 +843,7 @@ struct sh_state {
   std::vector<Inst *> registers;
 
   // The memory instruction corresponding to each symbol.
-  std::map<std::string, Inst *> sym_name2mem;
+  std::map<std::string, Inst *, std::less<>> sym_name2mem;
 
   std::string file_name;
   std::string func_name;

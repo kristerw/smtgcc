@@ -15,7 +15,9 @@ namespace smtgcc {
 namespace {
 
 struct Parser : public ParserBase {
-  Parser(sh_state *rstate) : rstate{rstate} {}
+  Parser(sh_state *rstate)
+    : ParserBase(rstate->sym_name2mem)
+    , rstate{rstate} {}
 
   enum class Cond_code {
     EQ, HS, GE, HI, GT, PZ, PL
@@ -1400,7 +1402,7 @@ void Parser::parse_function_data()
 {
   size_t orig_pos = pos;
 
-  std::vector<unsigned char> data;
+  std::vector<Inst *> data;
   for (;;)
     {
       if (pos == buf.size() - 1)
@@ -1412,7 +1414,7 @@ void Parser::parse_function_data()
 	  if (label)
 	    {
 	      size_t offset = data.size();
-	      if (parse_data(data))
+	      if (parse_data(rstate->entry_bb, data))
 		label_name2offset.emplace(*label, offset);
 	    }
 	}
@@ -1435,8 +1437,7 @@ void Parser::parse_function_data()
     {
       Inst *off = entry_bb->value_inst(i, mem->bitsize);
       Inst *ptr = entry_bb->build_inst(Op::ADD, mem, off);
-      Inst *byte = entry_bb->value_inst(data[i], 8);
-      entry_bb->build_inst(Op::STORE, ptr, byte);
+      entry_bb->build_inst(Op::STORE, ptr, data[i]);
     }
   function_data_mem = mem;
 }
@@ -1475,7 +1476,7 @@ Function *Parser::parse(std::string const& file_name)
   assert(module->functions.size() == 2);
   src_func = module->functions[0];
 
-  parse_rodata();
+  parse_rodata(rstate->entry_bb);
 
   state parser_state = state::global;
   pos = 0;
@@ -1505,13 +1506,12 @@ Function *Parser::parse(std::string const& file_name)
 	      {
 		if (!sym_name2data.contains(name))
 		  continue;
-		std::vector<unsigned char>& data = sym_name2data.at(name);
+		std::vector<Inst *>& data = sym_name2data.at(name);
 		for (size_t i = 0; i < data.size(); i++)
 		  {
 		    Inst *off = entry_bb->value_inst(i, mem->bitsize);
 		    Inst *ptr = entry_bb->build_inst(Op::ADD, mem, off);
-		    Inst *byte = entry_bb->value_inst(data[i], 8);
-		    entry_bb->build_inst(Op::STORE, ptr, byte);
+		    entry_bb->build_inst(Op::STORE, ptr, data[i]);
 		  }
 	      }
 
