@@ -1,5 +1,7 @@
 #include "gcc-plugin.h"
 #include "tree.h"
+#include "stringpool.h"
+#include "attribs.h"
 
 #include <cassert>
 
@@ -11,24 +13,15 @@ namespace {
 
 const int stack_size = 1024 * 100;
 
-// Return true if this is guaranteed not to be a HFA or HVA.
-// This is a hack to enable support for handling some structures in the ABI
-// before we add HFA, HVA, and the full ABI three stage process.
-bool is_not_hfa_hva(tree type)
+bool is_sve_type(tree type)
 {
-  if (TREE_CODE(type) == RECORD_TYPE)
-    {
-      for (tree fld = TYPE_FIELDS(type); fld; fld = DECL_CHAIN(fld))
-	{
-	  if (TREE_CODE(fld) != FIELD_DECL)
-	    continue;
-	  if (!VECTOR_TYPE_P(type))
-	    return true;
-	}
-      return false;
-    }
+  return POLY_INT_CST_P(TYPE_SIZE(type));
+}
 
-  return true;
+bool is_short_vector(tree type)
+{
+  uint64_t bitsize = bitsize_for_type(type);
+  return VECTOR_TYPE_P(type) && (bitsize == 128 || bitsize == 64);
 }
 
 std::optional<std::pair<unsigned, unsigned>> hfa_size(aarch64_state *rstate, tree type)
@@ -108,10 +101,75 @@ std::optional<std::pair<unsigned, unsigned>> hfa_size(aarch64_state *rstate, tre
   return {{nof_elem, bitsize}};
 }
 
-bool is_short_vector(tree type)
+std::optional<std::pair<unsigned, unsigned>> hva_size(aarch64_state *rstate, tree type)
 {
-  uint64_t bitsize = bitsize_for_type(type);
-  return VECTOR_TYPE_P(type) && (bitsize == 128 || bitsize == 64);
+  if (TREE_CODE(type) == ARRAY_TYPE)
+    {
+      tree elem_type = TREE_TYPE(type);
+      if (!is_short_vector(elem_type))
+	return {};
+      unsigned elem_bitsize = bitsize_for_type(elem_type);
+      unsigned nof_elem = bitsize_for_type(type) / elem_bitsize;
+      if (nof_elem > 4)
+	return {};
+      return {{nof_elem, elem_bitsize}};
+    }
+
+  if (TREE_CODE(type) != RECORD_TYPE)
+    return {};
+
+  unsigned nof_elem = 0;
+  unsigned bitsize = 0;
+
+  for (tree fld = TYPE_FIELDS(type); fld; fld = DECL_CHAIN(fld))
+    {
+      if (TREE_CODE(fld) != FIELD_DECL)
+	continue;
+      tree elem_type = TREE_TYPE(fld);
+      if (!is_short_vector(elem_type))
+	{
+	  auto elem_res = hva_size(rstate, elem_type);
+	  if (!elem_res)
+	    return {};
+	  auto [elem_nof_elem, elem_bitsize] = *elem_res;
+	  if (nof_elem == 0)
+	    {
+	      nof_elem = elem_nof_elem;
+	      bitsize = elem_bitsize;
+	    }
+	  else
+	    {
+	      if (bitsize != elem_bitsize)
+		return {};
+	      nof_elem += elem_nof_elem;
+	      if (nof_elem > 4)
+		return {};
+	    }
+	}
+      else
+	{
+	  if (++nof_elem > 4)
+	    return {};
+	  unsigned elem_bitsize = bitsize_for_type(elem_type);
+	  if (nof_elem == 1)
+	    {
+	      bitsize = elem_bitsize;
+	      if (bitsize > rstate->freg_bitsize)
+		return {};
+	    }
+	  if (bitsize != elem_bitsize)
+	    return {};
+	}
+    }
+
+  return {{nof_elem, bitsize}};
+}
+
+std::optional<std::pair<unsigned, unsigned>> hfa_hva_size(aarch64_state *rstate, tree type)
+{
+  if (auto hfa = hfa_size(rstate, type); hfa)
+    return hfa;
+  return hva_size(rstate, type);
 }
 
 void build_return(aarch64_state *rstate, Function *src_func, function *fun)
@@ -127,6 +185,9 @@ void build_return(aarch64_state *rstate, Function *src_func, function *fun)
   tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
   uint64_t ret_bitsize = src_last_bb->last_inst->args[0]->bitsize;
 
+  if (is_sve_type(ret_type))
+    throw Not_implemented("aarch64: Unhandled SVE return type");
+
   if ((SCALAR_FLOAT_TYPE_P(ret_type) && ret_bitsize <= rstate->freg_bitsize)
       || TYPE_MAIN_VARIANT(ret_type) == aarch64_mfp8_type_node)
     {
@@ -138,7 +199,9 @@ void build_return(aarch64_state *rstate, Function *src_func, function *fun)
       return;
     }
 
-  if ((INTEGRAL_TYPE_P(ret_type) || POINTER_TYPE_P(ret_type))
+  if ((INTEGRAL_TYPE_P(ret_type)
+       || POINTER_TYPE_P(ret_type)
+       || TREE_CODE(ret_type) == NULLPTR_TYPE)
       && ret_bitsize <= rstate->reg_bitsize)
     {
       Inst *retval =
@@ -159,7 +222,7 @@ void build_return(aarch64_state *rstate, Function *src_func, function *fun)
       return;
     }
 
-  if (auto hfa = hfa_size(rstate, ret_type); hfa)
+  if (auto hfa = hfa_hva_size(rstate, ret_type); hfa)
     {
       auto [nof_regs, elem_bitsize] = *hfa;
       Inst *retval =
@@ -178,9 +241,10 @@ void build_return(aarch64_state *rstate, Function *src_func, function *fun)
 
   if (ret_bitsize <= 2 * rstate->reg_bitsize
       && (TREE_CODE(ret_type) == RECORD_TYPE
+	  || TREE_CODE(ret_type) == UNION_TYPE
 	  || TREE_CODE(ret_type) == COMPLEX_TYPE
-	  || INTEGRAL_TYPE_P(ret_type))
-      && is_not_hfa_hva(ret_type))
+	  || INTEGRAL_TYPE_P(ret_type)
+	  || (VECTOR_TYPE_P(ret_type) && !VECTOR_FLOAT_TYPE_P(ret_type))))
     {
       unsigned nof_regs =
 	(ret_bitsize + rstate->reg_bitsize - 1) / rstate->reg_bitsize;
@@ -310,6 +374,8 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
       Inst *param = bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
 
       tree type = TREE_TYPE(decl);
+      if (is_sve_type(type))
+	throw Not_implemented("aarch64: Unhandled SVE param type");
       if (param_number == 0
 	  && !strcmp(IDENTIFIER_POINTER(DECL_NAME(fun->decl)), "__ct_base "))
 	{
@@ -327,7 +393,9 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
 	  write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + freg_nbr], param);
 	  freg_nbr++;
 	}
-      else if ((INTEGRAL_TYPE_P(type) || POINTER_TYPE_P(type))
+      else if ((INTEGRAL_TYPE_P(type)
+		|| POINTER_TYPE_P(type)
+		|| TREE_CODE(type) == NULLPTR_TYPE)
 	       && param->bitsize <= rstate.reg_bitsize)
 	{
 	  if (reg_nbr >= 8)
@@ -342,7 +410,7 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
 	  write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + freg_nbr], param);
 	  freg_nbr++;
 	}
-      else if (auto hfa = hfa_size(&rstate, type); hfa)
+      else if (auto hfa = hfa_hva_size(&rstate, type); hfa)
 	{
 	  auto [nof_regs, elem_bitsize] = *hfa;
 	  if (freg_nbr + nof_regs > 8)
@@ -357,10 +425,14 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
 	}
       else if (param->bitsize <= 2 * rstate.reg_bitsize
 	       && (TREE_CODE(type) == RECORD_TYPE
+		   || TREE_CODE(type) == UNION_TYPE
 		   || TREE_CODE(type) == COMPLEX_TYPE
-		   || INTEGRAL_TYPE_P(type))
-	       && is_not_hfa_hva(type))
+		   || INTEGRAL_TYPE_P(type)
+		   || (VECTOR_TYPE_P(type) && !VECTOR_FLOAT_TYPE_P(type))))
 	{
+	  if (TYPE_ALIGN(type) > rstate.reg_bitsize && (reg_nbr & 1) != 0)
+	    reg_nbr++;
+
 	  if (reg_nbr >= 8)
 	    throw Not_implemented("setup_aarch64_function: too many params");
 	  Inst *value = param;
