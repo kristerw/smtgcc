@@ -300,32 +300,44 @@ void build_return(aarch64_state *rstate, Function *src_func, function *fun)
       return;
     }
 
-  // The the value is passed in memory, where the address is specified by x8.
-  Module *module = rstate->module;
-  Inst *id = bb->value_inst(rstate->next_local_id++, module->ptr_id_bits);
-  Inst *mem_size = bb->value_inst(ret_bitsize / 8, module->ptr_offset_bits);
-  Inst *flags = bb->value_inst(0, 32);
-  Basic_block *entry_bb = rstate->entry_bb;
-  Inst *ret_mem = entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
-  Inst *reg = rstate->registers[Aarch64RegIdx::x8];
-  entry_bb->build_inst(Op::WRITE, reg, ret_mem);
-
-  // Generate the return value from the value returned in memory.
-  uint64_t size = (ret_bitsize + 7) / 8;
-  Inst *retval = 0;
-  for (uint64_t i = 0; i < size; i++)
+  if (ret_bitsize > 2 * rstate->reg_bitsize
+      && (TREE_CODE(ret_type) == RECORD_TYPE
+	  || TREE_CODE(ret_type) == UNION_TYPE
+	  || TREE_CODE(ret_type) == COMPLEX_TYPE
+	  || INTEGRAL_TYPE_P(ret_type)
+	  || VECTOR_TYPE_P(ret_type)))
     {
-      Inst *offset = bb->value_inst(i, ret_mem->bitsize);
-      Inst *ptr = bb->build_inst(Op::ADD, ret_mem, offset);
-      Inst *data_byte = bb->build_inst(Op::LOAD, ptr);
-      if (retval)
-	retval = bb->build_inst(Op::CONCAT, data_byte, retval);
-      else
-	retval = data_byte;
+      // The the value is passed in memory, where the address is specified
+      // by x8.
+      Module *module = rstate->module;
+      Inst *id = bb->value_inst(rstate->next_local_id++, module->ptr_id_bits);
+      Inst *mem_size = bb->value_inst(ret_bitsize / 8, module->ptr_offset_bits);
+      Inst *flags = bb->value_inst(0, 32);
+      Basic_block *entry_bb = rstate->entry_bb;
+      Inst *ret_mem = entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
+      Inst *reg = rstate->registers[Aarch64RegIdx::x8];
+      entry_bb->build_inst(Op::WRITE, reg, ret_mem);
+
+      // Generate the return value from the value returned in memory.
+      uint64_t size = (ret_bitsize + 7) / 8;
+      Inst *retval = 0;
+      for (uint64_t i = 0; i < size; i++)
+	{
+	  Inst *offset = bb->value_inst(i, ret_mem->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, ret_mem, offset);
+	  Inst *data_byte = bb->build_inst(Op::LOAD, ptr);
+	  if (retval)
+	    retval = bb->build_inst(Op::CONCAT, data_byte, retval);
+	  else
+	    retval = data_byte;
+	}
+      if (ret_bitsize < retval->bitsize)
+	retval = bb->build_trunc(retval, ret_bitsize);
+      bb->build_ret_inst(retval);
+      return;
     }
-  if (ret_bitsize < retval->bitsize)
-    retval = bb->build_trunc(retval, ret_bitsize);
-  bb->build_ret_inst(retval);
+
+  throw Not_implemented("aarch64: Unhandled return type");
 }
 
 void write_reg(Basic_block *bb, Inst *reg, Inst *value)
@@ -344,6 +356,25 @@ Inst *extract_vec_elem(Basic_block *bb, Inst *inst, uint32_t elem_bitsize, uint3
   Inst *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
   Inst *low = bb->value_inst(idx * elem_bitsize, 32);
   return bb->build_inst(Op::EXTRACT, inst, high, low);
+}
+
+Inst *param_in_mem(Basic_block *bb, aarch64_state *rstate, Inst *value)
+{
+  if ((value->bitsize & 7) != 0)
+    value = bb->build_inst(Op::ZEXT, value, (value->bitsize + 7) & ~7);
+  Module *module = rstate->module;
+  Inst *id = bb->value_inst(rstate->next_local_id++, module->ptr_id_bits);
+  Inst *mem_size = bb->value_inst(value->bitsize / 8, module->ptr_offset_bits);
+  Inst *flags = bb->value_inst(0, 32);
+  Inst *mem = bb->build_inst(Op::MEMORY, id, mem_size, flags);
+  for (uint64_t i = 0; i < value->bitsize / 8; i++)
+    {
+      Inst *offset = bb->value_inst(i, mem->bitsize);
+      Inst *addr = bb->build_inst(Op::ADD, mem, offset);
+      Inst *data_byte = extract_vec_elem(bb, value, 8, i);
+      bb->build_inst(Op::STORE, addr, data_byte);
+    }
+  return mem;
 }
 
 } // end anonymous namespace
@@ -570,6 +601,22 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
 			    value);
 		  ngrn++;
 		}
+	    }
+	  else
+	    throw Not_implemented("setup_aarch64_function: too many params");
+	}
+      else if (param->bitsize > 2 * rstate.reg_bitsize
+	       && (TREE_CODE(type) == RECORD_TYPE
+		   || TREE_CODE(type) == UNION_TYPE
+		   || TREE_CODE(type) == COMPLEX_TYPE
+		   || INTEGRAL_TYPE_P(type)
+		   || VECTOR_TYPE_P(type)))
+	{
+	  Inst *value = param_in_mem(bb, &rstate, param);
+	  if (ngrn < 8)
+	    {
+	      write_reg(bb, rstate.registers[Aarch64RegIdx::x0 + ngrn], value);
+	      ngrn++;
 	    }
 	  else
 	    throw Not_implemented("setup_aarch64_function: too many params");
