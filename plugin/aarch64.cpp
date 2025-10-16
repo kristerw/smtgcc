@@ -20,6 +20,8 @@ bool is_sve_type(tree type)
 
 bool is_short_vector(tree type)
 {
+  if (is_sve_type(type))
+    return false;
   uint64_t bitsize = bitsize_for_type(type);
   return VECTOR_TYPE_P(type) && (bitsize == 128 || bitsize == 64);
 }
@@ -186,7 +188,43 @@ void build_return(aarch64_state *rstate, Function *src_func, function *fun)
   uint64_t ret_bitsize = src_last_bb->last_inst->args[0]->bitsize;
 
   if (is_sve_type(ret_type))
-    throw Not_implemented("aarch64: Unhandled SVE return type");
+    {
+      Inst *z0 = rstate->registers[Aarch64RegIdx::z0];
+      if (ret_bitsize >= z0->bitsize)
+	{
+	  assert((ret_bitsize % z0->bitsize) == 0);
+	  unsigned nof_regs = ret_bitsize / z0->bitsize;
+	  assert(nof_regs <= 8);
+
+	  Inst *retval =
+	    bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z0]);
+	  for (unsigned i = 1; i < nof_regs; i++)
+	    {
+	      Inst *reg = rstate->registers[Aarch64RegIdx::z0 + i];
+	      Inst *inst = bb->build_inst(Op::READ, reg);
+	      retval = bb->build_inst(Op::CONCAT, inst, retval);
+	    }
+	  bb->build_ret_inst(retval);
+	  return;
+	}
+      else
+	{
+	  Inst *p0 = rstate->registers[Aarch64RegIdx::p0];
+	  assert((ret_bitsize % p0->bitsize) == 0);
+	  unsigned nof_regs = ret_bitsize / p0->bitsize;
+	  assert(nof_regs <= 4);
+	  Inst *retval =
+	    bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::p0]);
+	  for (unsigned i = 1; i < nof_regs; i++)
+	    {
+	      Inst *reg = rstate->registers[Aarch64RegIdx::p0 + i];
+	      Inst *inst = bb->build_inst(Op::READ, reg);
+	      retval = bb->build_inst(Op::CONCAT, inst, retval);
+	    }
+	  bb->build_ret_inst(retval);
+	  return;
+	}
+    }
 
   if ((SCALAR_FLOAT_TYPE_P(ret_type) && ret_bitsize <= rstate->freg_bitsize)
       || TYPE_MAIN_VARIANT(ret_type) == aarch64_mfp8_type_node)
@@ -379,8 +417,14 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
   stack = bb->build_inst(Op::ADD, stack, size);
   bb->build_inst(Op::WRITE, rstate.registers[Aarch64RegIdx::sp], stack);
 
-  uint32_t reg_nbr = 0;
-  uint32_t freg_nbr = 0;
+  // Next General-purpose Register Number
+  uint32_t ngrn = 0;
+
+  // Next SIMD and Floating-point Register Number
+  uint32_t nsrn = 0;
+
+  // Next Scalable Predicate Register Number
+  uint32_t nprn = 0;
 
   build_return(&rstate, src_func, fun);
 
@@ -390,17 +434,14 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
   std::vector<Inst*> stack_values;
   for (tree decl = DECL_ARGUMENTS(fun->decl); decl; decl = DECL_CHAIN(decl))
     {
-      uint32_t bitsize = bitsize_for_type(TREE_TYPE(decl));
+      tree type = TREE_TYPE(decl);
+      uint32_t bitsize = bitsize_for_type(type);
       if (bitsize <= 0)
 	throw Not_implemented("setup_aarch64_function: Parameter size == 0");
-
       Inst *param_nbr = bb->value_inst(param_number, 32);
       Inst *param_bitsize = bb->value_inst(bitsize, 32);
       Inst *param = bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
 
-      tree type = TREE_TYPE(decl);
-      if (is_sve_type(type))
-	throw Not_implemented("aarch64: Unhandled SVE param type");
       if (param_number == 0
 	  && !strcmp(IDENTIFIER_POINTER(DECL_NAME(fun->decl)), "__ct_base "))
 	{
@@ -413,40 +454,89 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
       if ((SCALAR_FLOAT_TYPE_P(type) && param->bitsize <= rstate.freg_bitsize)
 	  || TYPE_MAIN_VARIANT(type) == aarch64_mfp8_type_node)
 	{
-	  if (freg_nbr >= 8)
+	  if (nsrn < 8)
+	    {
+	      write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + nsrn], param);
+	      nsrn++;
+	    }
+	  else
 	    throw Not_implemented("setup_aarch64_function: too many params");
-	  write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + freg_nbr], param);
-	  freg_nbr++;
+	}
+      else if (is_short_vector(type))
+	{
+	  if (nsrn < 8)
+	    {
+	      write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + nsrn], param);
+	      nsrn++;
+	    }
+	  else
+	    throw Not_implemented("setup_aarch64_function: too many params");
+	}
+      else if (auto hfa = hfa_hva_size(&rstate, type); hfa)
+	{
+	  auto [nof_regs, elem_bitsize] = *hfa;
+	  if (nsrn + nof_regs < 8)
+	    {
+	      for (unsigned i = 0; i < nof_regs; i++)
+		{
+		  Inst *value = extract_vec_elem(bb, param, elem_bitsize, i);
+		  write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + nsrn],
+			    value);
+		  nsrn++;
+		}
+	    }
+	  else
+	    throw Not_implemented("setup_aarch64_function: too many params");
+	}
+      else if (is_sve_type(type))
+	{
+	  Inst *z0 = rstate.registers[Aarch64RegIdx::z0];
+	  if (param->bitsize >= z0->bitsize)
+	    {
+	      assert((param->bitsize % z0->bitsize) == 0);
+	      unsigned nof_regs = param->bitsize / z0->bitsize;
+	      if (nsrn + nof_regs <= 8)
+		{
+		  for (unsigned i = 0; i < nof_regs; i++)
+		    {
+		      Inst *reg = rstate.registers[Aarch64RegIdx::z0 + nsrn++];
+		      Inst *value = extract_vec_elem(bb, param, z0->bitsize, i);
+		      write_reg(bb, reg, value);
+		    }
+		}
+	      else
+		throw Not_implemented("setup_aarch64_function: too many params");
+	    }
+	  else
+	    {
+	      Inst *p0 = rstate.registers[Aarch64RegIdx::p0];
+	      assert((param->bitsize % p0->bitsize) == 0);
+	      unsigned nof_regs = param->bitsize / p0->bitsize;
+	      if (nprn + nof_regs <= 4)
+		{
+		  for (unsigned i = 0; i < nof_regs; i++)
+		    {
+		      Inst *reg = rstate.registers[Aarch64RegIdx::p0 + nprn++];
+		      Inst *value = extract_vec_elem(bb, param, p0->bitsize, i);
+		      write_reg(bb, reg, value);
+		    }
+		}
+	      else
+		throw Not_implemented("setup_aarch64_function: too many params");
+	    }
 	}
       else if ((INTEGRAL_TYPE_P(type)
 		|| POINTER_TYPE_P(type)
 		|| TREE_CODE(type) == NULLPTR_TYPE)
 	       && param->bitsize <= rstate.reg_bitsize)
 	{
-	  if (reg_nbr >= 8)
-	    throw Not_implemented("setup_aarch64_function: too many params");
-	  write_reg(bb, rstate.registers[Aarch64RegIdx::x0 + reg_nbr], param);
-	  reg_nbr++;
-	}
-      else if (is_short_vector(type))
-	{
-	  if (freg_nbr >= 8)
-	    throw Not_implemented("setup_aarch64_function: too many params");
-	  write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + freg_nbr], param);
-	  freg_nbr++;
-	}
-      else if (auto hfa = hfa_hva_size(&rstate, type); hfa)
-	{
-	  auto [nof_regs, elem_bitsize] = *hfa;
-	  if (freg_nbr + nof_regs > 8)
-	    throw Not_implemented("setup_aarch64_function: too many params");
-	  for (unsigned i = 0; i < nof_regs; i++)
+	  if (ngrn < 8)
 	    {
-	      Inst *reg_value = extract_vec_elem(bb, param, elem_bitsize, i);
-	      write_reg(bb, rstate.registers[Aarch64RegIdx::z0 + freg_nbr],
-			reg_value);
-	      freg_nbr++;
+	      write_reg(bb, rstate.registers[Aarch64RegIdx::x0 + ngrn], param);
+	      ngrn++;
 	    }
+	  else
+	    throw Not_implemented("setup_aarch64_function: too many params");
 	}
       else if (param->bitsize <= 2 * rstate.reg_bitsize
 	       && (TREE_CODE(type) == RECORD_TYPE
@@ -455,29 +545,34 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
 		   || INTEGRAL_TYPE_P(type)
 		   || (VECTOR_TYPE_P(type) && !VECTOR_FLOAT_TYPE_P(type))))
 	{
-	  if (TYPE_ALIGN(type) > rstate.reg_bitsize && (reg_nbr & 1) != 0)
-	    reg_nbr++;
+	  if (ngrn < 8
+	      && TYPE_ALIGN(type) > rstate.reg_bitsize
+	      && (ngrn & 1) != 0)
+	    ngrn++;
 
-	  if (reg_nbr >= 8)
-	    throw Not_implemented("setup_aarch64_function: too many params");
-	  Inst *value = param;
-	  if (value->bitsize > rstate.reg_bitsize)
-	    value = bb->build_trunc(value, rstate.reg_bitsize);
-	  write_reg(bb, rstate.registers[Aarch64RegIdx::x0 + reg_nbr], value);
-	  reg_nbr++;
-
-	  if (param->bitsize > rstate.reg_bitsize)
+	  if (ngrn < 8)
 	    {
-	      Inst *high = bb->value_inst(param->bitsize - 1, 32);
-	      Inst *low = bb->value_inst(rstate.reg_bitsize, 32);
-	      value = bb->build_inst(Op::EXTRACT, param, high, low);
-	      if (reg_nbr >= 8)
-		throw Not_implemented("setup_aarch64_function: "
-				      "too many params");
-	      write_reg(bb, rstate.registers[Aarch64RegIdx::x0 + reg_nbr],
-			value);
-	      reg_nbr++;
+	      Inst *value = param;
+	      if (value->bitsize > rstate.reg_bitsize)
+		value = bb->build_trunc(value, rstate.reg_bitsize);
+	      write_reg(bb, rstate.registers[Aarch64RegIdx::x0 + ngrn], value);
+	      ngrn++;
+
+	      if (param->bitsize > rstate.reg_bitsize)
+		{
+		  Inst *high = bb->value_inst(param->bitsize - 1, 32);
+		  Inst *low = bb->value_inst(rstate.reg_bitsize, 32);
+		  value = bb->build_inst(Op::EXTRACT, param, high, low);
+		  if (ngrn >= 8)
+		    throw Not_implemented("setup_aarch64_function: "
+					  "too many params");
+		  write_reg(bb, rstate.registers[Aarch64RegIdx::x0 + ngrn],
+			    value);
+		  ngrn++;
+		}
 	    }
+	  else
+	    throw Not_implemented("setup_aarch64_function: too many params");
 	}
       else
 	throw Not_implemented("setup_aarch64_function: param type not handled");
