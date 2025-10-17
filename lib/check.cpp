@@ -2115,21 +2115,23 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
 
   src->canonicalize();
   tgt->canonicalize();
-  if (identical(src, tgt))
-    return {};
 
   Converter converter(module, run_simplify_inst);
   converter.convert_function(src, Function_role::src);
   converter.convert_function(tgt, Function_role::tgt);
   converter.finalize();
 
-  if (!converter.need_checking())
-    return {};
-
   if (config.verbose > 1)
     {
       module->print(stderr);
       converter.module->print(stderr);
+    }
+
+  if (!converter.need_checking())
+    {
+      if (config.verbose > 0)
+	fprintf(stderr, "SMTGCC: No checking is needed\n");
+      return {};
     }
 
   Solver_result result = {Result_status::correct, {}};
