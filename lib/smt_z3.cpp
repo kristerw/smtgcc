@@ -986,28 +986,28 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
       && conv.src_unique_ub != conv.tgt_unique_ub
       && !(conv.tgt_unique_ub->op == Op::VALUE
 	   && conv.tgt_unique_ub->value() == 0))
-  {
-    z3::solver solver(ctx);
-    solver.add(!src_common_ub_expr);
-    solver.add(!src_unique_ub_expr);
-    solver.add(tgt_unique_ub_expr);
-    uint64_t start_time = get_time();
-    Solver_result solver_result = run_solver(solver, "UB", false_expr);
-    stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
-    if (solver_result.status == Result_status::incorrect)
-      {
-	assert(solver_result.message);
-	std::string msg = *solver_result.message;
-	add_print(msg, conv, solver);
-	Solver_result result = {Result_status::incorrect, msg};
-	return std::pair<SStats, Solver_result>(stats, result);
-      }
-    if (solver_result.status == Result_status::unknown)
-      {
-	assert(solver_result.message);
-	warning = warning + *solver_result.message;
-      }
-  }
+    {
+      z3::solver solver(ctx);
+      solver.add(!src_common_ub_expr);
+      solver.add(!src_unique_ub_expr);
+      solver.add(tgt_unique_ub_expr);
+      uint64_t start_time = get_time();
+      Solver_result solver_result = run_solver(solver, "UB", false_expr);
+      stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
+      if (solver_result.status == Result_status::incorrect)
+	{
+	  assert(solver_result.message);
+	  std::string msg = *solver_result.message;
+	  add_print(msg, conv, solver);
+	  Solver_result result = {Result_status::incorrect, msg};
+	  return std::pair<SStats, Solver_result>(stats, result);
+	}
+      if (solver_result.status == Result_status::unknown)
+	{
+	  assert(solver_result.message);
+	  warning = warning + *solver_result.message;
+	}
+    }
 
   // Check that the function calls abort/exit identically for src and tgt.
   if (conv.src_abort != conv.tgt_abort
@@ -1026,7 +1026,8 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
       solver.add(!src_unique_ub_expr);
       solver.add(src_abort_expr != tgt_abort_expr
 		 || src_exit_expr != tgt_exit_expr
-		 || (src_exit_expr && (src_exit_val_expr != tgt_exit_val_expr)));
+		 || (src_exit_expr
+		     && (src_exit_val_expr != tgt_exit_val_expr)));
       uint64_t start_time = get_time();
       Solver_result solver_result =
 	run_solver(solver, "abort/exit", solver_ub_expr);
@@ -1125,68 +1126,70 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
   if (conv.src_memory != conv.tgt_memory
       || conv.src_memory_size != conv.tgt_memory_size
       || conv.src_memory_indef != conv.tgt_memory_indef)
-  {
-    z3::expr src_mem = conv.inst_as_array(conv.src_memory);
-    z3::expr src_mem_size = conv.inst_as_array(conv.src_memory_size);
-    z3::expr src_mem_indef = conv.inst_as_array(conv.src_memory_indef);
+    {
+      z3::expr src_mem = conv.inst_as_array(conv.src_memory);
+      z3::expr src_mem_size = conv.inst_as_array(conv.src_memory_size);
+      z3::expr src_mem_indef = conv.inst_as_array(conv.src_memory_indef);
 
-    z3::expr tgt_mem = conv.inst_as_array(conv.tgt_memory);
-    z3::expr tgt_mem_indef = conv.inst_as_array(conv.tgt_memory_indef);
+      z3::expr tgt_mem = conv.inst_as_array(conv.tgt_memory);
+      z3::expr tgt_mem_indef = conv.inst_as_array(conv.tgt_memory_indef);
 
-    z3::expr ptr = ctx.bv_const(".ptr", func->module->ptr_bits);
-    uint32_t ptr_id_high = func->module->ptr_id_high;
-    uint32_t ptr_id_low = func->module->ptr_id_low;
-    z3::expr id = ptr.extract(ptr_id_high, ptr_id_low);
-    uint32_t ptr_offset_high = func->module->ptr_offset_high;
-    uint32_t ptr_offset_low = func->module->ptr_offset_low;
-    z3::expr offset = ptr.extract(ptr_offset_high, ptr_offset_low);
+      z3::expr ptr = ctx.bv_const(".ptr", func->module->ptr_bits);
+      uint32_t ptr_id_high = func->module->ptr_id_high;
+      uint32_t ptr_id_low = func->module->ptr_id_low;
+      z3::expr id = ptr.extract(ptr_id_high, ptr_id_low);
+      uint32_t ptr_offset_high = func->module->ptr_offset_high;
+      uint32_t ptr_offset_low = func->module->ptr_offset_low;
+      z3::expr offset = ptr.extract(ptr_offset_high, ptr_offset_low);
 
-    z3::solver solver(ctx);
-    solver.add(!src_common_ub_expr);
-    solver.add(!src_unique_ub_expr);
+      z3::solver solver(ctx);
+      solver.add(!src_common_ub_expr);
+      solver.add(!src_unique_ub_expr);
 
-    // Only check global memory.
-    solver.add(id > 0);
+      // Only check global memory.
+      solver.add(id > 0);
 
-    // Only check memory within a memory block.
-    solver.add(z3::ult(offset, z3::select(src_mem_size, id)));
+      // Only check memory within a memory block.
+      solver.add(z3::ult(offset, z3::select(src_mem_size, id)));
 
-    // Check that src and tgt are the same for the bits where src is defined
-    // and that tgt is not more indefinite than src.
-    z3::expr src_mask = ~z3::select(src_mem_indef, ptr);
-    z3::expr src_value = z3::select(src_mem, ptr) & src_mask;
-    z3::expr tgt_value = z3::select(tgt_mem, ptr) & src_mask;
-    z3::expr tgt_more_indef = (z3::select(tgt_mem_indef, ptr) & src_mask) != 0;
-    solver.add(src_value != tgt_value || tgt_more_indef);
+      // Check that src and tgt are the same for the bits where src is defined
+      // and that tgt is not more indefinite than src.
+      z3::expr src_mask = ~z3::select(src_mem_indef, ptr);
+      z3::expr src_value = z3::select(src_mem, ptr) & src_mask;
+      z3::expr tgt_value = z3::select(tgt_mem, ptr) & src_mask;
+      z3::expr tgt_more_indef =
+	(z3::select(tgt_mem_indef, ptr) & src_mask) != 0;
+      solver.add(src_value != tgt_value || tgt_more_indef);
 
-    uint64_t start_time = get_time();
-    Solver_result solver_result = run_solver(solver, "Memory", solver_ub_expr);
-    stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-    if (solver_result.status == Result_status::incorrect)
-      {
-	assert(solver_result.message);
-	z3::model model = solver.get_model();
-	z3::expr src_byte = model.eval(z3::select(src_mem, ptr));
-	z3::expr tgt_byte = model.eval(z3::select(tgt_mem, ptr));
-	z3::expr src_indef = model.eval(z3::select(src_mem_indef, ptr));
-	z3::expr tgt_indef = model.eval(z3::select(tgt_mem_indef, ptr));
-	std::string msg = *solver_result.message;
-	msg = msg + "\n.ptr = " + model.eval(ptr).to_string() + "\n";
-	msg = msg + "src *.ptr: " + src_byte.to_string() + "\n";
-	msg = msg + "tgt *.ptr: " + tgt_byte.to_string() + "\n";
-	msg = msg + "src indef: " + src_indef.to_string() + "\n";
-	msg = msg + "tgt indef: " + tgt_indef.to_string() + "\n";
-	msg = msg +  "tgt ub: " + model.eval(tgt_unique_ub_expr).to_string() + "\n";
-	add_print(msg, conv, solver);
-	Solver_result result = {Result_status::incorrect, msg};
-	return std::pair<SStats, Solver_result>(stats, result);
-      }
-    if (solver_result.status == Result_status::unknown)
-      {
-	assert(solver_result.message);
-	warning = warning + *solver_result.message;
-      }
-  }
+      uint64_t start_time = get_time();
+      Solver_result solver_result =
+	run_solver(solver, "Memory", solver_ub_expr);
+      stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
+      if (solver_result.status == Result_status::incorrect)
+	{
+	  assert(solver_result.message);
+	  z3::model model = solver.get_model();
+	  z3::expr src_byte = model.eval(z3::select(src_mem, ptr));
+	  z3::expr tgt_byte = model.eval(z3::select(tgt_mem, ptr));
+	  z3::expr src_indef = model.eval(z3::select(src_mem_indef, ptr));
+	  z3::expr tgt_indef = model.eval(z3::select(tgt_mem_indef, ptr));
+	  std::string msg = *solver_result.message;
+	  msg = msg + "\n.ptr = " + model.eval(ptr).to_string() + "\n";
+	  msg = msg + "src *.ptr: " + src_byte.to_string() + "\n";
+	  msg = msg + "tgt *.ptr: " + tgt_byte.to_string() + "\n";
+	  msg = msg + "src indef: " + src_indef.to_string() + "\n";
+	  msg = msg + "tgt indef: " + tgt_indef.to_string() + "\n";
+	  msg = msg +  "tgt ub: " + model.eval(tgt_unique_ub_expr).to_string() + "\n";
+	  add_print(msg, conv, solver);
+	  Solver_result result = {Result_status::incorrect, msg};
+	  return std::pair<SStats, Solver_result>(stats, result);
+	}
+      if (solver_result.status == Result_status::unknown)
+	{
+	  assert(solver_result.message);
+	  warning = warning + *solver_result.message;
+	}
+    }
 
   // Check that tgt does not have UB that is not in src.
   assert(conv.src_common_ub == conv.tgt_common_ub);
@@ -1194,28 +1197,28 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
       && conv.src_unique_ub != conv.tgt_unique_ub
       && !(conv.tgt_unique_ub->op == Op::VALUE
 	   && conv.tgt_unique_ub->value() == 0))
-  {
-    z3::solver solver(ctx);
-    solver.add(!src_common_ub_expr);
-    solver.add(!src_unique_ub_expr);
-    solver.add(tgt_unique_ub_expr);
-    uint64_t start_time = get_time();
-    Solver_result solver_result = run_solver(solver, "UB", false_expr);
-    stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
-    if (solver_result.status == Result_status::incorrect)
-      {
-	assert(solver_result.message);
-	std::string msg = *solver_result.message;
-	add_print(msg, conv, solver);
-	Solver_result result = {Result_status::incorrect, msg};
-	return std::pair<SStats, Solver_result>(stats, result);
-      }
-    if (solver_result.status == Result_status::unknown)
-      {
-	assert(solver_result.message);
-	warning = warning + *solver_result.message;
-      }
-  }
+    {
+      z3::solver solver(ctx);
+      solver.add(!src_common_ub_expr);
+      solver.add(!src_unique_ub_expr);
+      solver.add(tgt_unique_ub_expr);
+      uint64_t start_time = get_time();
+      Solver_result solver_result = run_solver(solver, "UB", false_expr);
+      stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
+      if (solver_result.status == Result_status::incorrect)
+	{
+	  assert(solver_result.message);
+	  std::string msg = *solver_result.message;
+	  add_print(msg, conv, solver);
+	  Solver_result result = {Result_status::incorrect, msg};
+	  return std::pair<SStats, Solver_result>(stats, result);
+	}
+      if (solver_result.status == Result_status::unknown)
+	{
+	  assert(solver_result.message);
+	  warning = warning + *solver_result.message;
+	}
+    }
 
   if (!warning.empty())
     {
