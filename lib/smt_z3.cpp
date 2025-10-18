@@ -566,9 +566,9 @@ void Converter::build_ternary_smt(const Inst *inst)
 	  z3::expr arg3 = inst_as_array(inst->args[2]);
 	  inst2array.insert({inst, ite(arg1, arg2, arg3)});
 	}
-      else if (inst->bitsize == 1 &&
-	  (inst2bool.contains(inst->args[1])
-	   && inst2bool.contains(inst->args[2])))
+      else if (inst->bitsize == 1
+	       && inst2bool.contains(inst->args[1])
+	       && inst2bool.contains(inst->args[2]))
 	{
 	  z3::expr arg1 = inst_as_bool(inst->args[0]);
 	  z3::expr arg2 = inst_as_bool(inst->args[1]);
@@ -680,7 +680,6 @@ void Converter::build_solver_smt(const Inst *inst)
 {
   if (inst->nof_args == 1)
     {
-      z3::expr arg1 = inst_as_bv(inst->args[0]);
       switch (inst->op)
 	{
 	case Op::SRC_ASSERT:
@@ -697,8 +696,6 @@ void Converter::build_solver_smt(const Inst *inst)
     }
   else if (inst->nof_args == 2)
     {
-      z3::expr arg1 = inst_as_bv(inst->args[0]);
-      z3::expr arg2 = inst_as_bv(inst->args[1]);
       switch (inst->op)
 	{
 	case Op::PARAM:
