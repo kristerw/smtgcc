@@ -914,6 +914,70 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 
   std::string warning;
 
+  // Check that tgt does not have UB that is not in src.
+  assert(conv.src_common_ub == conv.tgt_common_ub);
+  if (config.optimize_ub
+      && conv.src_unique_ub != conv.tgt_unique_ub
+      && !(conv.tgt_unique_ub->op == Op::VALUE
+	   && conv.tgt_unique_ub->value() == 0))
+    {
+      solver.push();
+      solver.assertFormula(not_src_common_ub_term);
+      solver.assertFormula(not_src_unique_ub_term);
+      solver.assertFormula(tgt_unique_ub_term);
+      uint64_t start_time = get_time();
+      Solver_result solver_result = run_solver(solver, "UB");
+      stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
+      if (solver_result.status == Result_status::incorrect)
+	return std::pair<SStats, Solver_result>(stats, solver_result);
+      if (solver_result.status == Result_status::unknown)
+	{
+	  assert(solver_result.message);
+	  warning = warning + *solver_result.message;
+	}
+      solver.pop();
+    }
+
+  // Check that the function calls abort/exit identically for src and tgt.
+  if (conv.src_abort != conv.tgt_abort
+      || conv.src_exit != conv.tgt_exit
+      || conv.src_exit_val != conv.tgt_exit_val)
+    {
+      solver.push();
+      cvc5::Term src_abort_term = conv.inst_as_bool(conv.src_abort);
+      cvc5::Term tgt_abort_term = conv.inst_as_bool(conv.tgt_abort);
+      cvc5::Term abort_differ =
+	solver.mkTerm(cvc5::Kind::XOR, {src_abort_term, tgt_abort_term});
+      cvc5::Term src_exit_term = conv.inst_as_bool(conv.src_exit);
+      cvc5::Term tgt_exit_term = conv.inst_as_bool(conv.tgt_exit);
+      cvc5::Term exit_differ =
+	solver.mkTerm(cvc5::Kind::XOR, {src_exit_term, tgt_exit_term});
+      cvc5::Term src_exit_val_term = conv.inst_as_bv(conv.src_exit_val);
+      cvc5::Term tgt_exit_val_term = conv.inst_as_bv(conv.tgt_exit_val);
+      cvc5::Term exit_val_differ =
+	solver.mkTerm(cvc5::Kind::DISTINCT,
+		      {src_exit_val_term, tgt_exit_val_term});
+      exit_val_differ =
+	solver.mkTerm(cvc5::Kind::AND, {src_exit_term, exit_val_differ});
+      cvc5::Term differ =
+	solver.mkTerm(cvc5::Kind::OR, {abort_differ, exit_differ});
+      differ = solver.mkTerm(cvc5::Kind::OR, {differ, exit_val_differ});
+      solver.assertFormula(not_src_common_ub_term);
+      solver.assertFormula(not_src_unique_ub_term);
+      solver.assertFormula(differ);
+      uint64_t start_time = get_time();
+      Solver_result solver_result = run_solver(solver, "abort/exit");
+      stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
+      if (solver_result.status == Result_status::incorrect)
+	return std::pair<SStats, Solver_result>(stats, solver_result);
+      if (solver_result.status == Result_status::unknown)
+	{
+	  assert(solver_result.message);
+	  warning = warning + *solver_result.message;
+	}
+      solver.pop();
+    }
+
   // Check that the returned value (if any) is the same for src and tgt.
   if (conv.src_retval != conv.tgt_retval
       || conv.src_retval_indef != conv.tgt_retval_indef)
@@ -987,115 +1051,120 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
   if (conv.src_memory != conv.tgt_memory
       || conv.src_memory_size != conv.tgt_memory_size
       || conv.src_memory_indef != conv.tgt_memory_indef)
-  {
-    solver.push();
-    solver.assertFormula(not_src_common_ub_term);
-    solver.assertFormula(not_src_unique_ub_term);
-    cvc5::Term src_mem = conv.inst_as_array(conv.src_memory);
-    cvc5::Term src_mem_size = conv.inst_as_array(conv.src_memory_size);
-    cvc5::Term src_mem_indef = conv.inst_as_array(conv.src_memory_indef);
+    {
+      solver.push();
+      solver.assertFormula(not_src_common_ub_term);
+      solver.assertFormula(not_src_unique_ub_term);
+      cvc5::Term src_mem = conv.inst_as_array(conv.src_memory);
+      cvc5::Term src_mem_size = conv.inst_as_array(conv.src_memory_size);
+      cvc5::Term src_mem_indef = conv.inst_as_array(conv.src_memory_indef);
 
-    cvc5::Term tgt_mem = conv.inst_as_array(conv.tgt_memory);
-    cvc5::Term tgt_mem_indef = conv.inst_as_array(conv.tgt_memory_indef);
+      cvc5::Term tgt_mem = conv.inst_as_array(conv.tgt_memory);
+      cvc5::Term tgt_mem_indef = conv.inst_as_array(conv.tgt_memory_indef);
 
-    cvc5::Sort ptr_sort = solver.mkBitVectorSort(func->module->ptr_bits);
-    cvc5::Term ptr = solver.mkConst(ptr_sort, ".ptr");
-    uint32_t ptr_id_high = func->module->ptr_id_high;
-    uint32_t ptr_id_low = func->module->ptr_id_low;
-    cvc5::Op id_op =
-      solver.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {ptr_id_high, ptr_id_low});
-    cvc5::Term id = solver.mkTerm(id_op, {ptr});
-    uint32_t ptr_offset_high = func->module->ptr_offset_high;
-    uint32_t ptr_offset_low = func->module->ptr_offset_low;
-    cvc5::Op offset_op =
-      solver.mkOp(cvc5::Kind::BITVECTOR_EXTRACT,
-		  {ptr_offset_high, ptr_offset_low});
-    cvc5::Term offset = solver.mkTerm(offset_op, {ptr});
+      cvc5::Sort ptr_sort = solver.mkBitVectorSort(func->module->ptr_bits);
+      cvc5::Term ptr = solver.mkConst(ptr_sort, ".ptr");
+      uint32_t ptr_id_high = func->module->ptr_id_high;
+      uint32_t ptr_id_low = func->module->ptr_id_low;
+      cvc5::Op id_op =
+	solver.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {ptr_id_high, ptr_id_low});
+      cvc5::Term id = solver.mkTerm(id_op, {ptr});
+      uint32_t ptr_offset_high = func->module->ptr_offset_high;
+      uint32_t ptr_offset_low = func->module->ptr_offset_low;
+      cvc5::Op offset_op =
+	solver.mkOp(cvc5::Kind::BITVECTOR_EXTRACT,
+		    {ptr_offset_high, ptr_offset_low});
+      cvc5::Term offset = solver.mkTerm(offset_op, {ptr});
 
-    // Only check global memory.
-    cvc5::Term zero_id = solver.mkBitVector(func->module->ptr_id_bits, 0);
-    cvc5::Term cond1 = solver.mkTerm(cvc5::Kind::BITVECTOR_SGT, {id, zero_id});
-    solver.assertFormula(cond1);
+      // Only check global memory.
+      cvc5::Term zero_id = solver.mkBitVector(func->module->ptr_id_bits, 0);
+      cvc5::Term cond1 =
+	solver.mkTerm(cvc5::Kind::BITVECTOR_SGT, {id, zero_id});
+      solver.assertFormula(cond1);
 
-    // Only check memory within a memory block.
-    cvc5::Term mem_size = solver.mkTerm(cvc5::Kind::SELECT, {src_mem_size, id});
-    cvc5::Term cond2 =
-      solver.mkTerm(cvc5::Kind::BITVECTOR_ULT, {offset, mem_size});
-    solver.assertFormula(cond2);
+      // Only check memory within a memory block.
+      cvc5::Term mem_size =
+	solver.mkTerm(cvc5::Kind::SELECT, {src_mem_size, id});
+      cvc5::Term cond2 =
+	solver.mkTerm(cvc5::Kind::BITVECTOR_ULT, {offset, mem_size});
+      solver.assertFormula(cond2);
 
-    // Check that src and tgt are the same for the bits where src is defined
-    // and that tgt is not more indefinite than src.
-    cvc5::Term src_indef =
-      solver.mkTerm(cvc5::Kind::SELECT, {src_mem_indef, ptr});
-    cvc5::Term src_mask = solver.mkTerm(cvc5::Kind::BITVECTOR_NOT, {src_indef});
-    cvc5::Term src_byte = solver.mkTerm(cvc5::Kind::SELECT, {src_mem, ptr});
-    src_byte = solver.mkTerm(cvc5::Kind::BITVECTOR_AND, {src_byte, src_mask});
-    cvc5::Term tgt_byte = solver.mkTerm(cvc5::Kind::SELECT, {tgt_mem, ptr});
-    tgt_byte = solver.mkTerm(cvc5::Kind::BITVECTOR_AND, {tgt_byte, src_mask});
-    cvc5::Term cond3 =
-      solver.mkTerm(cvc5::Kind::DISTINCT, {src_byte, tgt_byte});
-    cvc5::Term tgt_indef =
-      solver.mkTerm(cvc5::Kind::SELECT, {tgt_mem_indef, ptr});
-    cvc5::Term tgt_more_indef =
-      solver.mkTerm(cvc5::Kind::BITVECTOR_AND, {tgt_indef, src_mask});
-    cvc5::Term zero_byte = solver.mkBitVector(8, 0);
-    cvc5::Term cond4 =
-      solver.mkTerm(cvc5::Kind::DISTINCT, {tgt_more_indef, zero_byte});
-    solver.assertFormula(solver.mkTerm(cvc5::Kind::OR, {cond3, cond4}));
+      // Check that src and tgt are the same for the bits where src is defined
+      // and that tgt is not more indefinite than src.
+      cvc5::Term src_indef =
+	solver.mkTerm(cvc5::Kind::SELECT, {src_mem_indef, ptr});
+      cvc5::Term src_mask =
+	solver.mkTerm(cvc5::Kind::BITVECTOR_NOT, {src_indef});
+      cvc5::Term src_byte = solver.mkTerm(cvc5::Kind::SELECT, {src_mem, ptr});
+      src_byte = solver.mkTerm(cvc5::Kind::BITVECTOR_AND, {src_byte, src_mask});
+      cvc5::Term tgt_byte = solver.mkTerm(cvc5::Kind::SELECT, {tgt_mem, ptr});
+      tgt_byte = solver.mkTerm(cvc5::Kind::BITVECTOR_AND, {tgt_byte, src_mask});
+      cvc5::Term cond3 =
+	solver.mkTerm(cvc5::Kind::DISTINCT, {src_byte, tgt_byte});
+      cvc5::Term tgt_indef =
+	solver.mkTerm(cvc5::Kind::SELECT, {tgt_mem_indef, ptr});
+      cvc5::Term tgt_more_indef =
+	solver.mkTerm(cvc5::Kind::BITVECTOR_AND, {tgt_indef, src_mask});
+      cvc5::Term zero_byte = solver.mkBitVector(8, 0);
+      cvc5::Term cond4 =
+	solver.mkTerm(cvc5::Kind::DISTINCT, {tgt_more_indef, zero_byte});
+      solver.assertFormula(solver.mkTerm(cvc5::Kind::OR, {cond3, cond4}));
 
-    // TODO: Should make a better getBitVectorValue that prints values as
-    // hex, etc.
-    uint64_t start_time = get_time();
-    Solver_result solver_result = run_solver(solver, "Memory");
-    stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-    if (solver_result.status == Result_status::incorrect)
-      {
-	assert(solver_result.message);
-	cvc5::Term ptr_val = solver.getValue(ptr);
-	cvc5::Term src_byte_val = solver.getValue(src_byte);
-	cvc5::Term tgt_byte_val = solver.getValue(tgt_byte);
-	cvc5::Term src_indef_val = solver.getValue(src_indef);
-	cvc5::Term tgt_indef_val = solver.getValue(tgt_indef);
-	std::string msg = *solver_result.message;
-	msg = msg + "\n.ptr = " + ptr_val.getBitVectorValue(16) + "\n";
-	msg = msg + "src *.ptr: " + src_byte_val.getBitVectorValue(16) + "\n";
-	msg = msg + "tgt *.ptr: " + tgt_byte_val.getBitVectorValue(16) + "\n";
-	msg = msg + "src indef: " + src_indef_val.getBitVectorValue(16) + "\n";
-	msg = msg + "tgt indef: " + tgt_indef_val.getBitVectorValue(16) + "\n";
-	Solver_result result = {Result_status::incorrect, msg};
-	return std::pair<SStats, Solver_result>(stats, result);
-      }
-    if (solver_result.status == Result_status::unknown)
-      {
-	assert(solver_result.message);
-	warning = warning + *solver_result.message;
-      }
-    solver.pop();
-  }
-
+      // TODO: Should make a better getBitVectorValue that prints values as
+      // hex, etc.
+      uint64_t start_time = get_time();
+      Solver_result solver_result = run_solver(solver, "Memory");
+      stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
+      if (solver_result.status == Result_status::incorrect)
+	{
+	  assert(solver_result.message);
+	  cvc5::Term ptr_val = solver.getValue(ptr);
+	  cvc5::Term src_byte_val = solver.getValue(src_byte);
+	  cvc5::Term tgt_byte_val = solver.getValue(tgt_byte);
+	  cvc5::Term src_indef_val = solver.getValue(src_indef);
+	  cvc5::Term tgt_indef_val = solver.getValue(tgt_indef);
+	  std::string msg = *solver_result.message;
+	  msg = msg + "\n.ptr = " + ptr_val.getBitVectorValue(16) + "\n";
+	  msg = msg + "src *.ptr: " + src_byte_val.getBitVectorValue(16) + "\n";
+	  msg = msg + "tgt *.ptr: " + tgt_byte_val.getBitVectorValue(16) + "\n";
+	  msg = msg + "src indef: "
+	    + src_indef_val.getBitVectorValue(16) + "\n";
+	  msg = msg + "tgt indef: "
+	    + tgt_indef_val.getBitVectorValue(16) + "\n";
+	  Solver_result result = {Result_status::incorrect, msg};
+	  return std::pair<SStats, Solver_result>(stats, result);
+	}
+      if (solver_result.status == Result_status::unknown)
+	{
+	  assert(solver_result.message);
+	  warning = warning + *solver_result.message;
+	}
+      solver.pop();
+    }
 
   // Check that tgt does not have UB that is not in src.
   assert(conv.src_common_ub == conv.tgt_common_ub);
-  if (conv.src_unique_ub != conv.tgt_unique_ub
+  if (!config.optimize_ub
+      && conv.src_unique_ub != conv.tgt_unique_ub
       && !(conv.tgt_unique_ub->op == Op::VALUE
 	   && conv.tgt_unique_ub->value() == 0))
-  {
-    solver.push();
-    solver.assertFormula(not_src_common_ub_term);
-    solver.assertFormula(not_src_unique_ub_term);
-    solver.assertFormula(tgt_unique_ub_term);
-    uint64_t start_time = get_time();
-    Solver_result solver_result = run_solver(solver, "UB");
-    stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
-    if (solver_result.status == Result_status::incorrect)
-      return std::pair<SStats, Solver_result>(stats, solver_result);
-    if (solver_result.status == Result_status::unknown)
-      {
-	assert(solver_result.message);
-	warning = warning + *solver_result.message;
-      }
-    solver.pop();
-  }
+    {
+      solver.push();
+      solver.assertFormula(not_src_common_ub_term);
+      solver.assertFormula(not_src_unique_ub_term);
+      solver.assertFormula(tgt_unique_ub_term);
+      uint64_t start_time = get_time();
+      Solver_result solver_result = run_solver(solver, "UB");
+      stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
+      if (solver_result.status == Result_status::incorrect)
+	return std::pair<SStats, Solver_result>(stats, solver_result);
+      if (solver_result.status == Result_status::unknown)
+	{
+	  assert(solver_result.message);
+	  warning = warning + *solver_result.message;
+	}
+      solver.pop();
+    }
 
   if (!warning.empty())
     {
