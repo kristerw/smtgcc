@@ -346,6 +346,11 @@ struct Module {
   uint32_t ptr_offset_low;
 };
 
+enum class SmtSolver : uint8_t {
+  z3,
+  cvc5
+};
+
 struct Config
 {
   Config();
@@ -365,6 +370,8 @@ struct Config
   bool optimize_ub = true;
 
   bool redis_cache = false;
+
+  SmtSolver smt_solver;
 };
 
 extern Config config;

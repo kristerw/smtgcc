@@ -2101,11 +2101,6 @@ bool identical(Function *func1, Function *func2)
 
 Solver_result check_refine(Module *module, bool run_simplify_inst)
 {
-  struct VStats {
-    SStats cvc5;
-    SStats z3;
-  } stats;
-
   assert(module->functions.size() == 2);
   Function *src = module->functions[0];
   Function *tgt = module->functions[1];
@@ -2134,8 +2129,6 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
       return {};
     }
 
-  Solver_result result = {Result_status::correct, {}};
-
   Cache cache(converter.dest_func);
   if (std::optional<Solver_result> result_cache = cache.get())
     {
@@ -2144,33 +2137,23 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
       return *result_cache;
     }
 
-#if 0
-  auto [stats_cvc5, result_cvc5] = check_refine_cvc5(converter.dest_func);
-  stats.cvc5 = stats_cvc5;
-  if (result_cvc5.status != Result_status::correct)
-    result = result_cvc5;
-#endif
-#if 1
-  auto [stats_z3, result_z3] = check_refine_z3(converter.dest_func);
-  stats.z3 = stats_z3;
-  if (result_z3.status != Result_status::correct)
-    result = result_z3;
-#endif
+  Solver_result result = {Result_status::correct, {}};
+  struct SStats stats;
+  if (config.smt_solver == SmtSolver::z3)
+    std::tie(stats, result) = check_refine_z3(converter.dest_func);
+  else
+    std::tie(stats, result) = check_refine_cvc5(converter.dest_func);
 
   cache.set(result);
 
   if (config.verbose > 0)
     {
-      if (!stats.cvc5.skipped || !stats.z3.skipped)
+      if (!stats.skipped)
 	{
 	  fprintf(stderr, "SMTGCC: time: ");
 	  for (int i = 0; i < 4; i++)
 	    {
-	      fprintf(stderr, "%s%" PRIu64, i ? "," : "", stats.cvc5.time[i]);
-	    }
-	  for (int i = 0; i < 4; i++)
-	    {
-	      fprintf(stderr, "%s%" PRIu64, ",", stats.z3.time[i]);
+	      fprintf(stderr, "%s%" PRIu64, i ? "," : "", stats.time[i]);
 	    }
 	  fprintf(stderr, "\n");
 	}

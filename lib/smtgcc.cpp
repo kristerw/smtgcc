@@ -7,6 +7,7 @@
 #include <set>
 #include <time.h>
 
+#include "config.h"
 #include "smtgcc.h"
 
 using namespace std::string_literals;
@@ -169,6 +170,25 @@ Config::Config()
     {
       if (!strcmp(p, "redis"))
 	redis_cache = true;
+      else
+	throw Not_implemented("Unknown SMTGCC_CACHE");
+    }
+
+#if HAVE_LIBZ3
+  smt_solver = SmtSolver::z3;
+#elif HAVE_LIBCVC5
+  smt_solver = SmtSolver::cvc5;
+#else
+#error "No SMT solver was configured"
+#endif
+  if (char *p = getenv("SMTGCC_SMT_SOLVER"))
+    {
+      if (!strcmp(p, "Z3") || !strcmp(p, "z3"))
+	smt_solver = SmtSolver::z3;
+      else if (!strcmp(p, "cvc5") || !strcmp(p, "CVC5"))
+	smt_solver = SmtSolver::cvc5;
+      else
+	throw Not_implemented("Unknown SMTGCC_SMT_SOLVER");
     }
 }
 

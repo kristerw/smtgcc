@@ -116,7 +116,7 @@ Limitations in the current version:
   - Handling of pointer provenance is too restrictive.
   - ...
 
-## smtgcc-tv-backend -- RISC-V
+## smtgcc-tv-backend — RISC-V
 smtgcc-tv-backend compares the IR from the last GIMPLE pass with the generated assembly code and reports an error if the resulting assembly code is not a refinement of the IR (i.e., if the backend has miscompiled the program).
 
 The plugin supports the RISC-V RV32G and RV64G base profiles and the bitmanip, compressed, and vector extensions. It can be invoked as follows:
@@ -128,7 +128,7 @@ The limitations of smtgcc-tv-backend include all those listed for smtgcc-tv, wit
 * You must pass `-fno-section-anchors` to the compiler.
 * Address allocation of local variables differs between the IR and the generated assembly. As a result, the plugin disables checks when a local address is written to memory or cast to an integer type to avoid false positives.
 
-## smtgcc-tv-backend -- AArch64
+## smtgcc-tv-backend — AArch64
 smtgcc-tv-backend compares the IR from the last GIMPLE pass with the generated assembly code and reports an error if the resulting assembly code is not a refinement of the IR (i.e., if the backend has miscompiled the program).
 
 The plugin supports up to ARMv9.5-A. It can be invoked as follows:
@@ -140,7 +140,7 @@ The limitations of smtgcc-tv-backend include all those listed for smtgcc-tv, wit
 * You must pass `-fno-section-anchors` to the compiler.
 * Address allocation of local variables differs between the IR and the generated assembly. As a result, the plugin disables checks when a local address is written to memory or cast to an integer type to avoid false positives.
 
-## smtgcc-tv-backend -- BPF
+## smtgcc-tv-backend — BPF
 smtgcc-tv-backend compares the IR from the last GIMPLE pass with the generated assembly code and reports an error if the resulting assembly code is not a refinement of the IR (i.e., if the backend has miscompiled the program).
 
 The plugin can be invoked as follows:
@@ -204,11 +204,12 @@ Another way to verify such optimizations is to write the test in GIMPLE and pass
 It is good practice to check with `-fdump-tree-ssa` that the IR used by the tool looks as expected.
 
 ### Limitations
-smtgcc-check-refine has the same limitations as smtgcc-tv. 
+smtgcc-check-refine has the same limitations as smtgcc-tv.
 
 # Environment variables
- * `SMTGCC_VERBOSE` — Print debug information while running. Valid value 0-3, higher value prints more information (Default: 0)
- * `SMTGCC_TIMEOUT` — SMT solver timeout (Default: 120000)
- * `SMTGCC_MEMORY_LIMIT` — SMT solver memory use limit in megabytes (Default: 5120)
- * `SMTGCC_CACHE` — Set to "redis" to use a Redis database to cache SMT queries.
+ * `SMTGCC_VERBOSE` — Prints debug information. Valid values are 0-3. Higher values print more information. (Default: 0)
+ * `SMTGCC_TIMEOUT` — Sets the SMT solver timeout in milliseconds. (Default: 120000)
+ * `SMTGCC_MEMORY_LIMIT` — Sets the SMT solver memory limit in megabytes. (Default: 5120)
+ * `SMTGCC_CACHE` — Set to "redis" to use a Redis database for caching SMT queries.
  * `SMTGCC_ASM` — Set to the file name of the assembly to override the default when using smtgcc-tv-backend.
+ * `SMTGCC_SMT_SOLVER` — Selects which SMT solver to use. Valid values are "Z3" or "cvc5". (Default: Z3)

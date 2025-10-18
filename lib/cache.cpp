@@ -155,11 +155,12 @@ std::string Cache::hash(Function *func)
   const uint32_t nof_inst_info = inst_info.size();
   h.add(nof_inst_info);
 
-  // We add the SMT timeout/memory_limit to prevent the cache from returning
-  // a time out status from a previous run when we try again with a larger
-  // timeout.
+  // We add the SMT timeout/memory_limit/smt_solver to prevent the cache
+  // from returning a timeout status from a previous run when we try again
+  // with a larger timeout or different SMT solver.
   h.add(config.timeout);
   h.add(config.memory_limit);
+  h.add(config.smt_solver);
 
   // Module config
   h.add(func->module->ptr_bits);
