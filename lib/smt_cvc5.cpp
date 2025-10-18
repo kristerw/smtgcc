@@ -23,13 +23,14 @@ class Converter {
   cvc5::Op fp_sort(cvc5::Kind kind, uint32_t bitsize);
   void build_bv_comparison_smt(const Inst *inst);
   void build_fp_comparison_smt(const Inst *inst);
-  void build_nullary_smt(const Inst *inst);
+  void build_memory_state_smt(const Inst *inst);
   void build_bv_unary_smt(const Inst *inst);
   void build_fp_unary_smt(const Inst *inst);
   void build_bv_binary_smt(const Inst *inst);
   void build_fp_binary_smt(const Inst *inst);
   void build_ternary_smt(const Inst *inst);
   void build_conversion_smt(const Inst *inst);
+  void build_solver_smt(const Inst *inst);
   void build_special_smt(const Inst *inst);
   void build_smt(const Inst *inst);
   void convert_function();
@@ -59,6 +60,9 @@ public:
   Inst *src_retval_indef = nullptr;
   Inst *src_unique_ub = nullptr;
   Inst *src_common_ub = nullptr;
+  Inst *src_abort  = nullptr;
+  Inst *src_exit = nullptr;
+  Inst *src_exit_val  = nullptr;
 
   Inst *tgt_assert = nullptr;
   Inst *tgt_memory = nullptr;
@@ -68,6 +72,9 @@ public:
   Inst *tgt_retval_indef = nullptr;
   Inst *tgt_unique_ub = nullptr;
   Inst *tgt_common_ub = nullptr;
+  Inst *tgt_abort  = nullptr;
+  Inst *tgt_exit = nullptr;
+  Inst *tgt_exit_val  = nullptr;
 };
 
 cvc5::Term Converter::ite(cvc5::Term c, cvc5::Term a, cvc5::Term b)
@@ -101,7 +108,7 @@ cvc5::Term Converter::inst_as_bv(const Inst *inst)
   else
     {
       // We do not have a bitvector value for inst. This means there must
-      // be a floating point value for this instruction. Convert it to a
+      // be a floating-point value for this instruction. Convert it to a
       // bitvector.
       throw Not_implemented("inst_as_bv: convert fp to bitvector");
     }
@@ -129,7 +136,7 @@ cvc5::Term Converter::inst_as_fp(const Inst *inst)
   if (I != inst2fp.end())
     return I->second;
 
-  // We do not have a floating-point value for inst. This means there
+  // We do not have a floating-point value for inst. This means there must
   // be a bitvector value for this instruction. Convert it to floating
   // point.
   throw Not_implemented("inst_as_fp: bitvector to fp");
@@ -236,7 +243,7 @@ void Converter::build_fp_comparison_smt(const Inst *inst)
     }
 }
 
-void Converter::build_nullary_smt(const Inst *inst)
+void Converter::build_memory_state_smt(const Inst *inst)
 {
   switch (inst->op)
     {
@@ -286,13 +293,25 @@ void Converter::build_nullary_smt(const Inst *inst)
       }
       break;
     default:
-      throw Not_implemented("build_nullary_smt: "s + inst->name());
+      throw Not_implemented("build_memory_state_smt: "s + inst->name());
     }
 }
 
 void Converter::build_bv_unary_smt(const Inst *inst)
 {
   assert(inst->nof_args == 1);
+
+  // Perform the NOT operation as Boolean if the argument is Boolean. This
+  // avoids multiple conversions between bitvector and Boolean for the
+  // typical case where 1-bit values are used in logical expressions.
+  if (inst->bitsize == 1
+      && inst->op == Op::NOT
+      && inst2bool.contains(inst->args[0]))
+    {
+      cvc5::Term arg1 = inst_as_bool(inst->args[0]);
+      inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::NOT, {arg1})});
+      return;
+    }
 
   cvc5::Term arg1 = inst_as_bv(inst->args[0]);
   switch (inst->op)
@@ -317,14 +336,6 @@ void Converter::build_bv_unary_smt(const Inst *inst)
       break;
     case Op::SIMP_BARRIER:
       inst2bv.insert({inst, arg1});
-      break;
-    case Op::SRC_ASSERT:
-      assert(!src_assert);
-      src_assert = inst->args[0];
-      break;
-    case Op::TGT_ASSERT:
-      assert(!tgt_assert);
-      tgt_assert = inst->args[0];
       break;
     default:
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
@@ -366,30 +377,30 @@ void Converter::build_bv_binary_smt(const Inst *inst)
 	inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::SELECT, {arg1, arg2})});
       }
       return;
-    case Op::SRC_RETVAL:
-      assert(!src_retval);
-      assert(!src_retval_indef);
-      src_retval = inst->args[0];
-      src_retval_indef = inst->args[1];
-      return;
-    case Op::TGT_RETVAL:
-      assert(!tgt_retval);
-      assert(!tgt_retval_indef);
-      tgt_retval = inst->args[0];
-      tgt_retval_indef = inst->args[1];
-      return;
-    case Op::SRC_UB:
-      assert(!src_unique_ub && !src_common_ub);
-      src_common_ub = inst->args[0];
-      src_unique_ub = inst->args[1];
-      return;
-    case Op::TGT_UB:
-      assert(!tgt_unique_ub && !tgt_common_ub);
-      tgt_common_ub = inst->args[0];
-      tgt_unique_ub = inst->args[1];
-      return;
     default:
       break;
+    }
+
+  // Perform AND/OR/XOR operations as Boolean if at least one of the
+  // arguments are Boolean. This avoids multiple conversions between
+  // bitvector and Boolean for the typical case where 1-bit values
+  // are used in logical expressions.
+  if (inst->bitsize == 1 &&
+      (inst->op == Op::AND
+       || inst->op == Op::OR
+       || inst->op == Op::XOR)
+      && (inst2bool.contains(inst->args[0])
+	  || inst2bool.contains(inst->args[1])))
+    {
+      cvc5::Term arg1 = inst_as_bool(inst->args[0]);
+      cvc5::Term arg2 = inst_as_bool(inst->args[1]);
+      if (inst->op == Op::AND)
+	inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::AND, {arg1, arg2})});
+      else if (inst->op == Op::OR)
+	inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::OR, {arg1, arg2})});
+      else
+	inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::XOR, {arg1, arg2})});
+      return;
     }
 
   cvc5::Term arg1 = inst_as_bv(inst->args[0]);
@@ -404,29 +415,6 @@ void Converter::build_bv_binary_smt(const Inst *inst)
       break;
     case Op::MUL:
       inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_MULT, {arg1, arg2})});
-      break;
-    case Op::PARAM:
-      {
-	uint32_t index = inst->args[0]->value();
-	char name[100];
-	sprintf(name, ".param%" PRIu32, index);
-	cvc5::Sort sort = solver.mkBitVectorSort(inst->bitsize);
-	cvc5::Term param = solver.mkConst(sort, name);
-	inst2bv.insert({inst, param});
-      }
-      break;
-    case Op::PRINT:
-      print.push_back(inst);
-      break;
-    case Op::SYMBOLIC:
-      {
-	uint32_t index = inst->args[0]->value();
-	char name[100];
-	sprintf(name, ".symbolic%" PRIu32, index);
-	cvc5::Sort sort = solver.mkBitVectorSort(inst->bitsize);
-	cvc5::Term symbolic = solver.mkConst(sort, name);
-	inst2bv.insert({inst, symbolic});
-      }
       break;
     case Op::SDIV:
       inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SDIV, {arg1, arg2})});
@@ -556,6 +544,15 @@ void Converter::build_ternary_smt(const Inst *inst)
 	  cvc5::Term arg3 = inst_as_array(inst->args[2]);
 	  inst2array.insert({inst, ite(arg1, arg2, arg3)});
 	}
+      else if (inst->bitsize == 1
+	       && inst2bool.contains(inst->args[1])
+	       && inst2bool.contains(inst->args[2]))
+	{
+	  cvc5::Term arg1 = inst_as_bool(inst->args[0]);
+	  cvc5::Term arg2 = inst_as_bool(inst->args[1]);
+	  cvc5::Term arg3 = inst_as_bool(inst->args[2]);
+	  inst2array.insert({inst, ite(arg1, arg2, arg3)});
+	}
       else
 	{
 	  cvc5::Term arg1 = inst_as_bool(inst->args[0]);
@@ -564,20 +561,6 @@ void Converter::build_ternary_smt(const Inst *inst)
 	  inst2bv.insert({inst, ite(arg1, arg2, arg3)});
 	}
       break;
-    case Op::SRC_MEM:
-      assert(!src_memory);
-      assert(!src_memory_size);
-      src_memory = inst->args[0];
-      src_memory_size = inst->args[1];
-      src_memory_indef = inst->args[2];
-      return;
-    case Op::TGT_MEM:
-      assert(!tgt_memory);
-      assert(!tgt_memory_size);
-      tgt_memory = inst->args[0];
-      tgt_memory_size = inst->args[1];
-      tgt_memory_indef = inst->args[2];
-      return;
     default:
       throw Not_implemented("build_ternary_smt: "s + inst->name());
     }
@@ -653,6 +636,119 @@ void Converter::build_conversion_smt(const Inst *inst)
     }
 }
 
+void Converter::build_solver_smt(const Inst *inst)
+{
+  if (inst->nof_args == 1)
+    {
+      switch (inst->op)
+	{
+	case Op::SRC_ASSERT:
+	  assert(!src_assert);
+	  src_assert = inst->args[0];
+	  break;
+	case Op::TGT_ASSERT:
+	  assert(!tgt_assert);
+	  tgt_assert = inst->args[0];
+	  break;
+	default:
+	  throw Not_implemented("build_solver_smt: "s + inst->name());
+	}
+    }
+  else if (inst->nof_args == 2)
+    {
+      switch (inst->op)
+	{
+	case Op::PARAM:
+	  {
+	    uint32_t index = inst->args[0]->value();
+	    char name[100];
+	    sprintf(name, ".param%" PRIu32, index);
+	    cvc5::Sort sort = solver.mkBitVectorSort(inst->bitsize);
+	    cvc5::Term param = solver.mkConst(sort, name);
+	    inst2bv.insert({inst, param});
+	  }
+	  break;
+	case Op::PRINT:
+	  print.push_back(inst);
+	  break;
+	case Op::SRC_RETVAL:
+	  assert(!src_retval);
+	  assert(!src_retval_indef);
+	  src_retval = inst->args[0];
+	  src_retval_indef = inst->args[1];
+	  return;
+	case Op::SRC_UB:
+	  assert(!src_unique_ub && !src_common_ub);
+	  src_common_ub = inst->args[0];
+	  src_unique_ub = inst->args[1];
+	  return;
+	case Op::SYMBOLIC:
+	  {
+	    uint32_t index = inst->args[0]->value();
+	    char name[100];
+	    sprintf(name, ".symbolic%" PRIu32, index);
+	    cvc5::Sort sort = solver.mkBitVectorSort(inst->bitsize);
+	    cvc5::Term symbolic = solver.mkConst(sort, name);
+	    inst2bv.insert({inst, symbolic});
+	  }
+	  break;
+	case Op::TGT_RETVAL:
+	  assert(!tgt_retval);
+	  assert(!tgt_retval_indef);
+	  tgt_retval = inst->args[0];
+	  tgt_retval_indef = inst->args[1];
+	  return;
+	case Op::TGT_UB:
+	  assert(!tgt_unique_ub && !tgt_common_ub);
+	  tgt_common_ub = inst->args[0];
+	  tgt_unique_ub = inst->args[1];
+	  return;
+	default:
+	  throw Not_implemented("build_solver_smt: "s + inst->name());
+	}
+    }
+  else if (inst->nof_args == 3)
+    {
+      switch (inst->op)
+	{
+	case Op::SRC_MEM:
+	  assert(!src_memory);
+	  assert(!src_memory_size);
+	  src_memory = inst->args[0];
+	  src_memory_size = inst->args[1];
+	  src_memory_indef = inst->args[2];
+	  return;
+	case Op::TGT_MEM:
+	  assert(!tgt_memory);
+	  assert(!tgt_memory_size);
+	  tgt_memory = inst->args[0];
+	  tgt_memory_size = inst->args[1];
+	  tgt_memory_indef = inst->args[2];
+	  return;
+	case Op::SRC_EXIT:
+	  assert(!src_abort);
+	  assert(!src_exit);
+	  assert(!src_exit_val);
+	  src_abort = inst->args[0];
+	  src_exit = inst->args[1];
+	  src_exit_val = inst->args[2];
+	  return;
+	case Op::TGT_EXIT:
+	  assert(!tgt_abort);
+	  assert(!tgt_exit);
+	  assert(!tgt_exit_val);
+	  tgt_abort = inst->args[0];
+	  tgt_exit = inst->args[1];
+	  tgt_exit_val = inst->args[2];
+	  return;
+	default:
+	  throw Not_implemented("build_solver_smt: "s + inst->name());
+	}
+    }
+  else
+    throw Not_implemented("build_solver_smt: "s + inst->name());
+}
+
 void Converter::build_special_smt(const Inst *inst)
 {
   switch (inst->op)
@@ -692,11 +788,9 @@ void Converter::build_smt(const Inst *inst)
     case Inst_class::fcomparison:
       build_fp_comparison_smt(inst);
       break;
-#if 0
-    case Inst_class::nullary:
-      build_nullary_smt(inst);
+    case Inst_class::mem_nullary:
+      build_memory_state_smt(inst);
       break;
-#endif
     case Inst_class::iunary:
       build_bv_unary_smt(inst);
       break;
@@ -714,6 +808,11 @@ void Converter::build_smt(const Inst *inst)
       break;
     case Inst_class::conv:
       build_conversion_smt(inst);
+      break;
+    case Inst_class::solver_unary:
+    case Inst_class::solver_binary:
+    case Inst_class::solver_ternary:
+      build_solver_smt(inst);
       break;
     case Inst_class::special:
       build_special_smt(inst);
@@ -743,6 +842,21 @@ void Converter::convert_function()
     {
       src_retval_indef = nullptr;
       tgt_retval_indef = nullptr;
+    }
+
+  if (!src_abort && tgt_abort)
+    {
+      Basic_block *bb = func->bbs[0];
+      src_abort = bb->value_inst(0, 1);
+      src_exit = bb->value_inst(0, 1);
+      src_exit_val = bb->value_inst(0, tgt_exit_val->bitsize);
+    }
+  if (!tgt_abort && src_abort)
+    {
+      Basic_block *bb = func->bbs[0];
+      tgt_abort = bb->value_inst(0, 1);
+      tgt_exit = bb->value_inst(0, 1);
+      tgt_exit_val = bb->value_inst(0, src_exit_val->bitsize);
     }
 }
 
