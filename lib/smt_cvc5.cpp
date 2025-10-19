@@ -1012,6 +1012,20 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 
       solver.assertFormula(not_src_common_ub_term);
       solver.assertFormula(not_src_unique_ub_term);
+      if (conv.src_abort)
+	{
+	  cvc5::Term aborted_term = conv.inst_as_bool(conv.src_abort);
+	  cvc5::Term not_aborted =
+	    solver.mkTerm(cvc5::Kind::NOT, {conv.inst_as_bool(conv.src_abort)});
+	  solver.assertFormula(not_aborted);
+	}
+      if (conv.src_exit)
+	{
+	  cvc5::Term exited_term = conv.inst_as_bool(conv.src_exit);
+	  cvc5::Term not_exited =
+	    solver.mkTerm(cvc5::Kind::NOT, {conv.inst_as_bool(conv.src_exit)});
+	  solver.assertFormula(not_exited);
+	}
       cvc5::Term res1 =
 	solver.mkTerm(cvc5::Kind::DISTINCT, {src_term, tgt_term});
       cvc5::Term res2 = solver.mkTerm(cvc5::Kind::OR, {res1, is_more_indef});
