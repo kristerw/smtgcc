@@ -1367,6 +1367,22 @@ Inst *Simplify::simplify_slt()
       && arg1->args[0]->bitsize == arg2->args[0]->bitsize)
     return build_inst(Op::ULT, arg1->args[0], arg2->args[0]);
 
+  // slt (zext x), c -> ult x, c if (zext (trunc c)) == c
+  if (arg1->op == Op::ZEXT
+      && is_nbit_value(arg2, arg1->args[0]->bitsize))
+    {
+      Inst *new_c = value_inst(arg2->value(), arg1->args[0]->bitsize);
+      return build_inst(Op::ULT, arg1->args[0], new_c);
+    }
+
+  // slt c, (zext x) -> ult c, x if (zext (trunc c)) == c
+  if (arg2->op == Op::ZEXT
+      && is_nbit_value(arg1, arg2->args[0]->bitsize))
+    {
+      Inst *new_c = value_inst(arg1->value(), arg2->args[0]->bitsize);
+      return build_inst(Op::ULT, new_c, arg2->args[0]);
+    }
+
   // slt (sext x), (sext y) -> slt x, y
   if (arg1->op == Op::SEXT
       && arg2->op == Op::SEXT
