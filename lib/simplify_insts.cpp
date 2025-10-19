@@ -778,6 +778,18 @@ Inst *Simplify::simplify_eq()
       return build_inst(Op::EQ, arg1->args[0], new_const);
     }
 
+  // eq (add x, c1), (add x, c2) -> eq c1, c2
+  if (arg1->op == Op::ADD
+      && arg2->op == Op::ADD
+      && arg1->args[1]->op == Op::VALUE
+      && arg2->args[1]->op == Op::VALUE
+      && arg1->args[0] == arg2->args[0])
+    {
+      unsigned __int128 c1 = arg1->args[1]->value();
+      unsigned __int128 c2 = arg2->args[1]->value();
+      return value_inst((c2 - c1) == 0, 1);
+    }
+
   return inst;
 }
 
