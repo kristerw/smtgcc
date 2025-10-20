@@ -482,6 +482,15 @@ Inst *Simplify::simplify_and()
       return build_inst(Op::SHL, new_inst, c);
     }
 
+  // and x, (-1 >> c) -> zext (trunc x)
+  if (arg2->op == Op::VALUE
+      && popcount(arg2->value()) + clz(arg2->value()) == 128)
+    {
+      Inst *trunc_x =
+	build_inst(Op::EXTRACT, arg1, popcount(arg2->value()) - 1, 0);
+      return build_inst(Op::ZEXT, trunc_x, arg1->bitsize);
+    }
+
   // and (ite x, y, z), x -> and x, y
   // and x, (ite x, y, z) -> and x, y
   // and (ite x, y, z), (not x) -> and (not x), z
@@ -919,6 +928,17 @@ Inst *Simplify::simplify_lshr()
       Inst *x = arg1->args[0]->args[0];
       if (c <= inst->bitsize - x->bitsize)
 	return arg1->args[0];
+    }
+
+  // lshr (shl x, c), c -> zext (trunc x)
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::SHL
+      && arg1->args[1] == arg2)
+    {
+      Inst *trunc_x =
+	build_inst(Op::EXTRACT, arg1->args[0],
+		   arg1->bitsize - arg2->value() - 1, 0);
+      return build_inst(Op::ZEXT, trunc_x, arg1->bitsize);
     }
 
   return inst;
