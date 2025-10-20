@@ -941,6 +941,47 @@ Inst *Simplify::simplify_lshr()
       return build_inst(Op::ZEXT, trunc_x, arg1->bitsize);
     }
 
+  // A sequence:
+  //   %1 = xor x, y
+  //   %2 = zext %1, #64
+  //   %3 = add %2, #-1
+  //   %4 = lshr %3, #63
+  // is equivalent to:
+  //   %1 = eq x, y
+  //   %4 = zext %1, #64
+  if (arg2->op == Op::VALUE
+      && arg2->value() + 1 == arg2->bitsize
+      && arg1->op == Op::ADD
+      && is_value_m1(arg1->args[1])
+      && arg1->args[0]->op == Op::ZEXT
+      && arg1->args[0]->args[0]->op == Op::XOR)
+    {
+      Inst *x = arg1->args[0]->args[0]->args[0];
+      Inst *y = arg1->args[0]->args[0]->args[1];
+      return build_inst(Op::ZEXT, build_inst(Op::EQ, x, y), inst->bitsize);
+    }
+
+  // A sequence:
+  //   %1 = xor x, y
+  //   %2 = zext %1, #64
+  //   %3 = neg %2
+  //   %4 = lshr %3, #63
+  // is equivalent to:
+  //   %1 = eq x, y
+  //   %2 = not %1
+  //   %4 = zext %2, #64
+  if (arg2->op == Op::VALUE
+      && arg2->value() + 1 == arg2->bitsize
+      && arg1->op == Op::NEG
+      && arg1->args[0]->op == Op::ZEXT
+      && arg1->args[0]->args[0]->op == Op::XOR)
+    {
+      Inst *x = arg1->args[0]->args[0]->args[0];
+      Inst *y = arg1->args[0]->args[0]->args[1];
+      Inst *ne = build_inst(Op::NOT, build_inst(Op::EQ, x, y));
+      return build_inst(Op::ZEXT, ne, inst->bitsize);
+    }
+
   return inst;
 }
 
