@@ -1056,8 +1056,9 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
     }
 
   // Check that the returned value (if any) is the same for src and tgt.
-  if (conv.src_retval != conv.tgt_retval
-      || conv.src_retval_indef != conv.tgt_retval_indef)
+  if ((conv.src_retval != conv.tgt_retval
+       || conv.src_retval_indef != conv.tgt_retval_indef)
+      && !(conv.src_retval_indef && is_value_m1(conv.src_retval_indef)))
     {
       assert(conv.src_retval && conv.tgt_retval);
       z3::expr src_expr = conv.inst_as_bv(conv.src_retval);

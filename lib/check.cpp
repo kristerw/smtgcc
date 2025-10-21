@@ -1971,8 +1971,9 @@ bool Converter::need_checking()
       || src_exit_val != tgt_exit_val)
     return true;
 
-  if (src_retval != tgt_retval
-      || src_retval_indef != tgt_retval_indef)
+  if ((src_retval != tgt_retval
+       || src_retval_indef != tgt_retval_indef)
+      && !(src_retval_indef && is_value_m1(src_retval_indef)))
     return true;
 
   if (src_memory != tgt_memory
