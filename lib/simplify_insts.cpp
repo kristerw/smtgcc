@@ -1141,6 +1141,10 @@ Inst *Simplify::simplify_xor()
   if (arg2->op == Op::XOR && arg2->args[1] == arg1)
     return arg2->args[0];
 
+  // For Boolean x, y: xor x, y -> not (eq x, y)
+  if (inst->bitsize == 1)
+    return build_inst(Op::NOT, build_inst(Op::EQ, arg1, arg2));
+
   return inst;
 }
 
