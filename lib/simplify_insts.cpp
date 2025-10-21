@@ -776,6 +776,10 @@ Inst *Simplify::simplify_eq()
       && !is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
     return value_inst(0, 1);
 
+  // (not x) == (not y) -> x == y
+  if (arg1->op == Op::NOT && arg2->op == Op::NOT)
+    return build_inst(Op::EQ, arg1->args[0], arg2->args[0]);
+
   // eq (add x, c1), c2 -> eq x, (c2 - c1)
   if (arg1->op == Op::ADD
       && arg1->args[1]->op == Op::VALUE
