@@ -780,6 +780,13 @@ Inst *Simplify::simplify_eq()
   if (arg1->op == Op::NOT && arg2->op == Op::NOT)
     return build_inst(Op::EQ, arg1->args[0], arg2->args[0]);
 
+  // eq (neg x), c -> eq x, -c
+  if (arg1->op == Op::NEG && arg2->op == Op::VALUE)
+    {
+      unsigned __int128 c = arg2->value();
+      return build_inst(Op::EQ, arg1->args[0], value_inst(-c, arg2->bitsize));
+    }
+
   // eq (add x, c1), c2 -> eq x, (c2 - c1)
   if (arg1->op == Op::ADD
       && arg1->args[1]->op == Op::VALUE
