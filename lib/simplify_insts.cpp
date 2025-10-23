@@ -417,6 +417,18 @@ Inst *Simplify::simplify_add()
       return build_inst(Op::ADD, arg1->args[0], val);
     }
 
+  // add (add, x, c1), (add, y, c2) -> add (add x, y), (c1 + c2)
+  if (arg1->op == Op::ADD
+      && arg1->args[1]->op == Op::VALUE
+      && arg2->op == Op::ADD
+      && arg2->args[1]->op == Op::VALUE)
+    {
+      unsigned __int128 c1 = arg1->args[1]->value();
+      unsigned __int128 c2 = arg2->args[1]->value();
+      Inst *add = build_inst(Op::ADD, arg1->args[0], arg2->args[0]);
+      return build_inst(Op::ADD, add, value_inst(c1 + c2, add->bitsize));
+    }
+
   // add (mul x, c1), (mul x, c2) -> mul x, (c1 + c2)
   // The multiplication may be expressed as Op::SHL, or can be just x,
   // which is then treated as x * 1.
