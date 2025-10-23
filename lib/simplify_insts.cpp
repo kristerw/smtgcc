@@ -383,6 +383,20 @@ Inst *simplify_mem_size(Inst *inst, const std::map<uint64_t,uint64_t>& id2size)
   return inst;
 }
 
+std::pair<Inst *, unsigned __int128> get_mult(Inst *inst)
+{
+  if (inst->op == Op::MUL && inst->args[1]->op == Op::VALUE)
+    return {inst->args[0], inst->args[1]->value()};
+
+  if (inst->op == Op::SHL && inst->args[1]->op == Op::VALUE)
+    {
+      assert(inst->args[1]->value() < 128);
+      return {inst->args[0], (unsigned __int128)1 << inst->args[1]->value()};
+    }
+
+  return {inst, 1};
+}
+
 Inst *Simplify::simplify_add()
 {
   Inst *const arg1 = inst->args[0];
@@ -403,9 +417,15 @@ Inst *Simplify::simplify_add()
       return build_inst(Op::ADD, arg1->args[0], val);
     }
 
-  // add x, x -> shl x, 1
-  if (arg1 == arg2)
-    return build_inst(Op::SHL, arg1, value_inst(1, inst->bitsize));
+  // add (mul x, c1), (mul x, c2) -> mul x, (c1 + c2)
+  // The multiplication may be expressed as Op::SHL, or can be just x,
+  // which is then treated as x * 1.
+  {
+    auto [x1, c1] = get_mult(arg1);
+    auto [x2, c2] = get_mult(arg2);
+    if (x1 == x2)
+      return build_inst(Op::MUL, x1, value_inst(c1 + c2, inst->bitsize));
+  }
 
   return inst;
 }
