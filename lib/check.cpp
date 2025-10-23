@@ -160,6 +160,10 @@ public:
     const Cse_key key(op, arg1, arg2, arg3);
     key2inst.insert({key, inst});
   }
+  void clear()
+  {
+    key2inst.clear();
+  }
 };
 
 // Convert the IR of a function to a form having essentially 1-1
@@ -1958,6 +1962,10 @@ void Converter::finalize()
 
   dead_code_elimination(dest_func);
   dest_func->canonicalize();
+
+  src_bbcond2ub.clear();
+  tgt_bbcond2ub.clear();
+  cse.clear();
 }
 
 bool Converter::need_checking()
