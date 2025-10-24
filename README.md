@@ -152,6 +152,17 @@ The limitations of smtgcc-tv-backend include all those listed for smtgcc-tv, wit
 * You must pass `-masm=normal` to the compiler.
 * Address allocation of local variables differs between the IR and the generated assembly. As a result, the plugin disables checks when a local address is written to memory or cast to an integer type to avoid false positives.
 
+## smtgcc-tv-backend — SH
+smtgcc-tv-backend compares the IR from the last GIMPLE pass with the generated assembly code and reports an error if the resulting assembly code is not a refinement of the IR (i.e., if the backend has miscompiled the program).
+
+The plugin can be invoked as follows:
+```
+sh-elf-gcc -ml -m4-single -fno-strict-aliasing -c -fplugin=/path/to/smtgcc-tv-backend.so file.c
+```
+### Limitations
+The limitations of smtgcc-tv-backend include all those listed for smtgcc-tv, with the following additional limitations:
+* Address allocation of local variables differs between the IR and the generated assembly. As a result, the plugin disables checks when a local address is written to memory or cast to an integer type to avoid false positives.
+
 ## smtgcc-check-refine
 smtgcc-check-refine requires the translation unit to consist of two functions named `src` and `tgt`, and it verifies that `tgt` is a refinement of `src`.
 
