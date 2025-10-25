@@ -1308,7 +1308,7 @@ void Module::print(FILE *stream) const
 
 Module *create_module(uint32_t ptr_bits, uint32_t ptr_id_bits, uint32_t ptr_offset_bits)
 {
-  assert(ptr_bits == 32 || ptr_bits == 64);
+  assert(ptr_bits == 16 || ptr_bits == 32 || ptr_bits == 64);
   assert(ptr_bits >= ptr_id_bits + ptr_offset_bits);
   Module *module = new Module;
   module->ptr_bits = ptr_bits;

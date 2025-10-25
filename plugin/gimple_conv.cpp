@@ -8544,8 +8544,13 @@ void unroll_and_optimize(Module *module)
 CommonState::CommonState(Arch arch)
   : arch{arch}
 {
-  assert(POINTER_SIZE == 32 || POINTER_SIZE == 64);
-  if (POINTER_SIZE == 32)
+  assert(POINTER_SIZE == 16 || POINTER_SIZE == 32 || POINTER_SIZE == 64);
+  if (POINTER_SIZE == 16)
+    {
+      ptr_id_max = std::numeric_limits<int8_t>::max();
+      ptr_id_min = std::numeric_limits<int8_t>::min();
+    }
+  else if (POINTER_SIZE == 32)
     {
       ptr_id_max = std::numeric_limits<int8_t>::max();
       ptr_id_min = std::numeric_limits<int8_t>::min();
@@ -8567,11 +8572,16 @@ CommonState::CommonState(Arch arch)
 
 Module *create_module(Arch arch)
 {
-  assert(POINTER_SIZE == 32 || POINTER_SIZE == 64);
   uint32_t ptr_bits;
   uint32_t ptr_id_bits;
   uint32_t ptr_offset_bits;
-  if (POINTER_SIZE == 32)
+  if (POINTER_SIZE == 16)
+    {
+      ptr_bits = 16;
+      ptr_id_bits = 8;
+      ptr_offset_bits = 8;
+    }
+  else if (POINTER_SIZE == 32)
     {
       ptr_bits = 32;
       ptr_id_bits = 8;
@@ -8579,6 +8589,7 @@ Module *create_module(Arch arch)
     }
   else
     {
+      assert(POINTER_SIZE == 64);
       if (arch == Arch::riscv)
 	{
 	  ptr_bits = 64;
