@@ -864,27 +864,10 @@ Function *parse_sh(std::string const& file_name, sh_state *state);
 
 // simplify_insts.cpp
 struct Simplify_config {
-  virtual Inst *get_inst(Op, Inst *)
-  {
-    return nullptr;
-  }
-  virtual Inst *get_inst(Op, Inst *, Inst *)
-  {
-    return nullptr;
-  }
-  virtual Inst *get_inst(Op, Inst *, Inst *, Inst *)
-  {
-    return nullptr;
-  }
-  virtual void set_inst(Inst *, Op, Inst *)
-  {
-  }
-  virtual void set_inst(Inst *, Op, Inst *, Inst *)
-  {
-  }
-  virtual void set_inst(Inst *, Op, Inst *, Inst *, Inst *)
-  {
-  }
+  virtual Inst *build_inst(Op) = 0;
+  virtual Inst *build_inst(Op op, Inst *arg, bool insert_after = false) = 0;
+  virtual Inst *build_inst(Op op, Inst *arg1, Inst *arg2) = 0;
+  virtual Inst *build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3) = 0;
 };
 
 Inst *constant_fold_inst(Inst *inst);

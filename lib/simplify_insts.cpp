@@ -109,33 +109,19 @@ Inst *Simplify::value_inst(unsigned __int128 value, uint32_t bitsize)
 Inst *Simplify::build_inst(Op op, Inst *arg1)
 {
   if (config)
-    {
-      Inst *inst = config->get_inst(op, arg1);
-      if (inst)
-	return inst;
-    }
+    return config->build_inst(op, arg1);
   Inst *new_inst = create_inst(op, arg1);
   new_inst->insert_before(inst);
-  new_inst = simplify_inst(new_inst, config);
-  if (config)
-    config->set_inst(new_inst, op, arg1);
-  return new_inst;
+  return simplify_inst(new_inst, config);
 }
 
 Inst *Simplify::build_inst(Op op, Inst *arg1, Inst *arg2)
 {
   if (config)
-    {
-      Inst *inst = config->get_inst(op, arg1, arg2);
-      if (inst)
-	return inst;
-    }
+    return config->build_inst(op, arg1, arg2);
   Inst *new_inst = create_inst(op, arg1, arg2);
   new_inst->insert_before(inst);
-  new_inst = simplify_inst(new_inst, config);
-  if (config)
-    config->set_inst(new_inst, op, arg1, arg2);
-  return new_inst;
+  return simplify_inst(new_inst, config);
 }
 
 Inst *Simplify::build_inst(Op op, Inst *arg1, uint32_t arg2_val)
@@ -147,17 +133,10 @@ Inst *Simplify::build_inst(Op op, Inst *arg1, uint32_t arg2_val)
 Inst *Simplify::build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
 {
   if (config)
-    {
-      Inst *inst = config->get_inst(op, arg1, arg2, arg3);
-      if (inst)
-	return inst;
-    }
+    return config->build_inst(op, arg1, arg2, arg3);
   Inst *new_inst = create_inst(op, arg1, arg2, arg3);
   new_inst->insert_before(inst);
-  new_inst = simplify_inst(new_inst, config);
-  if (config)
-    config->set_inst(new_inst, op, arg1, arg2, arg3);
-  return new_inst;
+  return simplify_inst(new_inst, config);
 }
 
 Inst *Simplify::build_inst(Op op, Inst *arg1, uint32_t arg2_val, uint32_t arg3_val)

@@ -104,7 +104,7 @@ struct Inst_comp {
   }
 };
 
-struct Cse : Simplify_config {
+struct Cse {
 private:
   std::unordered_map<Cse_key, Inst *, Cse_key_hash> key2inst;
 
@@ -119,12 +119,20 @@ public:
     const Cse_key key(op);
     return get_inst(key);
   }
-  Inst *get_inst(Op op, Inst *arg1) override
+  Inst *get_inst(Op op, Inst *arg1)
   {
     const Cse_key key(op, arg1);
-    return get_inst(key);
+    Inst *inst = get_inst(key);
+    if (!inst && op == Op::NOT && arg1->op == Op::ITE)
+      {
+	Inst *a2 = get_inst(Op::NOT, arg1->args[1]);
+	Inst *a3 = get_inst(Op::NOT, arg1->args[2]);
+	if (a2 && a3)
+	  return get_inst(Op::ITE, arg1->args[0], a2, a3);
+      }
+    return inst;
   }
-  Inst *get_inst(Op op, Inst *arg1, Inst *arg2) override
+  Inst *get_inst(Op op, Inst *arg1, Inst *arg2)
   {
     const Cse_key key(op, arg1, arg2);
     Inst *inst = get_inst(key);
@@ -132,7 +140,7 @@ public:
       inst = cse_icomparison(op, arg1, arg2);
     return inst;
   }
-  Inst *get_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3) override
+  Inst *get_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
   {
     const Cse_key key(op, arg1, arg2, arg3);
     Inst *inst = get_inst(key);
@@ -145,17 +153,17 @@ public:
     const Cse_key key(op);
     key2inst.insert({key, inst});
   }
-  void set_inst(Inst *inst, Op op, Inst *arg1) override
+  void set_inst(Inst *inst, Op op, Inst *arg1)
   {
     const Cse_key key(op, arg1);
     key2inst.insert({key, inst});
   }
-  void set_inst(Inst *inst, Op op, Inst *arg1, Inst *arg2) override
+  void set_inst(Inst *inst, Op op, Inst *arg1, Inst *arg2)
   {
     const Cse_key key(op, arg1, arg2);
     key2inst.insert({key, inst});
   }
-  void set_inst(Inst *inst, Op op, Inst *arg1, Inst *arg2, Inst *arg3) override
+  void set_inst(Inst *inst, Op op, Inst *arg1, Inst *arg2, Inst *arg3)
   {
     const Cse_key key(op, arg1, arg2, arg3);
     key2inst.insert({key, inst});
@@ -170,7 +178,7 @@ public:
 // correspondence to what the SMT solver is using. In particular
 // eliminate control flow, and change the memory operations to use
 // arrays.
-class Converter {
+class Converter : Simplify_config {
   // True if simplify_inst should be called while building instructions.
   bool run_simplify_inst;
 
@@ -264,12 +272,13 @@ class Converter {
   Inst *specialize_cond_calc(Inst *cond, Inst *inst, bool is_true_branch);
   Inst *specialize_cond_arg(Inst *cond, Inst *inst, bool is_true_branch,
 			    int depth = 0);
-  Inst *build_inst(Op op);
-  Inst *build_inst(Op op, Inst *arg, bool insert_after = false);
-  Inst *build_inst(Op op, Inst *arg1, Inst *arg2);
-  Inst *build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3);
 
 public:
+  Inst *build_inst(Op op) final;
+  Inst *build_inst(Op op, Inst *arg, bool insert_after = false) final;
+  Inst *build_inst(Op op, Inst *arg1, Inst *arg2) final;
+  Inst *build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3) final;
+
   Converter(Module *m, bool run_simplify_inst = true);
   ~Converter()
   {
@@ -322,7 +331,7 @@ Inst *Converter::simplify(Inst *inst)
   else if (!processing_canonicalization && inst->op == Op::ADD)
     inst = canonicalize_add(inst);
   else
-    inst = simplify_inst(inst, &cse);
+    inst = simplify_inst(inst, this);
 
   // Simplify a sequence of two Op::ITEs with identical conditions and an
   // unrelated operation in the middle:
@@ -912,13 +921,13 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
       inst = dest_bb->build_inst(op, arg1, arg2);
       inst = simplify(inst);
       cse.set_inst(inst, op, arg1, arg2);
-    }
 
-  // Booleans are often used negated. Create the negated form right after
-  // the instruction to reduce differences in the result, independent of
-  // later simplifications.
-  if (inst->bitsize == 1 && inst->op != Op::NOT)
-    build_inst(Op::NOT, inst);
+      // Booleans are often used negated. Create the negated form right after
+      // the instruction to reduce differences in the result, independent of
+      // later simplifications.
+      if (inst->bitsize == 1 && inst->op != Op::NOT)
+	build_inst(Op::NOT, inst);
+    }
 
   return inst;
 }
@@ -931,13 +940,13 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
       inst = dest_bb->build_inst(op, arg1, arg2, arg3);
       inst = simplify(inst);
       cse.set_inst(inst, op, arg1, arg2, arg3);
-    }
 
-  // Booleans are often used negated. Create the negated form right after
-  // the instruction to reduce differences in the result, independent of
-  // later simplifications.
-  if (inst->bitsize == 1 && inst->op != Op::NOT)
-    build_inst(Op::NOT, inst);
+      // Booleans are often used negated. Create the negated form right after
+      // the instruction to reduce differences in the result, independent of
+      // later simplifications.
+      if (inst->bitsize == 1 && inst->op != Op::NOT)
+	build_inst(Op::NOT, inst);
+    }
 
   return inst;
 }
