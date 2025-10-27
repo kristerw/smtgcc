@@ -500,6 +500,7 @@ Inst *Converter::canonicalize_and_or(Inst *inst)
   {
     std::map<Inst*, std::vector<Inst*>> ult_comps;
     std::map<Inst*, std::vector<Inst*>> eq_comps;
+    std::map<Inst*, std::vector<Inst*>> not_eq_comps;
 
     // Collect Op::ULT, Op::ULE, and Op::EQ between an instruction and
     // a constant.
@@ -507,10 +508,13 @@ Inst *Converter::canonicalize_and_or(Inst *inst)
       {
 	if (elem->op == Op::EQ)
 	  {
-	    if (elem->args[0]->op == Op::VALUE)
-	      eq_comps[elem->args[1]].push_back(elem);
 	    if (elem->args[1]->op == Op::VALUE)
 	      eq_comps[elem->args[0]].push_back(elem);
+	  }
+	if (elem->op == Op::NOT && elem->args[0]->op == Op::EQ)
+	  {
+	    if (elem->args[0]->args[1]->op == Op::VALUE)
+	      not_eq_comps[elem->args[0]->args[0]].push_back(elem);
 	  }
 	if (elem->op == Op::ULT)
 	  {
@@ -530,14 +534,29 @@ Inst *Converter::canonicalize_and_or(Inst *inst)
 
     if (inst->op == Op::AND)
       {
-	// The expression is false if we have more than one equality
-	// comparison, as the comparisons must then be conflicting,
-	// such as
-	//   x == 1 && x == 2
-	for (auto& [_, comps] : eq_comps)
+	for (auto& [x, comps] : eq_comps)
 	  {
+	    // The expression is false if we have more than one equality
+	    // comparison, as the comparisons must then be conflicting,
+	    // such as
+	    //   x == 1 & x == 2
 	    if (comps.size() > 1)
 	      return value_inst(0, 1);
+
+	    // Expressions such as
+	    //   x == 1 & x != 2 & x != 3
+	    // can be simplified to just
+	    //   x == 1
+	    // Note: We know the constants differ because x & !x has
+	    // been eliminated above.
+	    if (not_eq_comps.contains(x))
+	      {
+		for (auto comp : not_eq_comps[x])
+		  {
+		    assert(comp->args[0]->args[1] != comps[0]->args[1]);
+		    elems.erase(comp);
+		  }
+	      }
 	  }
 
 	// Eliminate redundant comparisons.
@@ -549,10 +568,7 @@ Inst *Converter::canonicalize_and_or(Inst *inst)
 	      {
 		assert(eq_comps[x].size() == 1);
 		Inst *eq = eq_comps[x][0];
-		if (eq->args[0]->op == Op::VALUE)
-		  eq_val = eq->args[0]->value();
-		else
-		  eq_val = eq->args[1]->value();
+		eq_val = eq->args[1]->value();
 	      }
 
 	    // Find the largest and smallest values x may have for the
