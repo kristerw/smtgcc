@@ -1318,10 +1318,8 @@ Inst *Converter::get_full_edge_cond(Basic_block *src, Basic_block *dest)
 Inst *Converter::build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic_block *)>& pred2inst)
 {
   assert(bb->preds.size() > 0);
-  Inst *inst = pred2inst(bb->preds[0]);
-  if (bb->preds.size() == 1)
-    return inst;
-  for (unsigned i = 1; i < bb->preds.size(); i++)
+  Inst *inst = pred2inst(bb->preds.back());
+  for (int i = bb->preds.size() - 2; i >= 0; i--)
     {
       Inst *cond = get_full_edge_cond(bb->preds[i], bb);
       inst = build_inst(Op::ITE, cond, pred2inst(bb->preds[i]), inst);
