@@ -380,6 +380,7 @@ bool simplify_cfg(Function *func)
       //   .3:
       //     ...
       if (config.optimize_ub
+	  && func->loop_unrolling_done
 	  && bb->last_inst->op == Op::BR
 	  && bb->last_inst->nof_args == 1)
 	{
