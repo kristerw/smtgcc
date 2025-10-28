@@ -2088,6 +2088,12 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
 
   src->canonicalize();
   tgt->canonicalize();
+  if (identical(src, tgt))
+    {
+      if (config.verbose > 0)
+	fprintf(stderr, "SMTGCC: src and tgt are identical\n");
+      return {};
+    }
 
   Converter converter(module, run_simplify_inst);
   converter.convert_function(src, Function_role::src);
