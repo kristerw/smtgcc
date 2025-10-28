@@ -1042,7 +1042,7 @@ void Function::canonicalize()
        * when we create ITEs for phi nodes. We basically sort them in
        * reverse post order, but we treat basic blocks having exactly one
        * predecessor and successor as having the same position as its
-       * successor.
+       * predecessor.
        *
        * This approach generates the same ITEs for cases such as the GCC
        * pre pass eliminating BB3 as shown below (where BB2 in the original
@@ -1058,7 +1058,8 @@ void Function::canonicalize()
        *         |                            |
        *        ...                          ...
        *
-       * which would differ if we used the reverse post order directly.
+       * which would differ for BB4 if we used the reverse post order
+       * directly.
        */
       for (auto phi : bb->phis)
 	{
