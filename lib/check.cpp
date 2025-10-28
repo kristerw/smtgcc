@@ -89,11 +89,16 @@ enum class Function_role {
 // Comparison function for instructions.
 //
 // This is mostly used for sets etc. where we need a consistent order.
-// But for canonicalization we have higher requirements: We want
+// But for Op::ADD canonicalization we have higher requirements: We want
 // the instructions in the order they are created, but with Op::VALUE
 // instructions placed after non-Op::VALUE instructions so that we can
 // constant fold the constants without affecting the rest of the sequence.
 struct Inst_comp {
+  bool operator()(const Inst *a, const Inst *b) const {
+    return a->id < b->id;
+  }
+};
+struct Inst_comp_add {
   bool operator()(const Inst *a, const Inst *b) const {
     if (a->op == Op::VALUE && b->op != Op::VALUE)
       return false;
@@ -646,7 +651,7 @@ Inst *Converter::canonicalize_add(Inst *inst)
   elems.reserve(100);
   flatten(Op::ADD, inst->args[0], elems);
   flatten(Op::ADD, inst->args[1], elems);
-  Inst_comp comp;
+  Inst_comp_add comp;
   std::sort(elems.begin(), elems.end(), comp);
   assert(elems.size() >= 2);
 
