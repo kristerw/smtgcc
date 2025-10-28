@@ -641,35 +641,20 @@ Inst *Converter::canonicalize_add(Inst *inst)
 {
   assert(inst->op == Op::ADD);
 
-  Inst *arg1 = inst->args[0];
-  Inst *arg2 = inst->args[1];
-
   // Collect the elements.
   std::vector<Inst *> elems;
-  if (arg1->op == inst->op)
-    flatten(inst->op, arg1, elems);
-  else
-    elems.push_back(arg1);
-  if (arg2->op == inst->op)
-    flatten(inst->op, arg2, elems);
-  else
-    elems.push_back(arg2);
+  elems.reserve(100);
+  flatten(Op::ADD, inst->args[0], elems);
+  flatten(Op::ADD, inst->args[1], elems);
   Inst_comp comp;
   std::sort(elems.begin(), elems.end(), comp);
-
-  assert(!elems.empty());
-  if (elems.size() == 1)
-    return *elems.begin();
+  assert(elems.size() >= 2);
 
   // Generate the sequence.
   processing_canonicalization = true;
-  auto first = elems.begin();
-  auto second = std::next(first);
-  Inst *new_inst = build_inst(inst->op, *first, *second);
-  for (auto it = std::next(second); it != elems.end(); ++it)
-    {
-      new_inst = build_inst(inst->op, new_inst, *it);
-    }
+  Inst *new_inst = build_inst(inst->op, elems[0], elems[1]);
+  for (size_t i = 2; i < elems.size(); i++)
+    new_inst = build_inst(Op::ADD, new_inst, elems[i]);
   processing_canonicalization = false;
 
   return new_inst;
