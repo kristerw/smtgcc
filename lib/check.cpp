@@ -911,19 +911,20 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 	    }
 	}
     }
-  if (inst_info[(int)op].is_commutative
-      && !(arg1->op == op && arg2->op != op))
-    {
-      // Use the same argument order as canonicalization.
-      if (arg1->op != op && arg2->op == op)
-	std::swap(arg1, arg2);
-      else if (arg1->op == Op::VALUE && arg2->op != Op::VALUE)
-	std::swap(arg1, arg2);
-      else if (arg1->id > arg2->id)
-	std::swap(arg1, arg2);
-    }
   if (!inst)
     {
+      if (inst_info[(int)op].is_commutative
+	  && !(arg1->op == op && arg2->op != op))
+	{
+	  // Use the same argument order as canonicalization.
+	  if (arg1->op != op && arg2->op == op)
+	    std::swap(arg1, arg2);
+	  else if (arg1->op == Op::VALUE && arg2->op != Op::VALUE)
+	    std::swap(arg1, arg2);
+	  else if (arg1->id > arg2->id)
+	    std::swap(arg1, arg2);
+	}
+
       inst = dest_bb->build_inst(op, arg1, arg2);
       inst = simplify(inst);
       cse.set_inst(inst, op, arg1, arg2);
