@@ -126,6 +126,8 @@ public:
   }
   Inst *get_inst(Op op, Inst *arg1)
   {
+    if (op == Op::NOT && arg1->op == Op::NOT)
+      return arg1->args[0];
     const Cse_key key(op, arg1);
     Inst *inst = get_inst(key);
     if (!inst && op == Op::NOT && arg1->op == Op::ITE)
@@ -271,7 +273,7 @@ class Converter : Simplify_config {
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   Inst *simplify(Inst *inst);
   void flatten(Op op, Inst *inst, std::set<Inst *, Inst_comp>& elems);
-  void flatten(Op op, Inst *inst, std::vector<Inst *>& elems);
+  void flatten_add(Inst *inst, std::vector<Inst *>& elems);
   Inst *canonicalize_and_or(Inst *inst);
   Inst *canonicalize_add(Inst *inst);
   Inst *specialize_cond_calc(Inst *cond, Inst *inst, bool is_true_branch);
@@ -367,8 +369,8 @@ void Converter::flatten(Op op, Inst *inst, std::set<Inst *, Inst_comp>& elems)
 {
   if (inst->op == op)
     {
-      flatten(op, inst->args[1], elems);
       flatten(op, inst->args[0], elems);
+      flatten(op, inst->args[1], elems);
     }
   else if (inst->op == Op::NOT
 	   && ((op == Op::AND && inst->args[0]->op == Op::OR)
@@ -381,19 +383,12 @@ void Converter::flatten(Op op, Inst *inst, std::set<Inst *, Inst_comp>& elems)
     elems.insert(inst);
 }
 
-void Converter::flatten(Op op, Inst *inst, std::vector<Inst *>& elems)
+void Converter::flatten_add(Inst *inst, std::vector<Inst *>& elems)
 {
-  if (inst->op == op)
+  if (inst->op == Op::ADD)
     {
-      flatten(op, inst->args[1], elems);
-      flatten(op, inst->args[0], elems);
-    }
-  else if (inst->op == Op::NOT
-	   && ((op == Op::AND && inst->args[0]->op == Op::OR)
-	       || (op == Op::OR && inst->args[0]->op == Op::AND)))
-    {
-      flatten(op, build_inst(Op::NOT, inst->args[0]->args[0]), elems);
-      flatten(op, build_inst(Op::NOT, inst->args[0]->args[1]), elems);
+      flatten_add(inst->args[0], elems);
+      flatten_add(inst->args[1], elems);
     }
   else
     elems.push_back(inst);
@@ -649,8 +644,8 @@ Inst *Converter::canonicalize_add(Inst *inst)
   // Collect the elements.
   std::vector<Inst *> elems;
   elems.reserve(100);
-  flatten(Op::ADD, inst->args[0], elems);
-  flatten(Op::ADD, inst->args[1], elems);
+  flatten_add(inst->args[0], elems);
+  flatten_add(inst->args[1], elems);
   Inst_comp_add comp;
   std::sort(elems.begin(), elems.end(), comp);
   assert(elems.size() >= 2);
@@ -847,9 +842,6 @@ Inst *Converter::build_inst(Op op)
 
 Inst *Converter::build_inst(Op op, Inst *arg, bool insert_after)
 {
-  if (op == Op::NOT && arg->op == Op::NOT)
-    return arg->args[0];
-
   Inst *inst = cse.get_inst(op, arg);
   if (!inst)
     {
@@ -913,15 +905,15 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
     }
   if (!inst)
     {
-      if (inst_info[(int)op].is_commutative
-	  && !(arg1->op == op && arg2->op != op))
+      if (inst_info[(int)op].is_commutative)
 	{
 	  // Use the same argument order as canonicalization.
 	  if (arg1->op != op && arg2->op == op)
 	    std::swap(arg1, arg2);
 	  else if (arg1->op == Op::VALUE && arg2->op != Op::VALUE)
 	    std::swap(arg1, arg2);
-	  else if (arg1->id > arg2->id)
+	  else if (arg1->id > arg2->id
+		   && !(arg1->op == op && arg2->op != op))
 	    std::swap(arg1, arg2);
 	}
 
