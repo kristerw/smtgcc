@@ -1298,13 +1298,60 @@ Inst *Converter::get_full_edge_cond(Basic_block *src, Basic_block *dest)
 }
 
 // Build a chain of ite instructions for a phi-node.
+//
+// If we have a phi-node with three arguments, where the path conditions for
+// the elements are:
+//   1. a & b & c
+//   2. a & b & !c
+//   3. !a & d
+// we could build the chain as:
+//   ite (!a & d), v3, (ite (a & b & !c), v2, v1)
+// But we know that if the phi-node value is used, then at least one of the
+// paths must be taken. So we can eliminate a & b in the last ite:
+//   ite (!a & d), v3, (ite (!c), v2, v1)
+// because if 3. is not true, then one of 1. or 2. must be true.
+// In general, if all conditions in a sub-chain share the same element,
+// that element can be eliminated.
+// This optimization makes it possible to CSE more between src and tgt for
+// optimizations that modify the CFG.
 Inst *Converter::build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic_block *)>& pred2inst)
 {
   assert(bb->preds.size() > 0);
+
   Inst *inst = pred2inst(bb->preds.back());
+  std::set<Inst *, Inst_comp> common;
+  flatten(Op::AND, get_full_edge_cond(bb->preds.back(), bb), common);
   for (int i = bb->preds.size() - 2; i >= 0; i--)
     {
-      Inst *cond = get_full_edge_cond(bb->preds[i], bb);
+      std::set<Inst *, Inst_comp> conds;
+      Inst *full_cond = get_full_edge_cond(bb->preds[i], bb);
+      flatten(Op::AND, full_cond, conds);
+
+      std::set<Inst*, Inst_comp> tmp;
+      std::set_intersection(common.begin(), common.end(),
+			    conds.begin(), conds.end(),
+			    std::inserter(tmp, tmp.begin()));
+      common = std::move(tmp);
+      std::vector<Inst*> needed_conds;
+      needed_conds.reserve(conds.size());
+      std::set_difference(conds.begin(), conds.end(),
+			  common.begin(), common.end(),
+			  std::back_inserter(needed_conds));
+
+      // Create the simplified cond. This may be empty if several
+      // successive predecessors have the same condition (this
+      // typically happens when simplification after CSE folds them
+      // to 0 or 1). Use the original condition if that happens.
+      Inst *cond;
+      if (needed_conds.empty())
+	cond = full_cond;
+      else
+	{
+	  cond = needed_conds[0];
+	  for (unsigned j = 0; j < needed_conds.size(); j++)
+	    cond = build_inst(Op::AND, cond, needed_conds[j]);
+	}
+
       inst = build_inst(Op::ITE, cond, pred2inst(bb->preds[i]), inst);
     }
   return inst;
