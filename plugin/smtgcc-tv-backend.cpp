@@ -193,80 +193,73 @@ static Inst *split_phi(Inst *phi, uint64_t elem_bitsize, std::map<std::pair<Inst
   return res;
 }
 
-// Note: This assumes that we do not have any loops.
 static void eliminate_registers(Function *func)
 {
-  std::map<Basic_block *, std::map<Inst *, Inst *>> bb2reg_values;
-
-  // Collect all registers. This is not completely necessary, but we want
-  // to iterate over the registers in a consisten order when we create
-  // phi-nodes etc. and iterating over the maps could change order between
-  // different runs.
+  // Collect all registers.
   std::vector<Inst *> registers;
-  for (Inst *inst = func->bbs[0]->first_inst;
-       inst;
-       inst = inst->next)
+  for (Inst *inst = func->bbs[0]->first_inst; inst; inst = inst->next)
     {
       if (inst->op == Op::REGISTER)
-	{
-	  Basic_block *bb = func->bbs[0];
-	  registers.push_back(inst);
-	  // TODO: Should be an arbitrary value (i.e., a symbolic value)
-	  // instead of 0.
-	  bb2reg_values[bb][inst] = bb->value_inst(0, inst->bitsize);
-	}
+	registers.push_back(inst);
     }
 
-  // Add a phi-node for each register.
+  std::map<Basic_block *, std::map<Inst *, Inst *>> bb2reg_values;
   for (Basic_block *bb : func->bbs)
     {
-      std::map<Inst *, Inst *>& reg_values =
-	bb2reg_values[bb];
-      if (bb->preds.size() == 1)
+      std::map<Inst *, Inst *>& reg_values = bb2reg_values[bb];
+
+      // Set up the values at the top of the BB.
+      if (bb->preds.size() == 0)
 	{
-	  reg_values = bb2reg_values.at(bb->preds[0]);
+	  // Create the initial register values.
+	  // TODO: Should be an arbitrary value (i.e., a symbolic value)
+	  // instead of 0.
+	  for (auto reg : registers)
+	    reg_values.insert({reg, bb->value_inst(0, reg->bitsize)});
 	}
-      else if (bb->preds.size() > 1)
+      else if (bb->preds.size() == 1)
+	reg_values = bb2reg_values[bb->preds[0]];
+      else
 	{
 	  for (auto reg : registers)
 	    {
 	      Inst *phi = bb->build_phi_inst(reg->bitsize);
-	      reg_values[reg] = phi;
-	      for (auto pred_bb : bb->preds)
+	      reg_values.insert({reg, phi});
+	      for (auto pred : bb->preds)
 		{
-		  if (!bb2reg_values.at(pred_bb).contains(reg))
-		    throw Not_implemented("eliminate_registers: Read of uninit register");
-		  Inst *arg = bb2reg_values.at(pred_bb).at(reg);
-		  phi->add_phi_arg(arg, pred_bb);
+		  Inst *reg_value;
+		  if (pred == bb || bb2reg_values[pred].empty())
+		    reg_value = pred->build_inst(Op::READ, reg);
+		  else
+		    reg_value = bb2reg_values[pred][reg];
+		  phi->add_phi_arg(reg_value, pred);
 		}
 	    }
 	}
 
-      Inst *inst = bb->first_inst;
-      while (inst)
+      // Eliminate all Op::READ and Op::WRITE.
+      for (Inst *inst = bb->first_inst; inst;)
 	{
 	  Inst *next_inst = inst->next;
-	  if (inst->op == Op::READ)
-	    {
-	      if (!reg_values.contains(inst->args[0]))
-		throw Not_implemented("eliminate_registers: Read of uninit register");
-	      inst->replace_all_uses_with(reg_values.at(inst->args[0]));
-	      destroy_instruction(inst);
-	    }
-	  else if (inst->op == Op::WRITE)
+
+	  if (inst->op == Op::WRITE)
 	    {
 	      reg_values[inst->args[0]] = inst->args[1];
 	      destroy_instruction(inst);
 	    }
+	  else if (inst->op == Op::READ)
+	    {
+	      inst->replace_all_uses_with(reg_values[inst->args[0]]);
+	      destroy_instruction(inst);
+	    }
+
 	  inst = next_inst;
 	}
     }
 
-  for (auto inst : registers)
-    {
-      assert(inst->used_by.size() == 0);
-      destroy_instruction(inst);
-    }
+  // Eliminate all Op::REGISTER.
+  for (auto reg : registers)
+    destroy_instruction(reg);
 
   // Split vector phi-nodes into one phi per element.
   for (int i = func->bbs.size() - 1; i >= 0; i--)
@@ -292,53 +285,6 @@ static void eliminate_registers(Function *func)
       for (auto phi : dead_phis)
 	{
 	  destroy_instruction(phi);
-	}
-    }
-}
-
-// This eliminates registers in a basic block. It is safe to call this
-// function if the function has loops.
-static void early_eliminate_registers(Function *func)
-{
-  for (Basic_block *bb : func->bbs)
-    {
-      // Forward the value from an Op::WRITE instruction to a following
-      // Op::READ instruction.
-      std::map<Inst*,Inst*> write;
-      for (Inst *inst = bb->first_inst; inst;)
-	{
-	  Inst *next_inst = inst->next;
-
-	  if (inst->op == Op::WRITE)
-	    write[inst->args[0]] = inst->args[1];
-	  else if (inst->op == Op::READ)
-	    {
-	      if (write.contains(inst->args[0]))
-		inst->replace_all_uses_with(write[inst->args[0]]);
-	      if (inst->used_by.empty())
-		destroy_instruction(inst);
-	    }
-
-	  inst = next_inst;
-	}
-
-      // Remove dead Op::WRITE instructions.
-      std::set<Inst*> dead_writes;
-      for (Inst *inst = bb->last_inst; inst;)
-	{
-	  Inst *prev_inst = inst->prev;
-
-	  if (inst->op == Op::WRITE)
-	    {
-	      if (dead_writes.contains(inst->args[0]))
-		destroy_instruction(inst);
-	      else
-		dead_writes.insert(inst->args[0]);
-	    }
-	  else if (inst->op == Op::READ)
-	    dead_writes.erase(inst->args[0]);
-
-	  inst = prev_inst;
 	}
     }
 }
@@ -372,49 +318,15 @@ static void finish(void *, void *data)
 #endif
 	  validate(func);
 
-	  early_eliminate_registers(func);
-	  simplify_insts(func);
-	  dead_code_elimination(func);
-	  simplify_cfg(func);
-	  if (loop_unroll(func))
-	    {
-	      bool cfg_modified;
-	      do
-		{
-		  simplify_insts(func);
-		  dead_code_elimination(func);
-		  cfg_modified = simplify_cfg(func);
-		}
-	      while (cfg_modified);
-	    }
-
 	  eliminate_registers(func);
-	  validate(func);
-
-	  // Simplify the code several times -- this is often necessary
-	  // as instruction simplification enables new CFG simplifications
-	  // that then enable new instruction simplifications.
-	  // This is handled during unrolling for the GIMPLE passes, but
-	  // it does not work here because we must do unrolling before
-	  // eliminating the register instructions.
-	  simplify_insts(func);
-	  dead_code_elimination(func);
-	  simplify_cfg(func);
-	  vrp(func);
-	  bool cfg_modified;
-	  do
-	    {
-	      simplify_insts(func);
-	      dead_code_elimination(func);
-	      cfg_modified = simplify_cfg(func);
-	    }
-	  while (cfg_modified);
+	  unroll_and_optimize(func);
 
 	  canonicalize_memory(module);
 	  cse(module);
 	  simplify_mem(module);
 	  ls_elim(module);
 	  reduce_bitsize(module);
+	  bool cfg_modified;
 	  do
 	    {
 	      simplify_insts(module);
