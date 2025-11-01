@@ -272,9 +272,9 @@ class Converter : Simplify_config {
   Inst *get_cmp_inst(const Cse_key& key);
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   Inst *simplify(Inst *inst);
-  void flatten(Op op, Inst *inst, std::set<Inst *, Inst_comp>& elems);
+  void flatten_and(Inst *inst, std::set<Inst *, Inst_comp>& elems);
   void flatten_add(Inst *inst, std::vector<Inst *>& elems);
-  Inst *canonicalize_and_or(Inst *inst);
+  Inst *canonicalize_and(Inst *inst);
   Inst *canonicalize_add(Inst *inst);
   Inst *specialize_cond_calc(Inst *cond, Inst *inst, bool is_true_branch);
   Inst *specialize_cond_arg(Inst *cond, Inst *inst, bool is_true_branch,
@@ -333,8 +333,8 @@ Inst *Converter::simplify(Inst *inst)
 
   if (!processing_canonicalization
       && inst->bitsize == 1
-      && (inst->op == Op::AND || inst->op == Op::OR))
-    inst = canonicalize_and_or(inst);
+      && inst->op == Op::AND)
+    inst = canonicalize_and(inst);
   else if (!processing_canonicalization && inst->op == Op::ADD)
     inst = canonicalize_add(inst);
   else
@@ -365,19 +365,12 @@ Inst *Converter::simplify(Inst *inst)
   return inst;
 }
 
-void Converter::flatten(Op op, Inst *inst, std::set<Inst *, Inst_comp>& elems)
+void Converter::flatten_and(Inst *inst, std::set<Inst *, Inst_comp>& elems)
 {
-  if (inst->op == op)
+  if (inst->op == Op::AND)
     {
-      flatten(op, inst->args[0], elems);
-      flatten(op, inst->args[1], elems);
-    }
-  else if (inst->op == Op::NOT
-	   && ((op == Op::AND && inst->args[0]->op == Op::OR)
-	       || (op == Op::OR && inst->args[0]->op == Op::AND)))
-    {
-      flatten(op, build_inst(Op::NOT, inst->args[0]->args[0]), elems);
-      flatten(op, build_inst(Op::NOT, inst->args[0]->args[1]), elems);
+      flatten_and(inst->args[0], elems);
+      flatten_and(inst->args[1], elems);
     }
   else
     elems.insert(inst);
@@ -462,11 +455,11 @@ std::optional<unsigned __int128> ult_lower_bound(std::vector<Inst*>& comps)
   return ret;
 }
 
-// Canonicalize chains of Op::AND or Op::OR to the form:
+// Canonicalize chains of Op::AND to the form:
 //   (and (and (and (and e1, e2), e3), e4) ...
-Inst *Converter::canonicalize_and_or(Inst *inst)
+Inst *Converter::canonicalize_and(Inst *inst)
 {
-  assert(inst->op == Op::AND || inst->op == Op::OR);
+  assert(inst->op == Op::AND);
   assert(inst->bitsize == 1);
 
   Inst *arg1 = inst->args[0];
@@ -474,24 +467,18 @@ Inst *Converter::canonicalize_and_or(Inst *inst)
 
   // Collect the elements.
   std::set<Inst *, Inst_comp> elems;
-  flatten(inst->op, arg1, elems);
-  flatten(inst->op, arg2, elems);
+  flatten_and(arg1, elems);
+  flatten_and(arg2, elems);
 
   assert(!elems.empty());
   if (elems.size() == 1)
     return *elems.begin();
 
   // x & !x -> 0
-  // x | !x -> 1
   for (auto elem : elems)
     {
       if (elem->op == Op::NOT && elems.contains(elem->args[0]))
-	{
-	  if (inst->op == Op::AND)
-	    return value_inst(0, arg1->bitsize);
-	  else
-	    return value_inst(-1, arg1->bitsize);
-	}
+	return value_inst(0, arg1->bitsize);
     }
 
   // Eliminate redundant comparison with a constant. For example:
@@ -532,84 +519,79 @@ Inst *Converter::canonicalize_and_or(Inst *inst)
 	  }
       }
 
-    if (inst->op == Op::AND)
+    for (auto& [x, comps] : eq_comps)
       {
-	for (auto& [x, comps] : eq_comps)
-	  {
-	    // The expression is false if we have more than one equality
-	    // comparison, as the comparisons must then be conflicting,
-	    // such as
-	    //   x == 1 & x == 2
-	    if (comps.size() > 1)
-	      return value_inst(0, 1);
+	// The expression is false if we have more than one equality
+	// comparison, as the comparisons must then be conflicting,
+	// such as
+	//   x == 1 & x == 2
+	if (comps.size() > 1)
+	  return value_inst(0, 1);
 
-	    // Expressions such as
-	    //   x == 1 & x != 2 & x != 3
-	    // can be simplified to just
-	    //   x == 1
-	    // Note: We know the constants differ because x & !x has
-	    // been eliminated above.
-	    if (not_eq_comps.contains(x))
+	// Expressions such as
+	//   x == 1 & x != 2 & x != 3
+	// can be simplified to just
+	//   x == 1
+	// Note: We know the constants differ because x & !x has
+	// been eliminated above.
+	if (not_eq_comps.contains(x))
+	  {
+	    for (auto comp : not_eq_comps[x])
 	      {
-		for (auto comp : not_eq_comps[x])
-		  {
-		    assert(comp->args[0]->args[1] != comps[0]->args[1]);
-		    elems.erase(comp);
-		  }
+		assert(comp->args[0]->args[1] != comps[0]->args[1]);
+		elems.erase(comp);
 	      }
 	  }
+      }
 
-	// Eliminate redundant comparisons.
-	for (auto& [x, comps] : ult_comps)
+    // Eliminate redundant comparisons.
+    for (auto& [x, comps] : ult_comps)
+      {
+	// Find the value of the equality comparison, if any.
+	std::optional<unsigned __int128> eq_val;
+	if (eq_comps.contains(x))
 	  {
-	    // Find the value of the equality comparison, if any.
-	    std::optional<unsigned __int128> eq_val;
-	    if (eq_comps.contains(x))
-	      {
-		assert(eq_comps[x].size() == 1);
-		Inst *eq = eq_comps[x][0];
-		eq_val = eq->args[1]->value();
-	      }
+	    assert(eq_comps[x].size() == 1);
+	    Inst *eq = eq_comps[x][0];
+	    eq_val = eq->args[1]->value();
+	  }
 
-	    // Find the largest and smallest values x may have for the
-	    // expression to be true.
-	    std::optional<unsigned __int128> upper_bound =
-	      ult_upper_bound(comps);
-	    std::optional<unsigned __int128> lower_bound =
-	      ult_lower_bound(comps);
+	// Find the largest and smallest values x may have for the
+	// expression to be true.
+	std::optional<unsigned __int128> upper_bound = ult_upper_bound(comps);
+	std::optional<unsigned __int128> lower_bound = ult_lower_bound(comps);
 
-	    if (eq_val)
-	      {
-		// The expression is false in cases such as
-		//   x == 0 && x > 4
-		// where an equality comparison is not consistent with the
-		// comparisons for upper_bound and lower_bound.
-		if (upper_bound && *upper_bound < *eq_val)
-		  return value_inst(0, 1);
-		if (lower_bound && *eq_val < *lower_bound)
-		  return value_inst(0, 1);
+	if (eq_val)
+	  {
+	    // The expression is false in cases such as
+	    //   x == 0 && x > 4
+	    // where an equality comparison is not consistent with the
+	    // comparisons for upper_bound and lower_bound.
+	    if (upper_bound && *upper_bound < *eq_val)
+	      return value_inst(0, 1);
+	    if (lower_bound && *eq_val < *lower_bound)
+	      return value_inst(0, 1);
 
-		// The comparisons in ult_comps are consistent with the
-		// equality comparison, but this means all of them are
-		// redundant.
-		for (auto comp : comps)
-		  {
-		    elems.erase(comp);
-		  }
-		continue;
-	      }
-
-	    // Eliminate the ult_comps comparisons that are redundant with
-	    // respect to upper_bound and lower_bound.
+	    // The comparisons in ult_comps are consistent with the
+	    // equality comparison, but this means all of them are
+	    // redundant.
 	    for (auto comp : comps)
 	      {
-		std::optional<unsigned __int128> ubnd = ult_upper_bound(comp);
-		if (ubnd && upper_bound && *upper_bound < *ubnd)
-		  elems.erase(comp);
-		std::optional<unsigned __int128> lbnd = ult_lower_bound(comp);
-		if (lbnd && lower_bound && *lbnd < *lower_bound)
-		  elems.erase(comp);
+		elems.erase(comp);
 	      }
+	    continue;
+	  }
+
+	// Eliminate the ult_comps comparisons that are redundant with
+	// respect to upper_bound and lower_bound.
+	for (auto comp : comps)
+	  {
+	    std::optional<unsigned __int128> ubnd = ult_upper_bound(comp);
+	    if (ubnd && upper_bound && *upper_bound < *ubnd)
+	      elems.erase(comp);
+	    std::optional<unsigned __int128> lbnd = ult_lower_bound(comp);
+	    if (lbnd && lower_bound && *lbnd < *lower_bound)
+	      elems.erase(comp);
 	  }
       }
   }
@@ -879,27 +861,32 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 	}
 
       // Check if the expression already exists in a different form.
-      Inst *not_arg1;
-      if (arg1->op == Op::NOT)
-	not_arg1 = arg1->args[0];
-      else
-	not_arg1 = cse.get_inst(Op::NOT, arg1);
-      Inst *not_arg2;
-      if (arg2->op == Op::NOT)
-	not_arg2 = arg2->args[0];
-      else
-	not_arg2 = cse.get_inst(Op::NOT, arg2);
-      if (not_arg1 && not_arg2)
+      if (!(op == Op::AND && arg1->bitsize == 1))
 	{
-	  if (op == Op::AND)
-	    inst = cse.get_inst(Op::OR, not_arg1, not_arg2);
+	  Inst *not_arg1;
+	  if (arg1->op == Op::NOT)
+	    not_arg1 = arg1->args[0];
 	  else
-	    inst = cse.get_inst(Op::AND, not_arg1, not_arg2);
-	  if (inst)
+	    not_arg1 = cse.get_inst(Op::NOT, arg1);
+	  Inst *not_arg2;
+	  if (arg2->op == Op::NOT)
+	    not_arg2 = arg2->args[0];
+	  else
+	    not_arg2 = cse.get_inst(Op::NOT, arg2);
+	  if (not_arg1 && not_arg2)
 	    {
-	      inst = build_inst(Op::NOT, inst);
-	      cse.set_inst(inst, op, arg1, arg2);
-	      return inst;
+	      if (op == Op::AND)
+		{
+		  inst = cse.get_inst(Op::OR, not_arg1, not_arg2);
+		}
+	      else
+		inst = cse.get_inst(Op::AND, not_arg1, not_arg2);
+	      if (inst)
+		{
+		  inst = build_inst(Op::NOT, inst);
+		  cse.set_inst(inst, op, arg1, arg2);
+		  return inst;
+		}
 	    }
 	}
     }
@@ -1320,12 +1307,12 @@ Inst *Converter::build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic
 
   Inst *inst = pred2inst(bb->preds.back());
   std::set<Inst *, Inst_comp> common;
-  flatten(Op::AND, get_full_edge_cond(bb->preds.back(), bb), common);
+  flatten_and(get_full_edge_cond(bb->preds.back(), bb), common);
   for (int i = bb->preds.size() - 2; i >= 0; i--)
     {
       std::set<Inst *, Inst_comp> conds;
       Inst *full_cond = get_full_edge_cond(bb->preds[i], bb);
-      flatten(Op::AND, full_cond, conds);
+      flatten_and(full_cond, conds);
 
       std::set<Inst*, Inst_comp> tmp;
       std::set_intersection(common.begin(), common.end(),

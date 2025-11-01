@@ -1029,6 +1029,13 @@ Inst *Simplify::simplify_or()
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
+  if (inst->bitsize == 1)
+    {
+      Inst *not_arg1 = build_inst(Op::NOT, arg1);
+      Inst *not_arg2 = build_inst(Op::NOT, arg2);
+      return build_inst(Op::NOT, build_inst(Op::AND, not_arg1, not_arg2));
+    }
+
   // or x, 0 -> x
   if (is_value_zero(arg2))
     return arg1;
