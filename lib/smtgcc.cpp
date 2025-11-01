@@ -226,6 +226,8 @@ Inst *create_inst(Op op, Inst *arg)
       assert(arg->op == Op::REGISTER);
       inst->bitsize = arg->bitsize;
     }
+  else if (!inst_info[(int)op].has_lhs)
+    inst->bitsize = 0;
   else
     inst->bitsize = arg->bitsize;
   return inst;
@@ -299,7 +301,7 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2)
       assert(arg1->args[0]->value() == arg2->bitsize);
       inst->bitsize = 0;
     }
-  else if (op == Op::PRINT)
+  else if (!inst_info[(int)op].has_lhs)
     {
       inst->bitsize = 0;
     }
@@ -338,10 +340,7 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
 	   || op == Op::ARRAY_SET_SIZE
 	   || op == Op::ARRAY_SET_INDEF
 	   || op == Op::ARRAY_STORE
-	   || op == Op::MEMMOVE
-	   || op == Op::MEMSET
-	   || op == Op::SRC_MEM
-	   || op == Op::TGT_MEM)
+	   || !inst_info[(int)op].has_lhs)
     {
       inst->bitsize = 0;
     }
