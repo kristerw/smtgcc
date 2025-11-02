@@ -276,8 +276,10 @@ class Converter : Simplify_config {
   void flatten_add(Inst *inst, std::vector<Inst *>& elems);
   Inst *canonicalize_and(Inst *inst);
   Inst *canonicalize_add(Inst *inst);
-  Inst *specialize_cond_calc(Inst *cond, Inst *inst, bool is_true_branch);
-  Inst *specialize_cond_arg(Inst *cond, Inst *inst, bool is_true_branch,
+  std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond);
+  std::optional<bool> specialize_cond_false(Inst *inst, Inst *cond);
+  Inst *specialize_cond(Inst *inst, Inst *cond, bool cond_value);
+  Inst *specialize_cond_arg(Inst *inst, Inst *cond, bool cond_value,
 			    int depth = 0);
 
 public:
@@ -356,8 +358,8 @@ Inst *Converter::simplify(Inst *inst)
       Inst *const arg1 = inst->args[0];
       Inst *const arg2 = inst->args[1];
       Inst *const arg3 = inst->args[2];
-      Inst *new_arg2 = specialize_cond_arg(arg1, arg2, true);
-      Inst *new_arg3 = specialize_cond_arg(arg1, arg3, false);
+      Inst *new_arg2 = specialize_cond_arg(arg2, arg1, true);
+      Inst *new_arg3 = specialize_cond_arg(arg3, arg1, false);
       if (new_arg2 != arg2 || new_arg3 != arg3)
 	return build_inst(Op::ITE, arg1, new_arg2, new_arg3);
     }
@@ -642,16 +644,97 @@ Inst *Converter::canonicalize_add(Inst *inst)
   return new_inst;
 }
 
-Inst *Converter::specialize_cond_calc(Inst *cond, Inst *inst, bool is_true_branch)
+std::optional<bool> Converter::specialize_cond_true(Inst *inst, Inst *cond)
 {
   if (inst == cond)
-    return value_inst(is_true_branch, 1);
-  else if (inst->op == Op::ITE && cond == inst->args[0])
-    return is_true_branch ? inst->args[1] : inst->args[2];
+    return true;
+  if (inst->op == Op::NOT && inst->args[0] == cond)
+    return false;
+  if (cond->op == Op::NOT && cond->args[0] == inst)
+    return false;
+
+  if (cond->op == Op::ULT && cond->args[0]->op == Op::VALUE)
+    {
+      if (inst->op == Op::ULT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[1])
+	{
+	  if (inst->args[0]->value() <= cond->args[0]->value())
+	    return true;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->value() <= cond->args[0]->value())
+	    return false;
+	}
+    }
+  return {};
+}
+
+std::optional<bool> Converter::specialize_cond_false(Inst *inst, Inst *cond)
+{
+  if (inst == cond)
+    return false;
+  if (inst->op == Op::NOT && inst->args[0] == cond)
+    return true;
+  if (cond->op == Op::NOT && cond->args[0] == inst)
+    return true;
+
+  if (cond->op == Op::ULT && cond->args[0]->op == Op::VALUE)
+    {
+      if (inst->op == Op::ULT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[1])
+	{
+	  if (inst->args[0]->value() >= cond->args[0]->value())
+	    return false;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[1])
+	{
+	  if (inst->args[1]->value() > cond->args[0]->value())
+	    return false;
+	}
+    }
+
+  return {};
+}
+
+// Return the value of inst provided we know that the condition cond evaluates
+// to cond_value. The original inst is returned if we cannot determine its
+// value.
+//
+// For example, an inst representing x == 0 is false if we know that
+// cond x > 4 is true.
+Inst *Converter::specialize_cond(Inst *inst, Inst *cond, bool cond_value)
+{
+  if (inst->op == Op::ITE)
+    {
+      std::optional<bool> result;
+      if (cond_value)
+	result = specialize_cond_true(inst->args[0], cond);
+      else
+	result = specialize_cond_false(inst->args[0], cond);
+      if (result)
+	return *result ? inst->args[1] : inst->args[2];
+    }
+  else if (inst->bitsize == 1)
+    {
+      std::optional<bool> result;
+      if (cond_value)
+	result = specialize_cond_true(inst, cond);
+      else
+	result = specialize_cond_false(inst, cond);
+      if (result)
+	return value_inst(*result, 1);
+    }
   return inst;
 }
 
-Inst *Converter::specialize_cond_arg(Inst *cond, Inst *inst, bool is_true_branch, int depth)
+Inst *Converter::specialize_cond_arg(Inst *inst, Inst *cond, bool cond_value, int depth)
 {
   switch (inst->iclass())
     {
@@ -668,7 +751,7 @@ Inst *Converter::specialize_cond_arg(Inst *cond, Inst *inst, bool is_true_branch
       return inst;
     }
 
-  Inst *new_inst = specialize_cond_calc(cond, inst, is_true_branch);
+  Inst *new_inst = specialize_cond(inst, cond, cond_value);
   if (new_inst != inst)
     return new_inst;
 
@@ -703,7 +786,7 @@ Inst *Converter::specialize_cond_arg(Inst *cond, Inst *inst, bool is_true_branch
 	      || arg->op == Op::EXTRACT)
 	    next_depth = depth;
 
-	  arg = specialize_cond_arg(cond, args[i], is_true_branch, next_depth);
+	  arg = specialize_cond_arg(args[i], cond, cond_value, next_depth);
 	  if (arg != args[i])
 	    {
 	      args[i] = arg;
