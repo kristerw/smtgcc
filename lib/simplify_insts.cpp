@@ -1206,6 +1206,10 @@ Inst *Simplify::simplify_sext()
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
+  // Canonicalize "sext -1" as sext of a 1-bit constant 1.
+  if (is_value_m1(arg1) && arg1->bitsize > 1)
+    return build_inst(Op::SEXT, value_inst(1, 1), arg2);
+
   // sext (sext x) -> sext x
   if (arg1->op == Op::SEXT)
     return build_inst(Op::SEXT, arg1->args[0], arg2);
@@ -1237,6 +1241,10 @@ Inst *Simplify::simplify_zext()
 {
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
+
+  // Canonicalize "zext 0" as zext of a 1-bit constant 0.
+  if (is_value_zero(arg1) && arg1->bitsize > 1)
+    return build_inst(Op::ZEXT, value_inst(0, 1), arg2);
 
   // zext (zext x) -> zext x
   if (arg1->op == Op::ZEXT)
