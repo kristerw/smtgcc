@@ -7408,9 +7408,11 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       process_cfn_mulh(stmt);
       break;
     case CFN_REDUC_AND:
+    case CFN_REDUC_SBOOL_AND:
       process_cfn_reduc(stmt, BIT_AND_EXPR);
       break;
     case CFN_REDUC_IOR:
+    case CFN_REDUC_SBOOL_IOR:
       process_cfn_reduc(stmt, BIT_IOR_EXPR);
       break;
     case CFN_REDUC_MAX:
@@ -7423,6 +7425,7 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       process_cfn_reduc(stmt, PLUS_EXPR);
       break;
     case CFN_REDUC_XOR:
+    case CFN_REDUC_SBOOL_XOR:
       process_cfn_reduc(stmt, BIT_XOR_EXPR);
       break;
     case CFN_REDUC_FMIN:
