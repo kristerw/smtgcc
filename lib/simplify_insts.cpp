@@ -821,6 +821,10 @@ Inst *Simplify::simplify_eq()
       return value_inst((c2 - c1) == 0, 1);
     }
 
+  // eq (xor x, y), 0 -> eq x, y
+  if (arg1->op == Op::XOR && is_value_zero(arg2))
+    return build_inst(Op::EQ, arg1->args[0], arg1->args[1]);
+
   return inst;
 }
 
@@ -964,43 +968,39 @@ Inst *Simplify::simplify_lshr()
     }
 
   // A sequence:
-  //   %1 = xor x, y
-  //   %2 = zext %1, #64
+  //   %2 = zext x, #64
   //   %3 = add %2, #-1
   //   %4 = lshr %3, #63
   // is equivalent to:
-  //   %1 = eq x, y
+  //   %1 = eq x, 0
   //   %4 = zext %1, #64
   if (arg2->op == Op::VALUE
       && arg2->value() + 1 == arg2->bitsize
       && arg1->op == Op::ADD
       && is_value_m1(arg1->args[1])
-      && arg1->args[0]->op == Op::ZEXT
-      && arg1->args[0]->args[0]->op == Op::XOR)
+      && arg1->args[0]->op == Op::ZEXT)
     {
-      Inst *x = arg1->args[0]->args[0]->args[0];
-      Inst *y = arg1->args[0]->args[0]->args[1];
-      return build_inst(Op::ZEXT, build_inst(Op::EQ, x, y), inst->bitsize);
+      Inst *x = arg1->args[0]->args[0];
+      Inst *zero = value_inst(0, x->bitsize);
+      return build_inst(Op::ZEXT, build_inst(Op::EQ, x, zero), inst->bitsize);
     }
 
   // A sequence:
-  //   %1 = xor x, y
-  //   %2 = zext %1, #64
+  //   %2 = zext x, #64
   //   %3 = neg %2
   //   %4 = lshr %3, #63
   // is equivalent to:
-  //   %1 = eq x, y
+  //   %1 = eq x, 0
   //   %2 = not %1
   //   %4 = zext %2, #64
   if (arg2->op == Op::VALUE
       && arg2->value() + 1 == arg2->bitsize
       && arg1->op == Op::NEG
-      && arg1->args[0]->op == Op::ZEXT
-      && arg1->args[0]->args[0]->op == Op::XOR)
+      && arg1->args[0]->op == Op::ZEXT)
     {
-      Inst *x = arg1->args[0]->args[0]->args[0];
-      Inst *y = arg1->args[0]->args[0]->args[1];
-      Inst *ne = build_inst(Op::NOT, build_inst(Op::EQ, x, y));
+      Inst *x = arg1->args[0]->args[0];
+      Inst *zero = value_inst(0, x->bitsize);
+      Inst *ne = build_inst(Op::NOT, build_inst(Op::EQ, x, zero));
       return build_inst(Op::ZEXT, ne, inst->bitsize);
     }
 
