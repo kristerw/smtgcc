@@ -418,6 +418,10 @@ Inst *Simplify::simplify_add()
       return build_inst(Op::MUL, x1, value_inst(c1 + c2, inst->bitsize));
   }
 
+  // For Boolean x, y: add x, y -> not (eq x, y)
+  if (inst->bitsize == 1)
+    return build_inst(Op::NOT, build_inst(Op::EQ, arg1, arg2));
+
   return inst;
 }
 
@@ -1721,6 +1725,10 @@ Inst *Simplify::simplify_sub()
       Inst *new_inst = build_inst(Op::ZEXT, arg2->args[0], arg2->args[1]);
       return build_inst(Op::ADD, arg1, new_inst);
     }
+
+  // For Boolean x, y: sub x, y -> not (eq x, y)
+  if (inst->bitsize == 1)
+    return build_inst(Op::NOT, build_inst(Op::EQ, arg1, arg2));
 
   return inst;
 }
