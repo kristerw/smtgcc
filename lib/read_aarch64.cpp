@@ -246,6 +246,7 @@ private:
   void process_rdvl();
   void process_ext_addv(Op op);
   void process_cnt(uint64_t elem_bitsize);
+  void process_cntp();
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   Inst *extract_pred_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   void process_vec_unary(Op op);
@@ -3422,6 +3423,28 @@ void Parser::process_cnt(uint64_t elem_bitsize)
   uint64_t nof = process_last_pattern_mul(2, elem_bitsize);
 
   write_reg(dest, bb->value_inst(nof, dest->bitsize));
+}
+
+void Parser::process_cntp()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *pg = get_preg_value(3);
+  get_comma(4);
+  auto [reg, nof_elem, elem_bitsize] = get_preg(5);
+  Inst *pn = bb->build_inst(Op::READ, reg);
+  get_end_of_line(6);
+
+  Inst *res = bb->value_inst(0, dest->bitsize);
+  for (unsigned i = 0; i < nof_elem; i++)
+    {
+      Inst *pg_elem = extract_pred_elem(pg, elem_bitsize, i);
+      Inst *pn_elem = extract_pred_elem(pn, elem_bitsize, i);
+      Inst *inst = bb->build_inst(Op::AND, pg_elem, pn_elem);
+      inst = bb->build_inst(Op::ZEXT, inst, dest->bitsize);
+      res = bb->build_inst(Op::ADD, res, inst);
+    }
+  write_reg(dest, res);
 }
 
 void Parser::process_shift(Op op)
@@ -7453,6 +7476,8 @@ void Parser::parse_function()
     process_cnt(32);
   else if (name == "cntd")
     process_cnt(64);
+  else if (name == "cntp")
+    process_cntp();
   else if (name == "cpyp")
     process_cpyp();
   else if (name == "cpym" || name == "cpye")
