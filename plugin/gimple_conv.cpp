@@ -153,6 +153,8 @@ struct Converter {
   std::tuple<Inst *, Inst *, Inst *> process_ternary(enum tree_code code, tree arg1_tree, tree arg2_tree, tree arg3_tree);
   Inst *process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree lhs_type, tree arg1_type, tree arg2_type, tree arg3_type);
   std::pair<Inst *, Inst *> gen_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type, Inst *len = nullptr);
+  std::pair<Inst *, Inst *> gen_fold_left_plus(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *mask, Inst *mas_indef, tree arg2_type, tree mask_type, Inst *len = nullptr);
+  std::pair<Inst *, Inst *> gen_fold_left_plus(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree arg2_type);
   std::pair<Inst *, Inst *> process_vec_perm_expr(gimple *stmt);
   std::tuple<Inst *, Inst *, Inst *> vector_constructor(tree expr);
   void process_constructor(tree lhs, tree rhs);
@@ -181,6 +183,9 @@ struct Converter {
   void process_cfn_ctz(gimple *stmt);
   void process_cfn_div_pow2(gimple *stmt);
   void process_cfn_divmod(gimple *stmt);
+  void process_cfn_fold_left_plus(gimple *stmt);
+  void process_cfn_mask_fold_left_plus(gimple *stmt);
+  void process_cfn_mask_len_fold_left_plus(gimple *stmt);
   void process_cfn_exit(gimple *stmt);
   void process_cfn_expect(gimple *stmt);
   void process_cfn_fabs(gimple *stmt);
@@ -5096,6 +5101,87 @@ void Converter::process_cfn_divmod(gimple *stmt)
   tree2instruction.insert({lhs, inst});
 }
 
+std::pair<Inst *, Inst *> Converter::gen_fold_left_plus(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *mask, Inst *mask_indef, tree arg2_type, tree mask_type, Inst *len)
+{
+  if (arg1_indef || arg2_indef)
+    {
+      if (!arg1_indef)
+	arg1_indef = bb->value_inst(0, arg1->bitsize);
+      if (!arg2_indef)
+	arg2_indef = bb->value_inst(0, arg2->bitsize);
+    }
+  tree arg2_elem_type = TREE_TYPE(arg2_type);
+  uint32_t elem_bitsize = bitsize_for_type(arg2_elem_type);
+  assert(VECTOR_TYPE_P(mask_type));
+  tree mask_elem_type = TREE_TYPE(mask_type);
+  assert(TREE_CODE(mask_elem_type) == BOOLEAN_TYPE);
+  uint64_t mask_elem_bitsize = bitsize_for_type(mask_elem_type);
+  Inst *res = arg1;
+  Inst *res_indef = arg1_indef;
+  uint32_t nof_elt = bitsize_for_type(arg2_type) / elem_bitsize;
+  for (uint64_t i = 0; i < nof_elt; i++)
+    {
+      auto [elem, elem_indef] =
+	extract_vec_elem(bb, arg2, arg2_indef, elem_bitsize, i);
+      auto [inst, inst_indef, _] =
+	process_binary_scalar(PLUS_EXPR, res, res_indef, nullptr,
+			      elem, elem_indef, nullptr,
+			      arg2_elem_type, arg2_elem_type, arg2_elem_type);
+
+      Inst *cmp = nullptr;
+      if (len)
+	{
+	  Inst *i_inst = bb->value_inst(i, len->bitsize);
+	  cmp = bb->build_inst(Op::ULT, i_inst, len);
+	}
+
+      Inst *cond = extract_vec_elem(bb, mask, mask_elem_bitsize, i);
+      if (cond->bitsize != 1)
+	cond = bb->build_trunc(cond, 1);
+      if (mask_indef)
+	{
+	  Inst *mask_elem_indef =
+	    extract_vec_elem(bb, mask_indef, mask_elem_bitsize, i);
+	  build_ub_if_not_zero(mask_elem_indef, cmp);
+	}
+      if (cmp)
+	cond = bb->build_inst(Op::AND, cond, cmp);
+      res = bb->build_inst(Op::ITE, cond, inst, res);
+      if (res_indef && cond)
+	res_indef = bb->build_inst(Op::ITE, cond, inst_indef, res_indef);
+    }
+
+  return {res, res_indef};
+}
+
+std::pair<Inst *, Inst *> Converter::gen_fold_left_plus(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree arg2_type)
+{
+  if (arg1_indef || arg2_indef)
+    {
+      if (!arg1_indef)
+	arg1_indef = bb->value_inst(0, arg1->bitsize);
+      if (!arg2_indef)
+	arg2_indef = bb->value_inst(0, arg2->bitsize);
+    }
+  tree arg2_elem_type = TREE_TYPE(arg2_type);
+  uint32_t elem_bitsize = bitsize_for_type(arg2_elem_type);
+  Inst *res = arg1;
+  Inst *res_indef = arg1_indef;
+  Inst *res_prov = nullptr;
+  uint32_t nof_elt = bitsize_for_type(arg2_type) / elem_bitsize;
+  for (uint64_t i = 0; i < nof_elt; i++)
+    {
+      auto [elem, elem_indef] =
+	extract_vec_elem(bb, arg2, arg2_indef, elem_bitsize, i);
+      std::tie(res, res_indef, res_prov) =
+	process_binary_scalar(PLUS_EXPR, res, res_indef, nullptr,
+			      elem, elem_indef, nullptr,
+			      arg2_elem_type, arg2_elem_type, arg2_elem_type);
+    }
+
+  return {res, res_indef};
+}
+
 void Converter::process_cfn_expect(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 2
@@ -5965,6 +6051,95 @@ void Converter::process_cfn_store_lanes(gimple *stmt)
   auto [value, value_indef] = tree2inst_indef(value_expr);
   std::tie(value, value_indef) = store_lanes(value_type, value, value_indef);
   process_store(lhs, value, value_indef);
+}
+
+void Converter::process_cfn_fold_left_plus(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 2);
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  assert(!VECTOR_TYPE_P(arg1_type));
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  tree arg2_type = TREE_TYPE(arg2_expr);
+  assert(VECTOR_TYPE_P(arg2_type));
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+
+  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
+  auto [res, res_indef] =
+    gen_fold_left_plus(arg1, arg1_indef, arg2, arg2_indef, arg2_type);
+
+  constrain_range(bb, lhs, res);
+  tree2instruction.insert({lhs, res});
+  if (res_indef)
+    tree2indef.insert({lhs, res_indef});
+}
+
+void Converter::process_cfn_mask_fold_left_plus(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 3);
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  assert(!VECTOR_TYPE_P(arg1_type));
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  tree arg2_type = TREE_TYPE(arg2_expr);
+  assert(VECTOR_TYPE_P(arg2_type));
+  tree mask_expr = gimple_call_arg(stmt, 2);
+  tree mask_type = TREE_TYPE(mask_expr);
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+
+  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
+  auto [mask, mask_indef] = tree2inst_indef(mask_expr);
+  auto [res, res_indef] =
+    gen_fold_left_plus(arg1, arg1_indef, arg2, arg2_indef,
+		       mask, mask_indef, arg2_type, mask_type);
+
+  constrain_range(bb, lhs, res);
+  tree2instruction.insert({lhs, res});
+  if (res_indef)
+    tree2indef.insert({lhs, res_indef});
+}
+
+void Converter::process_cfn_mask_len_fold_left_plus(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 5);
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  assert(!VECTOR_TYPE_P(arg1_type));
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  tree arg2_type = TREE_TYPE(arg2_expr);
+  assert(VECTOR_TYPE_P(arg2_type));
+  tree mask_expr = gimple_call_arg(stmt, 2);
+  tree mask_type = TREE_TYPE(mask_expr);
+  tree len_expr = gimple_call_arg(stmt, 3);
+  assert(TYPE_UNSIGNED(TREE_TYPE(len_expr)));
+  Inst *len = tree2inst(len_expr);
+  tree len_type = TREE_TYPE(len_expr);
+  tree bias_expr = gimple_call_arg(stmt, 4);
+  Inst *bias = tree2inst(bias_expr);
+  tree bias_type = TREE_TYPE(bias_expr);
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+
+  bias = type_convert(bias, bias_type, len_type);
+  len = bb->build_inst(Op::ADD, len, bias);
+  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
+  auto [mask, mask_indef] = tree2inst_indef(mask_expr);
+  auto [res, res_indef] =
+    gen_fold_left_plus(arg1, arg1_indef, arg2, arg2_indef,
+		       mask, mask_indef, arg2_type, mask_type, len);
+
+  constrain_range(bb, lhs, res);
+  tree2instruction.insert({lhs, res});
+  if (res_indef)
+    tree2indef.insert({lhs, res_indef});
 }
 
 void Converter::process_cfn_memcpy(gimple *stmt)
@@ -7370,6 +7545,15 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       process_cfn_divmod(stmt);
       break;
     case CFN_FALLTHROUGH:
+      break;
+    case CFN_FOLD_LEFT_PLUS:
+      process_cfn_fold_left_plus(stmt);
+      break;
+    case CFN_MASK_FOLD_LEFT_PLUS:
+      process_cfn_mask_fold_left_plus(stmt);
+      break;
+    case CFN_MASK_LEN_FOLD_LEFT_PLUS:
+      process_cfn_mask_len_fold_left_plus(stmt);
       break;
     case CFN_LOAD_LANES:
       process_cfn_load_lanes(stmt);
