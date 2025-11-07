@@ -239,6 +239,7 @@ struct Converter {
   void process_cfn_vec_convert(gimple *stmt);
   void process_cfn_vec_extract(gimple *stmt);
   void process_cfn_vec_set(gimple *stmt);
+  void process_cfn_vec_trunc_add_high(gimple *stmt);
   void process_cfn_vec_widen(gimple *stmt, Op op, bool high);
   void process_cfn_vec_widen_abd(gimple *stmt, bool high);
   void process_cfn_while_ult(gimple *stmt);
@@ -7028,6 +7029,25 @@ void Converter::process_cfn_vec_set(gimple *stmt)
     tree2indef.insert({lhs, res_indef});
 }
 
+void Converter::process_cfn_vec_trunc_add_high(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 2);
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      Inst *res = bb->build_inst(Op::ADD, elem1, elem2);
+      uint32_t bitsize = res->bitsize / 2;
+      res = bb->build_inst(Op::EXTRACT, res, 2 * bitsize - 1, bitsize);
+      Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      if (res_indef)
+	res_indef =
+	  bb->build_inst(Op::EXTRACT, res_indef, 2 * bitsize - 1, bitsize);
+      return {res, res_indef};
+    };
+  process_cfn_binary(stmt, gen_elem);
+}
+
 void Converter::process_cfn_vec_widen(gimple *stmt, Op op, bool high)
 {
   assert(gimple_call_num_args(stmt) == 2);
@@ -7645,6 +7665,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_VEC_SET:
       process_cfn_vec_set(stmt);
+      break;
+    case CFN_VEC_TRUNC_ADD_HIGH:
+      process_cfn_vec_trunc_add_high(stmt);
       break;
     case CFN_VEC_WIDEN_ABD_HI:
       process_cfn_vec_widen_abd(stmt, true);
