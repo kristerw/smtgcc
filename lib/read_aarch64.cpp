@@ -244,6 +244,7 @@ private:
   void process_addpl();
   void process_addvl();
   void process_rdvl();
+  void process_fadda();
   void process_ext_addv(Op op);
   void process_cnt(uint64_t elem_bitsize);
   void process_cntp();
@@ -3391,6 +3392,30 @@ void Parser::process_rdvl()
 
   arg1 = arg1 * rstate->registers[Aarch64RegIdx::z0]->bitsize / 8;
   Inst *res = bb->value_inst(arg1, dest->bitsize);
+  write_reg(dest, res);
+}
+
+void Parser::process_fadda()
+{
+  Inst *dest = get_reg(1);
+  get_comma(2);
+  Inst *pred = get_preg_value(3);
+  get_comma(4);
+  Inst *arg1 = get_reg_value(5);
+  get_comma(6);
+  Inst *arg2 = get_zreg_value(7);
+  get_end_of_line(8);
+
+  uint32_t elem_bitsize = get_reg_bitsize(1);
+  uint32_t nof_elem = arg2->bitsize / elem_bitsize;
+  Inst *res = arg1;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      Inst *inst = bb->build_inst(Op::FADD, res, elem2);
+      Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
+      res = bb->build_inst(Op::ITE, pred_elem, inst, res);
+    }
   write_reg(dest, res);
 }
 
@@ -7466,6 +7491,8 @@ void Parser::parse_function()
     process_addvl();
   else if (name == "fabd")
     process_binary(gen_fabd);
+  else if (name == "fadda")
+    process_fadda();
   else if (name == "cmtst")
     process_binary(gen_cmtst);
   else if (name == "cntb")
