@@ -282,6 +282,9 @@ bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data)
 	      pos++;
 	    }
 
+	  if (size > MAX_MEMORY_UNROLL_LIMIT)
+	    throw Parse_error("Too large .zero", line_number);
+
 	  for (size_t i = 0; i < size; i++)
 	    data.push_back(bb->value_inst(0, 8));
 

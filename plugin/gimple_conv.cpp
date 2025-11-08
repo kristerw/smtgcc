@@ -35,9 +35,6 @@ static_assert(sizeof(HOST_WIDE_INT) == 8);
 // includes when I include it.
 unsigned int get_object_alignment(tree exp);
 
-// How many bytes load, store, __builtin_memset, etc. can expand.
-#define MAX_MEMORY_UNROLL_LIMIT  10000
-
 // Size of anonymous memory size blocks we may need to introduce (for example,
 // so that function pointer arguments have memory to point to).
 #define ANON_MEM_SIZE 136
