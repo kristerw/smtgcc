@@ -330,7 +330,7 @@ private:
   void process_sve_movprfx();
   void process_sve_ptrue();
   void process_sve_pfalse();
-  void process_sve_compare(Vec_cond op, bool update_cond = true);
+  void process_sve_compare(Vec_cond op, bool update_nzcv = false);
   void process_sve_ldr();
   void process_sve_ldr_preg();
   void process_sve_str();
@@ -5829,9 +5829,9 @@ void Parser::process_sve_preg_unary(Op op, bool update_nzcv)
   first_elems.reserve(nof_elem);
   for (uint32_t i = 0; i < nof_elem; i++)
     {
-      Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
       Inst *elem = extract_pred_elem(arg1, elem_bitsize, i);
       Inst *inst = bb->build_inst(op, elem);
+      Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
       last = bb->build_inst(Op::ITE, pred_elem, inst, last);
       first_elems.push_back({pred_elem, inst});
       inst = bb->build_inst(Op::AND, inst, pred_elem);
@@ -6604,7 +6604,7 @@ void Parser::process_sve_pfalse()
   write_reg(dest, bb->value_inst(0, dest->bitsize));
 }
 
-void Parser::process_sve_compare(Vec_cond op, bool update_cond)
+void Parser::process_sve_compare(Vec_cond op, bool update_nzcv)
 {
   auto [dest, nof_elem, elem_bitsize] = get_preg(1);
   get_comma(2);
@@ -6616,8 +6616,10 @@ void Parser::process_sve_compare(Vec_cond op, bool update_cond)
   get_end_of_line(8);
 
   Inst *res = nullptr;
-  Inst *last_cmp = bb->value_inst(0, 1);
-  Inst *z = bb->value_inst(0, 1);
+  Inst *last = bb->value_inst(0, 1);
+  Inst *none = bb->value_inst(1, 1);
+  std::vector<std::pair<Inst *, Inst *>> first_elems;
+  first_elems.reserve(nof_elem);
   for (uint32_t i = 0; i < nof_elem; i++)
     {
       Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
@@ -6627,11 +6629,11 @@ void Parser::process_sve_compare(Vec_cond op, bool update_cond)
       else
 	elem2 = extract_vec_elem(arg2, elem_bitsize, i);
       Inst *inst = gen_elem_compare(bb, elem1, elem2, op);
-      Inst *tmp_z = bb->build_inst(Op::OR, z, inst);
       Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
-      z = bb->build_inst(Op::ITE, pred_elem, tmp_z, z);
-      last_cmp = bb->build_inst(Op::ITE, pred_elem, inst, last_cmp);
-      inst = bb->build_inst(Op::ITE, pred_elem, inst, bb->value_inst(0, 1));
+      last = bb->build_inst(Op::ITE, pred_elem, inst, last);
+      first_elems.push_back({pred_elem, inst});
+      inst = bb->build_inst(Op::AND, inst, pred_elem);
+      none = bb->build_inst(Op::AND, none, bb->build_inst(Op::NOT, inst));
       if (elem_bitsize > 8)
 	inst = bb->build_inst(Op::ZEXT, inst, elem_bitsize / 8);
       if (res)
@@ -6640,11 +6642,18 @@ void Parser::process_sve_compare(Vec_cond op, bool update_cond)
 	res = inst;
     }
 
-  if (update_cond)
+  if (update_nzcv)
     {
-      Inst *n = extract_vec_elem(res, 1, 0);
-      z = bb->build_inst(Op::NOT, z);
-      Inst *c = bb->build_inst(Op::NOT, last_cmp);
+      Inst *first = bb->value_inst(0, 1);
+      while (!first_elems.empty())
+	{
+	  auto [pred, inst] = first_elems.back();
+	  first_elems.pop_back();
+	  first = bb->build_inst(Op::ITE, pred, inst, first);
+	}
+      Inst *n = first;
+      Inst *z = none;
+      Inst *c = bb->build_inst(Op::NOT, last);
       Inst *v = bb->value_inst(0, 1);
       set_nzcv(n, z, c, v);
     }
@@ -6704,49 +6713,49 @@ void Parser::parse_sve_preg_op()
   else if (name == "bic")
     process_sve_preg_binary(gen_bic);
   else if (name == "cmpeq")
-    process_sve_compare(Vec_cond::EQ);
+    process_sve_compare(Vec_cond::EQ, true);
   else if (name == "cmpge")
-    process_sve_compare(Vec_cond::GE);
+    process_sve_compare(Vec_cond::GE, true);
   else if (name == "cmpgt")
-    process_sve_compare(Vec_cond::GT);
+    process_sve_compare(Vec_cond::GT, true);
   else if (name == "cmphi")
-    process_sve_compare(Vec_cond::HI);
+    process_sve_compare(Vec_cond::HI, true);
   else if (name == "cmphs")
-    process_sve_compare(Vec_cond::HS);
+    process_sve_compare(Vec_cond::HS, true);
   else if (name == "cmple")
-    process_sve_compare(Vec_cond::LE);
+    process_sve_compare(Vec_cond::LE, true);
   else if (name == "cmplo")
-    process_sve_compare(Vec_cond::LO);
+    process_sve_compare(Vec_cond::LO, true);
   else if (name == "cmpls")
-    process_sve_compare(Vec_cond::LS);
+    process_sve_compare(Vec_cond::LS, true);
   else if (name == "cmplt")
-    process_sve_compare(Vec_cond::LT);
+    process_sve_compare(Vec_cond::LT, true);
   else if (name == "cmpne")
-    process_sve_compare(Vec_cond::NE);
+    process_sve_compare(Vec_cond::NE, true);
   else if (name == "eor")
     process_sve_preg_binary(Op::XOR);
   else if (name == "facge")
-    process_sve_compare(Vec_cond::FAGE, false);
+    process_sve_compare(Vec_cond::FAGE);
   else if (name == "facgt")
-    process_sve_compare(Vec_cond::FAGT, false);
+    process_sve_compare(Vec_cond::FAGT);
   else if (name == "facle")
-    process_sve_compare(Vec_cond::FALE, false);
+    process_sve_compare(Vec_cond::FALE);
   else if (name == "faclt")
-    process_sve_compare(Vec_cond::FALT, false);
+    process_sve_compare(Vec_cond::FALT);
   else if (name == "fcmeq")
-    process_sve_compare(Vec_cond::FEQ, false);
+    process_sve_compare(Vec_cond::FEQ);
   else if (name == "fcmge")
-    process_sve_compare(Vec_cond::FGE, false);
+    process_sve_compare(Vec_cond::FGE);
   else if (name == "fcmgt")
-    process_sve_compare(Vec_cond::FGT, false);
+    process_sve_compare(Vec_cond::FGT);
   else if (name == "fcmle")
-    process_sve_compare(Vec_cond::FLE, false);
+    process_sve_compare(Vec_cond::FLE);
   else if (name == "fcmlt")
-    process_sve_compare(Vec_cond::FLT, false);
+    process_sve_compare(Vec_cond::FLT);
   else if (name == "fcmne")
-    process_sve_compare(Vec_cond::FNE, false);
+    process_sve_compare(Vec_cond::FNE);
   else if (name == "fcmuo")
-    process_sve_compare(Vec_cond::FUO, false);
+    process_sve_compare(Vec_cond::FUO);
   else if (name == "ldr")
     process_sve_ldr_preg();
   else if (name == "mov")
