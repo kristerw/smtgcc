@@ -302,8 +302,9 @@ private:
   void process_sve_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_sve_ternary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*, Inst*));
   void process_sve_preg_unary(Op op, bool update_nzcv = false);
-  void process_sve_preg_binary(Op op);
-  void process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
+  void process_sve_preg_binary(Op op, bool update_nzcv = false);
+  void process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*),
+			       bool update_nzcv = false);
   void process_sve_preg_punpk(bool high);
   void process_sve_preg_ptest();
   void process_sve_widen(Op, bool high);
@@ -5868,7 +5869,7 @@ void Parser::process_sve_preg_unary(Op op, bool update_nzcv)
   write_reg(dest, res);
 }
 
-void Parser::process_sve_preg_binary(Op op)
+void Parser::process_sve_preg_binary(Op op, bool update_nzcv)
 {
   auto [dest, nof_elem, elem_bitsize] = get_preg(1);
   get_comma(2);
@@ -5880,14 +5881,20 @@ void Parser::process_sve_preg_binary(Op op)
   get_end_of_line(8);
 
   Inst *res = nullptr;
+  Inst *last = bb->value_inst(0, 1);
+  Inst *none = bb->value_inst(1, 1);
+  std::vector<std::pair<Inst *, Inst *>> first_elems;
+  first_elems.reserve(nof_elem);
   for (uint32_t i = 0; i < nof_elem; i++)
     {
       Inst *elem1 = extract_pred_elem(arg1, elem_bitsize, i);
       Inst *elem2 = extract_pred_elem(arg2, elem_bitsize, i);
       Inst *inst = bb->build_inst(op, elem1, elem2);
-
       Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
-      inst = bb->build_inst(Op::ITE, pred_elem, inst, bb->value_inst(0, 1));
+      last = bb->build_inst(Op::ITE, pred_elem, inst, last);
+      first_elems.push_back({pred_elem, inst});
+      inst = bb->build_inst(Op::AND, inst, pred_elem);
+      none = bb->build_inst(Op::AND, none, bb->build_inst(Op::NOT, inst));
       if (elem_bitsize > 8)
 	inst = bb->build_inst(Op::ZEXT, inst, elem_bitsize / 8);
       if (res)
@@ -5895,10 +5902,26 @@ void Parser::process_sve_preg_binary(Op op)
       else
 	res = inst;
     }
+
+  if (update_nzcv)
+    {
+      Inst *first = bb->value_inst(0, 1);
+      while (!first_elems.empty())
+	{
+	  auto [pred, inst] = first_elems.back();
+	  first_elems.pop_back();
+	  first = bb->build_inst(Op::ITE, pred, inst, first);
+	}
+      Inst *n = first;
+      Inst *z = none;
+      Inst *c = bb->build_inst(Op::NOT, last);
+      Inst *v = bb->value_inst(0, 1);
+      set_nzcv(n, z, c, v);
+    }
   write_reg(dest, res);
 }
 
-void Parser::process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*))
+void Parser::process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*), bool update_nzcv)
 {
   auto [dest, nof_elem, elem_bitsize] = get_preg(1);
   get_comma(2);
@@ -5910,20 +5933,42 @@ void Parser::process_sve_preg_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*
   get_end_of_line(8);
 
   Inst *res = nullptr;
+  Inst *last = bb->value_inst(0, 1);
+  Inst *none = bb->value_inst(1, 1);
+  std::vector<std::pair<Inst *, Inst *>> first_elems;
+  first_elems.reserve(nof_elem);
   for (uint32_t i = 0; i < nof_elem; i++)
     {
       Inst *elem1 = extract_pred_elem(arg1, elem_bitsize, i);
       Inst *elem2 = extract_pred_elem(arg2, elem_bitsize, i);
       Inst *inst = gen_elem(bb, elem1, elem2);
-
       Inst *pred_elem = extract_pred_elem(pred, elem_bitsize, i);
-      inst = bb->build_inst(Op::ITE, pred_elem, inst, bb->value_inst(0, 1));
+      last = bb->build_inst(Op::ITE, pred_elem, inst, last);
+      first_elems.push_back({pred_elem, inst});
+      inst = bb->build_inst(Op::AND, inst, pred_elem);
+      none = bb->build_inst(Op::AND, none, bb->build_inst(Op::NOT, inst));
       if (elem_bitsize > 8)
 	inst = bb->build_inst(Op::ZEXT, inst, elem_bitsize / 8);
       if (res)
 	res = bb->build_inst(Op::CONCAT, inst, res);
       else
 	res = inst;
+    }
+
+  if (update_nzcv)
+    {
+      Inst *first = bb->value_inst(0, 1);
+      while (!first_elems.empty())
+	{
+	  auto [pred, inst] = first_elems.back();
+	  first_elems.pop_back();
+	  first = bb->build_inst(Op::ITE, pred, inst, first);
+	}
+      Inst *n = first;
+      Inst *z = none;
+      Inst *c = bb->build_inst(Op::NOT, last);
+      Inst *v = bb->value_inst(0, 1);
+      set_nzcv(n, z, c, v);
     }
   write_reg(dest, res);
 }
@@ -6714,8 +6759,12 @@ void Parser::parse_sve_preg_op()
 
   if (name == "and")
     process_sve_preg_binary(Op::AND);
+  else if (name == "ands")
+    process_sve_preg_binary(Op::AND, true);
   else if (name == "bic")
     process_sve_preg_binary(gen_bic);
+  else if (name == "bics")
+    process_sve_preg_binary(gen_bic, true);
   else if (name == "cmpeq")
     process_sve_compare(Vec_cond::EQ, true);
   else if (name == "cmpge")
@@ -6738,6 +6787,8 @@ void Parser::parse_sve_preg_op()
     process_sve_compare(Vec_cond::NE, true);
   else if (name == "eor")
     process_sve_preg_binary(Op::XOR);
+  else if (name == "eors")
+    process_sve_preg_binary(Op::XOR, true);
   else if (name == "facge")
     process_sve_compare(Vec_cond::FAGE);
   else if (name == "facgt")
@@ -6766,16 +6817,24 @@ void Parser::parse_sve_preg_op()
     process_sve_mov_preg();
   else if (name == "nand")
     process_sve_preg_binary(gen_nand);
+  else if (name == "nands")
+    process_sve_preg_binary(gen_nand, true);
   else if (name == "nor")
     process_sve_preg_binary(gen_nor);
+  else if (name == "nors")
+    process_sve_preg_binary(gen_nor, true);
   else if (name == "not")
     process_sve_preg_unary(Op::NOT);
   else if (name == "nots")
     process_sve_preg_unary(Op::NOT, true);
   else if (name == "orn")
     process_sve_preg_binary(gen_orn);
+  else if (name == "orns")
+    process_sve_preg_binary(gen_orn, true);
   else if (name == "orr")
     process_sve_preg_binary(Op::OR);
+  else if (name == "orrs")
+    process_sve_preg_binary(Op::OR, true);
   else if (name == "pfalse")
     process_sve_pfalse();
   else if (name == "ptest")
