@@ -101,6 +101,7 @@ private:
   std::tuple<uint64_t, uint32_t, uint32_t> get_vreg_(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_vreg(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_scalar_vreg(unsigned idx);
+  Inst *get_scalar_zreg_value(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_ld1_vreg(unsigned idx);
   std::tuple<uint64_t, uint32_t, uint32_t> get_zreg_(unsigned idx);
   std::tuple<Inst *, uint32_t, uint32_t> get_zreg(unsigned idx,
@@ -208,6 +209,7 @@ private:
 				    bool parse_mul = true);
   uint64_t process_last_pattern(unsigned idx, uint64_t elem_bitsize);
   Inst *process_last_scalar_vec_arg(unsigned idx);
+  Inst *process_last_scalar_sve_arg(unsigned idx);
   void process_binary(Op op);
   void process_binary(Inst*(*gen_elem)(Basic_block*, Inst*, Inst*));
   void process_simd_compare(Vec_cond op);
@@ -326,6 +328,7 @@ private:
   void process_sve_ld1qr(uint32_t load_elem_size);
   void store_value(Inst *ptr, Inst *value);
   void process_sve_st1(uint32_t store_elem_size);
+  void process_sve_dup();
   void process_sve_mov_preg();
   void process_sve_mov_zreg();
   void process_sve_movprfx();
@@ -768,12 +771,15 @@ std::tuple<Inst *, uint32_t, uint32_t> Parser::get_scalar_vreg(unsigned idx)
   uint32_t elem_bitsize;
   if (suffix == ".d")
     elem_bitsize = 64;
-  if (suffix == ".s")
+  else if (suffix == ".s")
     elem_bitsize = 32;
-  if (suffix == ".h")
+  else if (suffix == ".h")
     elem_bitsize = 16;
-  if (suffix == ".b")
+  else if (suffix == ".b")
     elem_bitsize = 8;
+  else
+    throw Parse_error("expected a size specified instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
   uint32_t nof_elem = 128 / elem_bitsize;
   idx++;
 
@@ -784,6 +790,56 @@ std::tuple<Inst *, uint32_t, uint32_t> Parser::get_scalar_vreg(unsigned idx)
   get_right_bracket(idx);
 
   return {reg, elem_bitsize, elem_idx};
+}
+
+Inst *Parser::get_scalar_zreg_value(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+
+  if (tokens[idx].kind != Lexeme::name
+      || tokens[idx].size < 4
+      || buf[tokens[idx].pos] != 'z'
+      || !isdigit(buf[tokens[idx].pos + 1]))
+    throw Parse_error("expected a z-register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  uint32_t value = buf[tokens[idx].pos + 1] - '0';
+  uint32_t pos = 2;
+  if (isdigit(buf[tokens[idx].pos + pos]))
+    value = value * 10 + (buf[tokens[idx].pos + pos++] - '0');
+  if (value > 31)
+    throw Parse_error("expected a z-register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  Inst *reg = rstate->registers[Aarch64RegIdx::z0 + value];
+  std::string_view suffix(&buf[tokens[idx].pos + pos], tokens[idx].size - pos);
+  uint32_t elem_bitsize;
+  if (suffix == ".q")
+    elem_bitsize = 128;
+  else if (suffix == ".d")
+    elem_bitsize = 64;
+  else if (suffix == ".s")
+    elem_bitsize = 32;
+  else if (suffix == ".h")
+    elem_bitsize = 16;
+  else if (suffix == ".b")
+    elem_bitsize = 8;
+  else
+    throw Parse_error("expected a size specified instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+  uint32_t nof_elem = 128 / elem_bitsize;
+  idx++;
+
+  get_left_bracket(idx++);
+  uint32_t elem_idx = get_imm(idx++)->value();
+  get_right_bracket(idx);
+
+  if (elem_idx >= nof_elem)
+    return bb->value_inst(0, elem_bitsize);
+  else
+    {
+      Inst *inst = bb->build_inst(Op::READ, reg);
+      return extract_vec_elem(inst, elem_bitsize, elem_idx);
+    }
 }
 
 std::tuple<Inst *, uint32_t, uint32_t> Parser::get_ld1_vreg(unsigned idx)
@@ -3213,6 +3269,13 @@ Inst *Parser::process_last_scalar_vec_arg(unsigned idx)
 
   Inst *inst = bb->build_inst(Op::READ, reg);
   return extract_vec_elem(inst, elem_bitsize, elem_idx);
+}
+
+Inst *Parser::process_last_scalar_sve_arg(unsigned idx)
+{
+  Inst *inst = get_scalar_zreg_value(idx);
+  get_end_of_line(idx + 4);
+  return inst;
 }
 
 void Parser::process_binary(Op op)
@@ -6552,6 +6615,28 @@ void Parser::process_sve_st1(uint32_t store_elem_size)
     }
 }
 
+void Parser::process_sve_dup()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1;
+  if (is_zreg(3))
+    arg1 = process_last_scalar_sve_arg(3);
+  else
+    {
+      arg1 = get_reg_value(3);
+      arg1 = bb->build_trunc(arg1, elem_bitsize);
+      get_end_of_line(4);
+    }
+
+  Inst *res = arg1;
+  for (uint32_t i = 1; i < nof_elem; i++)
+    {
+      res = bb->build_inst(Op::CONCAT, arg1, res);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_mov_preg()
 {
   auto [dest, nof_elem, elem_bitsize] = get_preg(1);
@@ -6916,6 +7001,8 @@ void Parser::parse_sve_op()
     process_sve_unary(gen_cnot);
   else if (name == "cnt")
     process_sve_unary(gen_popcount);
+  else if (name == "dup")
+    process_sve_dup();
   else if (name == "eor")
     process_sve_binary(Op::XOR);
   else if (name == "eor3")
