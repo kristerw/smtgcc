@@ -92,6 +92,7 @@ void tv_function::check()
 	  cfg_modified = simplify_cfg(module);
 	}
       while (cfg_modified);
+      sort_stores(module);
 
       validate(module);
 

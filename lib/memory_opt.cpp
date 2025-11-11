@@ -185,6 +185,89 @@ void remove_unused_memory(Inst *memory_inst)
     }
 }
 
+std::pair<Inst *, __int128> get_base_offset(Inst *addr)
+{
+  Inst *base = nullptr;
+  __int128 offset = 0;
+  if (addr->op == Op::VALUE)
+    offset = addr->signed_value();
+  else if (addr->op == Op::ADD && addr->args[1]->op == Op::VALUE)
+    {
+      base = addr->args[0];
+      offset = addr->args[1]->signed_value();
+    }
+  else
+    base = addr;
+  return {base, offset};
+}
+
+bool may_alias(Inst *inst, std::vector<Inst *>& stores)
+{
+  assert(inst->op == Op::LOAD || inst->op == Op::STORE);
+  auto [base, offset] = get_base_offset(inst->args[0]);
+  for (auto store : stores)
+    {
+      auto [store_base, store_offset] = get_base_offset(store->args[0]);
+      if (base != store_base)
+	return true;
+      if (base == store_base && offset == store_offset)
+	return true;
+    }
+  return false;
+}
+
+void sort_stores(Basic_block *bb)
+{
+  struct {
+    bool operator()(const Inst *a, const Inst *b) const {
+      auto [a_base, a_offset] = get_base_offset(a->args[0]);
+      auto [b_base, b_offset] = get_base_offset(b->args[0]);
+      assert(a_base == b_base);
+      return a_offset < b_offset;
+    }
+  } comp;
+
+  Inst *curr_inst = bb->first_inst;
+  for (;;)
+    {
+      while (curr_inst)
+	{
+	  if (curr_inst->op == Op::STORE)
+	    break;
+	  curr_inst = curr_inst->next;
+	}
+
+      if (!curr_inst)
+	return;
+
+      std::vector<Inst *> stores;
+      stores.push_back(curr_inst);
+      curr_inst = curr_inst->next;
+
+      while (curr_inst)
+	{
+	  if (curr_inst->op == Op::LOAD || curr_inst->op == Op::STORE)
+	    {
+	      if (may_alias(curr_inst, stores))
+		break;
+
+	      if (curr_inst->op == Op::STORE)
+		stores.push_back(curr_inst);
+	    }
+	  curr_inst = curr_inst->next;
+	}
+
+      if (stores.size() > 1
+	  && !std::is_sorted(stores.begin(), stores.end(), comp))
+	{
+	  Inst *next = stores.back()->next;
+	  std::sort(stores.begin(), stores.end(), comp);
+	  for (auto store : stores)
+	    store->move_before(next);
+	}
+    }
+}
+
 void store_load_forwarding(Function *func)
 {
   std::map<Basic_block *, std::map<uint64_t, Inst *>> bb2mem_indef;
@@ -721,6 +804,18 @@ void ls_elim(Module *module)
 {
   for (auto func : module->functions)
     ls_elim(func);
+}
+
+void sort_stores(Function *func)
+{
+  for (auto bb : func->bbs)
+    sort_stores(bb);
+}
+
+void sort_stores(Module *module)
+{
+  for (auto func : module->functions)
+    sort_stores(func);
 }
 
 } // end namespace smtgcc

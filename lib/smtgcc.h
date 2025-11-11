@@ -490,6 +490,8 @@ bool loop_unroll(Module *module);
 void canonicalize_memory(Module *module);
 void ls_elim(Function *func);
 void ls_elim(Module *module);
+void sort_stores(Function *func);
+void sort_stores(Module *module);
 
 // read_ir.cpp
 Module *parse_ir(std::string const& file_name);

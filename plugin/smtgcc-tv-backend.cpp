@@ -334,6 +334,7 @@ static void finish(void *, void *data)
 	      cfg_modified = simplify_cfg(module);
 	    }
 	  while (cfg_modified);
+	  sort_stores(module);
 
 	  Solver_result result = check_refine(module);
 	  if (result.status != Result_status::correct)
