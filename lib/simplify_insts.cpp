@@ -408,6 +408,19 @@ Inst *Simplify::simplify_add()
       return build_inst(Op::ADD, add, value_inst(c1 + c2, add->bitsize));
     }
 
+  // add (add, x, c), y -> add (add x, y), c
+  // add y, (add, x, c) -> add (add x, y), c
+  if (arg1->op == Op::ADD && arg1->args[1]->op == Op::VALUE)
+    {
+      Inst *add = build_inst(Op::ADD, arg1->args[0], arg2);
+      return build_inst(Op::ADD, add, arg1->args[1]);
+    }
+  if (arg2->op == Op::ADD && arg2->args[1]->op == Op::VALUE)
+    {
+      Inst *add = build_inst(Op::ADD, arg2->args[0], arg1);
+      return build_inst(Op::ADD, add, arg2->args[1]);
+    }
+
   // add (mul x, c1), (mul x, c2) -> mul x, (c1 + c2)
   // The multiplication may be expressed as Op::SHL, or can be just x,
   // which is then treated as x * 1.
