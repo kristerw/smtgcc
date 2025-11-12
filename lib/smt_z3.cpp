@@ -351,9 +351,6 @@ void Converter::build_bv_unary_smt(const Inst *inst)
     case Op::NOT:
       inst2bv.insert({inst, ~arg1});
       break;
-    case Op::SIMP_BARRIER:
-      inst2bv.insert({inst, arg1});
-      break;
     default:
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
     }

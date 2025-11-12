@@ -14,7 +14,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 97> inst_info{{
+const std::array<Inst_info, 96> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -37,7 +37,6 @@ const std::array<Inst_info, 97> inst_info{{
   {"mov", Op::MOV, Inst_class::iunary, true, false},
   {"neg", Op::NEG, Inst_class::iunary, true, false},
   {"not", Op::NOT, Inst_class::iunary, true, false},
-  {"simp_barrier", Op::SIMP_BARRIER, Inst_class::iunary, true, false},
 
   // Floating-point unary
   {"fabs", Op::FABS, Inst_class::funary, true, false},

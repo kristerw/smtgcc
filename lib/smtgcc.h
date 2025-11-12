@@ -59,7 +59,6 @@ enum class Op : uint8_t {
   MOV,
   NEG,
   NOT,
-  SIMP_BARRIER,
 
   // Floating-point unary
   FABS,
@@ -201,7 +200,7 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 97> inst_info;
+extern const std::array<Inst_info, 96> inst_info;
 
 struct Module;
 struct Function;
