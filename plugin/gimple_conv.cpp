@@ -7864,60 +7864,6 @@ void Converter::process_gimple_return(gimple *stmt)
   // miscompile otherwise...
 }
 
-Inst *split_phi(Inst *phi, uint64_t elem_bitsize, std::map<std::pair<Inst *, uint64_t>, std::vector<Inst *>>& cache)
-{
-  assert(phi->op == Op::PHI);
-  assert(phi->bitsize % elem_bitsize == 0);
-  if (phi->bitsize == elem_bitsize)
-    return phi;
-  Inst *res = nullptr;
-  uint32_t nof_elem = phi->bitsize / elem_bitsize;
-  std::vector<Inst *> phis;
-  phis.reserve(nof_elem);
-  for (uint64_t i = 0; i < nof_elem; i++)
-    {
-      Inst *inst = phi->bb->build_phi_inst(elem_bitsize);
-      phis.push_back(inst);
-      if (res)
-	{
-	  Inst *concat = create_inst(Op::CONCAT, inst, res);
-	  if (res->op == Op::PHI)
-	    {
-	      if (phi->bb->first_inst)
-		concat->insert_before(phi->bb->first_inst);
-	      else
-		phi->bb->insert_last(concat);
-	    }
-	  else
-	    concat->insert_after(res);
-	  res = concat;
-	}
-      else
-	res = inst;
-    }
-  phi->replace_all_uses_with(res);
-
-  for (auto [arg_inst, arg_bb] : phi->phi_args)
-    {
-      std::vector<Inst *>& split = cache[{arg_inst, elem_bitsize}];
-      if (split.empty())
-	{
-	  for (uint64_t i = 0; i < nof_elem; i++)
-	    {
-	      Inst *inst =
-		extract_vec_elem(arg_inst->bb, arg_inst, elem_bitsize, i);
-	      split.push_back(inst);
-	    }
-	}
-      for (uint64_t i = 0; i < nof_elem; i++)
-	{
-	  phis[i]->add_phi_arg(split[i], arg_bb);
-	}
-    }
-
-  return res;
-}
-
 void Converter::generate_exit_inst()
 {
   if (bb_abort.empty() && bb2exit.empty())
@@ -8011,19 +7957,6 @@ void Converter::generate_return_inst()
 	}
       retval = phi;
       retval_indef = need_indef_phi ? phi_indef : nullptr;
-
-      std::map<std::pair<Inst *, uint64_t>, std::vector<Inst *>> cache;
-      if (VECTOR_TYPE_P(retval_type) || TREE_CODE(retval_type) == COMPLEX_TYPE)
-	{
-	  uint32_t elem_bitsize;
-	  if (VECTOR_TYPE_P(retval_type))
-	    elem_bitsize = bitsize_for_type(TREE_TYPE(retval_type));
-	  else
-	    elem_bitsize = bytesize_for_type(TREE_TYPE(retval_type)) * 8;
-	  retval = split_phi(retval, elem_bitsize, cache);
-	  if (retval_indef)
-	    retval_indef = split_phi(retval_indef, elem_bitsize, cache);
-	}
     }
 
   // GCC treats it as UB to return the address of a local variable.
@@ -8637,17 +8570,6 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 		  phi_prov->add_phi_arg(arg_prov, arg_bb);
 		}
 	      bb = nullptr;
-	    }
-
-	  if (VECTOR_TYPE_P(phi_type) || TREE_CODE(phi_type) == COMPLEX_TYPE)
-	    {
-	      uint32_t bs;
-	      if (VECTOR_TYPE_P(phi_type))
-		bs = bitsize_for_type(TREE_TYPE(phi_type));
-	      else
-		bs = bytesize_for_type(TREE_TYPE(phi_type)) * 8;
-	      tree2instruction[phi_result] = split_phi(phi_inst, bs, cache);
-	      tree2indef[phi_result] = split_phi(phi_indef, bs, cache);
 	    }
 	}
     }

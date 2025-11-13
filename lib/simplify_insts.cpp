@@ -2790,6 +2790,104 @@ Inst *Simplify::simplify_over_ite_arg()
   return inst;
 }
 
+Inst *extract_vec_elem(Basic_block *bb, Inst *inst, uint32_t elem_bitsize, uint32_t idx)
+{
+  if (idx == 0 && inst->bitsize == elem_bitsize)
+    return inst;
+  assert(inst->bitsize % elem_bitsize == 0);
+  Inst *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
+  Inst *low = bb->value_inst(idx * elem_bitsize, 32);
+  return bb->build_inst(Op::EXTRACT, inst, high, low);
+}
+
+// Return the element size to use for a vector phi if this is a vector phi.
+// For this to be considered a vector phi, all uses must be an Op::EXTRACT
+// of a size that divides the phi bitsize, and the extraction must be
+// extracted from a correctly aligned position. We then return the smallest
+// size of the extractions.
+// TODO: We currently skip element size <= 8 as this is too aggressive when
+// the phi is stored. This needs a better heuristic.
+std::optional<uint32_t> get_phi_elem_bitsize(Inst *phi)
+{
+  assert(phi->op == Op::PHI);
+
+  if (phi->bitsize < 32)
+    return {};
+
+  std::optional<uint32_t> elem_bitsize;
+  for (auto use : phi->used_by)
+    {
+      if (use->op != Op::EXTRACT)
+	return {};
+      if (use->bitsize != 16 && use->bitsize != 32 && use->bitsize != 64)
+	return {};
+      if (elem_bitsize)
+	{
+	  if (use->bitsize != *elem_bitsize)
+	    return {};
+	  if (use->args[2]->value() % *elem_bitsize != 0)
+	    return {};
+	}
+      else
+	elem_bitsize = use->bitsize;
+    }
+
+  return elem_bitsize;
+}
+
+Inst *split_phi(Inst *phi, uint64_t elem_bitsize, std::map<std::pair<Inst *, uint64_t>, std::vector<Inst *>>& cache)
+{
+  assert(phi->op == Op::PHI);
+  if (phi->bitsize == elem_bitsize)
+    return phi;
+  Inst *res = nullptr;
+  uint32_t nof_elem = phi->bitsize / elem_bitsize;
+  std::vector<Inst *> phis;
+  phis.reserve(nof_elem);
+  for (uint64_t i = 0; i < nof_elem; i++)
+    {
+      Inst *inst = phi->bb->build_phi_inst(elem_bitsize);
+      phis.push_back(inst);
+      if (res)
+	{
+	  Inst *concat = create_inst(Op::CONCAT, inst, res);
+	  if (res->op == Op::PHI)
+	    {
+	      if (phi->bb->first_inst)
+		concat->insert_before(phi->bb->first_inst);
+	      else
+		phi->bb->insert_last(concat);
+	    }
+	  else
+	    concat->insert_after(res);
+	  res = concat;
+	}
+      else
+	res = inst;
+    }
+  phi->replace_all_uses_with(res);
+
+  for (auto [arg_inst, arg_bb] : phi->phi_args)
+    {
+      std::vector<Inst *>& split = cache[{arg_inst, elem_bitsize}];
+      if (split.empty())
+	{
+	  for (uint64_t i = 0; i < nof_elem; i++)
+	    {
+	      Inst *inst =
+		extract_vec_elem(arg_inst->bb, arg_inst, elem_bitsize, i);
+	      split.push_back(inst);
+	    }
+	}
+      for (uint64_t i = 0; i < nof_elem; i++)
+	{
+	  phis[i]->add_phi_arg(split[i], arg_bb);
+	}
+    }
+
+  return res;
+}
+
 } // end anonymous namespace
 
 Inst *constant_fold_inst(Inst *inst)
@@ -3018,6 +3116,33 @@ Inst *simplify_inst(Inst *inst, Simplify_config *config)
 
 void simplify_insts(Function *func)
 {
+  // Split vector phi-nodes into one phi per element.
+  for (int i = func->bbs.size() - 1; i >= 0; i--)
+    {
+      Basic_block *bb = func->bbs[i];
+      std::vector<std::pair<Inst *, uint32_t>> phis;
+      for (auto phi : bb->phis)
+	{
+	  if (std::optional<uint32_t> elem_bitsize = get_phi_elem_bitsize(phi))
+	    phis.push_back({phi, *elem_bitsize});
+	}
+      std::map<std::pair<Inst *, uint64_t>, std::vector<Inst *>> cache;
+      for (auto [phi, elem_bitsize] : phis)
+	split_phi(phi, elem_bitsize, cache);
+
+      // Remove dead phi-nodes.
+      std::vector<Inst *> dead_phis;
+      for (auto phi : bb->phis)
+	{
+	  if (phi->used_by.empty())
+	    dead_phis.push_back(phi);
+	}
+      for (auto phi : dead_phis)
+	{
+	  destroy_instruction(phi);
+	}
+    }
+
   for (Basic_block *bb : func->bbs)
     {
       if (!bb->phis.empty())
