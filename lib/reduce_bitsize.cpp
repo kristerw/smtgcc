@@ -23,15 +23,6 @@ Inst *build_trunc(Inst *current_inst, Inst *inst, uint64_t bitsize)
   return new_inst;
 }
 
-void destroy(Inst *inst)
-{
-  // Memory instructions must be kept until the memory optimization passes.
-  if (inst->op == Op::MEMORY)
-    return;
-
-  destroy_instruction(inst);
-}
-
 uint64_t get_needed_bitsize(Inst *inst)
 {
   uint64_t bitsize = 0;
@@ -144,9 +135,8 @@ void reduce_bitsize(Function *func)
   for (int i = func->bbs.size() - 1; i >= 0; i--)
     {
       Basic_block *bb = func->bbs[i];
-      for (Inst *inst = bb->last_inst; inst;)
+      for (Inst *inst = bb->last_inst; inst; inst = inst->prev)
 	{
-	  Inst *next_inst = inst->prev;
 	  if (inst->has_lhs())
 	    {
 	      if (!inst->used_by.empty())
@@ -155,10 +145,12 @@ void reduce_bitsize(Function *func)
 	      // Dead instructions may prevent truncation if the dead
 	      // use is the only use of the full value. Remove dead
 	      // instructions to avoid this problem.
-	      if (inst->used_by.empty())
-		destroy(inst);
+	      if (inst->used_by.empty() && inst->op != Op::MEMORY)
+		{
+		  inst = inst->next;
+		  destroy_instruction(inst->prev);
+		}
 	    }
-	  inst = next_inst;
 	}
 
       std::vector<std::pair<Inst *, uint64_t>> truncate_phis;
