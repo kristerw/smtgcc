@@ -1388,6 +1388,7 @@ Inst *Converter::build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic
 {
   assert(bb->preds.size() > 0);
 
+  Inst_comp comp;
   Inst *inst = pred2inst(bb->preds.back());
   std::set<Inst *, Inst_comp> common;
   flatten_and(get_full_edge_cond(bb->preds.back(), bb), common);
@@ -1400,13 +1401,13 @@ Inst *Converter::build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic
       std::set<Inst*, Inst_comp> tmp;
       std::set_intersection(common.begin(), common.end(),
 			    conds.begin(), conds.end(),
-			    std::inserter(tmp, tmp.begin()));
+			    std::inserter(tmp, tmp.begin()), comp);
       common = std::move(tmp);
       std::vector<Inst*> needed_conds;
       needed_conds.reserve(conds.size());
       std::set_difference(conds.begin(), conds.end(),
 			  common.begin(), common.end(),
-			  std::back_inserter(needed_conds));
+			  std::back_inserter(needed_conds), comp);
 
       // Create the simplified cond. This may be empty if several
       // successive predecessors have the same condition (this
