@@ -153,6 +153,7 @@ private:
   void set_nzcv(Inst *n, Inst *z, Inst *c, Inst *v);
   Inst *build_cond(Cond_code cc);
   void process_cond_branch(Cond_code cc);
+  void process_compare_and_branch(Vec_cond op);
   void process_cbz(bool is_cbnz = false);
   void process_tbz(bool is_cbnz = false);
   void process_csel(Op op = Op::MOV);
@@ -1942,6 +1943,21 @@ void Parser::process_cond_branch(Cond_code cc)
   get_end_of_line(2);
 
   Inst *cond = build_cond(cc);
+  Basic_block *false_bb = func->build_bb();
+  bb->build_br_inst(cond, true_bb, false_bb);
+  bb = false_bb;
+}
+
+void Parser::process_compare_and_branch(Vec_cond op)
+{
+  Inst *arg1 = get_reg_value(1);
+  get_comma(2);
+  Inst *arg2 = get_reg_or_imm_value(3, arg1->bitsize);
+  get_comma(4);
+  Basic_block *true_bb = get_bb(5);
+  get_end_of_line(6);
+
+  Inst *cond = gen_elem_compare(bb, arg1, arg2, op);
   Basic_block *false_bb = func->build_bb();
   bb->build_br_inst(cond, true_bb, false_bb);
   bb = false_bb;
@@ -7676,6 +7692,26 @@ void Parser::parse_function()
     process_binary(gen_fabd);
   else if (name == "fadda")
     process_fadda();
+  else if (name == "cbeq")
+    process_compare_and_branch(Vec_cond::EQ);
+  else if (name == "cbne")
+    process_compare_and_branch(Vec_cond::NE);
+  else if (name == "cbgt")
+    process_compare_and_branch(Vec_cond::GT);
+  else if (name == "cbge")
+    process_compare_and_branch(Vec_cond::GE);
+  else if (name == "cbhi")
+    process_compare_and_branch(Vec_cond::HI);
+  else if (name == "cbhs")
+    process_compare_and_branch(Vec_cond::HS);
+  else if (name == "cble")
+    process_compare_and_branch(Vec_cond::LE);
+  else if (name == "cblo")
+    process_compare_and_branch(Vec_cond::LO);
+  else if (name == "cbls")
+    process_compare_and_branch(Vec_cond::LS);
+  else if (name == "cblt")
+    process_compare_and_branch(Vec_cond::LT);
   else if (name == "cmtst")
     process_binary(gen_cmtst);
   else if (name == "cntb")
