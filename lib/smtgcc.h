@@ -289,6 +289,7 @@ struct Basic_block {
   Inst *build_inst(Op op, uint32_t arg_val);
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2);
   Inst *build_inst(Op op, Inst *arg1, uint32_t arg2_val);
+  Inst *build_inst(Op op, uint32_t arg1_val, uint32_t arg2_val);
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3);
   Inst *build_inst(Op op, Inst *arg1, uint32_t arg2_val, uint32_t arg3_val);
   Inst *build_phi_inst(int bitsize);
@@ -625,6 +626,7 @@ struct aarch64_state {
   uint32_t freg_bitsize;
   std::vector<MemoryObject> memory_objects;
   int next_local_id;
+  int64_t symbolic_id;
 };
 Function *parse_aarch64(std::string const& file_name, aarch64_state *state);
 
@@ -662,6 +664,7 @@ struct bpf_state {
   Basic_block *exit_bb;
   std::vector<MemoryObject> memory_objects;
   int next_local_id;
+  int64_t symbolic_id;
 };
 Function *parse_bpf(std::string const& file_name, bpf_state *state);
 
@@ -791,6 +794,7 @@ struct riscv_state {
   uint32_t vreg_bitsize;
   std::vector<MemoryObject> memory_objects;
   int next_local_id;
+  int64_t symbolic_id;
 };
 Function *parse_riscv(std::string const& file_name, riscv_state *state);
 
@@ -863,6 +867,7 @@ struct sh_state {
   Basic_block *exit_bb;
   std::vector<MemoryObject> memory_objects;
   int next_local_id;
+  int64_t symbolic_id;
 };
 Function *parse_sh(std::string const& file_name, sh_state *state);
 

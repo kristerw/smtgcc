@@ -384,6 +384,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
   rstate.memory_objects = state->memory_objects;
   rstate.func_name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl));
   rstate.file_name = DECL_SOURCE_FILE(fun->decl);
+  rstate.symbolic_id = state->symbolic_id;
 
   Function *tgt = module->build_function("tgt");
   rstate.entry_bb = tgt->build_bb();

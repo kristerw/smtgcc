@@ -27,6 +27,8 @@ struct CommonState {
   int64_t ptr_id_min;
   int64_t ptr_id_max;
 
+  int64_t symbolic_id = 0;
+
   Arch arch;
 
   std::vector<smtgcc::MemoryObject> memory_objects;

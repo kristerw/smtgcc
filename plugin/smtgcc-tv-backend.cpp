@@ -88,7 +88,7 @@ unsigned int tv_pass::execute(function *fun)
   return 0;
 }
 
-static void eliminate_registers(Function *func)
+static void eliminate_registers(Function *func, int64_t& symbolic_id)
 {
   // Collect all registers.
   std::vector<Inst *> registers;
@@ -107,10 +107,12 @@ static void eliminate_registers(Function *func)
       if (bb->preds.size() == 0)
 	{
 	  // Create the initial register values.
-	  // TODO: Should be an arbitrary value (i.e., a symbolic value)
-	  // instead of 0.
 	  for (auto reg : registers)
-	    reg_values.insert({reg, bb->value_inst(0, reg->bitsize)});
+	    {
+	      Inst *inst =
+		bb->build_inst(Op::SYMBOLIC, symbolic_id++, reg->bitsize);
+	      reg_values.insert({reg, inst});
+	    }
 	}
       else if (bb->preds.size() == 1)
 	reg_values = bb2reg_values[bb->preds[0]];
@@ -186,7 +188,7 @@ static void finish(void *, void *data)
 #endif
 	  validate(func);
 
-	  eliminate_registers(func);
+	  eliminate_registers(func, state.symbolic_id);
 	  unroll_and_optimize(func);
 
 	  canonicalize_memory(module);

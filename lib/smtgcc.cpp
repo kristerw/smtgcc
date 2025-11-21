@@ -810,7 +810,19 @@ Inst *Basic_block::build_inst(Op op, Inst *arg1, Inst *arg2)
 
 Inst *Basic_block::build_inst(Op op, Inst *arg1, uint32_t arg2_val)
 {
-  assert(inst_info[(int)op].iclass == Inst_class::conv);
+  assert(inst_info[(int)op].iclass == Inst_class::conv
+	 || op == Op::PARAM
+	 || op == Op::SYMBOLIC);
+  Inst *arg2 = value_inst(arg2_val, 32);
+  Inst *inst = create_inst(op, arg1, arg2);
+  insert_last(inst);
+  return inst;
+}
+
+Inst *Basic_block::build_inst(Op op, uint32_t arg1_val, uint32_t arg2_val)
+{
+  assert(op == Op::PARAM || op == Op::SYMBOLIC);
+  Inst *arg1 = value_inst(arg1_val, 32);
   Inst *arg2 = value_inst(arg2_val, 32);
   Inst *inst = create_inst(op, arg1, arg2);
   insert_last(inst);
