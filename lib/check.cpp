@@ -124,16 +124,16 @@ public:
     const Cse_key key(op);
     return get_inst(key);
   }
-  Inst *get_inst(Op op, Inst *arg1)
+  Inst *get_inst(Op op, Inst *arg1, bool check_neg_ite = true)
   {
     if (op == Op::NOT && arg1->op == Op::NOT)
       return arg1->args[0];
     const Cse_key key(op, arg1);
     Inst *inst = get_inst(key);
-    if (!inst && op == Op::NOT && arg1->op == Op::ITE)
+    if (!inst && op == Op::NOT && arg1->op == Op::ITE && check_neg_ite)
       {
-	Inst *a2 = get_inst(Op::NOT, arg1->args[1]);
-	Inst *a3 = get_inst(Op::NOT, arg1->args[2]);
+	Inst *a2 = get_inst(Op::NOT, arg1->args[1], false);
+	Inst *a3 = get_inst(Op::NOT, arg1->args[2], false);
 	if (a2 && a3)
 	  return get_inst(Op::ITE, arg1->args[0], a2, a3);
       }
