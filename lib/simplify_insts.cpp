@@ -1235,22 +1235,6 @@ Inst *Simplify::simplify_sext()
   if (arg1->op == Op::ZEXT)
     return build_inst(Op::ZEXT, arg1->args[0], arg2);
 
-  // sext (extract (sext x)) -> sext (extract x)
-  if (arg1->op == Op::EXTRACT && arg1->args[0]->op == Op::SEXT)
-    {
-      Inst *x = arg1->args[0]->args[0];
-
-      // Extraction from only the original instruction or only the extended
-      // bits should have been simplified by simplify_extract.
-      assert(arg1->args[2]->value() < x->bitsize);
-      assert(arg1->args[1]->value() >= x->bitsize);
-
-      Inst *high = value_inst(x->bitsize - 1, 32);
-      Inst *low = arg1->args[2];
-      Inst *new_inst = build_inst(Op::EXTRACT, x, high, low);
-      return build_inst(Op::SEXT, new_inst, arg2);
-    }
-
   return inst;
 }
 
@@ -1266,22 +1250,6 @@ Inst *Simplify::simplify_zext()
   // zext (zext x) -> zext x
   if (arg1->op == Op::ZEXT)
     return build_inst(Op::ZEXT, arg1->args[0], arg2);
-
-  // zext (extract (zext x)) -> zext (extract x)
-  if (arg1->op == Op::EXTRACT && arg1->args[0]->op == Op::ZEXT)
-    {
-      Inst *x = arg1->args[0]->args[0];
-
-      // Extraction from only the original instruction or only the extended
-      // bits should have been simplified by simplify_extract.
-      assert(arg1->args[2]->value() < x->bitsize);
-      assert(arg1->args[1]->value() >= x->bitsize);
-
-      Inst *high = value_inst(x->bitsize - 1, 32);
-      Inst *low = arg1->args[2];
-      Inst *new_inst = build_inst(Op::EXTRACT, x, high, low);
-      return build_inst(Op::ZEXT, new_inst, arg2);
-    }
 
   return inst;
 }
@@ -2307,20 +2275,14 @@ Inst *Simplify::simplify_extract()
     }
 
   // Simplify "extract (sext/zext x)":
-  //  * If it is only extracting from x, it is changed to "extract x".
   //  * If it is only extracting from the extended bits, it is changed
   //    to a sext of the most significant bit of x, or 0 if the instruction
   //    is zext.
-  //  * If it is truncating the value, but still using bits from both x and
-  //    the extended bits, then it is changed to "zext/sext x" with a smaller
-  //    bitwidth.
+  //  * Otherwise, the relevant bits are extracted from x and then extended
+  //    if needed.
   if (arg1->op == Op::SEXT || arg1->op == Op::ZEXT)
     {
       Inst *ext_arg = arg1->args[0];
-      if (low_val == 0 && high_val == ext_arg->bitsize - 1)
-	return ext_arg;
-      if (high_val < ext_arg->bitsize)
-	return build_inst(Op::EXTRACT, ext_arg, arg2, arg3);
       if (low_val >= ext_arg->bitsize)
 	{
 	  if (arg1->op == Op::ZEXT)
@@ -2334,11 +2296,17 @@ Inst *Simplify::simplify_extract()
 	      return new_inst;
 	    }
 	}
-      if (low_val == 0)
+      else
 	{
-	  assert(high_val >= ext_arg->bitsize);
-	  Inst *bs = arg1->bb->value_inst(high_val + 1, 32);
-	  return build_inst(arg1->op, ext_arg, bs);
+	  Inst *new_inst;
+	  uint32_t new_high_val = std::min(high_val, ext_arg->bitsize - 1);
+	  if (low_val == 0 && new_high_val == ext_arg->bitsize - 1)
+	    new_inst = ext_arg;
+	  else
+	    new_inst = build_inst(Op::EXTRACT, ext_arg, new_high_val, low_val);
+	  if (new_inst->bitsize < inst->bitsize)
+	    new_inst = build_inst(arg1->op, new_inst, inst->bitsize);
+	  return new_inst;
 	}
     }
 
