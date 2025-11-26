@@ -385,6 +385,32 @@ Inst *Simplify::simplify_add()
   if (is_value_zero(arg2))
     return arg1;
 
+  // For Boolean x, y: add x, y -> not (eq x, y)
+  if (inst->bitsize == 1)
+    return build_inst(Op::NOT, build_inst(Op::EQ, arg1, arg2));
+
+  // add x, (neg y) -> sub x, y
+  // add (neg x), y -> sub y, x
+  if (arg2->op == Op::NEG)
+    return build_inst(Op::SUB, arg1, arg2->args[0]);
+  if (arg1->op == Op::NEG)
+    return build_inst(Op::SUB, arg2, arg1->args[0]);
+
+  // add x, (not y) -> add (sub x, y), -1
+  // add (not x), y -> add (sub y, x), -1
+  if (inst->bitsize <= 128 && arg2->op == Op::NOT)
+    {
+      Inst *new_inst = build_inst(Op::SUB, arg1, arg2->args[0]);
+      Inst *m1 = value_inst(-1, inst->bitsize);
+      return build_inst(Op::ADD, new_inst, m1);
+    }
+  if (inst->bitsize <= 128 && arg1->op == Op::NOT)
+    {
+      Inst *new_inst = build_inst(Op::SUB, arg2, arg1->args[0]);
+      Inst *m1 = value_inst(-1, inst->bitsize);
+      return build_inst(Op::ADD, new_inst, m1);
+    }
+
   // add (add, x, c2), c1 -> add x, (c1 + c2)
   if (arg2->op == Op::VALUE &&
       arg1->op == Op::ADD &&
@@ -430,10 +456,6 @@ Inst *Simplify::simplify_add()
     if (x1 == x2)
       return build_inst(Op::MUL, x1, value_inst(c1 + c2, inst->bitsize));
   }
-
-  // For Boolean x, y: add x, y -> not (eq x, y)
-  if (inst->bitsize == 1)
-    return build_inst(Op::NOT, build_inst(Op::EQ, arg1, arg2));
 
   return inst;
 }
@@ -1699,6 +1721,10 @@ Inst *Simplify::simplify_sub()
       Inst *val = value_inst(-arg2->value(), inst->bitsize);
       return build_inst(Op::ADD, arg1, val);
     }
+
+  // sub x, (neg y) -> add x, y
+  if (arg2->op == Op::NEG)
+    return build_inst(Op::ADD, arg1, arg2->args[0]);
 
   // For Boolean y: sub x, (sext y) -> add x, (zext y)
   if (is_boolean_sext(arg2))
