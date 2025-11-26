@@ -2797,7 +2797,13 @@ std::optional<uint32_t> get_phi_elem_bitsize(Inst *phi)
 	    return {};
 	}
       else
-	elem_bitsize = use->bitsize;
+	{
+	  if (phi->bitsize % use->bitsize != 0)
+	    return {};
+	  if (use->args[2]->value() % use->bitsize != 0)
+	    return {};
+	  elem_bitsize = use->bitsize;
+	}
     }
 
   return elem_bitsize;
