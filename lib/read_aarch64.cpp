@@ -217,8 +217,7 @@ private:
   void process_simd_shift(Op op);
   void process_rev();
   void process_rev(uint32_t bitsize);
-  Inst *gen_sub_cond_flags(Inst *arg1, Inst *arg2);
-  Inst *gen_add_cond_flags(Inst *arg1, Inst *arg2);
+  Inst *gen_add_with_carry(Inst *arg1, Inst *arg2, Inst *carry);
   Inst *gen_and_cond_flags(Inst *arg1, Inst *arg2);
   void process_cmn();
   void process_cmp();
@@ -2913,9 +2912,7 @@ void Parser::process_adcs()
   Inst *arg2 = process_last_arg(5, arg1->bitsize);
 
   Inst *c = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::c]);
-  c = bb->build_inst(Op::ZEXT, c, arg2->bitsize);
-  arg2 = bb->build_inst(Op::ADD, arg2, c);
-  Inst *res = gen_add_cond_flags(arg1, arg2);
+  Inst *res = gen_add_with_carry(arg1, arg2, c);
   write_reg(dest, res);
 }
 
@@ -2946,10 +2943,8 @@ void Parser::process_sbcs()
   get_end_of_line(6);
 
   Inst *c = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::c]);
-  c = bb->build_inst(Op::NOT, c);
-  c = bb->build_inst(Op::ZEXT, c, arg2->bitsize);
-  arg2 = bb->build_inst(Op::ADD, arg2, c);
-  Inst *res = gen_sub_cond_flags(arg1, arg2);
+  Inst *not_arg2 = bb->build_inst(Op::NOT, arg2);
+  Inst *res = gen_add_with_carry(arg1, not_arg2, c);
   write_reg(dest, res);
 }
 
@@ -2976,11 +2971,9 @@ void Parser::process_ngcs()
   get_end_of_line(4);
 
   Inst *c = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::c]);
-  c = bb->build_inst(Op::NOT, c);
-  c = bb->build_inst(Op::ZEXT, c, arg1->bitsize);
-  arg1 = bb->build_inst(Op::ADD, arg1, c);
+  Inst *not_arg1 = bb->build_inst(Op::NOT, arg1);
   Inst *zero = bb->value_inst(0, arg1->bitsize);
-  Inst *res = gen_sub_cond_flags(zero, arg1);
+  Inst *res = gen_add_with_carry(zero, not_arg1, c);
   write_reg(dest, res);
 }
 
@@ -3643,76 +3636,51 @@ void Parser::process_rev(uint32_t bitsize)
   write_reg(dest, res);
 }
 
-Inst *Parser::gen_sub_cond_flags(Inst *arg1, Inst *arg2)
-{
-  Inst *res = bb->build_inst(Op::SUB, arg1, arg2);
-
-  Inst *zero = bb->value_inst(0, res->bitsize);
-  Inst *is_neg_arg1 = bb->build_inst(Op::SLT, arg1, zero);
-  Inst *is_neg_arg2 = bb->build_inst(Op::SLT, arg2, zero);
-  Inst *is_neg_res = bb->build_inst(Op::SLT, res, zero);
-  Inst *is_pos_arg1 = bb->build_inst(Op::NOT, is_neg_arg1);
-  Inst *is_pos_arg2 = bb->build_inst(Op::NOT, is_neg_arg2);
-  Inst *is_pos_res = bb->build_inst(Op::NOT, is_neg_res);
-
-  Inst *n = is_neg_res;
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::n], n);
-
-  Inst *z = bb->build_inst(Op::EQ, arg1, arg2);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::z], z);
-
-  Inst *c = bb->build_inst(Op::ULT, arg1, arg2);
-  c = bb->build_inst(Op::NOT, c);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::c], c);
-
-  Inst *v1 = bb->build_inst(Op::AND, is_neg_arg1, is_pos_arg2);
-  v1 = bb->build_inst(Op::AND, v1, is_pos_res);
-  Inst *v2 = bb->build_inst(Op::AND, is_pos_arg1, is_neg_arg2);
-  v2 = bb->build_inst(Op::AND, v2, is_neg_res);
-  Inst *v = bb->build_inst(Op::OR, v1, v2);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::v], v);
-
-  Inst *ls = bb->build_inst(Op::ULE, arg1, arg2);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::ls], ls);
-
-  Inst *ge = bb->build_inst(Op::SLE, arg2, arg1);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::ge], ge);
-
-  Inst *gt = bb->build_inst(Op::SLT, arg2, arg1);
-  bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::gt], gt);
-
-  return res;
-}
-
-Inst *Parser::gen_add_cond_flags(Inst *arg1, Inst *arg2)
+Inst *Parser::gen_add_with_carry(Inst *arg1, Inst *arg2, Inst *carry)
 {
   Inst *res = bb->build_inst(Op::ADD, arg1, arg2);
+  res =
+    bb->build_inst(Op::ADD, res, bb->build_inst(Op::ZEXT, carry, res->bitsize));
 
   Inst *zero = bb->value_inst(0, res->bitsize);
-  Inst *is_neg_arg1 = bb->build_inst(Op::SLT, arg1, zero);
-  Inst *is_neg_arg2 = bb->build_inst(Op::SLT, arg2, zero);
-  Inst *is_neg_res = bb->build_inst(Op::SLT, res, zero);
-  Inst *is_pos_arg1 = bb->build_inst(Op::NOT, is_neg_arg1);
-  Inst *is_pos_arg2 = bb->build_inst(Op::NOT, is_neg_arg2);
-  Inst *is_pos_res = bb->build_inst(Op::NOT, is_neg_res);
+  Inst *signed_arg1 = bb->build_inst(Op::SEXT, arg1, res->bitsize + 1);
+  Inst *signed_arg2 = bb->build_inst(Op::SEXT, arg2, res->bitsize + 1);
+  Inst *unsigned_arg1 = bb->build_inst(Op::ZEXT, arg1, res->bitsize + 1);
+  Inst *unsigned_arg2 = bb->build_inst(Op::ZEXT, arg2, res->bitsize + 1);
+  Inst *wide_carry = bb->build_inst(Op::ZEXT, carry, res->bitsize + 1);
+  Inst *signed_res = bb->build_inst(Op::ADD, signed_arg1, signed_arg2);
+  signed_res = bb->build_inst(Op::ADD, signed_res, wide_carry);
+  Inst *unsigned_res = bb->build_inst(Op::ADD, unsigned_arg1, unsigned_arg2);
+  unsigned_res = bb->build_inst(Op::ADD, unsigned_res, wide_carry);
+  Inst *res_sext = bb->build_inst(Op::SEXT, res, res->bitsize + 1);
+  Inst *res_zext = bb->build_inst(Op::ZEXT, res, res->bitsize + 1);
+  Inst *not_arg2 = bb->build_inst(Op::NOT, arg2);
 
-  Inst *n = is_neg_res;
+  Inst *n = bb->build_inst(Op::SLT, res, zero);
 
   Inst *z = bb->build_inst(Op::EQ, res, zero);
 
-  Inst *c1 = bb->build_inst(Op::AND, is_neg_arg1, is_neg_arg2);
-  Inst *c2 = bb->build_inst(Op::AND, is_neg_arg1, is_pos_res);
-  Inst *c3 = bb->build_inst(Op::AND, is_neg_arg2, is_pos_res);
-  Inst *c = bb->build_inst(Op::OR, c1, c2);
-  c = bb->build_inst(Op::OR, c, c3);
+  Inst *c = bb->build_inst(Op::NE, res_zext, unsigned_res);
 
-  Inst *v1 = bb->build_inst(Op::AND, is_neg_arg1, is_neg_arg2);
-  v1 = bb->build_inst(Op::AND, v1, is_pos_res);
-  Inst *v2 = bb->build_inst(Op::AND, is_pos_arg1, is_pos_arg2);
-  v2 = bb->build_inst(Op::AND, v2, is_neg_res);
-  Inst *v = bb->build_inst(Op::OR, v1, v2);
+  Inst *v = bb->build_inst(Op::NE, res_sext, signed_res);
 
-  set_nzcv(n, z, c, v);
+  if (is_value_one(carry))
+    {
+      c = bb->build_inst(Op::NOT, bb->build_inst(Op::ULT, arg1, not_arg2));
+
+      set_nzcv(n, z, c, v);
+
+      Inst *ls = bb->build_inst(Op::ULE, arg1, not_arg2);
+      bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::ls], ls);
+
+      Inst *ge = bb->build_inst(Op::SLE, not_arg2, arg1);
+      bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::ge], ge);
+
+      Inst *gt = bb->build_inst(Op::SLT, not_arg2, arg1);
+      bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::gt], gt);
+    }
+  else
+    set_nzcv(n, z, c, v);
 
   return res;
 }
@@ -3738,7 +3706,7 @@ void Parser::process_cmn()
   get_comma(2);
   Inst *arg2 = process_last_arg(3, arg1->bitsize);
 
-  gen_add_cond_flags(arg1, arg2);
+  gen_add_with_carry(arg1, arg2, bb->value_inst(0, 1));
 }
 
 void Parser::process_cmp()
@@ -3747,7 +3715,8 @@ void Parser::process_cmp()
   get_comma(2);
   Inst *arg2 = process_last_arg(3, arg1->bitsize);
 
-  gen_sub_cond_flags(arg1, arg2);
+  Inst *not_arg2 = bb->build_inst(Op::NOT, arg2);
+  gen_add_with_carry(arg1, not_arg2, bb->value_inst(1, 1));
 }
 
 void Parser::process_subs()
@@ -3758,7 +3727,8 @@ void Parser::process_subs()
   get_comma(4);
   Inst *arg2 = process_last_arg(5, arg1->bitsize);
 
-  Inst *res = gen_sub_cond_flags(arg1, arg2);
+  Inst *not_arg2 = bb->build_inst(Op::NOT, arg2);
+  Inst *res = gen_add_with_carry(arg1, not_arg2, bb->value_inst(1, 1));
   write_reg(dest, res);
 }
 
@@ -3769,7 +3739,8 @@ void Parser::process_negs()
   Inst *arg1 = process_last_arg(3, get_reg_bitsize(1));
 
   Inst *zero = bb->value_inst(0, arg1->bitsize);
-  Inst *res = gen_sub_cond_flags(zero, arg1);
+  Inst *not_arg1 = bb->build_inst(Op::NOT, arg1);
+  Inst *res = gen_add_with_carry(zero, not_arg1, bb->value_inst(1, 1));
   write_reg(dest, res);
 }
 
@@ -3781,7 +3752,7 @@ void Parser::process_adds()
   get_comma(4);
   Inst *arg2 = process_last_arg(5, arg1->bitsize);
 
-  Inst *res = gen_add_cond_flags(arg1, arg2);
+  Inst *res = gen_add_with_carry(arg1, arg2, bb->value_inst(0, 1));
   write_reg(dest, res);
 }
 
@@ -3834,9 +3805,12 @@ void Parser::process_ccmp(bool is_ccmn)
   get_end_of_line(8);
 
   if (is_ccmn)
-    gen_add_cond_flags(arg1, arg2);
+    gen_add_with_carry(arg1, arg2, bb->value_inst(0, 1));
   else
-    gen_sub_cond_flags(arg1, arg2);
+    {
+      Inst *not_arg2 = bb->build_inst(Op::NOT, arg2);
+      gen_add_with_carry(arg1, not_arg2, bb->value_inst(1, 1));
+    }
   Inst *n1 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::n]);
   Inst *z1 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::z]);
   Inst *c1 = bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::c]);
