@@ -1296,7 +1296,17 @@ std::pair<SStats, Solver_result> check_assert_z3(Function *func)
 
 namespace smtgcc {
 
-SStats verify_z3(Function *, Function *)
+std::pair<SStats, Solver_result> check_refine_z3(Function *)
+{
+  throw Not_implemented("z3 is not available");
+}
+
+std::pair<SStats, Solver_result> check_ub_z3(Function *)
+{
+  throw Not_implemented("z3 is not available");
+}
+
+std::pair<SStats, Solver_result> check_assert_z3(Function *)
 {
   throw Not_implemented("z3 is not available");
 }

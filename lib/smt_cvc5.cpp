@@ -1246,7 +1246,7 @@ std::pair<SStats, Solver_result> check_assert_cvc5(Function *func)
 
 namespace smtgcc {
 
-SStats verify_cvc5(Function *, Function *)
+std::pair<SStats, Solver_result> check_refine_cvc5(Function *)
 {
   throw Not_implemented("cvc5 is not available");
 }
