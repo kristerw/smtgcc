@@ -6600,7 +6600,7 @@ void Converter::process_cfn_sat_trunc(gimple *stmt)
 
 void Converter::process_cfn_select_vl(gimple *stmt)
 {
-  assert(gimple_call_num_args(stmt) == 2);
+  assert(gimple_call_num_args(stmt) == 3);
   tree arg1_expr = gimple_call_arg(stmt, 0);
   tree arg1_type = TREE_TYPE(arg1_expr);
   Inst *arg1 = tree2inst(arg1_expr);
