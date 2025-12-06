@@ -36,7 +36,8 @@ bool is_returned_in_regs(tree expr)
 {
   tree type = TREE_TYPE(expr);
   uint64_t bitsize = bitsize_for_type(type);
-  if (!(bitsize == 8
+  if (!(bitsize == 1
+	|| bitsize == 8
 	|| bitsize == 16
 	|| bitsize == 32
 	|| bitsize == 64))
@@ -45,7 +46,7 @@ bool is_returned_in_regs(tree expr)
   if (INTEGRAL_TYPE_P(type) || POINTER_TYPE_P(type))
     return true;
 
-  if (TREE_CODE(type) == RECORD_TYPE)
+  if (TREE_CODE(type) == RECORD_TYPE || TREE_CODE(type) == UNION_TYPE)
     {
       uint64_t alignment = get_object_alignment(expr);
       if ((bitsize == 8 && alignment == 8)
