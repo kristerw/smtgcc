@@ -36,15 +36,18 @@ bool is_returned_in_regs(tree expr)
 {
   tree type = TREE_TYPE(expr);
   uint64_t bitsize = bitsize_for_type(type);
-  if (!(bitsize == 1
-	|| bitsize == 8
-	|| bitsize == 16
-	|| bitsize == 32
-	|| bitsize == 64))
-    return false;
+
+  if (VECTOR_INTEGER_TYPE_P(type) && bitsize <= 128)
+    return true;
 
   if (INTEGRAL_TYPE_P(type) || POINTER_TYPE_P(type))
-    return true;
+    {
+      return (bitsize == 1
+	      || bitsize == 8
+	      || bitsize == 16
+	      || bitsize == 32
+	      || bitsize == 64);
+    }
 
   if (TREE_CODE(type) == RECORD_TYPE || TREE_CODE(type) == UNION_TYPE)
     {
@@ -129,10 +132,10 @@ void build_return(sh_state *rstate, Function *src_func, function *fun)
   if (is_returned_in_regs(ret_expr))
     {
       Inst *retval = bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r0]);
-      if (retval->bitsize < ret_bitsize)
+      for (int i = 1; retval->bitsize < ret_bitsize; i++)
 	{
 	  Inst *inst =
-	    bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r1]);
+	    bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r0 + i]);
 	  retval = bb->build_inst(Op::CONCAT, inst, retval);
 	}
       if (ret_bitsize < retval->bitsize)
@@ -141,7 +144,8 @@ void build_return(sh_state *rstate, Function *src_func, function *fun)
       return;
     }
   if (TREE_CODE(TREE_TYPE(ret_expr)) == RECORD_TYPE
-      || TREE_CODE(TREE_TYPE(ret_expr)) == UNION_TYPE)
+      || TREE_CODE(TREE_TYPE(ret_expr)) == UNION_TYPE
+      || VECTOR_TYPE_P(TREE_TYPE(ret_expr)))
     {
       // Return value is passed in memory, where the address is specified
       // by R2.
@@ -335,7 +339,8 @@ sh_state setup_sh_function(CommonState *state, Function *src_func, function *fun
 	}
       else if ((INTEGRAL_TYPE_P(type)
 		|| POINTER_TYPE_P(type)
-		|| TREE_CODE(type) == RECORD_TYPE)
+		|| TREE_CODE(type) == RECORD_TYPE
+		|| VECTOR_INTEGER_TYPE_P(type))
 	       && bitsize <= 128)
 	{
 	  uint32_t expanded_bitsize = (bitsize + 31) & ~31;
