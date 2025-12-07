@@ -77,13 +77,21 @@ private:
   unsigned __int128 get_hex_or_integer(unsigned idx);
   Inst *get_imm(unsigned idx);
   bool is_reg(unsigned idx);
+  bool is_freg(unsigned idx);
+  bool is_dreg(unsigned idx);
   Inst *get_system_register_reg(unsigned idx);
+  Inst *get_fpul_value(unsigned idx);
   Inst *get_reg(unsigned idx);
   Inst *get_reg_value(unsigned idx);
   Inst *get_reg_or_imm_value(unsigned idx);
+  Inst *get_freg(unsigned idx);
+  Inst *get_freg_value(unsigned idx);
+  std::pair<Inst *, Inst *> get_dreg(unsigned idx);
+  Inst *get_dreg_value(unsigned idx);
   void get_right_paren(unsigned idx);
 
   void write_reg(Inst *reg, Inst *value);
+  void write_reg(std::pair<Inst *, Inst *> reg, Inst *value);
   std::string_view token_string(const Token& tok);
   std::string_view get_name(unsigned idx);
   Basic_block *get_bb(unsigned idx);
@@ -128,6 +136,15 @@ private:
   void process_mov(uint64_t size);
   void process_mova();
   void process_movt();
+  void process_fmov();
+  void process_fmov_s();
+  void process_fp_unary(Op op);
+  void process_fp_binary(Op op);
+  void process_fcmp_eq();
+  void process_fcmp_gt();
+  void process_float();
+  void process_fldi0();
+  void process_fldi1();
   void process_bf(bool delayed);
   void process_bt(bool delayed);
   void process_bra();
@@ -138,6 +155,8 @@ private:
   Inst *process_address(unsigned& idx, uint64_t size);
   void process_store(uint64_t size);
   void process_load(uint64_t size);
+  void process_fp_store();
+  void process_fp_load();
 
   void parse_function();
   void lex_line();
@@ -318,6 +337,40 @@ bool Parser::is_reg(unsigned idx)
   return true;
 }
 
+bool Parser::is_freg(unsigned idx)
+{
+  if (tokens[idx].kind != Lexeme::name)
+    return false;
+  if (tokens[idx].size < 3 || tokens[idx].size > 4)
+    return false;
+  if (buf[tokens[idx].pos] != 'f')
+    return false;
+  if (buf[tokens[idx].pos + 1] != 'r')
+    return false;
+  if (!isdigit(buf[tokens[idx].pos + 2]))
+    return false;
+  if (tokens[idx].size == 4 && !isdigit(buf[tokens[idx].pos + 3]))
+    return false;
+  return true;
+}
+
+bool Parser::is_dreg(unsigned idx)
+{
+  if (tokens[idx].kind != Lexeme::name)
+    return false;
+  if (tokens[idx].size < 3 || tokens[idx].size > 4)
+    return false;
+  if (buf[tokens[idx].pos] != 'd')
+    return false;
+  if (buf[tokens[idx].pos + 1] != 'r')
+    return false;
+  if (!isdigit(buf[tokens[idx].pos + 2]))
+    return false;
+  if (tokens[idx].size == 4 && !isdigit(buf[tokens[idx].pos + 3]))
+    return false;
+  return true;
+}
+
 Inst *Parser::get_system_register_reg(unsigned idx)
 {
   std::string_view reg_name = get_name(idx);
@@ -334,6 +387,15 @@ Inst *Parser::get_system_register_reg(unsigned idx)
   else
     throw Parse_error("unknown system register" + std::string(reg_name),
 		      line_number);
+}
+
+Inst *Parser::get_fpul_value(unsigned idx)
+{
+  std::string_view reg_name = get_name(idx);
+  if (reg_name != "fpul")
+    throw Parse_error("expected fpul instead of " + std::string(reg_name),
+		      line_number);
+  return bb->build_inst(Op::READ, rstate->registers[ShRegIdx::fpul]);
 }
 
 Inst *Parser::get_reg(unsigned idx)
@@ -365,6 +427,45 @@ Inst *Parser::get_reg_or_imm_value(unsigned idx)
   return value;
 }
 
+Inst *Parser::get_freg(unsigned idx)
+{
+  if (!is_freg(idx))
+    throw Parse_error("expected a fp register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+
+  uint32_t value = buf[tokens[idx].pos + 2] - '0';
+  if (tokens[idx].size == 4)
+    value = value * 10 + (buf[tokens[idx].pos + 3] - '0');
+  return rstate->registers[ShRegIdx::fr0 + value];
+}
+
+Inst *Parser::get_freg_value(unsigned idx)
+{
+  return bb->build_inst(Op::READ, get_freg(idx));
+}
+
+std::pair<Inst *, Inst *> Parser::get_dreg(unsigned idx)
+{
+  if (!is_dreg(idx))
+    throw Parse_error("expected a fp register instead of "
+		      + std::string(token_string(tokens[idx])), line_number);
+
+  uint32_t value = buf[tokens[idx].pos + 2] - '0';
+  if (tokens[idx].size == 4)
+    value = value * 10 + (buf[tokens[idx].pos + 3] - '0');
+  Inst *reg1 = rstate->registers[ShRegIdx::fr0 + value];
+  Inst *reg2 = rstate->registers[ShRegIdx::fr0 + value + 1];
+  return {reg1, reg2};
+}
+
+Inst *Parser::get_dreg_value(unsigned idx)
+{
+  auto [reg1, reg2] = get_dreg(idx);
+  Inst *inst1 = bb->build_inst(Op::READ, reg1);
+  Inst *inst2 = bb->build_inst(Op::READ, reg2);
+  return bb->build_inst(Op::CONCAT, inst1, inst2);
+}
+
 void Parser::get_right_paren(unsigned idx)
 {
   assert(idx > 0);
@@ -381,6 +482,15 @@ void Parser::write_reg(Inst *reg, Inst *value)
   if (reg_bitsize > value->bitsize)
     value = bb->build_inst(Op::ZEXT, value, reg_bitsize);
   bb->build_inst(Op::WRITE, reg, value);
+}
+
+void Parser::write_reg(std::pair<Inst *, Inst *> reg, Inst *value)
+{
+  auto [reg1, reg2] = reg;
+  assert(reg1->op == Op::REGISTER && reg2->op == Op::REGISTER);
+  assert(value->bitsize == 64);
+  bb->build_inst(Op::WRITE, reg1, bb->build_inst(Op::EXTRACT, value, 63, 32));
+  bb->build_inst(Op::WRITE, reg2, bb->build_inst(Op::EXTRACT, value, 31, 0));
 }
 
 std::string_view Parser::token_string(const Token& tok)
@@ -957,6 +1067,149 @@ void Parser::process_movt()
   write_reg(rn_reg, t);
 }
 
+void Parser::process_fmov()
+{
+  Inst *rm = get_freg_value(1);
+  get_comma(2);
+  Inst *rn_reg = get_freg(3);
+  get_end_of_line(4);
+
+  write_reg(rn_reg, rm);
+}
+
+void Parser::process_fmov_s()
+{
+  if (is_freg(1) || is_dreg(1))
+    process_fp_store();
+  else
+    process_fp_load();
+}
+
+void Parser::process_fp_unary(Op op)
+{
+  if (is_dreg(1))
+    {
+      Inst *rn = get_dreg_value(1);
+      std::pair<Inst *, Inst *> rn_reg = get_dreg(1);
+      get_end_of_line(2);
+
+      write_reg(rn_reg, bb->build_inst(op, rn));
+    }
+  else
+    {
+      Inst *rn = get_freg_value(1);
+      Inst *rn_reg = get_freg(1);
+      get_end_of_line(2);
+
+      write_reg(rn_reg, bb->build_inst(op, rn));
+    }
+}
+
+void Parser::process_fp_binary(Op op)
+{
+  if (is_dreg(1))
+    {
+      Inst *rm = get_dreg_value(1);
+      get_comma(2);
+      Inst *rn = get_dreg_value(3);
+      std::pair<Inst *, Inst *> rn_reg = get_dreg(3);
+      get_end_of_line(4);
+
+      write_reg(rn_reg, bb->build_inst(op, rn, rm));
+    }
+  else
+    {
+      Inst *rm = get_freg_value(1);
+      get_comma(2);
+      Inst *rn = get_freg_value(3);
+      Inst *rn_reg = get_freg(3);
+      get_end_of_line(4);
+
+      write_reg(rn_reg, bb->build_inst(op, rn, rm));
+    }
+}
+
+void Parser::process_fcmp_eq()
+{
+  Inst *rm;
+  Inst *rn;
+  if (is_dreg(1))
+    {
+      rm = get_dreg_value(1);
+      get_comma(2);
+      rn = get_dreg_value(3);
+      get_end_of_line(4);
+    }
+  else
+    {
+      rm = get_freg_value(1);
+      get_comma(2);
+      rn = get_freg_value(3);
+      get_end_of_line(4);
+    }
+
+  Inst *t = bb->build_inst(Op::FEQ, rn, rm);
+  bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::t], t);
+}
+
+void Parser::process_fcmp_gt()
+{
+  Inst *rm;
+  Inst *rn;
+  if (is_dreg(1))
+    {
+      rm = get_dreg_value(1);
+      get_comma(2);
+      rn = get_dreg_value(3);
+      get_end_of_line(4);
+    }
+  else
+    {
+      rm = get_freg_value(1);
+      get_comma(2);
+      rn = get_freg_value(3);
+      get_end_of_line(4);
+    }
+
+  Inst *t = bb->build_inst(Op::FLT, rm, rn);
+  bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::t], t);
+}
+
+void Parser::process_float()
+{
+  Inst *fpul = get_fpul_value(1);
+  get_comma(2);
+  if (is_dreg(3))
+    {
+      std::pair<Inst *, Inst *> rn_reg = get_dreg(3);
+      write_reg(rn_reg, bb->build_inst(Op::S2F, fpul, 64));
+    }
+  else
+    {
+      Inst *rn_reg = get_freg(3);
+      write_reg(rn_reg, bb->build_inst(Op::S2F, fpul, 32));
+    }
+  get_end_of_line(4);
+}
+
+void Parser::process_fldi0()
+{
+  Inst *rn_reg = get_freg(1);
+  get_end_of_line(2);
+  // TODO: assert FPSCR.PR == 0
+
+  write_reg(rn_reg, bb->value_inst(0, 32));
+}
+
+void Parser::process_fldi1()
+{
+  Inst *rn_reg = get_freg(1);
+  get_end_of_line(2);
+  // TODOL assert FPSCR.PR == 0
+
+  write_reg(rn_reg, bb->value_inst(0x3f800000, 32));
+}
+
 void Parser::process_bf(bool delayed)
 {
   Basic_block *true_bb = get_bb(1);
@@ -1146,6 +1399,48 @@ void Parser::process_load(uint64_t size)
   write_reg(dest_reg, value);
 }
 
+void Parser::process_fp_store()
+{
+  Inst *value;
+  if (is_dreg(1))
+    value = get_dreg_value(1);
+  else
+    value = get_freg_value(1);
+
+  get_comma(2);
+  unsigned idx = 3;
+  Inst *ptr = process_address(idx, 4);
+  get_end_of_line(idx++);
+
+  store_value(ptr, value);
+}
+
+void Parser::process_fp_load()
+{
+  if (is_dreg(tokens.size() - 1))
+    {
+      unsigned idx = 1;
+      Inst *ptr = process_address(idx, 8);
+      get_comma(idx++);
+      std::pair<Inst *, Inst *> dest_reg = get_dreg(idx++);
+      get_end_of_line(idx++);
+
+      Inst *value = load_value(ptr, 8);
+      write_reg(dest_reg, value);
+    }
+  else
+    {
+      unsigned idx = 1;
+      Inst *ptr = process_address(idx, 4);
+      get_comma(idx++);
+      Inst *dest_reg = get_freg(idx++);
+      get_end_of_line(idx++);
+
+      Inst *value = load_value(ptr, 4);
+      write_reg(dest_reg, value);
+    }
+}
+
 void Parser::parse_function()
 {
   if (tokens[0].kind == Lexeme::label_def)
@@ -1233,6 +1528,32 @@ void Parser::parse_function()
     process_ext(Op::ZEXT, 8);
   else if (name == "extu.w")
     process_ext(Op::ZEXT, 16);
+  else if (name == "fabs")
+    process_fp_unary(Op::FABS);
+  else if (name == "fadd")
+    process_fp_binary(Op::FADD);
+  else if (name == "fcmp/eq")
+    process_fcmp_eq();
+  else if (name == "fcmp/gt")
+    process_fcmp_gt();
+  else if (name == "fdiv")
+    process_fp_binary(Op::FDIV);
+  else if (name == "fldi0")
+    process_fldi0();
+  else if (name == "fldi1")
+    process_fldi1();
+  else if (name == "float")
+    process_float();
+  else if (name == "fmov")
+    process_fmov();
+  else if (name == "fmov.s")
+    process_fmov_s();
+  else if (name == "fmul")
+    process_fp_binary(Op::FMUL);
+  else if (name == "fneg")
+    process_fp_unary(Op::FNEG);
+  else if (name == "fsub")
+    process_fp_binary(Op::FSUB);
   else if (name == "lds")
     process_lds();
   else if (name == "lds.l")
