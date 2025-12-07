@@ -40,7 +40,9 @@ bool is_returned_in_regs(tree expr)
   if (VECTOR_INTEGER_TYPE_P(type) && bitsize <= 128)
     return true;
 
-  if (INTEGRAL_TYPE_P(type) || POINTER_TYPE_P(type))
+  if (INTEGRAL_TYPE_P(type)
+      || POINTER_TYPE_P(type)
+      || TREE_CODE(type) == NULLPTR_TYPE)
     {
       return (bitsize == 1
 	      || bitsize == 8
@@ -48,6 +50,9 @@ bool is_returned_in_regs(tree expr)
 	      || bitsize == 32
 	      || bitsize == 64);
     }
+
+  if (TREE_CODE(type) == COMPLEX_TYPE && INTEGRAL_TYPE_P(TREE_TYPE(type)))
+    return true;
 
   if (TREE_CODE(type) == RECORD_TYPE || TREE_CODE(type) == UNION_TYPE)
     {
@@ -339,8 +344,11 @@ sh_state setup_sh_function(CommonState *state, Function *src_func, function *fun
 	}
       else if ((INTEGRAL_TYPE_P(type)
 		|| POINTER_TYPE_P(type)
+		|| TREE_CODE(type) == NULLPTR_TYPE
 		|| TREE_CODE(type) == RECORD_TYPE
-		|| VECTOR_INTEGER_TYPE_P(type))
+		|| VECTOR_INTEGER_TYPE_P(type)
+		|| (TREE_CODE(type) == COMPLEX_TYPE
+		    && INTEGRAL_TYPE_P(TREE_TYPE(type))))
 	       && bitsize <= 128)
 	{
 	  uint32_t expanded_bitsize = (bitsize + 31) & ~31;
