@@ -840,7 +840,7 @@ struct ShRegIdx {
   static constexpr uint64_t pr = 34;
 
   // FPU system registers
-  static constexpr uint64_t fpsrc = 35;
+  static constexpr uint64_t fpscr = 35;
   static constexpr uint64_t fpul = 36;
 
   // Control registers

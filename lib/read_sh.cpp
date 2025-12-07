@@ -100,6 +100,8 @@ private:
   void get_at(unsigned idx);
   void get_end_of_line(unsigned idx);
   Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
+  void validate_fpscr_pr(bool expected_value);
+  void validate_fpscr_sz(bool expected_value);
   Inst *load_value(Inst *ptr, uint64_t size);
   void store_value(Inst *ptr, Inst *value);
   void process_unary(Op op);
@@ -381,7 +383,7 @@ Inst *Parser::get_system_register_reg(unsigned idx)
   else if (reg_name == "pr")
     return rstate->registers[ShRegIdx::pr];
   else if (reg_name == "fpscr")
-    return rstate->registers[ShRegIdx::fpsrc];
+    return rstate->registers[ShRegIdx::fpscr];
   else if (reg_name == "fpul")
     return rstate->registers[ShRegIdx::fpul];
   else
@@ -576,6 +578,26 @@ Inst *Parser::extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx)
   Inst *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
   Inst *low = bb->value_inst(idx * elem_bitsize, 32);
   return bb->build_inst(Op::EXTRACT, inst, high, low);
+}
+
+void Parser::validate_fpscr_pr(bool expected_value)
+{
+  Inst *value = bb->build_inst(Op::READ, rstate->registers[ShRegIdx::fpscr]);
+  Inst *pr = bb->build_extract_bit(value, 19);
+  if (expected_value)
+    bb->build_inst(Op::UB, bb->build_inst(Op::NOT, pr));
+  else
+    bb->build_inst(Op::UB, pr);
+}
+
+void Parser::validate_fpscr_sz(bool expected_value)
+{
+  Inst *value = bb->build_inst(Op::READ, rstate->registers[ShRegIdx::fpscr]);
+  Inst *sz = bb->build_extract_bit(value, 20);
+  if (expected_value)
+    bb->build_inst(Op::UB, bb->build_inst(Op::NOT, sz));
+  else
+    bb->build_inst(Op::UB, sz);
 }
 
 Inst *Parser::load_value(Inst *ptr, uint64_t size)
@@ -1073,6 +1095,7 @@ void Parser::process_fmov()
   get_comma(2);
   Inst *rn_reg = get_freg(3);
   get_end_of_line(4);
+  validate_fpscr_sz(false);
 
   write_reg(rn_reg, rm);
 }
@@ -1114,6 +1137,7 @@ void Parser::process_fp_binary(Op op)
       Inst *rn = get_dreg_value(3);
       std::pair<Inst *, Inst *> rn_reg = get_dreg(3);
       get_end_of_line(4);
+      validate_fpscr_pr(true);
 
       write_reg(rn_reg, bb->build_inst(op, rn, rm));
     }
@@ -1124,6 +1148,7 @@ void Parser::process_fp_binary(Op op)
       Inst *rn = get_freg_value(3);
       Inst *rn_reg = get_freg(3);
       get_end_of_line(4);
+      validate_fpscr_pr(false);
 
       write_reg(rn_reg, bb->build_inst(op, rn, rm));
     }
@@ -1139,6 +1164,7 @@ void Parser::process_fcmp_eq()
       get_comma(2);
       rn = get_dreg_value(3);
       get_end_of_line(4);
+      validate_fpscr_pr(true);
     }
   else
     {
@@ -1146,6 +1172,7 @@ void Parser::process_fcmp_eq()
       get_comma(2);
       rn = get_freg_value(3);
       get_end_of_line(4);
+      validate_fpscr_pr(false);
     }
 
   Inst *t = bb->build_inst(Op::FEQ, rn, rm);
@@ -1162,6 +1189,7 @@ void Parser::process_fcmp_gt()
       get_comma(2);
       rn = get_dreg_value(3);
       get_end_of_line(4);
+      validate_fpscr_pr(true);
     }
   else
     {
@@ -1169,6 +1197,7 @@ void Parser::process_fcmp_gt()
       get_comma(2);
       rn = get_freg_value(3);
       get_end_of_line(4);
+      validate_fpscr_pr(false);
     }
 
   Inst *t = bb->build_inst(Op::FLT, rm, rn);
@@ -1183,11 +1212,13 @@ void Parser::process_float()
     {
       std::pair<Inst *, Inst *> rn_reg = get_dreg(3);
       write_reg(rn_reg, bb->build_inst(Op::S2F, fpul, 64));
+      validate_fpscr_pr(true);
     }
   else
     {
       Inst *rn_reg = get_freg(3);
       write_reg(rn_reg, bb->build_inst(Op::S2F, fpul, 32));
+      validate_fpscr_pr(false);
     }
   get_end_of_line(4);
 }
@@ -1196,7 +1227,7 @@ void Parser::process_fldi0()
 {
   Inst *rn_reg = get_freg(1);
   get_end_of_line(2);
-  // TODO: assert FPSCR.PR == 0
+  validate_fpscr_pr(false);
 
   write_reg(rn_reg, bb->value_inst(0, 32));
 }
@@ -1205,7 +1236,7 @@ void Parser::process_fldi1()
 {
   Inst *rn_reg = get_freg(1);
   get_end_of_line(2);
-  // TODOL assert FPSCR.PR == 0
+  validate_fpscr_pr(false);
 
   write_reg(rn_reg, bb->value_inst(0x3f800000, 32));
 }
@@ -1403,9 +1434,15 @@ void Parser::process_fp_store()
 {
   Inst *value;
   if (is_dreg(1))
-    value = get_dreg_value(1);
+    {
+      value = get_dreg_value(1);
+      validate_fpscr_sz(true);
+    }
   else
-    value = get_freg_value(1);
+    {
+      value = get_freg_value(1);
+      validate_fpscr_sz(false);
+    }
 
   get_comma(2);
   unsigned idx = 3;
@@ -1424,6 +1461,7 @@ void Parser::process_fp_load()
       get_comma(idx++);
       std::pair<Inst *, Inst *> dest_reg = get_dreg(idx++);
       get_end_of_line(idx++);
+      validate_fpscr_sz(true);
 
       Inst *value = load_value(ptr, 8);
       write_reg(dest_reg, value);
@@ -1435,6 +1473,7 @@ void Parser::process_fp_load()
       get_comma(idx++);
       Inst *dest_reg = get_freg(idx++);
       get_end_of_line(idx++);
+      validate_fpscr_sz(false);
 
       Inst *value = load_value(ptr, 4);
       write_reg(dest_reg, value);

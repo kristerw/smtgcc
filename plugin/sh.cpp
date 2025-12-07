@@ -213,6 +213,17 @@ sh_state setup_sh_function(CommonState *state, Function *src_func, function *fun
 
   build_return(&rstate, src_func, fun);
 
+  // Set up the initial value of FPSCR.
+  //   SZ = 0
+  //   PR = 1 (unless TARGET_FPU_SINGLE)
+  // TODO: Check that the other bits are initialized appropriately.
+  Inst *fpscr;
+  if (TARGET_FPU_SINGLE)
+    fpscr = bb->value_inst(0x00000000, 32);
+  else
+    fpscr = bb->value_inst(0x00080000, 32);
+  bb->build_inst(Op::WRITE, rstate.registers[ShRegIdx::fpscr], fpscr);
+
   // Set up the PARAM instructions and copy the result to the correct
   // register or memory as required by the ABI.
   int param_number = 0;
