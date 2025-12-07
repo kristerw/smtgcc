@@ -140,6 +140,40 @@ void build_return(sh_state *rstate, Function *src_func, function *fun)
       bb->build_ret_inst(retval);
       return;
     }
+  if (TREE_CODE(TREE_TYPE(ret_expr)) == RECORD_TYPE
+      || TREE_CODE(TREE_TYPE(ret_expr)) == UNION_TYPE)
+    {
+      // Return value is passed in memory, where the address is specified
+      // by R2.
+      assert((ret_bitsize & 7) == 0);
+      Inst *id =
+	bb->value_inst(rstate->next_local_id++, rstate->module->ptr_id_bits);
+      Inst *mem_size =
+	bb->value_inst(ret_bitsize / 8, rstate->module->ptr_offset_bits);
+      Inst *flags = bb->value_inst(0, 32);
+
+      Basic_block *entry_bb = rstate->entry_bb;
+      Inst *ret_mem =
+	entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
+      Inst *reg = rstate->registers[ShRegIdx::r2];
+      entry_bb->build_inst(Op::WRITE, reg, ret_mem);
+
+      // Generate the return value from the value returned in memory.
+      uint64_t size = ret_bitsize / 8;
+      Inst *retval = 0;
+      for (uint64_t i = 0; i < size; i++)
+	{
+	  Inst *offset = bb->value_inst(i, ret_mem->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, ret_mem, offset);
+	  Inst *data_byte = bb->build_inst(Op::LOAD, ptr);
+	  if (retval)
+	    retval = bb->build_inst(Op::CONCAT, data_byte, retval);
+	  else
+	    retval = data_byte;
+	}
+      bb->build_ret_inst(retval);
+      return;
+    }
 
   throw Not_implemented("sh: Unhandled return type");
 }
