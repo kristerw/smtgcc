@@ -80,6 +80,7 @@ private:
   bool is_freg(unsigned idx);
   bool is_dreg(unsigned idx);
   Inst *get_system_register_reg(unsigned idx);
+  void get_fpul(unsigned idx);
   Inst *get_fpul_value(unsigned idx);
   Inst *get_reg(unsigned idx);
   Inst *get_reg_value(unsigned idx);
@@ -147,6 +148,7 @@ private:
   void process_float();
   void process_fldi0();
   void process_fldi1();
+  void process_ftrc();
   void process_bf(bool delayed);
   void process_bt(bool delayed);
   void process_bra();
@@ -391,12 +393,17 @@ Inst *Parser::get_system_register_reg(unsigned idx)
 		      line_number);
 }
 
-Inst *Parser::get_fpul_value(unsigned idx)
+void Parser::get_fpul(unsigned idx)
 {
   std::string_view reg_name = get_name(idx);
   if (reg_name != "fpul")
     throw Parse_error("expected fpul instead of " + std::string(reg_name),
 		      line_number);
+}
+
+Inst *Parser::get_fpul_value(unsigned idx)
+{
+  get_fpul(idx);
   return bb->build_inst(Op::READ, rstate->registers[ShRegIdx::fpul]);
 }
 
@@ -1241,6 +1248,27 @@ void Parser::process_fldi1()
   write_reg(rn_reg, bb->value_inst(0x3f800000, 32));
 }
 
+void Parser::process_ftrc()
+{
+  Inst *rm;
+  if (is_dreg(1))
+    {
+      rm = get_dreg_value(1);
+      validate_fpscr_pr(true);
+    }
+  else
+    {
+      rm = get_freg_value(1);
+      validate_fpscr_pr(false);
+    }
+  get_comma(2);
+  get_end_of_line(4);
+
+  // TODO: Handle out of bound values.
+  Inst *fpul = bb->build_inst(Op::F2S, rm, 32);
+  bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::fpul], fpul);
+}
+
 void Parser::process_bf(bool delayed)
 {
   Basic_block *true_bb = get_bb(1);
@@ -1593,6 +1621,8 @@ void Parser::parse_function()
     process_fp_unary(Op::FNEG);
   else if (name == "fsub")
     process_fp_binary(Op::FSUB);
+  else if (name == "ftrc")
+    process_ftrc();
   else if (name == "lds")
     process_lds();
   else if (name == "lds.l")
