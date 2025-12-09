@@ -1,5 +1,8 @@
 #include "gcc-plugin.h"
 #include "tree.h"
+#include "gimple.h"
+#include "ssa.h"
+#include "attribs.h"
 
 #include <cassert>
 
@@ -266,6 +269,10 @@ sh_state setup_sh_function(CommonState *state, Function *src_func, function *fun
   else
     fpscr = bb->value_inst(0x00080000, 32);
   bb->build_inst(Op::WRITE, rstate.registers[ShRegIdx::fpscr], fpscr);
+
+  // TODO: Implement interrupt_handler ABI.
+  if (lookup_attribute("interrupt_handler", DECL_ATTRIBUTES(fun->decl)))
+    throw Not_implemented("setup_sh_function: interrupt_handler");
 
   // Set up the PARAM instructions and copy the result to the correct
   // register or memory as required by the ABI.
