@@ -830,6 +830,10 @@ Inst *Simplify::simplify_eq()
   if (arg1->op == Op::NOT && arg2->op == Op::NOT)
     return build_inst(Op::EQ, arg1->args[0], arg2->args[0]);
 
+  // (neg x) == (neg y) -> x == y
+  if (arg1->op == Op::NEG && arg2->op == Op::NEG)
+    return build_inst(Op::EQ, arg1->args[0], arg2->args[0]);
+
   // eq (neg x), c -> eq x, -c
   if (arg1->op == Op::NEG && arg2->op == Op::VALUE)
     {
