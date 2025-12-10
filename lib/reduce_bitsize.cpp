@@ -46,6 +46,7 @@ void truncate_if_possible(Inst *inst)
       case Op::AND:
       case Op::MUL:
       case Op::OR:
+      case Op::SHL:
       case Op::SUB:
       case Op::XOR:
       case Op::ITE:
@@ -76,6 +77,33 @@ void truncate_if_possible(Inst *inst)
       case Op::SUB:
       case Op::XOR:
 	{
+	  Inst *arg1 = build_trunc(inst, inst->args[0], needed_bitsize);
+	  Inst *arg2;
+	  if (inst->args[1] == inst->args[0])
+	    arg2 = arg1;
+	  else
+	    arg2 = build_trunc(inst, inst->args[1], needed_bitsize);
+	  new_inst = create_inst(inst->op, arg1, arg2);
+	  new_inst->insert_before(inst);
+	}
+	break;
+      case Op::SHL:
+	{
+	  // We can only truncate if the shift value fits within the new size.
+	  Inst *shift = inst->args[1];
+	  if (shift->op == Op::VALUE)
+	    {
+	      uint64_t value_bits = std::bit_width(shift->value());
+	      if (value_bits > needed_bitsize)
+		return;
+	    }
+	  else if (shift->op == Op::ZEXT)
+	    {
+	      if (shift->args[0]->bitsize > needed_bitsize)
+		return;
+	    }
+	  else
+	    return;
 	  Inst *arg1 = build_trunc(inst, inst->args[0], needed_bitsize);
 	  Inst *arg2;
 	  if (inst->args[1] == inst->args[0])
