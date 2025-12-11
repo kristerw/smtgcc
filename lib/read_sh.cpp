@@ -146,9 +146,13 @@ private:
   void process_fcmp_eq();
   void process_fcmp_gt();
   void process_float();
+  void process_fcnvds();
+  void process_fcnvsd();
   void process_fldi0();
   void process_fldi1();
   void process_ftrc();
+  void process_flds();
+  void process_fsts();
   void process_bf(bool delayed);
   void process_bt(bool delayed);
   void process_bra();
@@ -1230,6 +1234,30 @@ void Parser::process_float()
   get_end_of_line(4);
 }
 
+void Parser::process_fcnvds()
+{
+  Inst *rm = get_dreg_value(1);
+  get_comma(2);
+  get_fpul(3);
+  get_end_of_line(4);
+
+  validate_fpscr_pr(true);
+  Inst *fpul = bb->build_inst(Op::FCHPREC, rm, 32);
+  bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::fpul], fpul);
+}
+
+void Parser::process_fcnvsd()
+{
+  Inst *fpul = get_fpul_value(1);
+  get_comma(2);
+  std::pair<Inst *, Inst *> rn_reg = get_dreg(3);
+  get_end_of_line(4);
+
+  validate_fpscr_pr(true);
+  Inst *rn = bb->build_inst(Op::FCHPREC, fpul, 64);
+  write_reg(rn_reg, rn);
+}
+
 void Parser::process_fldi0()
 {
   Inst *rn_reg = get_freg(1);
@@ -1267,6 +1295,26 @@ void Parser::process_ftrc()
   // TODO: Handle out of bound values.
   Inst *fpul = bb->build_inst(Op::F2S, rm, 32);
   bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::fpul], fpul);
+}
+
+void Parser::process_flds()
+{
+  Inst *rm = get_freg_value(1);
+  get_comma(2);
+  get_fpul(3);
+  get_end_of_line(4);
+
+  bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::fpul], rm);
+}
+
+void Parser::process_fsts()
+{
+  Inst *fpul = get_fpul_value(1);
+  get_comma(2);
+  Inst *rn_reg = get_freg(3);
+  get_end_of_line(4);
+
+  write_reg(rn_reg, fpul);
 }
 
 void Parser::process_bf(bool delayed)
@@ -1603,12 +1651,18 @@ void Parser::parse_function()
     process_fcmp_eq();
   else if (name == "fcmp/gt")
     process_fcmp_gt();
+  else if (name == "fcnvds")
+    process_fcnvds();
+  else if (name == "fcnvsd")
+    process_fcnvsd();
   else if (name == "fdiv")
     process_fp_binary(Op::FDIV);
   else if (name == "fldi0")
     process_fldi0();
   else if (name == "fldi1")
     process_fldi1();
+  else if (name == "flds")
+    process_flds();
   else if (name == "float")
     process_float();
   else if (name == "fmov")
@@ -1619,6 +1673,8 @@ void Parser::parse_function()
     process_fp_binary(Op::FMUL);
   else if (name == "fneg")
     process_fp_unary(Op::FNEG);
+  else if (name == "fsts")
+    process_fsts();
   else if (name == "fsub")
     process_fp_binary(Op::FSUB);
   else if (name == "ftrc")
