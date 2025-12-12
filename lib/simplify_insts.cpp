@@ -744,6 +744,16 @@ Inst *Simplify::simplify_concat()
       && arg1->args[0]->args[1]->value() == arg2->bitsize - 1)
     return build_inst(Op::SEXT, arg2, inst->bitsize);
 
+  // concat (sext (extract x, x->bitsize-1, x->bitsize-1)), concat (x, y)
+  //   -> sext (concat x, y)
+  if (arg1->op == Op::SEXT
+      && arg2->op == Op::CONCAT
+      && arg1->args[0]->op == Op::EXTRACT
+      && arg1->args[0]->args[0] == arg2->args[0]
+      && arg1->args[0]->args[1] == arg1->args[0]->args[2]
+      && arg1->args[0]->args[1]->value() == arg2->args[0]->bitsize - 1)
+    return build_inst(Op::SEXT, arg2,  inst->bitsize);
+
   // concat (sext (extract x, x->bitsize-1, x->bitsize-1)), (sext x) -> sext x
   if (arg1->op == Op::SEXT
       && arg2->op == Op::SEXT
@@ -752,6 +762,14 @@ Inst *Simplify::simplify_concat()
       && arg1->args[0]->args[1] == arg1->args[0]->args[2]
       && arg1->args[0]->args[1]->value() == arg2->args[0]->bitsize - 1)
     return build_inst(Op::SEXT, arg2->args[0], inst->bitsize);
+
+  // concat (sext x), y -> sext (concat x, y)
+  // concat (zext x), y -> zext (concat x, y)
+  if (arg1->op == Op::SEXT || arg1->op == Op::ZEXT)
+    {
+      Inst *concat = build_inst(Op::CONCAT, arg1->args[0], arg2);
+      return build_inst(arg1->op, concat, inst->bitsize);
+    }
 
   // We canonicalize concat so sequences of concat are always expressed
   // as "concat x, (concat y, concat ...)". The intention is that we should
