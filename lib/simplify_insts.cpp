@@ -367,12 +367,6 @@ std::pair<Inst *, unsigned __int128> get_mult(Inst *inst)
   if (inst->op == Op::MUL && inst->args[1]->op == Op::VALUE)
     return {inst->args[0], inst->args[1]->value()};
 
-  if (inst->op == Op::SHL && inst->args[1]->op == Op::VALUE)
-    {
-      assert(inst->args[1]->value() < 128);
-      return {inst->args[0], (unsigned __int128)1 << inst->args[1]->value()};
-    }
-
   return {inst, 1};
 }
 
@@ -448,8 +442,7 @@ Inst *Simplify::simplify_add()
     }
 
   // add (mul x, c1), (mul x, c2) -> mul x, (c1 + c2)
-  // The multiplication may be expressed as Op::SHL, or can be just x,
-  // which is then treated as x * 1.
+  // The "multiplication" may be just x, which is then treated as x * 1.
   {
     auto [x1, c1] = get_mult(arg1);
     auto [x2, c2] = get_mult(arg2);
@@ -503,9 +496,7 @@ Inst *Simplify::simplify_and()
   if ((arg1->op == Op::SEXT
        && arg2->op == Op::VALUE
        && is_nbit_signed_value(arg2, arg1->args[0]->bitsize))
-      || (arg1->op == Op::ZEXT
-	  && arg2->op == Op::VALUE
-	  && is_nbit_value(arg2, arg1->args[0]->bitsize)))
+      || (arg1->op == Op::ZEXT && arg2->op == Op::VALUE))
     {
       Inst *new_const = value_inst(arg2->value(), arg1->args[0]->bitsize);
       Inst *new_inst = build_inst(Op::AND, arg1->args[0], new_const);
@@ -523,14 +514,13 @@ Inst *Simplify::simplify_and()
   if (is_boolean_sext(arg1) && is_value_one(arg2))
     return build_inst(Op::ZEXT, arg1->args[0], arg1->args[1]);
 
-  // and x, (-1 << c) -> shl (lshr x, c), c
-  if (arg2->op == Op::VALUE
-      && popcount(arg2->value()) + ctz(arg2->value()) == inst->bitsize)
-    {
-      Inst *c = value_inst(ctz(arg2->value()), inst->bitsize);
-      Inst *new_inst = build_inst(Op::LSHR, arg1, c);
-      return build_inst(Op::SHL, new_inst, c);
-    }
+  // and (memory x, y, z), (-1 << c) -> memory x, y, z if c is <=
+  // ptr_offset_bits.
+  if (arg1->op == Op::MEMORY
+      && arg2->op == Op::VALUE
+      && popcount(arg2->value()) + ctz(arg2->value()) == inst->bitsize
+      && ctz(arg2->value()) <= inst->bb->func->module->ptr_offset_bits)
+    return arg1;
 
   // and x, (-1 >> c) -> zext (trunc x)
   if (arg2->op == Op::VALUE
@@ -919,37 +909,13 @@ Inst *Simplify::simplify_ashr()
       return build_inst(Op::SEXT, new_inst, inst->bitsize);
     }
 
-  // ashr (ashr x, c1), c2 -> ashr x, (c1 + c2)
-  if (arg2->op == Op::VALUE &&
-      arg1->op == Op::ASHR &&
-      arg1->args[1]->op == Op::VALUE)
+  // ashr x, c -> sext (extract x)
+  if (arg2->op == Op::VALUE)
     {
-      Inst *x = arg1->args[0];
-      unsigned __int128 c1 = arg1->args[1]->value();
-      unsigned __int128 c2 = arg2->value();
-      assert(c1 > 0 && c1 < inst->bitsize);
-      assert(c2 > 0 && c2 < inst->bitsize);
-      Inst *c = value_inst(c1 + c2, inst->bitsize);
-      return build_inst(Op::ASHR, x, c);
+      Inst *new_inst =
+	build_inst(Op::EXTRACT, arg1, inst->bitsize - 1, arg2->value());
+      return build_inst(Op::SEXT, new_inst, inst->bitsize);
     }
-
-  // ashr (lshr x, c1), c2 -> lshr x, (c1 + c2)
-  if (arg2->op == Op::VALUE &&
-      arg1->op == Op::LSHR &&
-      arg1->args[1]->op == Op::VALUE)
-    {
-      Inst *x = arg1->args[0];
-      unsigned __int128 c1 = arg1->args[1]->value();
-      unsigned __int128 c2 = arg2->value();
-      assert(c1 > 0 && c1 < inst->bitsize);
-      assert(c2 > 0 && c2 < inst->bitsize);
-      Inst *c = value_inst(c1 + c2, inst->bitsize);
-      return build_inst(Op::LSHR, x, c);
-    }
-
-  // ashr (zext x), y -> lshr (zext x), y
-  if (arg1->op == Op::ZEXT)
-    return build_inst(Op::LSHR, arg1, arg2);
 
   return inst;
 }
@@ -967,106 +933,12 @@ Inst *Simplify::simplify_lshr()
   if (arg2->op == Op::VALUE && arg2->value() >= inst->bitsize)
     return value_inst(0, inst->bitsize);
 
-  // lshr (zext x), c -> 0 if c >= x->bitsize
-  if (arg1->op == Op::ZEXT
-      && arg2->op == Op::VALUE
-      && arg2->value() >= arg1->args[0]->bitsize)
-    return value_inst(0, inst->bitsize);
-
-  // lshr (zext x), c -> zext (lshr x, c)
-  if (arg1->op == Op::ZEXT && arg2->op == Op::VALUE)
+  // lshr x, c -> zext (extract x)
+  if (arg2->op == Op::VALUE)
     {
-      Inst *shift = value_inst(arg2->value(), arg1->args[0]->bitsize);
-      Inst *new_inst = build_inst(Op::LSHR, arg1->args[0], shift);
-      return build_inst(Op::ZEXT, new_inst, arg1->args[1]);
-    }
-
-  // lshr (lshr x, c1), c2 -> lshr x, (c1 + c2)
-  if (arg2->op == Op::VALUE
-      && arg1->op == Op::LSHR
-      && arg1->args[1]->op == Op::VALUE)
-    {
-      Inst *x = arg1->args[0];
-      unsigned __int128 c1 = arg1->args[1]->value();
-      unsigned __int128 c2 = arg2->value();
-      assert(c1 < inst->bitsize);
-      assert(c2 < inst->bitsize);
-      Inst *c = value_inst(c1 + c2, inst->bitsize);
-      return build_inst(Op::LSHR, x, c);
-    }
-
-  // lshr (shl (sext x), c), c -> zext x if c is the same as the number of
-  // extended bits.
-  if (arg2->op == Op::VALUE
-      && arg1->op == Op::SHL
-      && arg1->args[1] == arg2
-      && arg1->args[0]->op == Op::SEXT)
-    {
-      unsigned __int128 c = arg2->value();
-      Inst *x = arg1->args[0]->args[0];
-      if (c == inst->bitsize - x->bitsize)
-	return build_inst(Op::ZEXT, x, arg1->args[0]->args[1]);
-    }
-
-  // lshr (shl (zext x), c), c -> zext x if c <= the number of
-  // extended bits.
-  if (arg2->op == Op::VALUE
-      && arg1->op == Op::SHL
-      && arg1->args[1] == arg2
-      && arg1->args[0]->op == Op::ZEXT)
-    {
-      unsigned __int128 c = arg2->value();
-      Inst *x = arg1->args[0]->args[0];
-      if (c <= inst->bitsize - x->bitsize)
-	return arg1->args[0];
-    }
-
-  // lshr (shl x, c), c -> zext (trunc x)
-  if (arg2->op == Op::VALUE
-      && arg1->op == Op::SHL
-      && arg1->args[1] == arg2)
-    {
-      Inst *trunc_x =
-	build_inst(Op::EXTRACT, arg1->args[0],
-		   arg1->bitsize - arg2->value() - 1, 0);
-      return build_inst(Op::ZEXT, trunc_x, arg1->bitsize);
-    }
-
-  // A sequence:
-  //   %2 = zext x, #64
-  //   %3 = add %2, #-1
-  //   %4 = lshr %3, #63
-  // is equivalent to:
-  //   %1 = eq x, 0
-  //   %4 = zext %1, #64
-  if (arg2->op == Op::VALUE
-      && arg2->value() + 1 == arg2->bitsize
-      && arg1->op == Op::ADD
-      && is_value_m1(arg1->args[1])
-      && arg1->args[0]->op == Op::ZEXT)
-    {
-      Inst *x = arg1->args[0]->args[0];
-      Inst *zero = value_inst(0, x->bitsize);
-      return build_inst(Op::ZEXT, build_inst(Op::EQ, x, zero), inst->bitsize);
-    }
-
-  // A sequence:
-  //   %2 = zext x, #64
-  //   %3 = neg %2
-  //   %4 = lshr %3, #63
-  // is equivalent to:
-  //   %1 = eq x, 0
-  //   %2 = not %1
-  //   %4 = zext %2, #64
-  if (arg2->op == Op::VALUE
-      && arg2->value() + 1 == arg2->bitsize
-      && arg1->op == Op::NEG
-      && arg1->args[0]->op == Op::ZEXT)
-    {
-      Inst *x = arg1->args[0]->args[0];
-      Inst *zero = value_inst(0, x->bitsize);
-      Inst *ne = build_inst(Op::NOT, build_inst(Op::EQ, x, zero));
-      return build_inst(Op::ZEXT, ne, inst->bitsize);
+      Inst *new_inst =
+	build_inst(Op::EXTRACT, arg1, inst->bitsize - 1, arg2->value());
+      return build_inst(Op::ZEXT, new_inst, inst->bitsize);
     }
 
   return inst;
@@ -1320,13 +1192,6 @@ Inst *Simplify::simplify_mul()
   if (is_value_one(arg2))
     return arg1;
 
-  // mul x, (1 << c) -> shl x, c
-  if (is_value_pow2(arg2))
-    {
-      Inst *c = value_inst(ctz(arg2->value()), arg1->bitsize);
-      return build_inst(Op::SHL, arg1, c);
-    }
-
   // mul (add x, c2), c1 -> add (mul x, c1), (c1 * c2)
   if (arg2->op == Op::VALUE &&
       arg1->op == Op::ADD &&
@@ -1350,16 +1215,16 @@ Inst *Simplify::simplify_mul()
       return build_inst(Op::MUL, arg1->args[0], c);
     }
 
-  // mul (shl x, c2), c1 -> mul x, (c1 * (1 << c2))
-  if (arg2->op == Op::VALUE
-      && arg1->op == Op::SHL
-      && arg1->args[1]->op == Op::VALUE)
+  // mul (sext x), c -> mul (zext x), c if c = c1 << c2 and the sign extension
+  // extends the value with <= c2 bits.
+  if (arg1->op == Op::SEXT && arg2->op == Op::VALUE)
     {
-      unsigned __int128 c1 = arg2->value();
-      unsigned __int128 c2 = arg1->args[1]->value();
-      assert(c2 < inst->bitsize);
-      Inst *c = value_inst(c1 * (((unsigned __int128)1) << c2), inst->bitsize);
-      return build_inst(Op::MUL, arg1->args[0], c);
+      uint64_t c2 = ctz(arg2->value());
+      if (arg1->bitsize - arg1->args[0]->bitsize <= c2)
+	{
+	  Inst *new_inst = build_inst(Op::ZEXT, arg1->args[0], arg1->args[1]);
+	  return build_inst(Op::MUL, new_inst, arg2);
+	}
     }
 
   return inst;
@@ -2097,60 +1962,12 @@ Inst *Simplify::simplify_shl()
   if (arg2->op == Op::VALUE && arg2->value() >= inst->bitsize)
     return value_inst(0, inst->bitsize);
 
-  // shl (ashr x, c), c -> shl (lshr x, c), c
-  if (arg2->op == Op::VALUE
-      && arg1->op == Op::ASHR
-      && arg1->args[1] == arg2)
+  // shl x, c -> mul x, (1 << c)
+  if (arg2->op == Op::VALUE)
     {
-      Inst *new_inst = build_inst(Op::LSHR, arg1->args[0], arg2);
-      return build_inst(Op::SHL, new_inst, arg2);
-    }
-
-  // shl (shl x, c1), c2 -> shl x, (c1 + c2)
-  if (arg2->op == Op::VALUE
-      && arg1->op == Op::SHL
-      && arg1->args[1]->op == Op::VALUE)
-    {
-      Inst *x = arg1->args[0];
-      unsigned __int128 c1 = arg1->args[1]->value();
-      unsigned __int128 c2 = arg2->value();
-      assert(c1 < inst->bitsize);
-      assert(c2 < inst->bitsize);
-      Inst *c = value_inst(c1 + c2, inst->bitsize);
-      return build_inst(Op::SHL, x, c);
-    }
-
-  // shl (mul x, c2), c1 -> mul x, ((1 << c1) * c2)
-  if (arg2->op == Op::VALUE
-      && arg1->op == Op::MUL
-      && arg1->args[1]->op == Op::VALUE)
-    {
-      unsigned __int128 c1 = arg2->value();
-      unsigned __int128 c2 = arg1->args[1]->value();
-      assert(c1 < inst->bitsize);
-      Inst *c = value_inst((((unsigned __int128)1) << c1) * c2, inst->bitsize);
-      return build_inst(Op::MUL, arg1->args[0], c);
-    }
-
-  // shl (lshr (memory x, y, z), c), c -> memory x, y, z if c is less
-  // than ptr_offset_bits.
-  if (arg2->op == Op::VALUE
-      && arg1->op == Op::LSHR
-      && arg1->args[1] == arg2
-      && arg1->args[0]->op == Op::MEMORY
-      && arg2->value() < inst->bb->func->module->ptr_offset_bits)
-    return arg1->args[0];
-
-  // shl (add x, c2), c1 -> add (shl x, c1), (c2 << c1)
-  if (arg2->op == Op::VALUE &&
-      arg1->op == Op::ADD &&
-      arg1->args[1]->op == Op::VALUE)
-    {
-      unsigned __int128 c1 = arg2->value();
-      unsigned __int128 c2 = arg1->args[1]->value();
-      Inst *new_inst = build_inst(Op::SHL, arg1->args[0], arg2);
-      Inst *val = value_inst(c2 << c1, inst->bitsize);
-      return build_inst(Op::ADD, new_inst, val);
+      Inst *c =
+	value_inst(((unsigned __int128)1) << arg2->value(), inst->bitsize);
+      return build_inst(Op::MUL, arg1, c);
     }
 
   return inst;
@@ -2362,17 +2179,15 @@ Inst *Simplify::simplify_extract()
 	}
     }
 
-  // Simplify "extract (shl x, c)":
-  //  * If it is only extracting from x, it is changed to "extract x".
-  //  * If it is only extracting from the extended bits, it is changed to 0.
-  if (arg1->op == Op::SHL && arg1->args[1]->op == Op::VALUE)
+  // Simplify "extract (mul x, c)" where c is a power of two. This is the
+  // same as x << c, so an extraction from the top part can be changed to
+  // "extract x".
+  if (arg1->op == Op::MUL && is_value_pow2(arg1->args[1]))
     {
       Inst *x = arg1->args[0];
-      uint64_t c = arg1->args[1]->value();
-      assert(c > 0 && c < x->bitsize);
-      if (high_val < c)
-	return value_inst(0, inst->bitsize);
-      else if (low_val >= c)
+      uint64_t c = ctz(arg1->args[1]->value());
+      assert(c > 0 && c < arg1->bitsize);
+      if (low_val >= c)
 	{
 	  Inst *high = value_inst(high_val - c, 32);
 	  Inst *low = value_inst(low_val - c, 32);
@@ -2380,43 +2195,16 @@ Inst *Simplify::simplify_extract()
 	}
     }
 
-  // Simplify "extract (lshr x, c)":
-  //  * If it is only extracting from x, it is changed to "extract x".
-  //  * If it is only extracting from the extended bits, it is changed to 0.
-  if (arg1->op == Op::LSHR && arg1->args[1]->op == Op::VALUE)
+  // Simplify "extract (mul x, c)" where c can be written as c1 << c2.
+  // Extraction from the bottom c2 bits is changed to 0.
+  if (arg1->op == Op::MUL && arg1->args[1]->op == Op::VALUE)
     {
-      Inst *x = arg1->args[0];
-      uint64_t c = arg1->args[1]->value();
-      assert(c > 0 && c < x->bitsize);
-      uint32_t hi_val = high_val + c;
-      uint32_t lo_val = low_val + c;
-      if (hi_val < x->bitsize)
-	return build_inst(Op::EXTRACT, x, hi_val, lo_val);
-      else if (lo_val >= x->bitsize)
-	return value_inst(0, inst->bitsize);
-    }
-
-  // Simplify "extract (ashr x, c)":
-  //  * If it is only extracting from x, it is changed to "extract x".
-  //  * If it is only extracting from the extended bits, including the
-  //    most significant bit of x, it is changed to a sext of the most
-  //    significant bit of x.
-  if (arg1->op == Op::ASHR && arg1->args[1]->op == Op::VALUE)
-    {
-      Inst *x = arg1->args[0];
-      uint64_t c = arg1->args[1]->value();
-      assert(c > 0 && c < x->bitsize);
-      uint32_t hi_val = high_val + c;
-      uint32_t lo_val = low_val + c;
-      if (hi_val < x->bitsize)
-	return build_inst(Op::EXTRACT, x, hi_val, lo_val);
-      else if (lo_val >= x->bitsize - 1)
+      uint64_t c2 = ctz(arg1->args[1]->value());
+      if (c2 > 0)
 	{
-	  Inst *idx = value_inst(x->bitsize - 1, 32);
-	  Inst *new_inst = build_inst(Op::EXTRACT, x, idx, idx);
-	  if (new_inst->bitsize < inst->bitsize)
-	    new_inst = build_inst(Op::SEXT, new_inst, inst->bitsize);
-	  return new_inst;
+	  assert(c2 < arg1->bitsize);
+	  if (high_val < c2)
+	    return value_inst(0, inst->bitsize);
 	}
     }
 
@@ -2520,6 +2308,42 @@ Inst *Simplify::simplify_extract()
       std::set<Inst*> visited;
       if (extract_is_zero(arg1, high_val, low_val, visited))
 	return value_inst(0, inst->bitsize);
+    }
+
+  // A sequence:
+  //   %2 = zext x, #64
+  //   %3 = add %2, #-1
+  //   %4 = extract %3, #63, #63
+  // is equivalent to:
+  //   %4 = eq x, 0
+  if (arg2->op == Op::VALUE
+      && arg2->value() == arg1->bitsize - 1
+      && arg3 == arg2
+      && arg1->op == Op::ADD
+      && is_value_m1(arg1->args[1])
+      && arg1->args[0]->op == Op::ZEXT)
+    {
+      Inst *x = arg1->args[0]->args[0];
+      Inst *zero = value_inst(0, x->bitsize);
+      return build_inst(Op::EQ, x, zero);
+    }
+
+  // A sequence:
+  //   %2 = zext x, #64
+  //   %3 = neg %2
+  //   %4 = extract %3, #63, #63
+  // is equivalent to:
+  //   %1 = eq x, 0
+  //   %4 = not %1
+  if (arg2->op == Op::VALUE
+      && arg2->value() == arg1->bitsize - 1
+      && arg3 == arg2
+      && arg1->op == Op::NEG
+      && arg1->args[0]->op == Op::ZEXT)
+    {
+      Inst *x = arg1->args[0]->args[0];
+      Inst *zero = value_inst(0, x->bitsize);
+      return build_inst(Op::NOT, build_inst(Op::EQ, x, zero));
     }
 
   return inst;
