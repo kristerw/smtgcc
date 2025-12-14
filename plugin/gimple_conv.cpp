@@ -8436,6 +8436,7 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	      assert(!switch_stmt);
 	      switch_stmt = stmt;
 	      break;
+	    case GIMPLE_DEBUG:
 	    case GIMPLE_LABEL:
 	    case GIMPLE_PREDICT:
 	    case GIMPLE_NOP:
