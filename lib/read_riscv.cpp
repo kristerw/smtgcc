@@ -2840,7 +2840,15 @@ void Parser::process_vec_mask_pop()
   Inst *dest = get_reg(1);
   get_comma(2);
   Inst *arg1 = get_vreg_value(3);
-  get_end_of_line(4);
+  Inst *mask = nullptr;
+  if (tokens.size() > 4)
+    {
+      get_comma(4);
+      mask = get_vreg_value(5);
+      get_end_of_line(6);
+    }
+  else
+    get_end_of_line(4);
 
   Inst *res = bb->value_inst(0, dest->bitsize);
   Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
@@ -2848,6 +2856,8 @@ void Parser::process_vec_mask_pop()
     {
       Inst *elem1 = extract_vec_elem(arg1, 1, i);
       Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
+      if (mask)
+	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
       Inst *inst = bb->build_inst(Op::AND, elem1, cmp);
       inst = bb->build_inst(Op::ZEXT, inst, res->bitsize);
       res = bb->build_inst(Op::ADD, res, inst);
