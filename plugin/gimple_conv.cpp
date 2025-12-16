@@ -3706,7 +3706,7 @@ std::pair<Inst *, Inst *> Converter::process_vec_perm_expr(gimple *stmt)
 {
   auto [arg1, arg1_indef] = tree2inst_indef(gimple_assign_rhs1(stmt));
   auto [arg2, arg2_indef] = tree2inst_indef(gimple_assign_rhs2(stmt));
-  Inst *arg3 = tree2inst(gimple_assign_rhs3(stmt));
+  auto [arg3, arg3_indef] = tree2inst_indef(gimple_assign_rhs3(stmt));
   assert(arg1->bitsize == arg2->bitsize);
   tree arg1_type = TREE_TYPE(gimple_assign_rhs1(stmt));
   tree arg1_elem_type = TREE_TYPE(arg1_type);
@@ -3744,11 +3744,22 @@ std::pair<Inst *, Inst *> Converter::process_vec_perm_expr(gimple *stmt)
       else
 	res = inst;
 
+      Inst *idx_indef = nullptr;
+      if (arg3_indef)
+	{
+	  idx_indef = extract_vec_elem(bb, arg3_indef, elem_bitsize3, i);
+	  idx_indef = bb->build_inst(Op::AND, idx_indef, mask1);
+	  Inst *zero = bb->value_inst(0, idx_indef->bitsize);
+	  idx_indef = bb->build_inst(Op::NE, idx_indef, zero);
+	  idx_indef = bb->build_inst(Op::SEXT, idx_indef, elem_bitsize1);
+	}
       if (arg1_indef)
 	{
 	  Inst *indef1 = extract_elem(bb, arg1_indef, elem_bitsize1, idx2);
 	  Inst *indef2 = extract_elem(bb, arg2_indef, elem_bitsize1, idx2);
 	  Inst *indef = bb->build_inst(Op::ITE, cmp, indef1, indef2);
+	  if (arg3_indef)
+	    indef = bb->build_inst(Op::OR, indef, idx_indef);
 	  if (res_indef)
 	    res_indef = bb->build_inst(Op::CONCAT, indef, res_indef);
 	  else
