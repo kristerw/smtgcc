@@ -16,18 +16,13 @@ namespace {
 class Converter {
   std::map<const Inst *, cvc5::Term> inst2array;
   std::map<const Inst *, cvc5::Term> inst2bv;
-  std::map<const Inst *, cvc5::Term> inst2fp;
   std::map<const Inst *, cvc5::Term> inst2bool;
 
   cvc5::Term ite(cvc5::Term c, cvc5::Term a, cvc5::Term b);
-  cvc5::Op fp_sort(cvc5::Kind kind, uint32_t bitsize);
   void build_bv_comparison_smt(const Inst *inst);
-  void build_fp_comparison_smt(const Inst *inst);
   void build_memory_state_smt(const Inst *inst);
   void build_bv_unary_smt(const Inst *inst);
-  void build_fp_unary_smt(const Inst *inst);
   void build_bv_binary_smt(const Inst *inst);
-  void build_fp_binary_smt(const Inst *inst);
   void build_ternary_smt(const Inst *inst);
   void build_conversion_smt(const Inst *inst);
   void build_solver_smt(const Inst *inst);
@@ -47,7 +42,6 @@ public:
   }
   cvc5::Term inst_as_array(const Inst *inst);
   cvc5::Term inst_as_bv(const Inst *inst);
-  cvc5::Term inst_as_fp(const Inst *inst);
   cvc5::Term inst_as_bool(const Inst *inst);
 
   std::vector<const Inst *> print;
@@ -95,23 +89,13 @@ cvc5::Term Converter::inst_as_bv(const Inst *inst)
   if (I != inst2bv.end())
     return I->second;
 
-  if (inst->bitsize == 1)
-    {
-      // We do not have a bitvector value for inst. This means there must
-      // be a Boolean value for this instruction. Convert it to a bitvector.
-      cvc5::Term term =
-	ite(inst2bool.at(inst), solver.mkBitVector(1, 1),
-	    solver.mkBitVector(1, 0));
-      inst2bv.insert({inst, term});
-      return term;
-    }
-  else
-    {
-      // We do not have a bitvector value for inst. This means there must
-      // be a floating-point value for this instruction. Convert it to a
-      // bitvector.
-      throw Not_implemented("inst_as_bv: convert fp to bitvector");
-    }
+  // We do not have a bitvector value for inst. This means there must
+  // be a Boolean value for this instruction. Convert it to a bitvector.
+  assert(inst->bitsize == 1);
+  cvc5::Term term =
+    ite(inst2bool.at(inst), solver.mkBitVector(1, 1), solver.mkBitVector(1, 0));
+  inst2bv.insert({inst, term});
+  return term;
 }
 
 cvc5::Term Converter::inst_as_bool(const Inst *inst)
@@ -128,18 +112,6 @@ cvc5::Term Converter::inst_as_bool(const Inst *inst)
     solver.mkTerm(cvc5::Kind::EQUAL, {bv, solver.mkBitVector(1, 1)});
   inst2bool.insert({inst, term});
   return term;
-}
-
-cvc5::Term Converter::inst_as_fp(const Inst *inst)
-{
-  auto I = inst2fp.find(inst);
-  if (I != inst2fp.end())
-    return I->second;
-
-  // We do not have a floating-point value for inst. This means there must
-  // be a bitvector value for this instruction. Convert it to floating
-  // point.
-  throw Not_implemented("inst_as_fp: bitvector to fp");
 }
 
 void Converter::build_bv_comparison_smt(const Inst *inst)
@@ -182,61 +154,6 @@ void Converter::build_bv_comparison_smt(const Inst *inst)
       break;
     case Op::ULT:
       inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_ULT, {arg1, arg2})});
-      break;
-    default:
-      throw Not_implemented("build_comparison_smt: "s + inst->name());
-    }
-}
-
-cvc5::Op Converter::fp_sort(cvc5::Kind kind, uint32_t bitsize)
-{
-  switch (bitsize)
-    {
-      // TODO: 16 and 128 bits
-    case 32:
-      return solver.mkOp(kind, {8, 24});
-    case 64:
-      return solver.mkOp(kind, {11, 53});
-    default:
-      throw Not_implemented("fp_sort: f" + std::to_string(bitsize));
-    }
-}
-
-void Converter::build_fp_comparison_smt(const Inst *inst)
-{
-  assert(inst->nof_args == 2);
-  cvc5::Term arg1 = inst_as_fp(inst->args[0]);
-  cvc5::Term arg2 = inst_as_fp(inst->args[1]);
-
-  switch (inst->op)
-    {
-    case Op::FEQ:
-      {
-	cvc5::Term eq =
-	  solver.mkTerm(cvc5::Kind::FLOATINGPOINT_EQ, {arg1, arg2});
-	inst2bool.insert({inst, eq});
-      }
-      break;
-    case Op::FNE:
-      {
-	cvc5::Term eq =
-	  solver.mkTerm(cvc5::Kind::FLOATINGPOINT_EQ, {arg1, arg2});
-	inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::NOT, {eq})});
-      }
-      break;
-    case Op::FLE:
-      {
-	cvc5::Term leq =
-	  solver.mkTerm(cvc5::Kind::FLOATINGPOINT_LEQ, {arg1, arg2});
-	inst2bool.insert({inst, leq});
-      }
-      break;
-    case Op::FLT:
-      {
-	cvc5::Term lt =
-	  solver.mkTerm(cvc5::Kind::FLOATINGPOINT_LT, {arg1, arg2});
-	inst2bool.insert({inst, lt});
-      }
       break;
     default:
       throw Not_implemented("build_comparison_smt: "s + inst->name());
@@ -317,14 +234,9 @@ void Converter::build_bv_unary_smt(const Inst *inst)
   switch (inst->op)
     {
     case Op::IS_INF:
-      // TODO: Implement Op::IS_INF
-      throw Not_implemented("build_bv_unary_smt: "s + inst->name());
     case Op::IS_NAN:
-      // TODO: Implement Op::IS_NAN
-      throw Not_implemented("build_bv_unary_smt: "s + inst->name());
     case Op::IS_NONCANONICAL_NAN:
-      // TODO: Implement Op::IS_NONCANONICAL_NAN
-      throw Not_implemented("build_bv_unary_smt: "s + inst->name());
+      throw Not_implemented("floating-point support in smt_cvc5");
     case Op::MOV:
       inst2bv.insert({inst, arg1});
       break;
@@ -336,25 +248,6 @@ void Converter::build_bv_unary_smt(const Inst *inst)
       break;
     default:
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
-    }
-}
-
-void Converter::build_fp_unary_smt(const Inst *inst)
-{
-  cvc5::Term arg1 = inst_as_fp(inst->args[0]);
-  switch (inst->op)
-    {
-    case Op::FABS:
-      inst2fp.insert({inst, solver.mkTerm(cvc5::Kind::FLOATINGPOINT_ABS, {arg1})});
-      break;
-    case Op::FNEG:
-      inst2fp.insert({inst, solver.mkTerm(cvc5::Kind::FLOATINGPOINT_NEG, {arg1})});
-      break;
-    case Op::NAN:
-      // TODO: Implement Op::NAN
-      throw Not_implemented("build_fp_unary_smt: "s + inst->name());
-    default:
-      throw Not_implemented("build_fp_unary_smt: "s + inst->name());
     }
 }
 
@@ -463,48 +356,6 @@ void Converter::build_bv_binary_smt(const Inst *inst)
     }
 }
 
-void Converter::build_fp_binary_smt(const Inst *inst)
-{
-  assert(inst->nof_args == 2);
-  cvc5::Term arg1 = inst_as_fp(inst->args[0]);
-  cvc5::Term arg2 = inst_as_fp(inst->args[1]);
-  cvc5::Term rm =
-    solver.mkRoundingMode(cvc5::RoundingMode::ROUND_NEAREST_TIES_TO_EVEN);
-  switch (inst->op)
-    {
-    case Op::FADD:
-      {
-	cvc5::Term term =
-	  solver.mkTerm(cvc5::Kind::FLOATINGPOINT_ADD, {rm, arg1, arg2});
-	inst2fp.insert({inst, term});
-      }
-      break;
-    case Op::FSUB:
-      {
-	cvc5::Term term =
-	  solver.mkTerm(cvc5::Kind::FLOATINGPOINT_SUB, {rm, arg1, arg2});
-	inst2fp.insert({inst, term});
-      }
-      break;
-    case Op::FMUL:
-      {
-	cvc5::Term term =
-	  solver.mkTerm(cvc5::Kind::FLOATINGPOINT_MULT, {rm, arg1, arg2});
-	inst2fp.insert({inst, term});
-      }
-      break;
-    case Op::FDIV:
-      {
-	cvc5::Term term =
-	  solver.mkTerm(cvc5::Kind::FLOATINGPOINT_DIV, {rm, arg1, arg2});
-	inst2fp.insert({inst, term});
-      }
-      break;
-    default:
-      throw Not_implemented("build_binary_smt: "s + inst->name());
-    }
-}
-
 void Converter::build_ternary_smt(const Inst *inst)
 {
   assert(inst->nof_args == 3);
@@ -586,48 +437,11 @@ void Converter::build_conversion_smt(const Inst *inst)
       }
       break;
     case Op::F2U:
-      {
-	cvc5::Term arg = inst_as_fp(inst->args[0]);
-	cvc5::Term rtz =
-	  solver.mkRoundingMode(cvc5::RoundingMode::ROUND_TOWARD_ZERO);
-	cvc5::Op op =
-	  solver.mkOp(cvc5::Kind::FLOATINGPOINT_TO_UBV, {inst->bitsize});
-	inst2bv.insert({inst, solver.mkTerm(op, {rtz, arg})});
-      }
-      break;
     case Op::F2S:
-      {
-	cvc5::Term arg = inst_as_fp(inst->args[0]);
-	cvc5::Term rtz =
-	  solver.mkRoundingMode(cvc5::RoundingMode::ROUND_TOWARD_ZERO);
-	cvc5::Op op =
-	  solver.mkOp(cvc5::Kind::FLOATINGPOINT_TO_SBV, {inst->bitsize});
-	inst2bv.insert({inst, solver.mkTerm(op, {rtz, arg})});
-      }
-      break;
     case Op::S2F:
-      {
-	cvc5::Term arg = inst_as_bv(inst->args[0]);
-	cvc5::Term rm =
-	  solver.mkRoundingMode(cvc5::RoundingMode::ROUND_NEAREST_TIES_TO_EVEN);
-	cvc5::Op op =
-	  fp_sort(cvc5::Kind::FLOATINGPOINT_TO_FP_FROM_SBV, inst->bitsize);
-	inst2fp.insert({inst, solver.mkTerm(op, {rm, arg})});
-      }
-      break;
     case Op::U2F:
-      {
-	cvc5::Term arg = inst_as_bv(inst->args[0]);
-	cvc5::Term rm =
-	  solver.mkRoundingMode(cvc5::RoundingMode::ROUND_NEAREST_TIES_TO_EVEN);
-	cvc5::Op op =
-	  fp_sort(cvc5::Kind::FLOATINGPOINT_TO_FP_FROM_UBV, inst->bitsize);
-	inst2fp.insert({inst, solver.mkTerm(op, {rm, arg})});
-      }
-      break;
     case Op::FCHPREC:
-      // TODO: Implement Op::FCHPREC
-      throw Not_implemented("build_conversion_smt: "s + inst->name());
+      throw Not_implemented("floating-point support in smt_cvc5");
     default:
       throw Not_implemented("build_conversion_smt: "s + inst->name());
     }
@@ -782,23 +596,14 @@ void Converter::build_smt(const Inst *inst)
     case Inst_class::icomparison:
       build_bv_comparison_smt(inst);
       break;
-    case Inst_class::fcomparison:
-      build_fp_comparison_smt(inst);
-      break;
     case Inst_class::mem_nullary:
       build_memory_state_smt(inst);
       break;
     case Inst_class::iunary:
       build_bv_unary_smt(inst);
       break;
-    case Inst_class::funary:
-      build_fp_unary_smt(inst);
-      break;
     case Inst_class::ibinary:
       build_bv_binary_smt(inst);
-      break;
-    case Inst_class::fbinary:
-      build_fp_binary_smt(inst);
       break;
     case Inst_class::ternary:
       build_ternary_smt(inst);
@@ -814,6 +619,10 @@ void Converter::build_smt(const Inst *inst)
     case Inst_class::special:
       build_special_smt(inst);
       break;
+    case Inst_class::fcomparison:
+    case Inst_class::funary:
+    case Inst_class::fbinary:
+      throw Not_implemented("floating-point support in smt_cvc5");
     default:
       throw Not_implemented("build_smt: "s + inst->name());
     }
@@ -881,11 +690,11 @@ Solver_result run_solver(cvc5::Solver& solver, const char *str)
 
 void set_solver_limits(cvc5::Solver& solver)
 {
+  solver.setLogic("QF_ABV");
   solver.setOption("produce-models", "true");
   char buf[32];
   sprintf(buf, "%d", config.timeout);
   solver.setOption("tlimit-per", buf);
-  solver.setLogic("QF_ABVFP");
 }
 
 } // end anonymous namespace
