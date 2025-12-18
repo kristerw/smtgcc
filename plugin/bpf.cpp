@@ -28,7 +28,7 @@ void build_return(bpf_state *rstate, Function *src_func, function *fun)
       && ret_bitsize <= 64)
     {
       Inst *retval =
-	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::x0]);
+	bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r0]);
       if (ret_bitsize < retval->bitsize)
 	retval = bb->build_trunc(retval, ret_bitsize);
       bb->build_ret_inst(retval);
