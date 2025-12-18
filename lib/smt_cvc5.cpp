@@ -399,7 +399,7 @@ void Converter::build_ternary_smt(const Inst *inst)
 	  cvc5::Term arg1 = inst_as_bool(inst->args[0]);
 	  cvc5::Term arg2 = inst_as_bool(inst->args[1]);
 	  cvc5::Term arg3 = inst_as_bool(inst->args[2]);
-	  inst2array.insert({inst, ite(arg1, arg2, arg3)});
+	  inst2bool.insert({inst, ite(arg1, arg2, arg3)});
 	}
       else
 	{
