@@ -51,6 +51,7 @@ lib_sources = \
 	lib/read_sh.cpp \
 	lib/reduce_bitsize.cpp \
 	lib/simplify_insts.cpp \
+	lib/smt_bitwuzla.cpp \
 	lib/smt_cvc5.cpp \
 	lib/smt_z3.cpp \
 	lib/smtgcc.cpp \

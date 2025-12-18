@@ -2184,6 +2184,8 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
   struct SStats stats;
   if (config.smt_solver == SmtSolver::z3)
     std::tie(stats, result) = check_refine_z3(converter.dest_func);
+  else if (config.smt_solver == SmtSolver::bitwuzla)
+    std::tie(stats, result) = check_refine_bitwuzla(converter.dest_func);
   else
     std::tie(stats, result) = check_refine_cvc5(converter.dest_func);
 

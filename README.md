@@ -226,4 +226,4 @@ smtgcc-check-refine has the same limitations as smtgcc-tv.
  * `SMTGCC_MEMORY_LIMIT` — Sets the SMT solver memory limit in megabytes. (Default: 5120)
  * `SMTGCC_CACHE` — Set to "redis" to use a Redis database for caching SMT queries.
  * `SMTGCC_ASM` — Set to the file name of the assembly to override the default when using smtgcc-tv-backend.
- * `SMTGCC_SMT_SOLVER` — Selects which SMT solver to use. Valid values are "Z3" or "cvc5". (Default: Z3)
+ * `SMTGCC_SMT_SOLVER` — Selects which SMT solver to use. Valid values are "Z3", "bitwuzla", or "cvc5". (Default: Z3)

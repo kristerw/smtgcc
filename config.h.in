@@ -3,6 +3,9 @@
 /* Define to 1 if you have hiredis. */
 #undef HAVE_HIREDIS
 
+/* Define to 1 if you have bitwuzla. */
+#undef HAVE_LIBBITWUZLA
+
 /* Define to 1 if you have cvc5. */
 #undef HAVE_LIBCVC5
 

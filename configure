@@ -2738,6 +2738,41 @@ fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam \
     conftest$ac_exeext conftest.$ac_ext
 
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for -lbitwuzla" >&5
+printf %s "checking for -lbitwuzla... " >&6; }
+save_LIBS=$LIBS
+LIBS="-lbitwuzla $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+          #include <bitwuzla/cpp/bitwuzla.h>
+
+int
+main (void)
+{
+
+          bitwuzla::Options options;
+          options.set(bitwuzla::Option::PRODUCE_MODELS, true);
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_cxx_try_link "$LINENO"
+then :
+
+printf "%s\n" "#define HAVE_LIBBITWUZLA 1" >>confdefs.h
+
+               { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }
+else $as_nop
+  LIBS=$save_LIBS
+               { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no" >&5
+printf "%s\n" "no" >&6; }
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+
 { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for -lcvc5" >&5
 printf %s "checking for -lcvc5... " >&6; }
 save_LIBS=$LIBS

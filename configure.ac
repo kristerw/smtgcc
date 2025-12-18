@@ -24,6 +24,19 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM([[
 	      [LIBS=$save_LIBS
                AC_MSG_RESULT([no])])
 
+AC_MSG_CHECKING([for -lbitwuzla])
+save_LIBS=$LIBS
+LIBS="-lbitwuzla $LIBS"
+AC_LINK_IFELSE([AC_LANG_PROGRAM([[
+          #include <bitwuzla/cpp/bitwuzla.h>
+	]], [[
+          bitwuzla::Options options;
+          options.set(bitwuzla::Option::PRODUCE_MODELS, true);
+	]])], [AC_DEFINE([HAVE_LIBBITWUZLA], [1], [Define to 1 if you have bitwuzla.])
+               AC_MSG_RESULT([yes])],
+	      [LIBS=$save_LIBS
+               AC_MSG_RESULT([no])])
+
 AC_MSG_CHECKING([for -lcvc5])
 save_LIBS=$LIBS
 LIBS="-lcvc5 $LIBS"

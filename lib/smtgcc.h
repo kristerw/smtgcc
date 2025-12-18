@@ -351,7 +351,8 @@ struct Module {
 
 enum class SmtSolver : uint8_t {
   z3,
-  cvc5
+  cvc5,
+  bitwuzla
 };
 
 struct Config
@@ -885,6 +886,9 @@ void simplify_insts(Function *func);
 void simplify_insts(Module *module);
 void simplify_mem(Function *func);
 void simplify_mem(Module *module);
+
+// smt_bitwuzla.cpp
+std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func);
 
 // smt_cvc5.cpp
 std::pair<SStats, Solver_result> check_refine_cvc5(Function *func);
