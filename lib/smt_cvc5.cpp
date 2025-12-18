@@ -995,58 +995,6 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
   return std::pair<SStats, Solver_result>(stats, {Result_status::correct, {}});
 }
 
-std::pair<SStats, Solver_result> check_ub_cvc5(Function *func)
-{
-  assert(func->bbs.size() == 1);
-
-  cvc5::Solver solver;
-  set_solver_limits(solver);
-
-  SStats stats;
-  stats.skipped = false;
-
-  Converter conv(solver, func);
-  cvc5::Term common_ub_term = conv.inst_as_bool(conv.src_common_ub);
-  cvc5::Term unique_ub_term = conv.inst_as_bool(conv.src_unique_ub);
-  cvc5::Term ub_term = solver.mkTerm(cvc5::Kind::BITVECTOR_OR,
-				     {common_ub_term, unique_ub_term});
-  solver.push();
-  solver.assertFormula(ub_term);
-  uint64_t start_time = get_time();
-  Solver_result solver_result = run_solver(solver, "UB");
-  stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-  return std::pair<SStats, Solver_result>(stats, solver_result);
-}
-
-std::pair<SStats, Solver_result> check_assert_cvc5(Function *func)
-{
-  assert(func->bbs.size() == 1);
-
-  cvc5::Solver solver;
-  set_solver_limits(solver);
-
-  SStats stats;
-  stats.skipped = false;
-
-  Converter conv(solver, func);
-  cvc5::Term common_ub_term = conv.inst_as_bool(conv.src_common_ub);
-  cvc5::Term unique_ub_term = conv.inst_as_bool(conv.src_unique_ub);
-  cvc5::Term not_common_ub_term =
-    solver.mkTerm(cvc5::Kind::NOT, {common_ub_term});
-  cvc5::Term not_unique_ub_term =
-    solver.mkTerm(cvc5::Kind::NOT, {unique_ub_term});
-  cvc5::Term assert_term = conv.inst_as_bool(conv.src_assert);
-
-  solver.push();
-  solver.assertFormula(not_common_ub_term);
-  solver.assertFormula(not_unique_ub_term);
-  solver.assertFormula(assert_term);
-  uint64_t start_time = get_time();
-  Solver_result solver_result = run_solver(solver, "UB");
-  stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-  return std::pair<SStats, Solver_result>(stats, solver_result);
-}
-
 } // end namespace smtgcc
 
 #else

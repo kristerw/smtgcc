@@ -471,8 +471,6 @@ bool postdominates(const Basic_block *bb1, const Basic_block *bb2);
 // check.cpp
 bool identical(Function *func1, Function *func2);
 Solver_result check_refine(Module *module, bool run_simplify_inst = true);
-Solver_result check_assert(Function *func);
-Solver_result check_ub(Function *func);
 void convert(Module *module);
 
 // cse.cpp
@@ -892,13 +890,9 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func);
 
 // smt_cvc5.cpp
 std::pair<SStats, Solver_result> check_refine_cvc5(Function *func);
-std::pair<SStats, Solver_result> check_assert_cvc5(Function *func);
-std::pair<SStats, Solver_result> check_ub_cvc5(Function *func);
 
 // smt_z3.cpp
 std::pair<SStats, Solver_result> check_refine_z3(Function *func);
-std::pair<SStats, Solver_result> check_assert_z3(Function *func);
-std::pair<SStats, Solver_result> check_ub_z3(Function *func);
 
 // util.cpp
 uint32_t popcount(unsigned __int128 x);

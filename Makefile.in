@@ -19,7 +19,6 @@ LIBS:=@LIBS@
 
 tools = \
 	smtgcc-check-refine \
-	smtgcc-check-ub \
 	smtgcc-opt
 
 plugins = \
@@ -63,7 +62,6 @@ lib_objects = $(lib_sources:.cpp=.o)
 
 tools_sources = \
 	tools/smtgcc-check-refine.cpp \
-	tools/smtgcc-check-ub.cpp \
 	tools/smtgcc-opt.cpp
 tools_objects = $(tools_sources:.cpp=.o)
 
@@ -111,8 +109,6 @@ $(plugin_objects): %.o: %.cpp
 
 smtgcc-check-refine: tools/smtgcc-check-refine.o $(lib_objects)
 	$(CXX) $(CXXFLAGS) tools/smtgcc-check-refine.o -o $@ $(lib_objects) $(LIBS)
-smtgcc-check-ub: tools/smtgcc-check-ub.o $(lib_objects)
-	$(CXX) $(CXXFLAGS) tools/smtgcc-check-ub.o -o $@ $(lib_objects) $(LIBS)
 
 smtgcc-opt: tools/smtgcc-opt.o $(lib_objects)
 	$(CXX) $(CXXFLAGS) tools/smtgcc-opt.o -o $@ $(lib_objects) $(LIBS)

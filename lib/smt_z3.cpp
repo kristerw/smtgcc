@@ -1239,55 +1239,6 @@ std::pair<SStats, Solver_result> check_refine_z3(Function *func)
   }
 }
 
-std::pair<SStats, Solver_result> check_ub_z3(Function *func)
-{
-  assert(func->bbs.size() == 1);
-
-  z3::context ctx;
-  set_solver_limits();
-
-  SStats stats;
-  stats.skipped = false;
-
-  Converter conv(ctx, func);
-  z3::expr src_unique_ub_expr = conv.inst_as_bool(conv.src_unique_ub);
-  z3::expr src_common_ub_expr = conv.inst_as_bool(conv.src_common_ub);
-  z3::expr false_expr = ctx.bool_val(false);
-
-  z3::solver solver(ctx);
-  solver.add(src_common_ub_expr || src_unique_ub_expr);
-  uint64_t start_time = get_time();
-  Solver_result solver_result = run_solver(solver, "UB", false_expr);
-  stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-  return std::pair<SStats, Solver_result>(stats, solver_result);
-}
-
-std::pair<SStats, Solver_result> check_assert_z3(Function *func)
-{
-  assert(func->bbs.size() == 1);
-
-  z3::context ctx;
-  set_solver_limits();
-
-  SStats stats;
-  stats.skipped = false;
-
-  Converter conv(ctx, func);
-  z3::expr src_unique_ub_expr = conv.inst_as_bool(conv.src_unique_ub);
-  z3::expr src_common_ub_expr = conv.inst_as_bool(conv.src_common_ub);
-  z3::expr assert_expr = conv.inst_as_bool(conv.src_assert);
-  z3::expr false_expr = ctx.bool_val(false);
-
-  z3::solver solver(ctx);
-  solver.add(!src_common_ub_expr);
-  solver.add(!src_unique_ub_expr);
-  solver.add(assert_expr);
-  uint64_t start_time = get_time();
-  Solver_result solver_result = run_solver(solver, "ASSERT", false_expr);
-  stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
-  return std::pair<SStats, Solver_result>(stats, solver_result);
-}
-
 } // end namespace smtgcc
 
 #else
