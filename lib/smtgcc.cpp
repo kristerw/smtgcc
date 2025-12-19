@@ -173,10 +173,10 @@ Config::Config()
 	throw Not_implemented("Unknown SMTGCC_CACHE");
     }
 
-#if HAVE_LIBZ3
-  smt_solver = SmtSolver::z3;
-#elif HAVE_LIBBITWUZLA
+#if HAVE_LIBBITWUZLA
   smt_solver = SmtSolver::bitwuzla;
+#elif HAVE_LIBZ3
+  smt_solver = SmtSolver::z3;
 #elif HAVE_LIBCVC5
   smt_solver = SmtSolver::cvc5;
 #else

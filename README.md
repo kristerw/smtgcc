@@ -68,11 +68,16 @@ The implementation is described in a series of blog posts. The first posts descr
 8. Control flow
 
 # Compiling smtgcc
-You must have the Z3 SMT solver installed. For example, as
+You must have an SMT solver (Bitwuzla, Z3, or cvc5) installed. Bitwuzla is preferred, as it is much faster than the other two. You can install it as follows:
 ```
-sudo apt install libz3-dev
+git clone https://github.com/bitwuzla/bitwuzla
+cd bitwuzla/
+./configure.py --shared
+cd build
+meson compile
+meson install
 ```
-Configuring and building `smtgcc` is done by `configure` and `make`, and you must specify the target compiler for which to build the GCC plugins
+Configuring and building `smtgcc` is done using `configure` and `make`. You must specify the target compiler for which the smtgcc plugins should be built:
 ```
 ./configure --with-target-compiler=/path/to/install/bin/gcc
 make
@@ -226,4 +231,4 @@ smtgcc-check-refine has the same limitations as smtgcc-tv.
  * `SMTGCC_MEMORY_LIMIT` — Sets the SMT solver memory limit in megabytes. (Default: 5120)
  * `SMTGCC_CACHE` — Set to "redis" to use a Redis database for caching SMT queries.
  * `SMTGCC_ASM` — Set to the file name of the assembly to override the default when using smtgcc-tv-backend.
- * `SMTGCC_SMT_SOLVER` — Selects which SMT solver to use. Valid values are "Z3", "bitwuzla", or "cvc5". (Default: Z3)
+ * `SMTGCC_SMT_SOLVER` — Selects which SMT solver to use. Valid values are "bitwuzla", "Z3", or "cvc5". (Default: bitwuzla)
