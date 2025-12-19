@@ -70,6 +70,8 @@ public:
   Inst *tgt_abort  = nullptr;
   Inst *tgt_exit = nullptr;
   Inst *tgt_exit_val  = nullptr;
+
+  std::vector<Term> input;
 };
 
 Term Converter::ite(Term c, Term a, Term b)
@@ -468,6 +470,7 @@ void Converter::build_solver_smt(const Inst *inst)
 	    sprintf(name, ".param%" PRIu32, index);
 	    Sort sort = tm.mk_bv_sort(inst->bitsize);
 	    Term param = tm.mk_const(sort, name);
+	    input.push_back(param);
 	    inst2bv.insert({inst, param});
 	  }
 	  break;
@@ -667,7 +670,7 @@ void Converter::convert_function()
     }
 }
 
-Solver_result run_solver(Bitwuzla& solver, const char *str)
+Solver_result run_solver(Bitwuzla& solver, const char *str, Converter& conv, Inst *ub_cond = nullptr)
 {
   if (config.verbose > 2)
     {
@@ -681,8 +684,30 @@ Solver_result run_solver(Bitwuzla& solver, const char *str)
     }
   else if (result == Result::SAT)
     {
+      if (config.optimize_ub && ub_cond)
+	{
+	  // We perform the UB check first in order to prevent false alarms
+	  // for retval/memory/etc. when tgt is more UB than src and we
+	  // enable smtgcc optimizations that may change the result
+	  // for cases that are UB. But it is possible that the UB check
+	  // times out, but later checks manage to find a case where
+	  // retval/memory/etc. differ for a case where tgt is more UB
+	  // than src. Report this as a failure found by the UB check.
+	  if (solver.get_value(conv.inst_as_bool(ub_cond)).is_true())
+	    str = "UB";
+	}
       std::string msg = "Transformation is not correct ("s + str + ")\n";
-      // TODO: Display the model.
+      for (auto& term : conv.input)
+	{
+	  std::string name;
+	  auto symbol_name = term.symbol();
+	  if (symbol_name)
+	    name = *symbol_name;
+	  else
+	    name = "???";
+	  std::string value = solver.get_value(term).value<std::string>(16);
+	  msg = msg + name + " = " + value + "\n";
+	}
       return {Result_status::incorrect, msg};
     }
   else if (result == Result::UNKNOWN)
@@ -736,7 +761,7 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       solver.assert_formula(not_src_unique_ub_term);
       solver.assert_formula(tgt_unique_ub_term);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "UB");
+      Solver_result solver_result = run_solver(solver, "UB", conv);
       stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	return std::pair<SStats, Solver_result>(stats, solver_result);
@@ -773,7 +798,8 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       solver.assert_formula(not_src_unique_ub_term);
       solver.assert_formula(differ);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "abort/exit");
+      Solver_result solver_result =
+	run_solver(solver, "abort/exit", conv, conv.tgt_unique_ub);
       stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	return std::pair<SStats, Solver_result>(stats, solver_result);
@@ -835,29 +861,26 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       Term res2 = tm.mk_term(Kind::OR, {res1, is_more_indef});
       solver.assert_formula(res2);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "retval");
+      Solver_result solver_result =
+	run_solver(solver, "retval", conv, conv.tgt_unique_ub);
       stats.time[1] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
-#if 0
 	  assert(solver_result.message);
-	  Term src_val = solver.getValue(src_term);
-	  Term tgt_val = solver.getValue(tgt_term);
+	  Term src_val = solver.get_value(src_term);
+	  Term tgt_val = solver.get_value(tgt_term);
 	  std::string msg = *solver_result.message;
-	  msg = msg + "src retval: " + src_val.getBitVectorValue(16) + "\n";
-	  msg = msg + "tgt retval: " + tgt_val.getBitVectorValue(16) + "\n";
+	  msg = msg + "src retval: " + src_val.value<std::string>(16) + "\n";
+	  msg = msg + "tgt retval: " + tgt_val.value<std::string>(16) + "\n";
 	  if (conv.src_retval_indef)
 	    {
 	      Term src_indef = conv.inst_as_bv(conv.src_retval_indef);
 	      Term tgt_indef = conv.inst_as_bv(conv.tgt_retval_indef);
-	      Term src_indef_val = solver.getValue(src_indef);
-	      Term tgt_indef_val = solver.getValue(tgt_indef);
-	      msg = msg + "src indef: " + src_indef_val.getBitVectorValue(16) + "\n";
-	      msg = msg + "tgt indef: " + tgt_indef_val.getBitVectorValue(16) + "\n";
+	      Term src_indef_val = solver.get_value(src_indef);
+	      Term tgt_indef_val = solver.get_value(tgt_indef);
+	      msg = msg + "src indef: " + src_indef_val.value<std::string>(16) + "\n";
+	      msg = msg + "tgt indef: " + tgt_indef_val.value<std::string>(16) + "\n";
 	    }
-#else
-	  std::string msg = *solver_result.message;
-#endif
 	  Solver_result result = {Result_status::incorrect, msg};
 	  return std::pair<SStats, Solver_result>(stats, result);
 	}
@@ -919,31 +942,26 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       Term cond4 = tm.mk_term(Kind::DISTINCT, {tgt_more_indef, zero_byte});
       solver.assert_formula(tm.mk_term(Kind::OR, {cond3, cond4}));
 
-      // TODO: Should make a better getBitVectorValue that prints values as
-      // hex, etc.
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "Memory");
+      Solver_result solver_result =
+	run_solver(solver, "Memory", conv, conv.tgt_unique_ub);
       stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
-#if 0
 	  assert(solver_result.message);
-	  Term ptr_val = solver.getValue(ptr);
-	  Term src_byte_val = solver.getValue(src_byte);
-	  Term tgt_byte_val = solver.getValue(tgt_byte);
-	  Term src_indef_val = solver.getValue(src_indef);
-	  Term tgt_indef_val = solver.getValue(tgt_indef);
+	  Term ptr_val = solver.get_value(ptr);
+	  Term src_byte_val = solver.get_value(src_byte);
+	  Term tgt_byte_val = solver.get_value(tgt_byte);
+	  Term src_indef_val = solver.get_value(src_indef);
+	  Term tgt_indef_val = solver.get_value(tgt_indef);
 	  std::string msg = *solver_result.message;
-	  msg = msg + "\n.ptr = " + ptr_val.getBitVectorValue(16) + "\n";
-	  msg = msg + "src *.ptr: " + src_byte_val.getBitVectorValue(16) + "\n";
-	  msg = msg + "tgt *.ptr: " + tgt_byte_val.getBitVectorValue(16) + "\n";
+	  msg = msg + "\n.ptr = " + ptr_val.value<std::string>(16) + "\n";
+	  msg = msg + "src *.ptr: " + src_byte_val.value<std::string>(16) + "\n";
+	  msg = msg + "tgt *.ptr: " + tgt_byte_val.value<std::string>(16) + "\n";
 	  msg = msg + "src indef: "
-	    + src_indef_val.getBitVectorValue(16) + "\n";
+	    + src_indef_val.value<std::string>(16) + "\n";
 	  msg = msg + "tgt indef: "
-	    + tgt_indef_val.getBitVectorValue(16) + "\n";
-#else
-	  std::string msg = *solver_result.message;
-#endif
+	    + tgt_indef_val.value<std::string>(16) + "\n";
 	  Solver_result result = {Result_status::incorrect, msg};
 	  return std::pair<SStats, Solver_result>(stats, result);
 	}
@@ -967,7 +985,7 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       solver.assert_formula(not_src_unique_ub_term);
       solver.assert_formula(tgt_unique_ub_term);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "UB");
+      Solver_result solver_result = run_solver(solver, "UB", conv);
       stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	return std::pair<SStats, Solver_result>(stats, solver_result);
