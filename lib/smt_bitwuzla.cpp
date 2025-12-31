@@ -670,6 +670,11 @@ void Converter::convert_function()
     }
 }
 
+std::string value_string(const Term& val)
+{
+  return "0x" + val.value<std::string>(16);
+}
+
 Solver_result run_solver(Bitwuzla& solver, const char *str, Converter& conv, Inst *ub_cond = nullptr)
 {
   if (config.verbose > 2)
@@ -705,8 +710,8 @@ Solver_result run_solver(Bitwuzla& solver, const char *str, Converter& conv, Ins
 	    name = *symbol_name;
 	  else
 	    name = "???";
-	  std::string value = solver.get_value(term).value<std::string>(16);
-	  msg = msg + name + " = " + value + "\n";
+	  Term value = solver.get_value(term);
+	  msg = msg + name + " = " + value_string(value) + "\n";
 	}
       return {Result_status::incorrect, msg};
     }
@@ -870,16 +875,16 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 	  Term src_val = solver.get_value(src_term);
 	  Term tgt_val = solver.get_value(tgt_term);
 	  std::string msg = *solver_result.message;
-	  msg = msg + "src retval: " + src_val.value<std::string>(16) + "\n";
-	  msg = msg + "tgt retval: " + tgt_val.value<std::string>(16) + "\n";
+	  msg = msg + "src retval: " + value_string(src_val) + "\n";
+	  msg = msg + "tgt retval: " + value_string(tgt_val) + "\n";
 	  if (conv.src_retval_indef)
 	    {
 	      Term src_indef = conv.inst_as_bv(conv.src_retval_indef);
 	      Term tgt_indef = conv.inst_as_bv(conv.tgt_retval_indef);
 	      Term src_indef_val = solver.get_value(src_indef);
 	      Term tgt_indef_val = solver.get_value(tgt_indef);
-	      msg = msg + "src indef: " + src_indef_val.value<std::string>(16) + "\n";
-	      msg = msg + "tgt indef: " + tgt_indef_val.value<std::string>(16) + "\n";
+	      msg = msg + "src indef: " + value_string(src_indef_val) + "\n";
+	      msg = msg + "tgt indef: " + value_string(tgt_indef_val) + "\n";
 	    }
 	  Solver_result result = {Result_status::incorrect, msg};
 	  return std::pair<SStats, Solver_result>(stats, result);
@@ -955,13 +960,11 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 	  Term src_indef_val = solver.get_value(src_indef);
 	  Term tgt_indef_val = solver.get_value(tgt_indef);
 	  std::string msg = *solver_result.message;
-	  msg = msg + "\n.ptr = " + ptr_val.value<std::string>(16) + "\n";
-	  msg = msg + "src *.ptr: " + src_byte_val.value<std::string>(16) + "\n";
-	  msg = msg + "tgt *.ptr: " + tgt_byte_val.value<std::string>(16) + "\n";
-	  msg = msg + "src indef: "
-	    + src_indef_val.value<std::string>(16) + "\n";
-	  msg = msg + "tgt indef: "
-	    + tgt_indef_val.value<std::string>(16) + "\n";
+	  msg = msg + "\n.ptr = " + value_string(ptr_val) + "\n";
+	  msg = msg + "src *.ptr: " + value_string(src_byte_val) + "\n";
+	  msg = msg + "tgt *.ptr: " + value_string(tgt_byte_val) + "\n";
+	  msg = msg + "src indef: " + value_string(src_indef_val) + "\n";
+	  msg = msg + "tgt indef: " + value_string(tgt_indef_val) + "\n";
 	  Solver_result result = {Result_status::incorrect, msg};
 	  return std::pair<SStats, Solver_result>(stats, result);
 	}
