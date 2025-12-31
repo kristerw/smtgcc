@@ -45,7 +45,7 @@ public:
   Term inst_as_bv(const Inst *inst);
   Term inst_as_bool(const Inst *inst);
 
-  std::vector<const Inst *> print;
+  std::vector<std::pair<Term, Term>> print;
 
   Inst *src_assert = nullptr;
   Inst *src_memory = nullptr;
@@ -475,7 +475,11 @@ void Converter::build_solver_smt(const Inst *inst)
 	  }
 	  break;
 	case Op::PRINT:
-	  print.push_back(inst);
+	  {
+	    Term arg1 = inst_as_bv(inst->args[0]);
+	    Term arg2 = inst_as_bv(inst->args[1]);
+	    print.push_back({arg1, arg2});
+	  }
 	  break;
 	case Op::SRC_RETVAL:
 	  assert(!src_retval);
@@ -712,6 +716,13 @@ Solver_result run_solver(Bitwuzla& solver, const char *str, Converter& conv, Ins
 	    name = "???";
 	  Term value = solver.get_value(term);
 	  msg = msg + name + " = " + value_string(value) + "\n";
+	}
+      for (auto& [term1, term2] : conv.print)
+	{
+	  Term value1 = solver.get_value(term1);
+	  Term value2 = solver.get_value(term2);
+	  msg = msg + "print " + value_string(value1) + ", ";
+	  msg = msg + value_string(value2) + "\n";
 	}
       return {Result_status::incorrect, msg};
     }
