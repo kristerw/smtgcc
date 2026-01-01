@@ -32,11 +32,13 @@ class Converter {
   void convert_function();
 
   TermManager& tm;
+  Bitwuzla& solver;
   const Function *func;
 
 public:
-  Converter(TermManager& tm, const Function *func)
+  Converter(TermManager& tm, Bitwuzla& solver, const Function *func)
     : tm{tm}
+    , solver{solver}
     , func{func}
   {
     convert_function();
@@ -113,6 +115,8 @@ Term Converter::inst_as_bool(const Inst *inst)
   Term bv = inst2bv.at(inst);
   Sort bv1 = tm.mk_bv_sort(1);
   Term term = tm.mk_term(Kind::EQUAL, {bv, tm.mk_bv_one(bv1)});
+  if (inst->op == Op::VALUE)
+    term = solver.simplify(term);
   inst2bool.insert({inst, term});
   return term;
 }
@@ -345,7 +349,15 @@ void Converter::build_bv_binary_smt(const Inst *inst)
       inst2bv.insert({inst, tm.mk_term(Kind::BV_XOR, {arg1, arg2})});
       break;
     case Op::CONCAT:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_CONCAT, {arg1, arg2})});
+      {
+	// We may concatenate two large constants that cannot be constant
+	// folded at IR level (as the IR limits constant width to 128 bits),
+	// so we we fold it here to get nicer SMT2 code when debugging.
+	Term concat = tm.mk_term(Kind::BV_CONCAT, {arg1, arg2});
+	if (inst->args[0]->op == Op::VALUE && inst->args[1]->op == Op::VALUE)
+	  concat = solver.simplify(concat);
+	inst2bv.insert({inst, concat});
+      }
       break;
     default:
       throw Not_implemented("build_binary_smt: "s + inst->name());
@@ -576,7 +588,8 @@ void Converter::build_special_smt(const Inst *inst)
 	    Term lo = tm.mk_bv_value_uint64(lo_sort, low);
 	    Sort hi_sort = tm.mk_bv_sort(inst->bitsize - 64);
 	    Term hi = tm.mk_bv_value_uint64(hi_sort, high);
-	    inst2bv.insert({inst, tm.mk_term(Kind::BV_CONCAT, {hi, lo})});
+	    Term concat = tm.mk_term(Kind::BV_CONCAT, {hi, lo});
+	    inst2bv.insert({inst, solver.simplify(concat)});
 	  }
 	else
 	  {
@@ -756,7 +769,7 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
   SStats stats;
   stats.skipped = false;
 
-  Converter conv(tm, func);
+  Converter conv(tm, solver, func);
   Term src_common_ub_term = conv.inst_as_bool(conv.src_common_ub);
   Term src_unique_ub_term = conv.inst_as_bool(conv.src_unique_ub);
   Term not_src_common_ub_term = tm.mk_term(Kind::NOT, {src_common_ub_term});
