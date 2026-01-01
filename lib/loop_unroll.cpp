@@ -328,9 +328,8 @@ Basic_block *Unroller::translate(Basic_block *bb)
   return bb;
 }
 
-// Insert new exit blocks to ensure that all predecessors in the exit block
-// are within the loop and that no other basic block (except the loop header)
-// has predecessors within the loop.
+// Insert new exit blocks to ensure that all predecessors in the exit blocks
+// are within the loop.
 void Unroller::build_new_loop_exit()
 {
   for (size_t i = 0; i < loop.exit_blocks.size(); i++)
