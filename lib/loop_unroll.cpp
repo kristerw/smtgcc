@@ -47,6 +47,7 @@ class Unroller
   std::map<Basic_block *, Basic_block *> curr_bb;
   Basic_block *next_loop_header = nullptr;
 
+  void build_preheader();
   void build_new_loop_exit();
   void update_loop_exit(Basic_block *orig_loop_bb,
 			Basic_block *current_iter_bb, Basic_block *exit_bb);
@@ -146,6 +147,7 @@ void Unroller::ensure_lcssa(Inst *inst)
 // Update all uses outside the loop to use a phi node in the loop exit block.
 void Unroller::create_lcssa()
 {
+  build_preheader();
   build_new_loop_exit();
 
   for (auto bb : loop.bbs)
@@ -326,6 +328,64 @@ Basic_block *Unroller::translate(Basic_block *bb)
   if (I != curr_bb.end())
     return I->second;
   return bb;
+}
+
+void Unroller::build_preheader()
+{
+  Basic_block *loop_header = loop.bbs[0];
+
+  // Find the loop header's predecessors that are not within the loop.
+  std::vector<Basic_block *> bbs;
+  bbs.reserve(loop_header->preds.size());
+  for (auto bb : loop_header->preds)
+    {
+      if (!contains(loop.bbs, bb))
+	bbs.push_back(bb);
+    }
+
+  // There is nothing to do if we already have a preheader.
+  if (bbs.size() <= 1)
+    return;
+
+  // Build the preheader and update branches and phi nodes.
+  Basic_block *preheader = func->build_bb();
+  preheader->build_br_inst(loop_header);
+  for (auto phi : loop_header->phis)
+    {
+      Inst *new_phi = preheader->build_phi_inst(phi->bitsize);
+      for (auto bb : bbs)
+	{
+	  Inst *phi_arg = phi->get_phi_arg(bb);
+	  phi->remove_phi_arg(bb);
+	  new_phi->add_phi_arg(phi_arg, bb);
+
+	  phi->add_phi_arg(new_phi, preheader);
+	}
+    }
+  for (auto bb : bbs)
+    {
+      assert(bb->last_inst->op == Op::BR);
+      if (bb->last_inst->nof_args == 0)
+	{
+	  Basic_block *dest_bb = bb->last_inst->u.br1.dest_bb;
+	  assert(dest_bb == loop_header);
+	  destroy_instruction(bb->last_inst);
+	  bb->build_br_inst(preheader);
+	}
+      else
+	{
+	  Inst *arg = bb->last_inst->args[0];
+	  Basic_block *true_bb = bb->last_inst->u.br3.true_bb;
+	  Basic_block *false_bb = bb->last_inst->u.br3.false_bb;
+	  assert(true_bb == loop_header || false_bb == loop_header);
+	  if (true_bb == loop_header)
+	    true_bb = preheader;
+	  if (false_bb == loop_header)
+	    false_bb = preheader;
+	  destroy_instruction(bb->last_inst);
+	  bb->build_br_inst(arg, true_bb, false_bb);
+	}
+    }
 }
 
 // Insert new exit blocks to ensure that all predecessors in the exit blocks
