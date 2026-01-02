@@ -2957,7 +2957,16 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	  build_ub_if_not_zero(arg2_indef);
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	arg2 = type_convert(arg2, arg2_type, arg1_type);
+
+	// The assembly instructions for most ISAs truncate the shift
+	// amount. Do the same truncation here to make it more likely
+	// that the src and tgt shifts get CSEd. This is safe since the
+	// operation is UB if the shift amount does not fit in the
+	// truncated size.
+	assert(arg1->bitsize > 1);
+	arg2 = bb->build_trunc(arg2, std::bit_width(arg1->bitsize - 1));
+	arg2 = bb->build_inst(Op::ZEXT, arg2, arg1->bitsize);
+
 	Inst *res_indef = arg1_indef;
 	if (res_indef)
 	  res_indef = bb->build_inst(Op::SHL, res_indef, arg2);
@@ -2969,7 +2978,16 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	  build_ub_if_not_zero(arg2_indef);
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	arg2 = type_convert(arg2, arg2_type, arg1_type);
+
+	// The assembly instructions for most ISAs truncate the shift
+	// amount. Do the same truncation here to make it more likely
+	// that the src and tgt shifts get CSEd. This is safe since the
+	// operation is UB if the shift amount does not fit in the
+	// truncated size.
+	assert(arg1->bitsize > 1);
+	arg2 = bb->build_trunc(arg2, std::bit_width(arg1->bitsize - 1));
+	arg2 = bb->build_inst(Op::ZEXT, arg2, arg1->bitsize);
+
 	Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
 	Inst *shift = bb->build_inst(Op::ZEXT, arg2, concat->bitsize);
 	Inst *shifted = bb->build_inst(Op::LSHR, concat, shift);
@@ -2988,7 +3006,16 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	  build_ub_if_not_zero(arg2_indef);
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	arg2 = type_convert(arg2, arg2_type, arg1_type);
+
+	// The assembly instructions for most ISAs truncate the shift
+	// amount. Do the same truncation here to make it more likely
+	// that the src and tgt shifts get CSEd. This is safe since the
+	// operation is UB if the shift amount does not fit in the
+	// truncated size.
+	assert(arg1->bitsize > 1);
+	arg2 = bb->build_trunc(arg2, std::bit_width(arg1->bitsize - 1));
+	arg2 = bb->build_inst(Op::ZEXT, arg2, arg1->bitsize);
+
 	Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
 	Inst *shift = bb->build_inst(Op::ZEXT, arg2, concat->bitsize);
 	Inst *shifted = bb->build_inst(Op::SHL, concat, shift);
@@ -3011,7 +3038,16 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
 	Op op = is_unsigned ? Op::LSHR : Op::ASHR;
-	arg2 = type_convert(arg2, arg2_type, arg1_type);
+
+	// The assembly instructions for most ISAs truncate the shift
+	// amount. Do the same truncation here to make it more likely
+	// that the src and tgt shifts get CSEd. This is safe since the
+	// operation is UB if the shift amount does not fit in the
+	// truncated size.
+	assert(arg1->bitsize > 1);
+	arg2 = bb->build_trunc(arg2, std::bit_width(arg1->bitsize - 1));
+	arg2 = bb->build_inst(Op::ZEXT, arg2, arg1->bitsize);
+
 	Inst *res_indef = arg1_indef;
 	if (res_indef)
 	  res_indef = bb->build_inst(op, res_indef, arg2);
