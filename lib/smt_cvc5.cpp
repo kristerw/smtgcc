@@ -666,9 +666,9 @@ void Converter::convert_function()
     }
 }
 
-Solver_result run_solver(cvc5::Solver& solver, const char *str)
+Solver_result run_solver(cvc5::Solver& solver, const std::vector<cvc5::Term>& assumptions, const char *str)
 {
-  cvc5::Result result = solver.checkSat();
+  cvc5::Result result = solver.checkSatAssuming(assumptions);
   if (result.isUnsat())
     {
       return {Result_status::correct, {}};
@@ -718,6 +718,9 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
     solver.mkTerm(cvc5::Kind::NOT, {src_unique_ub_term});
   cvc5::Term tgt_unique_ub_term = conv.inst_as_bool(conv.tgt_unique_ub);
 
+  solver.assertFormula(not_src_common_ub_term);
+  solver.assertFormula(not_src_unique_ub_term);
+
   std::string warning;
 
   // Check that tgt does not have UB that is not in src.
@@ -727,12 +730,10 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
       && !(conv.tgt_unique_ub->op == Op::VALUE
 	   && conv.tgt_unique_ub->value() == 0))
     {
-      solver.push();
-      solver.assertFormula(not_src_common_ub_term);
-      solver.assertFormula(not_src_unique_ub_term);
-      solver.assertFormula(tgt_unique_ub_term);
+      std::vector<cvc5::Term> assumptions;
+      assumptions.push_back(tgt_unique_ub_term);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "UB");
+      Solver_result solver_result = run_solver(solver, assumptions, "UB");
       stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	return std::pair<SStats, Solver_result>(stats, solver_result);
@@ -741,7 +742,6 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	  assert(solver_result.message);
 	  warning = warning + *solver_result.message;
 	}
-      solver.pop();
     }
 
   // Check that the function calls abort/exit identically for src and tgt.
@@ -749,7 +749,7 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
       || conv.src_exit != conv.tgt_exit
       || conv.src_exit_val != conv.tgt_exit_val)
     {
-      solver.push();
+      std::vector<cvc5::Term> assumptions;
       cvc5::Term src_abort_term = conv.inst_as_bool(conv.src_abort);
       cvc5::Term tgt_abort_term = conv.inst_as_bool(conv.tgt_abort);
       cvc5::Term abort_differ =
@@ -768,11 +768,10 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
       cvc5::Term differ =
 	solver.mkTerm(cvc5::Kind::OR, {abort_differ, exit_differ});
       differ = solver.mkTerm(cvc5::Kind::OR, {differ, exit_val_differ});
-      solver.assertFormula(not_src_common_ub_term);
-      solver.assertFormula(not_src_unique_ub_term);
-      solver.assertFormula(differ);
+      assumptions.push_back(differ);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "abort/exit");
+      Solver_result solver_result =
+	run_solver(solver, assumptions, "abort/exit");
       stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	return std::pair<SStats, Solver_result>(stats, solver_result);
@@ -781,7 +780,6 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	  assert(solver_result.message);
 	  warning = warning + *solver_result.message;
 	}
-      solver.pop();
     }
 
   // Check that the returned value (if any) is the same for src and tgt.
@@ -789,7 +787,7 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
        || conv.src_retval_indef != conv.tgt_retval_indef)
       && !(conv.src_retval_indef && is_value_m1(conv.src_retval_indef)))
     {
-      solver.push();
+      std::vector<cvc5::Term> assumptions;
       assert(conv.src_retval && conv.tgt_retval);
       cvc5::Term src_term = conv.inst_as_bv(conv.src_retval);
       cvc5::Term tgt_term = conv.inst_as_bv(conv.tgt_retval);
@@ -817,28 +815,26 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	    }
 	}
 
-      solver.assertFormula(not_src_common_ub_term);
-      solver.assertFormula(not_src_unique_ub_term);
       if (conv.src_abort)
 	{
 	  cvc5::Term aborted_term = conv.inst_as_bool(conv.src_abort);
 	  cvc5::Term not_aborted =
 	    solver.mkTerm(cvc5::Kind::NOT, {conv.inst_as_bool(conv.src_abort)});
-	  solver.assertFormula(not_aborted);
+	  assumptions.push_back(not_aborted);
 	}
       if (conv.src_exit)
 	{
 	  cvc5::Term exited_term = conv.inst_as_bool(conv.src_exit);
 	  cvc5::Term not_exited =
 	    solver.mkTerm(cvc5::Kind::NOT, {conv.inst_as_bool(conv.src_exit)});
-	  solver.assertFormula(not_exited);
+	  assumptions.push_back(not_exited);
 	}
       cvc5::Term res1 =
 	solver.mkTerm(cvc5::Kind::DISTINCT, {src_term, tgt_term});
       cvc5::Term res2 = solver.mkTerm(cvc5::Kind::OR, {res1, is_more_indef});
-      solver.assertFormula(res2);
+      assumptions.push_back(res2);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "retval");
+      Solver_result solver_result = run_solver(solver, assumptions, "retval");
       stats.time[1] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
@@ -865,7 +861,6 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	  assert(solver_result.message);
 	  warning = warning + *solver_result.message;
 	}
-      solver.pop();
     }
 
   // Check that the global memory is consistent for src and tgt.
@@ -873,9 +868,7 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
       || conv.src_memory_size != conv.tgt_memory_size
       || conv.src_memory_indef != conv.tgt_memory_indef)
     {
-      solver.push();
-      solver.assertFormula(not_src_common_ub_term);
-      solver.assertFormula(not_src_unique_ub_term);
+      std::vector<cvc5::Term> assumptions;
       cvc5::Term src_mem = conv.inst_as_array(conv.src_memory);
       cvc5::Term src_mem_size = conv.inst_as_array(conv.src_memory_size);
       cvc5::Term src_mem_indef = conv.inst_as_array(conv.src_memory_indef);
@@ -901,14 +894,14 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
       cvc5::Term zero_id = solver.mkBitVector(func->module->ptr_id_bits, 0);
       cvc5::Term cond1 =
 	solver.mkTerm(cvc5::Kind::BITVECTOR_SGT, {id, zero_id});
-      solver.assertFormula(cond1);
+      assumptions.push_back(cond1);
 
       // Only check memory within a memory block.
       cvc5::Term mem_size =
 	solver.mkTerm(cvc5::Kind::SELECT, {src_mem_size, id});
       cvc5::Term cond2 =
 	solver.mkTerm(cvc5::Kind::BITVECTOR_ULT, {offset, mem_size});
-      solver.assertFormula(cond2);
+      assumptions.push_back(cond2);
 
       // Check that src and tgt are the same for the bits where src is defined
       // and that tgt is not more indefinite than src.
@@ -929,12 +922,12 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
       cvc5::Term zero_byte = solver.mkBitVector(8, 0);
       cvc5::Term cond4 =
 	solver.mkTerm(cvc5::Kind::DISTINCT, {tgt_more_indef, zero_byte});
-      solver.assertFormula(solver.mkTerm(cvc5::Kind::OR, {cond3, cond4}));
+      assumptions.push_back(solver.mkTerm(cvc5::Kind::OR, {cond3, cond4}));
 
       // TODO: Should make a better getBitVectorValue that prints values as
       // hex, etc.
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "Memory");
+      Solver_result solver_result = run_solver(solver, assumptions, "Memory");
       stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
@@ -960,7 +953,6 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	  assert(solver_result.message);
 	  warning = warning + *solver_result.message;
 	}
-      solver.pop();
     }
 
   // Check that tgt does not have UB that is not in src.
@@ -970,12 +962,10 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
       && !(conv.tgt_unique_ub->op == Op::VALUE
 	   && conv.tgt_unique_ub->value() == 0))
     {
-      solver.push();
-      solver.assertFormula(not_src_common_ub_term);
-      solver.assertFormula(not_src_unique_ub_term);
-      solver.assertFormula(tgt_unique_ub_term);
+      std::vector<cvc5::Term> assumptions;
+      assumptions.push_back(tgt_unique_ub_term);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "UB");
+      Solver_result solver_result = run_solver(solver, assumptions, "UB");
       stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	return std::pair<SStats, Solver_result>(stats, solver_result);
@@ -984,7 +974,6 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	  assert(solver_result.message);
 	  warning = warning + *solver_result.message;
 	}
-      solver.pop();
     }
 
   if (!warning.empty())
