@@ -887,14 +887,18 @@ void Converter::convert_function()
 // issue where tgt is more UB than src (which should have been detected by
 // an earlier check, but timed out instead of finding the issue).
 // Passing ctx.bool_val(false) for ub_expr disables the detection.
-Solver_result run_solver(z3::solver& s, const char *str, z3::expr& ub_expr)
+Solver_result run_solver(z3::solver& s, const z3::expr_vector& assumptions, const char *str, z3::expr& ub_expr)
 {
   if (config.verbose > 2)
     {
+      s.push();
+      for (auto expr : assumptions)
+	s.add(expr);
       fprintf(stderr, "SMTGCC: SMTLIB2 for %s:\n", str);
       fprintf(stderr, "%s", s.to_smt2().c_str());
+      s.pop();
     }
-  switch (s.check()) {
+  switch (s.check(assumptions)) {
   case z3::unsat:
     return {Result_status::correct, {}};
   case z3::sat:
@@ -975,6 +979,10 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
   z3::expr solver_ub_expr =
     config.optimize_ub ? tgt_unique_ub_expr : false_expr;
 
+  z3::solver solver(ctx);
+  solver.add(!src_common_ub_expr);
+  solver.add(!src_unique_ub_expr);
+
   std::string warning;
 
   // Check that tgt does not have UB that is not in src.
@@ -984,12 +992,11 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
       && !(conv.tgt_unique_ub->op == Op::VALUE
 	   && conv.tgt_unique_ub->value() == 0))
     {
-      z3::solver solver(ctx);
-      solver.add(!src_common_ub_expr);
-      solver.add(!src_unique_ub_expr);
-      solver.add(tgt_unique_ub_expr);
+      z3::expr_vector assumptions(ctx);
+      assumptions.push_back(tgt_unique_ub_expr);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "UB", false_expr);
+      Solver_result solver_result =
+	run_solver(solver, assumptions, "UB", false_expr);
       stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
@@ -1011,6 +1018,7 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
       || conv.src_exit != conv.tgt_exit
       || conv.src_exit_val != conv.tgt_exit_val)
     {
+      z3::expr_vector assumptions(ctx);
       z3::expr src_abort_expr = conv.inst_as_bool(conv.src_abort);
       z3::expr tgt_abort_expr = conv.inst_as_bool(conv.tgt_abort);
       z3::expr src_exit_expr = conv.inst_as_bool(conv.src_exit);
@@ -1018,16 +1026,13 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
       z3::expr src_exit_val_expr = conv.inst_as_bv(conv.src_exit_val);
       z3::expr tgt_exit_val_expr = conv.inst_as_bv(conv.tgt_exit_val);
 
-      z3::solver solver(ctx);
-      solver.add(!src_common_ub_expr);
-      solver.add(!src_unique_ub_expr);
-      solver.add(src_abort_expr != tgt_abort_expr
-		 || src_exit_expr != tgt_exit_expr
-		 || (src_exit_expr
-		     && (src_exit_val_expr != tgt_exit_val_expr)));
+      assumptions.push_back(src_abort_expr != tgt_abort_expr
+			    || src_exit_expr != tgt_exit_expr
+			    || (src_exit_expr
+				&& (src_exit_val_expr != tgt_exit_val_expr)));
       uint64_t start_time = get_time();
       Solver_result solver_result =
-	run_solver(solver, "abort/exit", solver_ub_expr);
+	run_solver(solver, assumptions, "abort/exit", solver_ub_expr);
       stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
@@ -1082,17 +1087,15 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 	    }
 	}
 
-      z3::solver solver(ctx);
-      solver.add(!src_common_ub_expr);
-      solver.add(!src_unique_ub_expr);
+      z3::expr_vector assumptions(ctx);
       if (conv.src_abort)
-	solver.add(!conv.inst_as_bool(conv.src_abort));
+	assumptions.push_back(!conv.inst_as_bool(conv.src_abort));
       if (conv.src_exit)
-	solver.add(!conv.inst_as_bool(conv.src_exit));
-      solver.add((src_expr != tgt_expr) || is_more_indef);
+	assumptions.push_back(!conv.inst_as_bool(conv.src_exit));
+      assumptions.push_back((src_expr != tgt_expr) || is_more_indef);
       uint64_t start_time = get_time();
       Solver_result solver_result =
-	run_solver(solver, "retval", solver_ub_expr);
+	run_solver(solver, assumptions, "retval", solver_ub_expr);
       stats.time[1] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
@@ -1140,15 +1143,13 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
       uint32_t ptr_offset_low = func->module->ptr_offset_low;
       z3::expr offset = ptr.extract(ptr_offset_high, ptr_offset_low);
 
-      z3::solver solver(ctx);
-      solver.add(!src_common_ub_expr);
-      solver.add(!src_unique_ub_expr);
+      z3::expr_vector assumptions(ctx);
 
       // Only check global memory.
-      solver.add(id > 0);
+      assumptions.push_back(id > 0);
 
       // Only check memory within a memory block.
-      solver.add(z3::ult(offset, z3::select(src_mem_size, id)));
+      assumptions.push_back(z3::ult(offset, z3::select(src_mem_size, id)));
 
       // Check that src and tgt are the same for the bits where src is defined
       // and that tgt is not more indefinite than src.
@@ -1157,11 +1158,11 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
       z3::expr tgt_value = z3::select(tgt_mem, ptr) & src_mask;
       z3::expr tgt_more_indef =
 	(z3::select(tgt_mem_indef, ptr) & src_mask) != 0;
-      solver.add(src_value != tgt_value || tgt_more_indef);
+      assumptions.push_back(src_value != tgt_value || tgt_more_indef);
 
       uint64_t start_time = get_time();
       Solver_result solver_result =
-	run_solver(solver, "Memory", solver_ub_expr);
+	run_solver(solver, assumptions, "Memory", solver_ub_expr);
       stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
@@ -1196,12 +1197,11 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
       && !(conv.tgt_unique_ub->op == Op::VALUE
 	   && conv.tgt_unique_ub->value() == 0))
     {
-      z3::solver solver(ctx);
-      solver.add(!src_common_ub_expr);
-      solver.add(!src_unique_ub_expr);
-      solver.add(tgt_unique_ub_expr);
+      z3::expr_vector assumptions(ctx);
+      assumptions.push_back(tgt_unique_ub_expr);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "UB", false_expr);
+      Solver_result solver_result =
+	run_solver(solver, assumptions, "UB", false_expr);
       stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
