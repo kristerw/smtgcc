@@ -692,14 +692,18 @@ std::string value_string(const Term& val)
   return "0x" + val.value<std::string>(16);
 }
 
-Solver_result run_solver(Bitwuzla& solver, const char *str, Converter& conv, Inst *ub_cond = nullptr)
+Solver_result run_solver(Bitwuzla& solver, const std::vector<Term>& assumptions, const char *str, Converter& conv, Inst *ub_cond = nullptr)
 {
   if (config.verbose > 2)
     {
+      solver.push(1);
+      for (auto& term : assumptions)
+	solver.assert_formula(term);
       fprintf(stderr, "SMTGCC: SMTLIB2 for %s:\n", str);
       solver.print_formula(std::cerr);
+      solver.pop(1);
     }
-  Result result = solver.check_sat();
+  Result result = solver.check_sat(assumptions);
   if (result == Result::UNSAT)
     {
       return {Result_status::correct, {}};
@@ -776,6 +780,9 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
   Term not_src_unique_ub_term = tm.mk_term(Kind::NOT, {src_unique_ub_term});
   Term tgt_unique_ub_term = conv.inst_as_bool(conv.tgt_unique_ub);
 
+  solver.assert_formula(not_src_common_ub_term);
+  solver.assert_formula(not_src_unique_ub_term);
+
   std::string warning;
 
   // Check that tgt does not have UB that is not in src.
@@ -785,12 +792,10 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       && !(conv.tgt_unique_ub->op == Op::VALUE
 	   && conv.tgt_unique_ub->value() == 0))
     {
-      solver.push(1);
-      solver.assert_formula(not_src_common_ub_term);
-      solver.assert_formula(not_src_unique_ub_term);
-      solver.assert_formula(tgt_unique_ub_term);
+      std::vector<Term> assumptions;
+      assumptions.push_back(tgt_unique_ub_term);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "UB", conv);
+      Solver_result solver_result = run_solver(solver, assumptions, "UB", conv);
       stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	return std::pair<SStats, Solver_result>(stats, solver_result);
@@ -799,7 +804,6 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 	  assert(solver_result.message);
 	  warning = warning + *solver_result.message;
 	}
-      solver.pop(1);
     }
 
   // Check that the function calls abort/exit identically for src and tgt.
@@ -807,7 +811,7 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       || conv.src_exit != conv.tgt_exit
       || conv.src_exit_val != conv.tgt_exit_val)
     {
-      solver.push(1);
+      std::vector<Term> assumptions;
       Term src_abort_term = conv.inst_as_bool(conv.src_abort);
       Term tgt_abort_term = conv.inst_as_bool(conv.tgt_abort);
       Term abort_differ =
@@ -823,12 +827,10 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       exit_val_differ = tm.mk_term(Kind::AND, {src_exit_term, exit_val_differ});
       Term differ = tm.mk_term(Kind::OR, {abort_differ, exit_differ});
       differ = tm.mk_term(Kind::OR, {differ, exit_val_differ});
-      solver.assert_formula(not_src_common_ub_term);
-      solver.assert_formula(not_src_unique_ub_term);
-      solver.assert_formula(differ);
+      assumptions.push_back(differ);
       uint64_t start_time = get_time();
       Solver_result solver_result =
-	run_solver(solver, "abort/exit", conv, conv.tgt_unique_ub);
+	run_solver(solver, assumptions, "abort/exit", conv, conv.tgt_unique_ub);
       stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	return std::pair<SStats, Solver_result>(stats, solver_result);
@@ -837,7 +839,6 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 	  assert(solver_result.message);
 	  warning = warning + *solver_result.message;
 	}
-      solver.pop(1);
     }
 
   // Check that the returned value (if any) is the same for src and tgt.
@@ -845,7 +846,7 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
        || conv.src_retval_indef != conv.tgt_retval_indef)
       && !(conv.src_retval_indef && is_value_m1(conv.src_retval_indef)))
     {
-      solver.push(1);
+      std::vector<Term> assumptions;
       assert(conv.src_retval && conv.tgt_retval);
       Term src_term = conv.inst_as_bv(conv.src_retval);
       Term tgt_term = conv.inst_as_bv(conv.tgt_retval);
@@ -870,28 +871,26 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 	    }
 	}
 
-      solver.assert_formula(not_src_common_ub_term);
-      solver.assert_formula(not_src_unique_ub_term);
       if (conv.src_abort)
 	{
 	  Term aborted_term = conv.inst_as_bool(conv.src_abort);
 	  Term not_aborted =
 	    tm.mk_term(Kind::NOT, {conv.inst_as_bool(conv.src_abort)});
-	  solver.assert_formula(not_aborted);
+	  assumptions.push_back(not_aborted);
 	}
       if (conv.src_exit)
 	{
 	  Term exited_term = conv.inst_as_bool(conv.src_exit);
 	  Term not_exited =
 	    tm.mk_term(Kind::NOT, {conv.inst_as_bool(conv.src_exit)});
-	  solver.assert_formula(not_exited);
+	  assumptions.push_back(not_exited);
 	}
       Term res1 = tm.mk_term(Kind::DISTINCT, {src_term, tgt_term});
       Term res2 = tm.mk_term(Kind::OR, {res1, is_more_indef});
-      solver.assert_formula(res2);
+      assumptions.push_back(res2);
       uint64_t start_time = get_time();
       Solver_result solver_result =
-	run_solver(solver, "retval", conv, conv.tgt_unique_ub);
+	run_solver(solver, assumptions, "retval", conv, conv.tgt_unique_ub);
       stats.time[1] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
@@ -918,7 +917,6 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 	  assert(solver_result.message);
 	  warning = warning + *solver_result.message;
 	}
-      solver.pop(1);
     }
 
   // Check that the global memory is consistent for src and tgt.
@@ -926,9 +924,7 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       || conv.src_memory_size != conv.tgt_memory_size
       || conv.src_memory_indef != conv.tgt_memory_indef)
     {
-      solver.push(1);
-      solver.assert_formula(not_src_common_ub_term);
-      solver.assert_formula(not_src_unique_ub_term);
+      std::vector<Term> assumptions;
       Term src_mem = conv.inst_as_array(conv.src_memory);
       Term src_mem_size = conv.inst_as_array(conv.src_memory_size);
       Term src_mem_indef = conv.inst_as_array(conv.src_memory_indef);
@@ -949,12 +945,12 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       // Only check global memory.
       Term zero_id = tm.mk_bv_zero(tm.mk_bv_sort(func->module->ptr_id_bits));
       Term cond1 = tm.mk_term(Kind::BV_SGT, {id, zero_id});
-      solver.assert_formula(cond1);
+      assumptions.push_back(cond1);
 
       // Only check memory within a memory block.
       Term mem_size = tm.mk_term(Kind::ARRAY_SELECT, {src_mem_size, id});
       Term cond2 = tm.mk_term(Kind::BV_ULT, {offset, mem_size});
-      solver.assert_formula(cond2);
+      assumptions.push_back(cond2);
 
       // Check that src and tgt are the same for the bits where src is defined
       // and that tgt is not more indefinite than src.
@@ -969,11 +965,11 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       Term tgt_more_indef = tm.mk_term(Kind::BV_AND, {tgt_indef, src_mask});
       Term zero_byte = tm.mk_bv_zero(tm.mk_bv_sort(8));
       Term cond4 = tm.mk_term(Kind::DISTINCT, {tgt_more_indef, zero_byte});
-      solver.assert_formula(tm.mk_term(Kind::OR, {cond3, cond4}));
+      assumptions.push_back(tm.mk_term(Kind::OR, {cond3, cond4}));
 
       uint64_t start_time = get_time();
       Solver_result solver_result =
-	run_solver(solver, "Memory", conv, conv.tgt_unique_ub);
+	run_solver(solver, assumptions, "Memory", conv, conv.tgt_unique_ub);
       stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
@@ -997,7 +993,6 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 	  assert(solver_result.message);
 	  warning = warning + *solver_result.message;
 	}
-      solver.pop(1);
     }
 
   // Check that tgt does not have UB that is not in src.
@@ -1007,12 +1002,10 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       && !(conv.tgt_unique_ub->op == Op::VALUE
 	   && conv.tgt_unique_ub->value() == 0))
     {
-      solver.push(1);
-      solver.assert_formula(not_src_common_ub_term);
-      solver.assert_formula(not_src_unique_ub_term);
-      solver.assert_formula(tgt_unique_ub_term);
+      std::vector<Term> assumptions;
+      assumptions.push_back(tgt_unique_ub_term);
       uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, "UB", conv);
+      Solver_result solver_result = run_solver(solver, assumptions, "UB", conv);
       stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	return std::pair<SStats, Solver_result>(stats, solver_result);
@@ -1021,7 +1014,6 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 	  assert(solver_result.message);
 	  warning = warning + *solver_result.message;
 	}
-      solver.pop(1);
     }
 
   if (!warning.empty())

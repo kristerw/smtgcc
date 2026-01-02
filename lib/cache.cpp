@@ -150,7 +150,7 @@ std::string Cache::hash(Function *func)
   // applies when the SMT code is updated or when inst_info is reordered.
   // Adding or removing inst_info values does not require the version to be
   // updated, as we instead add the number of inst_info as a separate value.
-  const uint32_t version = 0;
+  const uint32_t version = 1;
   h.add(version);
   const uint32_t nof_inst_info = inst_info.size();
   h.add(nof_inst_info);
