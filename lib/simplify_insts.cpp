@@ -1823,6 +1823,20 @@ Inst *Simplify::simplify_ite()
       return build_inst(Op::ITE, new_inst, arg2, arg3->args[2]);
     }
 
+  // ite c, (array_store x, y, z1), (array_store x, y, z2)
+  //   -> array_store x, y, (ite c, z1, z2)
+  // and similarly for array_set_flag, array_set_indef, array_set_size.
+  if (arg2->op == arg3->op
+      && (arg2->op == Op::ARRAY_STORE
+	  || arg2->op == Op::ARRAY_SET_FLAG
+	  || arg2->op == Op::ARRAY_SET_INDEF
+	  || arg2->op == Op::ARRAY_SET_SIZE)
+      && arg2->args[0] == arg3->args[0]
+      && arg2->args[1] == arg3->args[1])
+    {
+      Inst *new_inst = build_inst(Op::ITE, arg1, arg2->args[2], arg3->args[2]);
+      return build_inst(arg2->op, arg2->args[0], arg2->args[1], new_inst);
+    }
   return inst;
 }
 
