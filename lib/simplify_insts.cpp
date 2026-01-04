@@ -1223,6 +1223,23 @@ Inst *Simplify::simplify_mul()
       return build_inst(Op::MUL, arg1->args[0], c);
     }
 
+  // mul (zext (extract x, high, c)), (1 << c) -> zext (and x, ~((1 << c) - 1))
+  if (is_value_pow2(arg2)
+      && arg1->op == Op::ZEXT
+      && arg1->args[0]->op == Op::EXTRACT
+      && arg1->args[0]->args[2]->value() == ctz(arg2->value()))
+    {
+      Inst *x = arg1->args[0]->args[0];
+      if (arg1->args[0]->args[1]->value() != x->bitsize - 1)
+	x = build_inst(Op::EXTRACT, x, arg1->args[0]->args[1]->value(), 0);
+      int shift_amount = arg1->args[0]->args[2]->value();
+      Inst *mask = value_inst(((__int128)-1) << shift_amount, x->bitsize);
+      Inst *res = build_inst(Op::AND, x, mask);
+      if (res->bitsize < inst->bitsize)
+	res = build_inst(Op::ZEXT, res, inst->bitsize);
+      return res;
+    }
+
   // mul (sext x), c -> mul (zext x), c if c = c1 << c2 and the sign extension
   // extends the value with <= c2 bits.
   if (arg1->op == Op::SEXT && arg2->op == Op::VALUE)
