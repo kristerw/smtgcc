@@ -41,6 +41,7 @@ lib_sources = \
 	lib/check.cpp \
 	lib/cse.cpp \
 	lib/dead_code_elimination.cpp \
+	lib/eliminate_registers.cpp \
 	lib/loop_unroll.cpp \
 	lib/memory_opt.cpp \
 	lib/read_aarch64.cpp \

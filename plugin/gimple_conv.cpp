@@ -8690,8 +8690,9 @@ Function *process_function(Module *module, CommonState *state, function *fun, bo
   return func.process_function();
 }
 
-void unroll_and_optimize(Function *func)
+void unroll_and_optimize(Function *func, int64_t& symbolic_id)
 {
+  eliminate_registers(func, symbolic_id);
   simplify_insts(func);
   dead_code_elimination(func);
   simplify_cfg(func);
@@ -8714,8 +8715,10 @@ void unroll_and_optimize(Function *func)
 
 void unroll_and_optimize(Module *module)
 {
+  // TODO: Handle the case where the functions already contain Op::SYMBOLIC.
+  int64_t symbolic_id = 0;
   for (auto func : module->functions)
-    unroll_and_optimize(func);
+    unroll_and_optimize(func, symbolic_id);
 }
 
 CommonState::CommonState(Arch arch)

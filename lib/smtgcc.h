@@ -481,6 +481,10 @@ void cse(Module *module);
 void dead_code_elimination(Function *func);
 void dead_code_elimination(Module *module);
 
+// eliminate_registers.cpp
+void eliminate_registers(Function *func, int64_t& symbolic_id);
+void eliminate_registers(Module *module);
+
 // loop_unroll.cpp
 bool loop_unroll(Function *func, int nof_unroll = unroll_limit);
 bool loop_unroll(Module *module);

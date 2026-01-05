@@ -35,7 +35,7 @@ struct CommonState {
 };
 
 smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun, bool is_tgt_func);
-void unroll_and_optimize(smtgcc::Function *func);
+void unroll_and_optimize(smtgcc::Function *func, int64_t& symbolic_id);
 void unroll_and_optimize(smtgcc::Module *module);
 smtgcc::Module *create_module(Arch arch = Arch::gimple);
 uint64_t bitsize_for_type(tree type);

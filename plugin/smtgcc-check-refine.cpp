@@ -58,7 +58,7 @@ unsigned int tv_pass::execute(function *fun)
       bool is_tgt_func = !strcmp(name, "tgt");
 
       Function *func = process_function(module, &state, fun, is_tgt_func);
-      unroll_and_optimize(func);
+      unroll_and_optimize(func, state.symbolic_id);
       if (module->functions.size() == 2)
 	{
 	  // TODO: Is canonicalize memory needed? It should obviously be
