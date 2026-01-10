@@ -4901,7 +4901,6 @@ void Converter::process_cfn_cond_fminmax(gimple *stmt)
   auto[arg1, arg1_indef] = tree2inst_indef(arg1_expr);
   tree arg2_expr = gimple_call_arg(stmt, 1);
   tree arg2_type = TREE_TYPE(arg2_expr);
-  tree arg2_elem_type = TREE_TYPE(arg2_type);
   auto[arg2, arg2_indef] = tree2inst_indef(arg2_expr);
   tree arg3_expr = gimple_call_arg(stmt, 2);
   auto[arg3, arg3_indef] = tree2inst_indef(arg3_expr);
@@ -4913,8 +4912,19 @@ void Converter::process_cfn_cond_fminmax(gimple *stmt)
   combined_fn code = gimple_call_combined_fn(stmt);
   assert(code == CFN_COND_FMIN || code == CFN_COND_FMAX);
 
-  uint32_t elem_bitsize = bitsize_for_type(arg2_elem_type);
-  uint32_t nof_elt = bitsize_for_type(arg2_type) / elem_bitsize;
+  uint32_t elem_bitsize;
+  uint32_t nof_elt;
+  if (VECTOR_TYPE_P(arg2_type))
+    {
+      tree arg2_elem_type = TREE_TYPE(arg2_type);
+      elem_bitsize = bitsize_for_type(arg2_elem_type);
+      nof_elt = bitsize_for_type(arg2_type) / elem_bitsize;
+    }
+  else
+    {
+      elem_bitsize = bitsize_for_type(arg2_type);
+      nof_elt = 1;
+    }
   Inst *op_inst = nullptr;
   Inst *op_indef = nullptr;
   for (uint64_t i = 0; i < nof_elt; i++)
@@ -4950,15 +4960,35 @@ void Converter::process_cfn_cond_fminmax(gimple *stmt)
 	}
     }
 
-  auto [ret_inst, ret_indef] =
-    gen_vec_cond(arg1, arg1_indef, op_inst, op_indef, arg4, arg4_indef,
-		 arg1_type, arg4_type);
+  Inst *res;
+  Inst *res_indef = nullptr;
+  if (VECTOR_TYPE_P(arg1_type))
+    {
+      std::tie(res, res_indef) =
+	gen_vec_cond(arg1, arg1_indef, op_inst, op_indef, arg4, arg4_indef,
+		     arg1_type, arg4_type);
+    }
+  else
+    {
+      assert(TREE_CODE(arg1_type) == BOOLEAN_TYPE);
+      if (TYPE_PRECISION(arg1_type) != 1)
+	arg1 = bb->build_extract_bit(arg1, 0);
+      res = bb->build_inst(Op::ITE, arg1, op_inst, arg4);
+      if (op_indef || arg4_indef)
+	{
+	  if (!op_indef)
+	    op_indef = bb->value_inst(0, op_inst->bitsize);
+	  if (!arg4_indef)
+	    arg4_indef = bb->value_inst(0, arg4->bitsize);
+	  res_indef = bb->build_inst(Op::ITE, arg1, op_indef, arg4_indef);
+	}
+    }
 
   if (lhs)
     {
-      tree2instruction.insert({lhs, ret_inst});
-      if (ret_indef)
-	tree2indef.insert({lhs, ret_indef});
+      tree2instruction.insert({lhs, res});
+      if (res_indef)
+	tree2indef.insert({lhs, res_indef});
     }
 }
 
