@@ -29,6 +29,12 @@ struct Not_implemented
   const std::string msg;
 };
 
+struct Error
+{
+  Error(const std::string& msg) : msg{msg} {}
+  const std::string msg;
+};
+
 struct Parse_error
 {
   Parse_error(const std::string& msg, int line) : msg{msg}, line{line} {}

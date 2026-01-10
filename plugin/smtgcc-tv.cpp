@@ -17,6 +17,8 @@ using namespace smtgcc;
 
 int plugin_is_GPL_compatible;
 
+struct my_plugin;
+
 // Function keeping track of the translation validation information for
 // a function.
 struct tv_function
@@ -28,13 +30,14 @@ struct tv_function
   Module *module = nullptr;
   CommonState *state = nullptr;
 
-  void check();
+  void check(my_plugin *plugin_data);
   void delete_ir();
 };
 
 struct my_plugin {
   bool has_run_ssa_pass = false;
   bool new_functions_are_ssa = false;
+  bool error_occurred = false;
 
   std::map<unsigned int, tv_function *> fun2tvfun;
 };
@@ -74,7 +77,7 @@ static Function *convert_function(Module *module, CommonState *state, std::set<s
   return nullptr;
 }
 
-void tv_function::check()
+void tv_function::check(my_plugin *plugin_data)
 {
   try
     {
@@ -114,9 +117,24 @@ void tv_function::check()
 	  errors.insert(error.msg);
 	}
     }
+  catch (Error& error)
+    {
+      fprintf(stderr, "Error: %s\n", error.msg.c_str());
+
+      // The library may be in a bad state. For example, if the SMT
+      // solver has thrown an out of memory error (because the solver
+      // ignored the memory limit), it may not have freed the memory,
+      // and all subsequent solver runs may return "unknown" even if
+      // they could have been analyzed. This pollutes the cache, so
+      // future compilations will get an incorrectly cached timeout
+      // message even if we compile them separately without the
+      // function that ran out of memory. So we stop here instead
+      // of (incorrectly) processing the subsequent functions.
+      plugin_data->error_occurred = true;
+    }
 }
 
-static void check(opt_pass *pass, tv_function *tv_fun)
+static void check(opt_pass *pass, my_plugin *plugin_data, tv_function *tv_fun)
 {
   Module *next_module = create_module();
   CommonState *next_state = new CommonState();
@@ -152,7 +170,7 @@ static void check(opt_pass *pass, tv_function *tv_fun)
 	      tv_fun->pass_name = pass->name;
 	      return;
 	    }
-	  tv_fun->check();
+	  tv_fun->check(plugin_data);
 	}
       tv_fun->delete_ir();
     }
@@ -165,12 +183,16 @@ static void check(opt_pass *pass, tv_function *tv_fun)
 
 static void ipa_pass(opt_pass *pass, my_plugin *plugin_data)
 {
+  if (plugin_data->error_occurred)
+    return;
   if (plugin_data->has_run_ssa_pass)
     plugin_data->new_functions_are_ssa = true;
 
   struct cgraph_node *node;
   FOR_EACH_FUNCTION_WITH_GIMPLE_BODY(node)
     {
+      if (plugin_data->error_occurred)
+	return;
       function *fun = node->get_fun();
       if (!plugin_data->fun2tvfun.contains(DECL_UID(fun->decl)))
 	continue;
@@ -181,7 +203,7 @@ static void ipa_pass(opt_pass *pass, my_plugin *plugin_data)
 	continue;
 
       push_cfun(fun);
-      check(pass, tv_fun);
+      check(pass, plugin_data, tv_fun);
       tv_fun->delete_ir();
       pop_cfun();
     }
@@ -189,6 +211,8 @@ static void ipa_pass(opt_pass *pass, my_plugin *plugin_data)
 
 static void gimple_pass(opt_pass *pass, my_plugin *plugin_data)
 {
+  if (plugin_data->error_occurred)
+    return;
   tv_function *tv_fun;
   if (!plugin_data->fun2tvfun.contains(DECL_UID(cfun->decl)))
     {
@@ -224,7 +248,7 @@ static void gimple_pass(opt_pass *pass, my_plugin *plugin_data)
       return;
     }
 
-  check(pass, tv_fun);
+  check(pass, plugin_data, tv_fun);
 }
 
 static void pass_execution(void *event_data, void *data)

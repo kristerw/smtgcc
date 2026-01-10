@@ -144,7 +144,7 @@ static void finish(void *, void *data)
 		      state.func_name.c_str(), msg.c_str());
 	    }
 	}
-      catch (Parse_error error)
+      catch (Parse_error& error)
 	{
 	  fprintf(stderr, "%s:%d: Parse error: %s\n", file_name, error.line,
 		  error.msg.c_str());
@@ -152,6 +152,21 @@ static void finish(void *, void *data)
       catch (Not_implemented& error)
 	{
 	  fprintf(stderr, "Not implemented: %s\n", error.msg.c_str());
+	}
+      catch (Error& error)
+	{
+	  fprintf(stderr, "Error: %s\n", error.msg.c_str());
+
+	  // The library may be in a bad state. For example, if the SMT
+	  // solver has thrown an out of memory error (because the solver
+	  // ignored the memory limit), it may not have freed the memory,
+	  // and all subsequent solver runs may return "unknown" even if
+	  // they could have been analyzed. This pollutes the cache, so
+	  // future compilations will get an incorrectly cached timeout
+	  // message even if we compile them separately without the
+	  // function that ran out of memory. So we exit here instead
+	  // of (incorrectly) processing the subsequent functions.
+	  return;
 	}
     }
 }

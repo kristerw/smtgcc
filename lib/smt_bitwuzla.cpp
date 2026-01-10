@@ -703,7 +703,15 @@ Solver_result run_solver(Bitwuzla& solver, const std::vector<Term>& assumptions,
       solver.print_formula(std::cerr);
       solver.pop(1);
     }
-  Result result = solver.check_sat(assumptions);
+  Result result;
+  try
+    {
+      result = solver.check_sat(assumptions);
+    }
+  catch (const std::bad_alloc& e)
+    {
+      throw Error("Bitwuzla out of memory");
+    }
   if (result == Result::UNSAT)
     {
       return {Result_status::correct, {}};
