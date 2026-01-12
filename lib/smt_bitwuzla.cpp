@@ -115,7 +115,7 @@ Term Converter::inst_as_bool(const Inst *inst)
   Term bv = inst2bv.at(inst);
   Sort bv1 = tm.mk_bv_sort(1);
   Term term = tm.mk_term(Kind::EQUAL, {bv, tm.mk_bv_one(bv1)});
-  if (inst->op == Op::VALUE)
+  if (bv.is_value())
     term = solver.simplify(term);
   inst2bool.insert({inst, term});
   return term;
@@ -354,7 +354,7 @@ void Converter::build_bv_binary_smt(const Inst *inst)
 	// folded at IR level (as the IR limits constant width to 128 bits),
 	// so we we fold it here to get nicer SMT2 code when debugging.
 	Term concat = tm.mk_term(Kind::BV_CONCAT, {arg1, arg2});
-	if (inst->args[0]->op == Op::VALUE && inst->args[1]->op == Op::VALUE)
+	if (arg1.is_value() && arg2.is_value())
 	  concat = solver.simplify(concat);
 	inst2bv.insert({inst, concat});
       }
