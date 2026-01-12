@@ -429,8 +429,23 @@ void Converter::build_conversion_smt(const Inst *inst)
 	Term arg = inst_as_bv(inst->args[0]);
 	assert(inst->args[0]->bitsize < inst->bitsize);
 	unsigned bits =  inst->bitsize - inst->args[0]->bitsize;
-	Term res = tm.mk_term(Kind::BV_SIGN_EXTEND, {arg}, {bits});
-	inst2bv.insert({inst, res});
+	if (inst->args[0]->bitsize == 1 && inst->bitsize <= 128)
+	  {
+	    Sort b1_sort = tm.mk_bv_sort(1);
+	    Term arg = inst_as_bool(inst->args[0]);
+	    Term zero = tm.mk_bv_value_uint64(b1_sort, 0);
+	    zero = tm.mk_term(Kind::BV_ZERO_EXTEND, {zero}, {bits});
+	    zero = solver.simplify(zero);
+	    Term m1 = tm.mk_bv_value_uint64(b1_sort, 1);
+	    m1 = tm.mk_term(Kind::BV_SIGN_EXTEND, {m1}, {bits});
+	    m1 = solver.simplify(m1);
+	    inst2bv.insert({inst, ite(arg, m1, zero)});
+	  }
+	else
+	  {
+	    Term res = tm.mk_term(Kind::BV_SIGN_EXTEND, {arg}, {bits});
+	    inst2bv.insert({inst, res});
+	  }
       }
       break;
     case Op::ZEXT:
@@ -438,8 +453,23 @@ void Converter::build_conversion_smt(const Inst *inst)
 	Term arg = inst_as_bv(inst->args[0]);
 	assert(inst->args[0]->bitsize < inst->bitsize);
 	unsigned bits =  inst->bitsize - inst->args[0]->bitsize;
-	Term res = tm.mk_term(Kind::BV_ZERO_EXTEND, {arg}, {bits});
-	inst2bv.insert({inst, res});
+	if (inst->args[0]->bitsize == 1 && inst->bitsize <= 128)
+	  {
+	    Sort b1_sort = tm.mk_bv_sort(1);
+	    Term arg = inst_as_bool(inst->args[0]);
+	    Term zero = tm.mk_bv_value_uint64(b1_sort, 0);
+	    zero = tm.mk_term(Kind::BV_ZERO_EXTEND, {zero}, {bits});
+	    zero = solver.simplify(zero);
+	    Term one = tm.mk_bv_value_uint64(b1_sort, 1);
+	    one = tm.mk_term(Kind::BV_ZERO_EXTEND, {one}, {bits});
+	    one = solver.simplify(one);
+	    inst2bv.insert({inst, ite(arg, one, zero)});
+	  }
+	else
+	  {
+	    Term res = tm.mk_term(Kind::BV_ZERO_EXTEND, {arg}, {bits});
+	    inst2bv.insert({inst, res});
+	  }
       }
       break;
     case Op::F2U:
