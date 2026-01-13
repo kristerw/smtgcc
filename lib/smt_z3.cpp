@@ -439,7 +439,7 @@ void Converter::build_bv_binary_smt(const Inst *inst)
     case Op::UDIV:
       inst2bv.insert({inst, z3::udiv(arg1, arg2)});
       break;
-    case Op::SADD_WRAPS:
+    case Op::SADD_OVERFLOW:
       {
 	z3::expr earg1 = z3::sext(arg1, 1);
 	z3::expr earg2 = z3::sext(arg2, 1);
@@ -448,7 +448,7 @@ void Converter::build_bv_binary_smt(const Inst *inst)
 	inst2bool.insert({inst, eadd != eres});
       }
       break;
-    case Op::SMUL_WRAPS:
+    case Op::SMUL_OVERFLOW:
       {
 	z3::expr earg1 = z3::sext(arg1, inst->args[0]->bitsize);
 	z3::expr earg2 = z3::sext(arg2, inst->args[0]->bitsize);
@@ -460,7 +460,7 @@ void Converter::build_bv_binary_smt(const Inst *inst)
     case Op::SREM:
       inst2bv.insert({inst, z3::srem(arg1, arg2)});
       break;
-    case Op::SSUB_WRAPS:
+    case Op::SSUB_OVERFLOW:
       {
 	z3::expr earg1 = z3::sext(arg1, 1);
 	z3::expr earg2 = z3::sext(arg2, 1);

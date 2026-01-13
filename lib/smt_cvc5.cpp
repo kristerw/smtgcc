@@ -312,16 +312,16 @@ void Converter::build_bv_binary_smt(const Inst *inst)
     case Op::UDIV:
       inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_UDIV, {arg1, arg2})});
       break;
-    case Op::SADD_WRAPS:
+    case Op::SADD_OVERFLOW:
       inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SADDO, {arg1, arg2})});
       break;
-    case Op::SMUL_WRAPS:
+    case Op::SMUL_OVERFLOW:
       inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SMULO, {arg1, arg2})});
       break;
     case Op::SREM:
       inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SREM, {arg1, arg2})});
       break;
-    case Op::SSUB_WRAPS:
+    case Op::SSUB_OVERFLOW:
       inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SSUBO, {arg1, arg2})});
       break;
     case Op::UREM:

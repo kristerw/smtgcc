@@ -80,7 +80,7 @@ private:
   Inst *simplify_neg();
   Inst *simplify_not();
   Inst *simplify_or();
-  Inst *simplify_sadd_wraps();
+  Inst *simplify_sadd_overflow();
   Inst *simplify_s2f();
   Inst *simplify_u2f();
   Inst *simplify_feq();
@@ -90,8 +90,8 @@ private:
   Inst *simplify_slt();
   Inst *simplify_ite();
   Inst *simplify_shl();
-  Inst *simplify_smul_wraps();
-  Inst *simplify_ssub_wraps();
+  Inst *simplify_smul_overflow();
+  Inst *simplify_ssub_overflow();
   Inst *simplify_sub();
   Inst *simplify_ule();
   Inst *simplify_ult();
@@ -1292,7 +1292,7 @@ Inst *Simplify::simplify_not()
   return inst;
 }
 
-// Helper function for simplify_sadd_wraps and simplify_ssub_wraps.
+// Helper function for simplify_sadd_overflow and simplify_ssub_overflow.
 // Check if inst is an instruction that extends more than one bit, or a
 // VALUE where the two most significant bits are `00` or `11`.
 bool is_ext(Inst *inst)
@@ -1475,17 +1475,17 @@ Inst *Simplify::simplify_slt()
   return inst;
 }
 
-Inst *Simplify::simplify_sadd_wraps()
+Inst *Simplify::simplify_sadd_overflow()
 {
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // sadd_wraps x, 0 -> false
+  // sadd_overflow x, 0 -> false
   if (is_value_zero(arg2))
     return value_inst(0, 1);
 
-  // sadd_wraps x, c -> slt (maxint - c), x when c > 0
-  // sadd_wraps x, c -> slt x, (minint - c) when c < 0
+  // sadd_overflow x, c -> slt (maxint - c), x when c > 0
+  // sadd_overflow x, c -> slt x, (minint - c) when c < 0
   if (arg2->op == Op::VALUE)
     {
       __int128 c = arg2->signed_value();
@@ -1505,7 +1505,7 @@ Inst *Simplify::simplify_sadd_wraps()
 	}
     }
 
-  // sadd_wraps x, y is always false if x and y are zext/sext that expand
+  // sadd_overflow x, y is always false if x and y are zext/sext that expand
   // more than one bit, or constant that could have been extended in that
   // way. This is a common case for e.g. char/short arithmetic that is
   // promoted to int.
@@ -1515,12 +1515,12 @@ Inst *Simplify::simplify_sadd_wraps()
   return inst;
  }
 
-Inst *Simplify::simplify_ssub_wraps()
+Inst *Simplify::simplify_ssub_overflow()
 {
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // ssub_wraps 0, x -> x == minint
+  // ssub_overflow 0, x -> x == minint
   if (is_value_zero(arg1))
     {
       unsigned __int128 minint = ((unsigned __int128)1) << (arg2->bitsize - 1);
@@ -1528,12 +1528,12 @@ Inst *Simplify::simplify_ssub_wraps()
       return build_inst(Op::EQ, arg2, minint_inst);
     }
 
-  // ssub_wraps x, 0 -> false
+  // ssub_overflow x, 0 -> false
   if (is_value_zero(arg2))
     return value_inst(0, 1);
 
-  // ssub_wraps x, c -> slt (minint + c), x when c > 0
-  // ssub_wraps x, c -> slt x, (maxint + c) when c < 0
+  // ssub_overflow x, c -> slt (minint + c), x when c > 0
+  // ssub_overflow x, c -> slt x, (maxint + c) when c < 0
   if (arg2->op == Op::VALUE)
     {
       __int128 c = arg2->signed_value();
@@ -1553,37 +1553,37 @@ Inst *Simplify::simplify_ssub_wraps()
 	}
     }
 
-  // ssub_wraps x, y is always false if x and y are zext/sext that expand
+  // ssub_overflow x, y is always false if x and y are zext/sext that expand
   // more than one bit, or constant that could have been extended in that
   // way. This is a common case for e.g. char/short arithmetic that is
   // promoted to int.
   if (is_ext(arg1) && is_ext(arg2))
     return value_inst(0, 1);
 
-  // For Boolean y: ssub_wraps x, (sext y) -> sadd_wraps x, (zext y)
+  // For Boolean y: ssub_overflow x, (sext y) -> sadd_overflow x, (zext y)
   if (is_boolean_sext(arg2))
     {
       Inst *new_inst = build_inst(Op::ZEXT, arg2->args[0], arg2->args[1]);
-      return build_inst(Op::SADD_WRAPS, arg1, new_inst);
+      return build_inst(Op::SADD_OVERFLOW, arg1, new_inst);
     }
 
   return inst;
 }
 
-Inst *Simplify::simplify_smul_wraps()
+Inst *Simplify::simplify_smul_overflow()
 {
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  // smul_wraps x, 0 -> false
+  // smul_overflow x, 0 -> false
   if (is_value_zero(arg2))
     return value_inst(0, 1);
 
-  // smul_wraps x, 1 -> false
+  // smul_overflow x, 1 -> false
   if (is_value_one(arg2))
     return value_inst(0, 1);
 
-  // smul_wraps x, -1 -> eq x, minint
+  // smul_overflow x, -1 -> eq x, minint
   if (is_value_m1(arg2))
     {
       unsigned __int128 minint = ((unsigned __int128)1) << (arg1->bitsize - 1);
@@ -1591,7 +1591,7 @@ Inst *Simplify::simplify_smul_wraps()
       return build_inst(Op::EQ, arg1, minint_inst);
     }
 
-  // smul_wraps x, c ->  or (lt x, minint / c), (lt maxint / c, x)
+  // smul_overflow x, c ->  or (lt x, minint / c), (lt maxint / c, x)
   if (arg2->op == Op::VALUE)
     {
       __int128 maxint = (((unsigned __int128)1) << (arg1->bitsize - 1)) - 1;
@@ -1607,7 +1607,7 @@ Inst *Simplify::simplify_smul_wraps()
       return build_inst(Op::OR, new_inst1, new_inst2);
     }
 
-  // smul_wraps (sext x), (sext y) -> false if the extended x and y have
+  // smul_overflow (sext x), (sext y) -> false if the extended x and y have
   // at least 2x the number of bits as x and y.
   if (arg1->op == Op::SEXT
       && arg1->bitsize >= 2 * arg1->args[0]->bitsize
@@ -2634,7 +2634,7 @@ Inst *Simplify::simplify_over_ite_arg()
       // other argument is not constant. For example, AND if one of the ITE
       // values is 0 or -1.
       if (inst->op == Op::ADD
-	  || inst->op == Op::SADD_WRAPS
+	  || inst->op == Op::SADD_OVERFLOW
 	  || inst->op == Op::XOR)
 	{
 	  if (a1_cond && pred2(a1_val1, a1_val2))
@@ -2653,7 +2653,7 @@ Inst *Simplify::simplify_over_ite_arg()
 	    return gen_ite_of_op(a2_cond, a2_val1, a2_val2,
 				 pred3, gen2, cache);
 	}
-      else if (inst->op == Op::MUL || inst->op == Op::SMUL_WRAPS)
+      else if (inst->op == Op::MUL || inst->op == Op::SMUL_OVERFLOW)
 	{
 	  if (a1_cond && pred4(a1_val1, a1_val2))
 	    return gen_ite_of_op(a1_cond, a1_val1, a1_val2,
@@ -2662,7 +2662,7 @@ Inst *Simplify::simplify_over_ite_arg()
 	    return gen_ite_of_op(a2_cond, a2_val1, a2_val2,
 				 pred4, gen2, cache);
 	}
-      else if (inst->op == Op::SUB || inst->op == Op::SSUB_WRAPS)
+      else if (inst->op == Op::SUB || inst->op == Op::SSUB_OVERFLOW)
 	{
 	  if (a2_cond && pred2(a2_val1, a2_val2))
 	    return gen_ite_of_op(a2_cond, a2_val1, a2_val2,
@@ -2914,8 +2914,8 @@ Inst *Simplify::simplify()
     case Op::OR:
       inst = simplify_or();
       break;
-    case Op::SADD_WRAPS:
-      inst = simplify_sadd_wraps();
+    case Op::SADD_OVERFLOW:
+      inst = simplify_sadd_overflow();
       break;
     case Op::S2F:
       inst = simplify_s2f();
@@ -2944,11 +2944,11 @@ Inst *Simplify::simplify()
     case Op::SHL:
       inst = simplify_shl();
       break;
-    case Op::SMUL_WRAPS:
-      inst = simplify_smul_wraps();
+    case Op::SMUL_OVERFLOW:
+      inst = simplify_smul_overflow();
       break;
-    case Op::SSUB_WRAPS:
-      inst = simplify_ssub_wraps();
+    case Op::SSUB_OVERFLOW:
+      inst = simplify_ssub_overflow();
       break;
     case Op::SUB:
       inst = simplify_sub();

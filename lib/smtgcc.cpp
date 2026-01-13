@@ -55,12 +55,12 @@ const std::array<Inst_info, 96> inst_info{{
   {"lshr", Op::LSHR, Inst_class::ibinary, true, false},
   {"mul", Op::MUL, Inst_class::ibinary, true, true},
   {"or", Op::OR, Inst_class::ibinary, true, true},
-  {"sadd_wraps", Op::SADD_WRAPS, Inst_class::ibinary, true, true},
+  {"sadd_overflow", Op::SADD_OVERFLOW, Inst_class::ibinary, true, true},
   {"sdiv", Op::SDIV, Inst_class::ibinary, true, false},
   {"shl", Op::SHL, Inst_class::ibinary, true, false},
-  {"smul_wraps", Op::SMUL_WRAPS, Inst_class::ibinary, true, true},
+  {"smul_overflow", Op::SMUL_OVERFLOW, Inst_class::ibinary, true, true},
   {"srem", Op::SREM, Inst_class::ibinary, true, false},
-  {"ssub_wraps", Op::SSUB_WRAPS, Inst_class::ibinary, true, false},
+  {"ssub_overflow", Op::SSUB_OVERFLOW, Inst_class::ibinary, true, false},
   {"sub", Op::SUB, Inst_class::ibinary, true, false},
   {"udiv", Op::UDIV, Inst_class::ibinary, true, false},
   {"urem", Op::UREM, Inst_class::ibinary, true, false},
@@ -255,9 +255,9 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2)
   Inst_class iclass = inst_info[(int)op].iclass;
   if (iclass == Inst_class::icomparison
       || iclass == Inst_class::fcomparison
-      || op == Op::SADD_WRAPS
-      || op == Op::SSUB_WRAPS
-      || op == Op::SMUL_WRAPS)
+      || op == Op::SADD_OVERFLOW
+      || op == Op::SSUB_OVERFLOW
+      || op == Op::SMUL_OVERFLOW)
     {
       assert(arg1->bitsize == arg2->bitsize);
       inst->bitsize = 1;

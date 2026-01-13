@@ -3200,7 +3200,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	  prov = arg2_prov;
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
-	  bb->build_inst(Op::UB, bb->build_inst(Op::SSUB_WRAPS, arg1, arg2));
+	  bb->build_inst(Op::UB, bb->build_inst(Op::SSUB_OVERFLOW, arg1, arg2));
 	return {bb->build_inst(Op::SUB, arg1, arg2), res_indef, prov};
       }
     case PLUS_EXPR:
@@ -3214,7 +3214,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	  prov = arg2_prov;
 
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
-	  bb->build_inst(Op::UB, bb->build_inst(Op::SADD_WRAPS, arg1, arg2));
+	  bb->build_inst(Op::UB, bb->build_inst(Op::SADD_OVERFLOW, arg1, arg2));
 	return {bb->build_inst(Op::ADD, arg1, arg2), res_indef, prov};
       }
     case GE_EXPR:
@@ -3273,7 +3273,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
     case MULT_EXPR:
       {
 	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
-	  bb->build_inst(Op::UB, bb->build_inst(Op::SMUL_WRAPS, arg1, arg2));
+	  bb->build_inst(Op::UB, bb->build_inst(Op::SMUL_OVERFLOW, arg1, arg2));
 	return {bb->build_inst(Op::MUL, arg1, arg2), res_indef, nullptr};
       }
     case MULT_HIGHPART_EXPR:

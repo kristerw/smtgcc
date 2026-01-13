@@ -31,11 +31,11 @@ class Vrp
   void handle_neg(Inst *inst);
   void handle_or(Inst *inst);
   void handle_phi(Inst *inst);
-  void handle_sadd_wraps(Inst *inst);
+  void handle_sadd_overflow(Inst *inst);
   void handle_sext(Inst *inst);
   void handle_slt(Inst *inst);
   void handle_shl(Inst *inst);
-  void handle_ssub_wraps(Inst *inst);
+  void handle_ssub_overflow(Inst *inst);
   void handle_ult(Inst *inst);
   void handle_value(Inst *inst);
   void handle_xor(Inst *inst);
@@ -316,7 +316,7 @@ void Vrp::handle_phi(Inst *inst)
     }
 }
 
-void Vrp::handle_sadd_wraps(Inst *inst)
+void Vrp::handle_sadd_overflow(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
@@ -407,7 +407,7 @@ void Vrp::handle_shl(Inst *inst)
     }
 }
 
-void Vrp::handle_ssub_wraps(Inst *inst)
+void Vrp::handle_ssub_overflow(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
@@ -531,8 +531,8 @@ void Vrp::handle_inst(Inst *inst)
     case Op::PHI:
       handle_phi(inst);
       break;
-    case Op::SADD_WRAPS:
-      handle_sadd_wraps(inst);
+    case Op::SADD_OVERFLOW:
+      handle_sadd_overflow(inst);
       break;
     case Op::SEXT:
       handle_sext(inst);
@@ -543,8 +543,8 @@ void Vrp::handle_inst(Inst *inst)
     case Op::SHL:
       handle_shl(inst);
       break;
-    case Op::SSUB_WRAPS:
-      handle_ssub_wraps(inst);
+    case Op::SSUB_OVERFLOW:
+      handle_ssub_overflow(inst);
       break;
     case Op::ULT:
       handle_ult(inst);

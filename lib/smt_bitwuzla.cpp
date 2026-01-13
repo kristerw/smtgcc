@@ -315,16 +315,16 @@ void Converter::build_bv_binary_smt(const Inst *inst)
     case Op::UDIV:
       inst2bv.insert({inst, tm.mk_term(Kind::BV_UDIV, {arg1, arg2})});
       break;
-    case Op::SADD_WRAPS:
+    case Op::SADD_OVERFLOW:
       inst2bool.insert({inst, tm.mk_term(Kind::BV_SADD_OVERFLOW, {arg1, arg2})});
       break;
-    case Op::SMUL_WRAPS:
+    case Op::SMUL_OVERFLOW:
       inst2bool.insert({inst, tm.mk_term(Kind::BV_SMUL_OVERFLOW, {arg1, arg2})});
       break;
     case Op::SREM:
       inst2bv.insert({inst, tm.mk_term(Kind::BV_SREM, {arg1, arg2})});
       break;
-    case Op::SSUB_WRAPS:
+    case Op::SSUB_OVERFLOW:
       inst2bool.insert({inst, tm.mk_term(Kind::BV_SSUB_OVERFLOW, {arg1, arg2})});
       break;
     case Op::UREM:
