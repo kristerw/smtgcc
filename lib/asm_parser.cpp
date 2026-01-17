@@ -58,7 +58,7 @@ std::string_view ParserBase::parse_cmd()
   if (buf[pos] == '.' && isalnum(buf[pos + 1]))
     {
       pos += 2;
-      while (isalnum(buf[pos]) || buf[pos] == '_')
+      while (isalnum(buf[pos]) || buf[pos] == '_' || buf[pos] == '.')
 	pos++;
       assert(buf[pos] == ' '
 	     || buf[pos] == '\t'
