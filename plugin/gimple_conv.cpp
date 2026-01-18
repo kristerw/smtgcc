@@ -1213,13 +1213,17 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
     case VECTOR_CST:
       {
 	uint32_t bitsize = bitsize_for_type(TREE_TYPE(expr));
-	uint32_t elem_bitsize = bitsize_for_type(TREE_TYPE(TREE_TYPE(expr)));
+	tree elem_type = TREE_TYPE(TREE_TYPE(expr));
+	uint32_t elem_bitsize = bitsize_for_type(elem_type);
 	uint32_t nof_elem = bitsize / elem_bitsize;
-	Inst *ret = tree2inst(VECTOR_CST_ELT(expr, 0));
+	tree elem = VECTOR_CST_ELT(expr, 0);
+	Inst *ret = type_convert(tree2inst(elem), TREE_TYPE(elem), elem_type);
 	for (uint32_t i = 1; i < nof_elem; i++)
 	  {
-	    Inst *elem = tree2inst(VECTOR_CST_ELT(expr, i));
-	    ret = bb->build_inst(Op::CONCAT, elem, ret);
+	    elem = VECTOR_CST_ELT(expr, i);
+	    Inst *elem_inst =
+	      type_convert(tree2inst(elem), TREE_TYPE(elem), elem_type);
+	    ret = bb->build_inst(Op::CONCAT, elem_inst, ret);
 	  }
 	return {ret, nullptr, nullptr};
       }
