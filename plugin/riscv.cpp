@@ -338,13 +338,10 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
     }
   else
     {
-      // Return of values wider than 2*reg_bitsize are passed in memory,
-      // where the address is specified by an implicit first parameter.
-      assert((ret_bitsize & 7) == 0);
+      uint64_t size = (ret_bitsize + 7) / 8;
       Inst *id =
 	tgt->value_inst(rstate->next_local_id++, tgt->module->ptr_id_bits);
-      Inst *mem_size =
-	tgt->value_inst(ret_bitsize / 8, tgt->module->ptr_offset_bits);
+      Inst *mem_size = tgt->value_inst(size, tgt->module->ptr_offset_bits);
       Inst *flags = tgt->value_inst(0, 32);
 
       Basic_block *entry_bb = rstate->entry_bb;
@@ -354,7 +351,6 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
       entry_bb->build_inst(Op::WRITE, reg, ret_mem);
 
       // Generate the return value from the value returned in memory.
-      uint64_t size = ret_bitsize / 8;
       Inst *retval = 0;
       for (uint64_t i = 0; i < size; i++)
 	{
@@ -366,6 +362,8 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
 	  else
 	    retval = data_byte;
 	}
+      if (ret_bitsize < retval->bitsize)
+	retval = bb->build_trunc(retval, ret_bitsize);
       bb->build_ret_inst(retval);
     }
 }
