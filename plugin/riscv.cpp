@@ -368,6 +368,35 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
     }
 }
 
+Inst *extract_vec_elem(Basic_block *bb, Inst *inst, uint32_t elem_bitsize, uint32_t idx)
+{
+  if (idx == 0 && inst->bitsize == elem_bitsize)
+    return inst;
+  assert(inst->bitsize % elem_bitsize == 0);
+  Inst *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
+  Inst *low = bb->value_inst(idx * elem_bitsize, 32);
+  return bb->build_inst(Op::EXTRACT, inst, high, low);
+}
+
+Inst *param_in_mem(Basic_block *bb, riscv_state& rstate, Inst *value)
+{
+  if ((value->bitsize & 7) != 0)
+    value = bb->build_inst(Op::ZEXT, value, (value->bitsize + 7) & ~7);
+  Module *module = rstate.module;
+  Inst *id = bb->value_inst(rstate.next_local_id++, module->ptr_id_bits);
+  Inst *mem_size = bb->value_inst(value->bitsize / 8, module->ptr_offset_bits);
+  Inst *mem_flags = bb->value_inst(0, 32);
+  Inst *mem = bb->build_inst(Op::MEMORY, id, mem_size, mem_flags);
+  for (uint64_t i = 0; i < value->bitsize / 8; i++)
+    {
+      Inst *offset = bb->value_inst(i, mem->bitsize);
+      Inst *addr = bb->build_inst(Op::ADD, mem, offset);
+      Inst *data_byte = extract_vec_elem(bb, value, 8, i);
+      bb->build_inst(Op::STORE, addr, data_byte);
+    }
+  return mem;
+}
+
 } // end anonymous namespace
 
 riscv_state setup_riscv_function(CommonState *state, Function *src_func, function *fun)
@@ -525,24 +554,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 	}
       else
 	{
-	  // The argument is passed in memory.
-	  assert(param->bitsize % 8 == 0);
-	  if (rstate.next_local_id == 0)
-	    throw Not_implemented("too many local variables");
-	  Inst *id =
-	    bb->value_inst(rstate.next_local_id++, module->ptr_id_bits);
-	  uint64_t size = param->bitsize / 8;
-	  Inst *mem_size = bb->value_inst(size, module->ptr_offset_bits);
-	  Inst *flags = bb->value_inst(0, 32);
-	  Inst *ptr = bb->build_inst(Op::MEMORY, id, mem_size, flags);
-	  for (uint64_t i = 0; i < size; i++)
-	    {
-	      Inst *size_inst = bb->value_inst(i, ptr->bitsize);
-	      Inst *addr = bb->build_inst(Op::ADD, ptr, size_inst);
-	      Inst *byte = bb->build_inst(Op::EXTRACT, param, i * 8 + 7, i * 8);
-	      bb->build_inst(Op::STORE, addr, byte);
-	    }
-
+	  Inst *ptr = param_in_mem(bb, rstate, param);
 	  if (reg_nbr > RiscvRegIdx::x17)
 	    stack_values.push_back(ptr);
 	  else
