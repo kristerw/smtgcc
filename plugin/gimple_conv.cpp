@@ -791,7 +791,6 @@ void Converter::load_vec_ub_check(Inst *ptr, Inst *prov, uint64_t size, tree exp
   tree type = TREE_TYPE(expr);
   assert(VECTOR_TYPE_P(type));
   tree elem_type = TREE_TYPE(type);
-  uint64_t alignment = get_object_alignment(expr) / 8;
   uint64_t elem_size = bytesize_for_type(elem_type);
 
   // It is UB if the pointer provenance does not correspond to the address.
@@ -808,18 +807,14 @@ void Converter::load_vec_ub_check(Inst *ptr, Inst *prov, uint64_t size, tree exp
 
   // A vector load may read outside the object, as long as the first element
   // is within the object and the rest of the vector does not cross a page
-  // boundary. The compiler does not, in general, know where the page
-  // boundaries are, so in practice this means that out-of-bounds reads are
-  // valid as long as the extra bytes are within the same alignment line as
-  // the last valid byte.
-  // TODO: Should the bytes read out of bounds be marked as indef?
-  if (size <= alignment)
-    {
-      size_inst = bb->value_inst(elem_size - 1, ptr->bitsize);
-      end = bb->build_inst(Op::ADD, ptr, size_inst);
-    }
+  // boundary. We do not, in general, know the page size, and the way GCC
+  // is handling this is not completely sound anyway, so we ignore the
+  // page size overflow for now.
+  // TODO: Revisit this when PR120980 is solved.
+  Inst *elem_size_inst = bb->value_inst(elem_size - 1, ptr->bitsize);
+  Inst *elem_end = bb->build_inst(Op::ADD, ptr, elem_size_inst);
   Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
-  Inst *offset = bb->build_extract_offset(end);
+  Inst *offset = bb->build_extract_offset(elem_end);
   Inst *out_of_bound = bb->build_inst(Op::ULE, mem_size, offset);
   bb->build_inst(Op::UB, out_of_bound);
 }
@@ -1283,11 +1278,18 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
       }
     case BIT_FIELD_REF:
       {
+	Inst *value, *indef, *prov;
 	tree arg = TREE_OPERAND(expr, 0);
 	if (TREE_CODE(arg) != SSA_NAME)
-	  return process_load(expr);
+	  {
+	    if (VECTOR_TYPE_P(TREE_TYPE(arg)))
+	      std::tie(value, indef, prov) = process_load(arg);
+	    else
+	      return process_load(expr);
+	  }
+	else
+	  std::tie(value, indef, prov) = tree2inst_indef_prov(arg);
 
-	auto [value, indef, prov] = tree2inst_indef_prov(arg);
 	uint64_t bitsize = get_int_cst_val(TREE_OPERAND(expr, 1));
 	uint64_t bit_offset = get_int_cst_val(TREE_OPERAND(expr, 2));
 	uint64_t hi = bitsize + bit_offset - 1;
