@@ -1768,20 +1768,9 @@ std::tuple<Inst *, Inst *, Inst *> Converter::vector_as_array(tree expr)
   Inst *cond = bb->build_inst(Op::ULE, nof_elems, idx);
   bb->build_inst(Op::UB, cond);
 
-  Inst *elm_bitsize = bb->value_inst(elem_size * 8, idx->bitsize);
-  Inst *shift = bb->build_inst(Op::MUL, idx, elm_bitsize);
-
-  if (inst->bitsize > shift->bitsize)
-    shift = bb->build_inst(Op::ZEXT, shift, inst->bitsize);
-  else if (inst->bitsize < shift->bitsize)
-    shift = bb->build_trunc(shift, inst->bitsize);
-  inst = bb->build_inst(Op::LSHR, inst, shift);
-  inst = bb->build_trunc(inst, elem_size * 8);
+  inst = extract_elem(bb, inst, elem_size * 8, idx);
   if (indef)
-    {
-      indef = bb->build_inst(Op::LSHR, indef, shift);
-      indef = bb->build_trunc(indef, elem_size * 8);
-    }
+    indef = extract_elem(bb, indef, elem_size * 8, idx);
   std::tie(inst, indef) = from_mem_repr(inst, indef, elem_type);
 
   return {inst, indef, nullptr};
