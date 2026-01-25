@@ -513,10 +513,22 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 	  // Ensure the stack is aligned when writing values wider than
 	  // one register.
 	  if (reg_nbr > RiscvRegIdx::x17
-	       && (*arg_regs).regs[0]
-	       && (*arg_regs).regs[1]
-	       && (stack_values.size() & 1))
-	    stack_values.push_back(nullptr);
+	      && (*arg_regs).regs[0]
+	      && (*arg_regs).regs[1])
+	    {
+	      uint64_t alignment;
+	      if (AGGREGATE_TYPE_P(type))
+		alignment = TYPE_ALIGN(type);
+	      else
+		alignment = TYPE_ALIGN(TYPE_MAIN_VARIANT(type));
+	      if (PREFERRED_STACK_BOUNDARY < alignment)
+		alignment = PREFERRED_STACK_BOUNDARY;
+	      if (alignment > 2 * rstate.reg_bitsize)
+		throw Not_implemented("setup_riscv_function: "
+				      "too large alignment");
+	      if (alignment > rstate.reg_bitsize && (stack_values.size() & 1))
+		stack_values.push_back(nullptr);
+	    }
 
 	  if ((*arg_regs).regs[0])
 	    {
