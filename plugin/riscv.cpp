@@ -505,10 +505,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 
       std::optional<Regs> arg_regs =
 	regs_for_value(&rstate, param, type, RiscvRegIdx::f18 - freg_nbr);
-      if (arg_regs
-	  && !(TARGET_VECTOR
-	       && VECTOR_TYPE_P(type)
-	       && reg_nbr > RiscvRegIdx::x17))
+      if (arg_regs)
 	{
 	  // Ensure the stack is aligned when writing values wider than
 	  // one register.
