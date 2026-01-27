@@ -316,6 +316,8 @@ private:
   void process_sve_f2i(bool is_unsigned);
   void process_sve_ext(Op op, uint64_t trunc_bitsize);
   void process_sve_sel();
+  void process_sve_zip1();
+  void process_sve_zip2();
   void process_sve_uzp(bool odd);
   void process_sve_preg_uzp(bool odd);
   void process_sve_index();
@@ -6283,6 +6285,52 @@ void Parser::process_sve_sel()
   write_reg(dest, res);
 }
 
+void Parser::process_sve_zip1()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1 = get_zreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_zreg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem/2; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, elem1, res);
+      else
+	res = elem1;
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      res = bb->build_inst(Op::CONCAT, elem2, res);
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_sve_zip2()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1 = get_zreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_zreg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = nof_elem/2; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, i);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, elem1, res);
+      else
+	res = elem1;
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, i);
+      res = bb->build_inst(Op::CONCAT, elem2, res);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_uzp(bool odd)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -7185,6 +7233,10 @@ void Parser::parse_sve_op()
     process_sve_uzp(false);
   else if (name == "uzp2")
     process_sve_uzp(true);
+  else if (name == "zip1")
+    process_sve_zip1();
+  else if (name == "zip2")
+    process_sve_zip2();
   else
     throw Parse_error("unhandled sve instruction: "s + std::string(name),
 		      line_number);
