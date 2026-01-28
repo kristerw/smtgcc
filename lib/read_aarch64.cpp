@@ -321,7 +321,9 @@ private:
   void process_sve_zip2();
   void process_sve_preg_zip2();
   void process_sve_trn1();
+  void process_sve_preg_trn1();
   void process_sve_trn2();
+  void process_sve_preg_trn2();
   void process_sve_uzp(bool odd);
   void process_sve_preg_uzp(bool odd);
   void process_sve_index();
@@ -6412,6 +6414,33 @@ void Parser::process_sve_trn1()
   write_reg(dest, res);
 }
 
+void Parser::process_sve_preg_trn1()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  get_comma(2);
+  Inst *arg1 = get_preg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_preg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem/2; i++)
+    {
+      Inst *elem1 = extract_pred_elem(arg1, elem_bitsize, 2 * i);
+      if (elem_bitsize > 8)
+	elem1 = bb->build_inst(Op::ZEXT, elem1, elem_bitsize / 8);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, elem1, res);
+      else
+	res = elem1;
+      Inst *elem2 = extract_pred_elem(arg2, elem_bitsize, 2 * i);
+      if (elem_bitsize > 8)
+	elem2 = bb->build_inst(Op::ZEXT, elem2, elem_bitsize / 8);
+      res = bb->build_inst(Op::CONCAT, elem2, res);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_trn2()
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -6430,6 +6459,33 @@ void Parser::process_sve_trn2()
       else
 	res = elem1;
       Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, 2 * i + 1);
+      res = bb->build_inst(Op::CONCAT, elem2, res);
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_sve_preg_trn2()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_preg(1);
+  get_comma(2);
+  Inst *arg1 = get_preg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_preg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem/2; i++)
+    {
+      Inst *elem1 = extract_pred_elem(arg1, elem_bitsize, 2 * i + 1);
+      if (elem_bitsize > 8)
+	elem1 = bb->build_inst(Op::ZEXT, elem1, elem_bitsize / 8);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, elem1, res);
+      else
+	res = elem1;
+      Inst *elem2 = extract_pred_elem(arg2, elem_bitsize, 2 * i + 1);
+      if (elem_bitsize > 8)
+	elem2 = bb->build_inst(Op::ZEXT, elem2, elem_bitsize / 8);
       res = bb->build_inst(Op::CONCAT, elem2, res);
     }
   write_reg(dest, res);
@@ -7074,6 +7130,10 @@ void Parser::parse_sve_preg_op()
     process_sve_preg_punpk(false);
   else if (name == "str")
     process_sve_str_preg();
+  else if (name == "trn1")
+    process_sve_preg_trn1();
+  else if (name == "trn2")
+    process_sve_preg_trn2();
   else if (name == "uzp1")
     process_sve_preg_uzp(false);
   else if (name == "uzp2")
