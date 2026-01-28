@@ -4775,14 +4775,12 @@ void Parser::process_vec_trn2()
 void Parser::process_vec_tbl()
 {
   auto [dest, nof_elem, elem_bitsize] = get_vreg(1);
-  if (elem_bitsize != 8 || nof_elem != 16)
-    throw Parse_error("expected element size 8", line_number);
   get_comma(2);
   Inst *arg1, *arg2;
   if (tokens.size() == 8)
     {
       get_left_brace(3);
-      arg1 = get_vreg_value(4, nof_elem, elem_bitsize);
+      arg1 = get_vreg_value(4, 16, 8);
       get_right_brace(5);
       get_comma(6);
       arg2 = get_vreg_value(7, nof_elem, elem_bitsize);
@@ -4791,9 +4789,9 @@ void Parser::process_vec_tbl()
   else
     {
       get_left_brace(3);
-      uint64_t start_idx = get_vreg_idx(4, nof_elem, elem_bitsize);
+      uint64_t start_idx = get_vreg_idx(4, 16, 8);
       get_minus(5);
-      uint64_t end_idx = get_vreg_idx(6, nof_elem, elem_bitsize);
+      uint64_t end_idx = get_vreg_idx(6, 16, 8);
       get_right_brace(7);
       get_comma(8);
       arg2 = get_vreg_value(9, nof_elem, elem_bitsize);
