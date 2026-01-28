@@ -320,6 +320,8 @@ private:
   void process_sve_preg_zip1();
   void process_sve_zip2();
   void process_sve_preg_zip2();
+  void process_sve_trn1();
+  void process_sve_trn2();
   void process_sve_uzp(bool odd);
   void process_sve_preg_uzp(bool odd);
   void process_sve_index();
@@ -6387,6 +6389,52 @@ void Parser::process_sve_preg_zip2()
   write_reg(dest, res);
 }
 
+void Parser::process_sve_trn1()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1 = get_zreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_zreg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem/2; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, 2 * i);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, elem1, res);
+      else
+	res = elem1;
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, 2 * i);
+      res = bb->build_inst(Op::CONCAT, elem2, res);
+    }
+  write_reg(dest, res);
+}
+
+void Parser::process_sve_trn2()
+{
+  auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
+  get_comma(2);
+  Inst *arg1 = get_zreg_value(3);
+  get_comma(4);
+  Inst *arg2 = get_zreg_value(5);
+  get_end_of_line(6);
+
+  Inst *res = nullptr;
+  for (uint32_t i = 0; i < nof_elem/2; i++)
+    {
+      Inst *elem1 = extract_vec_elem(arg1, elem_bitsize, 2 * i + 1);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, elem1, res);
+      else
+	res = elem1;
+      Inst *elem2 = extract_vec_elem(arg2, elem_bitsize, 2 * i + 1);
+      res = bb->build_inst(Op::CONCAT, elem2, res);
+    }
+  write_reg(dest, res);
+}
+
 void Parser::process_sve_uzp(bool odd)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -7257,6 +7305,10 @@ void Parser::parse_sve_op()
     process_sve_ext(Op::SEXT, 16);
   else if (name == "sxtw")
     process_sve_ext(Op::SEXT, 32);
+  else if (name == "trn1")
+    process_sve_trn1();
+  else if (name == "trn2")
+    process_sve_trn2();
   else if (name == "uabd")
     process_sve_binary(gen_uabd);
   else if (name == "ucvtf")
