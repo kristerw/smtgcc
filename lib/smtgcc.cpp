@@ -14,7 +14,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 96> inst_info{{
+const std::array<Inst_info, 112> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -99,14 +99,30 @@ const std::array<Inst_info, 96> inst_info{{
   // Load/store
   {"free", Op::FREE, Inst_class::ls_unary, false, false},
   {"get_mem_flag", Op::GET_MEM_FLAG, Inst_class::ls_unary, true, false},
+  {"get_mem_flag_be", Op::GET_MEM_FLAG_BE, Inst_class::ls_binary, true, false},
+  {"get_mem_flag_le", Op::GET_MEM_FLAG_LE, Inst_class::ls_binary, true, false},
   {"get_mem_indef", Op::GET_MEM_INDEF, Inst_class::ls_unary, true, false},
+  {"get_mem_indef_be", Op::GET_MEM_INDEF_BE, Inst_class::ls_binary, true, false},
+  {"get_mem_indef_le", Op::GET_MEM_INDEF_LE, Inst_class::ls_binary, true, false},
   {"get_mem_size", Op::GET_MEM_SIZE, Inst_class::ls_unary, true, false},
   {"load", Op::LOAD, Inst_class::ls_unary, true, false},
+  {"load_be", Op::LOAD_BE, Inst_class::ls_binary, true, false},
+  {"load_le", Op::LOAD_LE, Inst_class::ls_binary, true, false},
   {"memmove", Op::MEMMOVE, Inst_class::ls_ternary, false, false},
+  {"memmove_mem_flag", Op::MEMMOVE_MEM_FLAG, Inst_class::ls_ternary, false, false},
+  {"memmove_mem_indef", Op::MEMMOVE_MEM_INDEF, Inst_class::ls_ternary, false, false},
   {"memset", Op::MEMSET, Inst_class::ls_ternary, false, false},
+  {"memset_mem_flag", Op::MEMSET_MEM_FLAG, Inst_class::ls_ternary, false, false},
+  {"memset_mem_indef", Op::MEMSET_MEM_INDEF, Inst_class::ls_ternary, false, false},
   {"set_mem_flag", Op::SET_MEM_FLAG, Inst_class::ls_binary, false, false},
+  {"set_mem_flag_be", Op::SET_MEM_FLAG_BE, Inst_class::ls_binary, false, false},
+  {"set_mem_flag_le", Op::SET_MEM_FLAG_LE, Inst_class::ls_binary, false, false},
   {"set_mem_indef", Op::SET_MEM_INDEF, Inst_class::ls_binary, false, false},
+  {"set_mem_indef_be", Op::SET_MEM_INDEF_BE, Inst_class::ls_binary, false, false},
+  {"set_mem_indef_le", Op::SET_MEM_INDEF_LE, Inst_class::ls_binary, false, false},
   {"store", Op::STORE, Inst_class::ls_binary, false, false},
+  {"store_be", Op::STORE_BE, Inst_class::ls_binary, false, false},
+  {"store_le", Op::STORE_LE, Inst_class::ls_binary, false, false},
 
   // Register
   {"read", Op::READ, Inst_class::reg_unary, true, false},
