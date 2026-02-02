@@ -666,6 +666,54 @@ Inst *Simplify::simplify_concat()
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
+  // concat (concat x, c2), c1 -> concat x, c
+  if (arg2->op == Op::VALUE
+      && arg1->op == Op::CONCAT
+      && arg1->args[1]->op == Op::VALUE
+      && arg2->bitsize + arg1->args[1]->bitsize <= 128)
+    {
+      Inst *new_const = build_inst(Op::CONCAT, arg1->args[1], arg2);
+      return build_inst(Op::CONCAT, arg1->args[0], new_const);
+    }
+
+  // We canonicalize concat so sequences of concat are always expressed
+  // as "concat x, (concat y, concat ...)". The intention is that we should
+  // get the same IR if we load an 8-byte value as if we concatenate two
+  // 4-byte values.
+  if (arg1->op == Op::CONCAT)
+    {
+      std::vector<Inst *> elems;
+      flatten(arg1, elems);
+      Inst *new_inst = arg2;
+      for (auto elem : elems)
+	{
+	  new_inst = build_inst(Op::CONCAT, elem, new_inst);
+	}
+      return new_inst;
+    }
+
+  // concat 0, x -> zext x
+  if (is_value_zero(arg1))
+    return build_inst(Op::ZEXT, arg2, inst->bitsize);
+
+  // concat c1, (concat c2, x)) -> concat c, x
+  if (arg1->op == Op::VALUE
+      && arg2->op == Op::CONCAT
+      && arg2->args[0]->op == Op::VALUE
+      && arg1->bitsize + arg2->args[0]->bitsize <= 128)
+    {
+      Inst *new_const = build_inst(Op::CONCAT, arg1, arg2->args[0]);
+      return build_inst(Op::CONCAT, new_const, arg2->args[1]);
+    }
+
+  // concat (sext x), y -> sext (concat x, y)
+  // concat (zext x), y -> zext (concat x, y)
+  if (arg1->op == Op::SEXT || arg1->op == Op::ZEXT)
+    {
+      Inst *concat = build_inst(Op::CONCAT, arg1->args[0], arg2);
+      return build_inst(arg1->op, concat, inst->bitsize);
+    }
+
   // concat (extract x, hi1, lo1), (extract x, hi2, lo2)
   //   -> extract x, hi1, lo2) if lo1 = hi2 + 1
   if (arg1->op == Op::EXTRACT
@@ -696,94 +744,60 @@ Inst *Simplify::simplify_concat()
       return build_inst(Op::CONCAT, new_inst, y);
     }
 
-  // concat c1, (concat c2, x)) -> concat c, x
-  if (arg1->op == Op::VALUE
-      && arg2->op == Op::CONCAT
-      && arg2->args[0]->op == Op::VALUE
-      && arg1->bitsize + arg2->args[0]->bitsize <= 128)
-    {
-      Inst *new_const = build_inst(Op::CONCAT, arg1, arg2->args[0]);
-      return build_inst(Op::CONCAT, new_const, arg2->args[1]);
-    }
-
-  // concat (concat x, c2), c1 -> concat x, c
-  if (arg2->op == Op::VALUE
-      && arg1->op == Op::CONCAT
-      && arg1->args[1]->op == Op::VALUE
-      && arg2->bitsize + arg1->args[1]->bitsize <= 128)
-    {
-      Inst *new_const = build_inst(Op::CONCAT, arg1->args[1], arg2);
-      return build_inst(Op::CONCAT, arg1->args[0], new_const);
-    }
-
-  // concat 0, x -> zext x
-  if (is_value_zero(arg1))
-    return build_inst(Op::ZEXT, arg2, inst->bitsize);
-
-  // For Boolean x: concat (sext x), (sext x) -> sext x
-  if (is_boolean_sext(arg1)
-      && is_boolean_sext(arg2)
-      && arg1->args[0] == arg2->args[0])
-    return build_inst(Op::SEXT, arg1->args[0], inst->bitsize);
+  // For Boolean x: concat x, x -> sext x
+  if (arg1->bitsize == 1 && arg1 == arg2)
+    return build_inst(Op::SEXT, arg1, inst->bitsize);
 
   // For Boolean x: concat x, (sext x) -> sext x
   if (is_boolean_sext(arg2) && arg1 == arg2->args[0])
     return build_inst(Op::SEXT, arg1, inst->bitsize);
 
-  // For Boolean x: concat (sext x), x -> sext x
-  if (is_boolean_sext(arg1) && arg1->args[0] == arg2)
-    return build_inst(Op::SEXT, arg2, inst->bitsize);
-
-  // concat (sext (extract x, x->bitsize-1, x->bitsize-1)), x -> sext x
-  if (arg1->op == Op::SEXT
-      && arg1->args[0]->op == Op::EXTRACT
-      && arg1->args[0]->args[0] == arg2
-      && arg1->args[0]->args[1] == arg1->args[0]->args[2]
-      && arg1->args[0]->args[1]->value() == arg2->bitsize - 1)
-    return build_inst(Op::SEXT, arg2, inst->bitsize);
-
-  // concat (sext (extract x, x->bitsize-1, x->bitsize-1)), concat (x, y)
-  //   -> sext (concat x, y)
-  if (arg1->op == Op::SEXT
+  // For Boolean x: concat x, (concat x, y) -> sext (concat x, y)
+  if (arg1->bitsize == 1
       && arg2->op == Op::CONCAT
-      && arg1->args[0]->op == Op::EXTRACT
-      && arg1->args[0]->args[0] == arg2->args[0]
-      && arg1->args[0]->args[1] == arg1->args[0]->args[2]
-      && arg1->args[0]->args[1]->value() == arg2->args[0]->bitsize - 1)
-    return build_inst(Op::SEXT, arg2,  inst->bitsize);
+      && arg2->args[0] == arg1)
+    return build_inst(Op::SEXT, arg2, inst->bitsize);
 
-  // concat (sext (extract x, x->bitsize-1, x->bitsize-1)), (sext x) -> sext x
-  if (arg1->op == Op::SEXT
+  // For Boolean x: concat x, (sext (concat x, y)) -> sext (concat x, y)
+  if (arg1->bitsize == 1
       && arg2->op == Op::SEXT
-      && arg1->args[0]->op == Op::EXTRACT
-      && arg1->args[0]->args[0] == arg2->args[0]
-      && arg1->args[0]->args[1] == arg1->args[0]->args[2]
-      && arg1->args[0]->args[1]->value() == arg2->args[0]->bitsize - 1)
+      && arg2->args[0]->op == Op::CONCAT
+      && arg2->args[0]->args[0] == arg1)
     return build_inst(Op::SEXT, arg2->args[0], inst->bitsize);
 
-  // concat (sext x), y -> sext (concat x, y)
-  // concat (zext x), y -> zext (concat x, y)
-  if (arg1->op == Op::SEXT || arg1->op == Op::ZEXT)
-    {
-      Inst *concat = build_inst(Op::CONCAT, arg1->args[0], arg2);
-      return build_inst(arg1->op, concat, inst->bitsize);
-    }
+  // concat (extract x, x->bitsize-1, x->bitsize-1), x -> sext x
+  if (arg1->op == Op::EXTRACT
+      && arg1->args[0] == arg2
+      && arg1->args[1] == arg1->args[2]
+      && arg1->args[1]->value() == arg2->bitsize - 1)
+    return build_inst(Op::SEXT, arg2, inst->bitsize);
 
-  // We canonicalize concat so sequences of concat are always expressed
-  // as "concat x, (concat y, concat ...)". The intention is that we should
-  // get the same IR if we load an 8-byte value as if we concatenate two
-  // 4-byte values.
-  if (arg1->op == Op::CONCAT)
-    {
-      std::vector<Inst *> elems;
-      flatten(arg1, elems);
-      Inst *new_inst = arg2;
-      for (auto elem : elems)
-	{
-	  new_inst = build_inst(Op::CONCAT, elem, new_inst);
-	}
-      return new_inst;
-    }
+  // concat (extract x, x->bitsize-1, x->bitsize-1), (sext x) -> sext x
+  if (arg2->op == Op::SEXT
+      && arg1->op == Op::EXTRACT
+      && arg1->args[0] == arg2->args[0]
+      && arg1->args[1] == arg1->args[2]
+      && arg1->args[1]->value() == arg2->args[0]->bitsize - 1)
+    return build_inst(Op::SEXT, arg2->args[0], inst->bitsize);
+
+  // concat (extract x, x->bitsize-1, x->bitsize-1), concat (x, y)
+  //   -> sext (concat x, y)
+  if (arg2->op == Op::CONCAT
+      && arg1->op == Op::EXTRACT
+      && arg1->args[0] == arg2->args[0]
+      && arg1->args[1] == arg1->args[2]
+      && arg1->args[1]->value() == arg2->args[0]->bitsize - 1)
+    return build_inst(Op::SEXT, arg2,  inst->bitsize);
+
+  // concat (extract x, x->bitsize-1, x->bitsize-1), sext (concat (x, y))
+  //   -> sext (concat x, y)
+  if (arg2->op == Op::SEXT
+      && arg2->args[0]->op == Op::CONCAT
+      && arg1->op == Op::EXTRACT
+      && arg1->args[0] == arg2->args[0]->args[0]
+      && arg1->args[1] == arg1->args[2]
+      && arg1->args[1]->value() == arg2->args[0]->args[0]->bitsize - 1)
+    return build_inst(Op::SEXT, arg2->args[0],  inst->bitsize);
 
   return inst;
 }
