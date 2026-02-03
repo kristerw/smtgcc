@@ -100,11 +100,8 @@ private:
   void get_comma(unsigned idx);
   void get_at(unsigned idx);
   void get_end_of_line(unsigned idx);
-  Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
   void validate_fpscr_pr(bool expected_value);
   void validate_fpscr_sz(bool expected_value);
-  Inst *load_value(Inst *ptr, uint64_t size);
-  void store_value(Inst *ptr, Inst *value);
   void process_unary(Op op);
   void process_binary(Op op);
   void process_negc();
@@ -581,16 +578,6 @@ void Parser::get_end_of_line(unsigned idx)
 				    line_number);
 }
 
-Inst *Parser::extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx)
-{
-  if (idx == 0 && inst->bitsize == elem_bitsize)
-    return inst;
-  assert(inst->bitsize % elem_bitsize == 0);
-  Inst *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
-  Inst *low = bb->value_inst(idx * elem_bitsize, 32);
-  return bb->build_inst(Op::EXTRACT, inst, high, low);
-}
-
 void Parser::validate_fpscr_pr(bool expected_value)
 {
   Inst *value = bb->build_inst(Op::READ, rstate->registers[ShRegIdx::fpscr]);
@@ -609,30 +596,6 @@ void Parser::validate_fpscr_sz(bool expected_value)
     bb->build_inst(Op::UB, bb->build_inst(Op::NOT, sz));
   else
     bb->build_inst(Op::UB, sz);
-}
-
-Inst *Parser::load_value(Inst *ptr, uint64_t size)
-{
-  Inst *value = bb->build_inst(Op::LOAD, ptr);
-  for (uint64_t i = 1; i < size; i++)
-    {
-      Inst *offset = bb->value_inst(i, ptr->bitsize);
-      Inst *addr = bb->build_inst(Op::ADD, ptr, offset);
-      Inst *data_byte = bb->build_inst(Op::LOAD, addr);
-      value = bb->build_inst(Op::CONCAT, data_byte, value);
-    }
-  return value;
-}
-
-void Parser::store_value(Inst *ptr, Inst *value)
-{
-  for (uint64_t i = 0; i < value->bitsize / 8; i++)
-    {
-      Inst *offset = bb->value_inst(i, ptr->bitsize);
-      Inst *addr = bb->build_inst(Op::ADD, ptr, offset);
-      Inst *data_byte = extract_vec_elem(value, 8, i);
-      bb->build_inst(Op::STORE, addr, data_byte);
-    }
 }
 
 void Parser::process_unary(Op op)
@@ -946,7 +909,7 @@ void Parser::process_lds_l()
   Inst *sr_reg = get_system_register_reg(idx++);
   get_end_of_line(idx);
 
-  Inst *value = load_value(ptr, 4);
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, 4);
   bb->build_inst(Op::WRITE, sr_reg, value);
 }
 
@@ -970,7 +933,7 @@ void Parser::process_sts_l()
   get_end_of_line(idx);
 
   Inst *value = bb->build_inst(Op::READ, sr_reg);
-  store_value(ptr, value);
+  bb->build_inst(Op::STORE_LE, ptr, value);
 }
 
 void Parser::process_mul_l()
@@ -1489,7 +1452,7 @@ void Parser::process_store(uint64_t size)
 
   if (size * 8 < value->bitsize)
     value = bb->build_trunc(value, size * 8);
-  store_value(ptr, value);
+  bb->build_inst(Op::STORE_LE, ptr, value);
 }
 
 void Parser::process_load(uint64_t size)
@@ -1500,7 +1463,7 @@ void Parser::process_load(uint64_t size)
   Inst *dest_reg = get_reg(idx++);
   get_end_of_line(idx++);
 
-  Inst *value = load_value(ptr, size);
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size);
   if (value->bitsize < 32)
     value = bb->build_inst(Op::SEXT, value, 32);
   write_reg(dest_reg, value);
@@ -1525,7 +1488,7 @@ void Parser::process_fp_store()
   Inst *ptr = process_address(idx, 4);
   get_end_of_line(idx++);
 
-  store_value(ptr, value);
+  bb->build_inst(Op::STORE_LE, ptr, value);
 }
 
 void Parser::process_fp_load()
@@ -1539,7 +1502,7 @@ void Parser::process_fp_load()
       get_end_of_line(idx++);
       validate_fpscr_sz(true);
 
-      Inst *value = load_value(ptr, 8);
+      Inst *value = bb->build_inst(Op::LOAD_LE, ptr, 8);
       write_reg(dest_reg, value);
     }
   else
@@ -1551,7 +1514,7 @@ void Parser::process_fp_load()
       get_end_of_line(idx++);
       validate_fpscr_sz(false);
 
-      Inst *value = load_value(ptr, 4);
+      Inst *value = bb->build_inst(Op::LOAD_LE, ptr, 4);
       write_reg(dest_reg, value);
     }
 }
