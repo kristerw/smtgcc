@@ -84,6 +84,7 @@ void tv_function::check(my_plugin *plugin_data)
       unroll_and_optimize(module);
       canonicalize_memory(module);
       cse(module);
+      vrp(module);
       simplify_mem(module);
       ls_elim(module);
       reduce_bitsize(module);

@@ -65,6 +65,7 @@ unsigned int tv_pass::execute(function *fun)
 	  // the same globals in both.
 	  canonicalize_memory(module);
 	  cse(module);
+	  vrp(module);
 	  simplify_mem(module);
 	  ls_elim(module);
 	  reduce_bitsize(module);

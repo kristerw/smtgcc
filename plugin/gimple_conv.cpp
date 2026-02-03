@@ -8732,8 +8732,6 @@ void unroll_and_optimize(Function *func, int64_t& symbolic_id)
 	}
       while (cfg_modified);
     }
-  vrp(func);
-  simplify_insts(func);
   dead_code_elimination(func);
   validate(func);
 }

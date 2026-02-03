@@ -121,6 +121,7 @@ static void finish(void *, void *data)
 
 	  canonicalize_memory(module);
 	  cse(module);
+	  vrp(module);
 	  simplify_mem(module);
 	  ls_elim(module);
 	  reduce_bitsize(module);
