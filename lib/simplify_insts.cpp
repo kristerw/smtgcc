@@ -2261,6 +2261,16 @@ Inst *Simplify::simplify_extract()
 	}
     }
 
+  // extract (and x, c) -> and (extract x), (extract c)
+  // extract (or x, c) -> or (extract x), (extract c)
+  if ((arg1->op == Op::AND || arg1->op == Op::OR)
+      && arg1->args[1]->op == Op::VALUE)
+    {
+      Inst *extract_x = build_inst(Op::EXTRACT, arg1->args[0], arg2, arg3);
+      Inst *extract_c = build_inst(Op::EXTRACT, arg1->args[1], arg2, arg3);
+      return build_inst(arg1->op, extract_x, extract_c);
+    }
+
   // "extract (concat x, y)" is changed to "extract x" or "extract y" if the
   // range only accesses bits from one of the arguments.
   if (arg1->op == Op::CONCAT)
