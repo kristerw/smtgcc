@@ -308,6 +308,18 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2)
       assert(arg2->bitsize == 8);
       inst->bitsize = 0;
     }
+  else if (op == Op::LOAD_BE || op == Op::LOAD_LE)
+    {
+      assert(arg1->bitsize == arg1->bb->func->module->ptr_bits);
+      assert(arg2->op == Op::VALUE);
+      inst->bitsize = arg2->value() * 8;
+    }
+  else if (op == Op::STORE_BE || op == Op::STORE_LE)
+    {
+      assert(arg1->bitsize == arg1->bb->func->module->ptr_bits);
+      assert(arg2->bitsize % 8 == 0);
+      inst->bitsize = 0;
+     }
   else if (op == Op::SET_MEM_FLAG)
     {
       assert(arg1->bitsize == arg1->bb->func->module->ptr_bits);
@@ -831,6 +843,8 @@ Inst *Basic_block::build_inst(Op op, Inst *arg1, Inst *arg2)
 Inst *Basic_block::build_inst(Op op, Inst *arg1, uint32_t arg2_val)
 {
   assert(inst_info[(int)op].iclass == Inst_class::conv
+	 || op == Op::LOAD_BE
+	 || op == Op::LOAD_LE
 	 || op == Op::PARAM
 	 || op == Op::SYMBOLIC);
   Inst *arg2 = value_inst(arg2_val, 32);

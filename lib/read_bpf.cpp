@@ -84,9 +84,6 @@ private:
   Basic_block *get_bb_def(unsigned idx);
   void get_comma(unsigned idx);
   void get_end_of_line(unsigned idx);
-  Inst *extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx);
-  Inst *load_value(Inst *ptr, uint64_t size);
-  void store_value(Inst *ptr, Inst *value);
   Inst *build_cond(Cond_code cc, Inst *arg1, Inst *arg2);
   void process_unary(Op op);
   void process_unary32(Op op);
@@ -471,40 +468,6 @@ void Parser::get_end_of_line(unsigned idx)
 				    line_number);
 }
 
-Inst *Parser::extract_vec_elem(Inst *inst, uint32_t elem_bitsize, uint32_t idx)
-{
-  if (idx == 0 && inst->bitsize == elem_bitsize)
-    return inst;
-  assert(inst->bitsize % elem_bitsize == 0);
-  Inst *high = bb->value_inst(idx * elem_bitsize + elem_bitsize - 1, 32);
-  Inst *low = bb->value_inst(idx * elem_bitsize, 32);
-  return bb->build_inst(Op::EXTRACT, inst, high, low);
-}
-
-Inst *Parser::load_value(Inst *ptr, uint64_t size)
-{
-  Inst *value = bb->build_inst(Op::LOAD, ptr);
-  for (uint64_t i = 1; i < size; i++)
-    {
-      Inst *offset = bb->value_inst(i, ptr->bitsize);
-      Inst *addr = bb->build_inst(Op::ADD, ptr, offset);
-      Inst *data_byte = bb->build_inst(Op::LOAD, addr);
-      value = bb->build_inst(Op::CONCAT, data_byte, value);
-    }
-  return value;
-}
-
-void Parser::store_value(Inst *ptr, Inst *value)
-{
-  for (uint64_t i = 0; i < value->bitsize / 8; i++)
-    {
-      Inst *offset = bb->value_inst(i, ptr->bitsize);
-      Inst *addr = bb->build_inst(Op::ADD, ptr, offset);
-      Inst *data_byte = extract_vec_elem(value, 8, i);
-      bb->build_inst(Op::STORE, addr, data_byte);
-    }
-}
-
 Inst *Parser::build_cond(Cond_code cc, Inst *arg1, Inst *arg2)
 {
   switch (cc)
@@ -807,7 +770,7 @@ void Parser::process_store(uint32_t size)
   ptr = bb->build_inst(Op::ADD, ptr, offset);
   if (size * 8 < value->bitsize)
     value = bb->build_trunc(value, size * 8);
-  store_value(ptr, value);
+  bb->build_inst(Op::STORE_LE, ptr, value);
 }
 
 void Parser::process_load(uint32_t size, bool sign_extend)
@@ -822,7 +785,7 @@ void Parser::process_load(uint32_t size, bool sign_extend)
   get_end_of_line(8);
 
   ptr = bb->build_inst(Op::ADD, ptr, offset);
-  Inst *value = load_value(ptr, size);
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size);
   if (sign_extend)
     value = bb->build_inst(Op::SEXT, value, 64);
   write_reg(dest, value);

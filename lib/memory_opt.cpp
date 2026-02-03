@@ -603,7 +603,47 @@ void expand_memmove_memset(Function *func)
 	{
 	  Inst *next_inst = inst->next;
 
-	  if (inst->op == Op::MEMSET)
+	  if (inst->op == Op::LOAD_LE)
+	    {
+	      Inst *orig_ptr = inst->args[0];
+	      uint64_t size = inst->args[1]->value();
+	      Inst *value = create_inst(Op::LOAD, orig_ptr);
+	      value->insert_before(inst);
+	      for (uint64_t i = 1; i < size; i++)
+		{
+		  Inst *offset = bb->value_inst(i, orig_ptr->bitsize);
+		  Inst *ptr = create_inst(Op::ADD, orig_ptr, offset);
+		  ptr->insert_before(inst);
+		  ptr = simplify_inst(ptr);
+		  Inst *data_byte = create_inst(Op::LOAD, ptr);
+		  data_byte->insert_before(inst);
+		  value = create_inst(Op::CONCAT, data_byte, value);
+		  value->insert_before(inst);
+		}
+	      inst->replace_all_uses_with(value);
+	      destroy_instruction(inst);
+	    }
+	  else if (inst->op == Op::STORE_LE)
+	    {
+	      Inst *orig_ptr = inst->args[0];
+	      Inst *value = inst->args[1];
+	      for (uint64_t i = 0; i < value->bitsize / 8; i++)
+		{
+		  Inst *offset = bb->value_inst(i, orig_ptr->bitsize);
+		  Inst *ptr = create_inst(Op::ADD, orig_ptr, offset);
+		  ptr->insert_before(inst);
+		  ptr = simplify_inst(ptr);
+		  uint32_t hi = i * 8 + 7;
+		  uint32_t lo = i * 8;
+		  Inst *data_byte = create_inst(Op::EXTRACT, value, hi, lo);
+		  data_byte->insert_before(inst);
+		  data_byte = simplify_inst(data_byte);
+		  Inst *store = create_inst(Op::STORE, ptr, data_byte);
+		  store->insert_before(inst);
+		}
+	      destroy_instruction(inst);
+	    }
+	  else if (inst->op == Op::MEMSET)
 	    {
 	      Inst *orig_ptr = inst->args[0];
 	      Inst *value = inst->args[1];
