@@ -2127,19 +2127,19 @@ Inst *Parser::process_address(unsigned idx, unsigned vec_size)
 	{
 	  idx++;
 	  offset = get_sym_addr(idx++);
+	  offset = bb->build_trunc(offset, 12);
 	  if (tokens.size() > idx && tokens[idx].kind == Lexeme::plus)
 	    {
 	      idx++;
-	      Inst *offset2 = get_reg_or_imm_value(idx++, ptr->bitsize);
+	      Inst *offset2 = get_reg_or_imm_value(idx++, offset->bitsize);
 	      offset = bb->build_inst(Op::ADD, offset, offset2);
 	    }
 	  else if (tokens.size() > idx && tokens[idx].kind == Lexeme::minus)
 	    {
 	      idx++;
-	      Inst *offset2 = get_reg_or_imm_value(idx++, ptr->bitsize);
+	      Inst *offset2 = get_reg_or_imm_value(idx++, offset->bitsize);
 	      offset = bb->build_inst(Op::SUB, offset, offset2);
 	    }
-	  offset = bb->build_trunc(offset, 12);
 	  offset = bb->build_inst(Op::ZEXT, offset, ptr->bitsize);
 	}
       else
@@ -3181,6 +3181,7 @@ Inst *Parser::process_last_arg(unsigned idx, uint32_t bitsize)
     {
       idx++;
       Inst *arg = get_sym_addr(idx++);
+      arg = bb->build_trunc(arg, 12);
       if (tokens.size() > idx && tokens[idx].kind == Lexeme::plus)
 	{
 	  idx++;
@@ -3193,7 +3194,6 @@ Inst *Parser::process_last_arg(unsigned idx, uint32_t bitsize)
 	  Inst *offset = get_reg_or_imm_value(idx++, arg->bitsize);
 	  arg = bb->build_inst(Op::SUB, arg, offset);
 	}
-      arg = bb->build_trunc(arg, 12);
       arg = bb->build_inst(Op::ZEXT, arg, bitsize);
       get_end_of_line(idx);
       return arg;

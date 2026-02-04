@@ -2409,6 +2409,11 @@ Inst *Simplify::simplify_extract()
       return build_inst(Op::NOT, build_inst(Op::EQ, x, zero));
     }
 
+  // extract (memory ...) -> 0 if the high index is less than ptr_offset_bits.
+  if (arg1->op == Op::MEMORY
+      && arg2->value() < inst->bb->func->module->ptr_offset_bits)
+    return value_inst(0, inst->bitsize);
+
   return inst;
 }
 
