@@ -330,11 +330,9 @@ private:
   void process_sve_while();
   void process_sve_whilerw();
   void process_sve_whilewr();
-  Inst *load_value(Inst *ptr, uint64_t size);
   void process_sve_ld1(uint32_t load_elem_size, Op op);
   void process_sve_ld1r(uint32_t load_elem_size);
   void process_sve_ld1qr(uint32_t load_elem_size);
-  void store_value(Inst *ptr, Inst *value);
   void process_sve_st1(uint32_t store_elem_size);
   void process_sve_dup();
   void process_sve_mov_preg();
@@ -2298,7 +2296,7 @@ void Parser::process_load(uint32_t trunc_size, Op op)
   if (trunc_size)
     size = trunc_size;
   load_ub_check(ptr, size);
-  Inst *value = load_value(ptr, size);
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size);
   if (op != Op::ZEXT)
     value = bb->build_inst(op, value, reg_bitsize);
   write_reg(dest, value);
@@ -2318,7 +2316,7 @@ void Parser::process_ld1()
 
   unsigned size = elem_bitsize / 8;
   load_ub_check(ptr, size);
-  Inst *value = load_value(ptr, size);
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size);
   Inst *res = nullptr;
   for (unsigned i = 0; i < nof_elem; i++)
     {
@@ -2345,7 +2343,7 @@ void Parser::process_ld1r()
 
   unsigned size = elem_bitsize / 8;
   load_ub_check(ptr, size);
-  Inst *value = load_value(ptr, size);
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size);
   Inst *res = value;
   for (unsigned i = 1; i < nof_elem; i++)
     {
@@ -2379,7 +2377,7 @@ void Parser::process_vec_ldn(uint64_t n)
 	  Inst *elem_ptr = bb->build_inst(Op::ADD, ptr, off);
 	  offset += elem_size;
 
-	  Inst *elem = load_value(elem_ptr, elem_size);
+	  Inst *elem = bb->build_inst(Op::LOAD_LE, elem_ptr, elem_size);
 	  if (res)
 	    res = bb->build_inst(Op::CONCAT, elem, res);
 	  else
@@ -2422,7 +2420,7 @@ void Parser::process_sve_ldn(uint64_t n, uint64_t elem_size)
 	  Inst *elem_ptr = bb->build_inst(Op::ADD, ptr, off);
 	  offset += elem_size;
 
-	  Inst *elem = load_value(elem_ptr, elem_size);
+	  Inst *elem = bb->build_inst(Op::LOAD_LE, elem_ptr, elem_size);
 	  elem = bb->build_inst(Op::ITE, pred_elem, elem, zero);
 	  if (res)
 	    res = bb->build_inst(Op::CONCAT, elem, res);
@@ -2457,7 +2455,7 @@ void Parser::process_ldp()
   Inst *ptr = process_address(5);
 
   load_ub_check(ptr, size * 2);
-  Inst *value = load_value(ptr, size * 2);
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size * 2);
   uint32_t bitsize = size * 8;
   Inst *value1 = bb->build_trunc(value, bitsize);
   Inst *value2 = bb->build_inst(Op::EXTRACT, value, bitsize * 2 - 1, bitsize);
@@ -2476,7 +2474,7 @@ void Parser::process_ldpsw()
 
   uint32_t size = 4;
   load_ub_check(ptr, size * 2);
-  Inst *value = load_value(ptr, size * 2);
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size * 2);
   uint32_t bitsize = size * 8;
   Inst *value1 = bb->build_trunc(value, bitsize);
   value1 = bb->build_inst(Op::SEXT, value1, 64);
@@ -2497,7 +2495,7 @@ void Parser::process_store(uint32_t trunc_size)
     value = bb->build_trunc(value, trunc_size * 8);
   uint32_t size = value->bitsize / 8;
   store_ub_check(ptr, size);
-  store_value(ptr, value);
+  bb->build_inst(Op::STORE_LE, ptr, value);
 }
 
 void Parser::process_stp()
@@ -2511,7 +2509,7 @@ void Parser::process_stp()
   Inst *value = bb->build_inst(Op::CONCAT, value2, value1);
   uint32_t size = value->bitsize / 8;
   store_ub_check(ptr, size);
-  store_value(ptr, value);
+  bb->build_inst(Op::STORE_LE, ptr, value);
 }
 
 void Parser::process_st1()
@@ -2529,7 +2527,7 @@ void Parser::process_st1()
   value = extract_vec_elem(value, elem_bitsize, idx);
   uint32_t size = value->bitsize / 8;
   store_ub_check(ptr, size);
-  store_value(ptr, value);
+  bb->build_inst(Op::STORE_LE, ptr, value);
 }
 
 void Parser::process_vec_stn(uint64_t n)
@@ -2563,7 +2561,7 @@ void Parser::process_vec_stn(uint64_t n)
 	  offset += elem_size;
 
 	  Inst *elem = extract_vec_elem(inst, elem_bitsize, i);
-	  store_value(elem_ptr, elem);
+	  bb->build_inst(Op::STORE_LE, elem_ptr, elem);
 	}
     }
 }
@@ -2606,7 +2604,7 @@ void Parser::process_sve_stn(uint64_t n, uint64_t elem_size)
 	  offset += elem_size;
 	  Inst *elem_ptr = bb->build_inst(Op::ADD, ptr, elem_offset);
 	  Inst *elem = extract_vec_elem(inst, elem_bitsize, i);
-	  store_value(elem_ptr, elem);
+	  bb->build_inst(Op::STORE_LE, elem_ptr, elem);
 
 	  bb->build_br_inst(false_bb);
 	  bb = false_bb;
@@ -6678,19 +6676,6 @@ void Parser::process_sve_whilewr()
   write_reg(dest, res);
 }
 
-Inst *Parser::load_value(Inst *ptr, uint64_t size)
-{
-  Inst *value = bb->build_inst(Op::LOAD, ptr);
-  for (uint64_t i = 1; i < size; i++)
-    {
-      Inst *offset = bb->value_inst(i, ptr->bitsize);
-      Inst *addr = bb->build_inst(Op::ADD, ptr, offset);
-      Inst *data_byte = bb->build_inst(Op::LOAD, addr);
-      value = bb->build_inst(Op::CONCAT, data_byte, value);
-    }
-  return value;
-}
-
 void Parser::process_sve_ld1(uint32_t load_elem_size, Op op)
 {
   auto [dest, nof_elem, elem_bitsize] = get_zreg(1);
@@ -6705,7 +6690,7 @@ void Parser::process_sve_ld1(uint32_t load_elem_size, Op op)
   for (uint32_t i = 0; i < nof_elem; i++)
     {
       Inst *pred = extract_pred_elem(arg1, elem_bitsize, i);
-      Inst *inst = load_value(arg2, load_elem_size);
+      Inst *inst = bb->build_inst(Op::LOAD_LE, arg2, load_elem_size);
       if (inst->bitsize < elem_bitsize)
 	inst = bb->build_inst(op, inst, elem_bitsize);
       inst = bb->build_inst(Op::ITE, pred, inst, zero);
@@ -6730,7 +6715,7 @@ void Parser::process_sve_ld1r(uint32_t load_elem_size)
 
   Inst *zero = bb->value_inst(0, elem_bitsize);
   Inst *res = nullptr;
-  Inst *loaded_value = load_value(arg2, load_elem_size);
+  Inst *loaded_value = bb->build_inst(Op::LOAD_LE, arg2, load_elem_size);
   for (uint32_t i = 0; i < nof_elem; i++)
     {
       Inst *pred = extract_pred_elem(arg1, elem_bitsize, i);
@@ -6759,7 +6744,7 @@ void Parser::process_sve_ld1qr(uint32_t load_elem_size)
     {
       Inst *offset = bb->value_inst(i * load_elem_size, arg2->bitsize);
       Inst *ptr = bb->build_inst(Op::ADD, arg2, offset);
-      Inst *loaded_value = load_value(ptr, load_elem_size);
+      Inst *loaded_value = bb->build_inst(Op::LOAD_LE, ptr, load_elem_size);
       Inst *pred = extract_pred_elem(arg1, elem_bitsize, i);
       Inst *inst = bb->build_inst(Op::ITE, pred, loaded_value, zero);
       if (res)
@@ -6769,17 +6754,6 @@ void Parser::process_sve_ld1qr(uint32_t load_elem_size)
     }
 
   write_reg(dest, res);
-}
-
-void Parser::store_value(Inst *ptr, Inst *value)
-{
-  for (uint64_t i = 0; i < value->bitsize / 8; i++)
-    {
-      Inst *offset = bb->value_inst(i, ptr->bitsize);
-      Inst *addr = bb->build_inst(Op::ADD, ptr, offset);
-      Inst *data_byte = extract_vec_elem(value, 8, i);
-      bb->build_inst(Op::STORE, addr, data_byte);
-    }
 }
 
 void Parser::process_sve_st1(uint32_t store_elem_size)
@@ -6804,7 +6778,7 @@ void Parser::process_sve_st1(uint32_t store_elem_size)
       Inst *elem = extract_vec_elem(arg0, elem_bitsize, i);
       if (elem_bitsize > 8 * store_elem_size)
 	elem = bb->build_trunc(elem, 8 * store_elem_size);
-      store_value(elem_ptr, elem);
+      bb->build_inst(Op::STORE_LE, elem_ptr, elem);
 
       bb->build_br_inst(false_bb);
       bb = false_bb;
@@ -6998,7 +6972,7 @@ void Parser::process_sve_ldr_preg()
   Inst *ptr = process_address(3, size);
 
   load_ub_check(ptr, size);
-  Inst *value = load_value(ptr, size);
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size);
   write_reg(dest, value);
 }
 
@@ -7010,7 +6984,7 @@ void Parser::process_sve_ldr()
   Inst *ptr = process_address(3, size);
 
   load_ub_check(ptr, size);
-  Inst *value = load_value(ptr, size);
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size);
   write_reg(dest, value);
 }
 
@@ -7021,7 +6995,7 @@ void Parser::process_sve_str()
   Inst *ptr = process_address(3, value->bitsize / 8);
 
   store_ub_check(ptr, value->bitsize / 8);
-  store_value(ptr, value);
+  bb->build_inst(Op::STORE_LE, ptr, value);
 }
 
 void Parser::process_sve_str_preg()
@@ -7031,7 +7005,7 @@ void Parser::process_sve_str_preg()
   Inst *ptr = process_address(3, value->bitsize / 8);
 
   store_ub_check(ptr, value->bitsize / 8);
-  store_value(ptr, value);
+  bb->build_inst(Op::STORE_LE, ptr, value);
 }
 
 void Parser::parse_sve_preg_op()
