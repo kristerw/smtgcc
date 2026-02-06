@@ -313,6 +313,7 @@ struct Basic_block {
   Inst *build_inst(Op op, Inst *arg1, uint32_t arg2_val);
   Inst *build_inst(Op op, uint32_t arg1_val, uint32_t arg2_val);
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3);
+  Inst *build_inst(Op op, Inst *arg1, Inst *arg2, uint32_t arg3_val);
   Inst *build_inst(Op op, Inst *arg1, uint32_t arg2_val, uint32_t arg3_val);
   Inst *build_phi_inst(int bitsize);
   Inst *build_ret_inst();

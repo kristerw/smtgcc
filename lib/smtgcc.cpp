@@ -870,6 +870,20 @@ Inst *Basic_block::build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
   return inst;
 }
 
+Inst *Basic_block::build_inst(Op op, Inst *arg1, Inst *arg2, uint32_t arg3_val)
+{
+  assert(op == Op::MEMMOVE
+	 || op == Op::MEMMOVE_MEM_FLAG
+	 || op == Op::MEMMOVE_MEM_INDEF
+	 || op == Op::MEMSET
+	 || op == Op::MEMSET_MEM_FLAG
+	 || op == Op::MEMSET_MEM_INDEF);
+  Inst *arg3 = value_inst(arg3_val, 32);
+  Inst *inst = create_inst(op, arg1, arg2, arg3);
+  insert_last(inst);
+  return inst;
+}
+
 Inst *Basic_block::build_inst(Op op, Inst *arg1, uint32_t arg2_val, uint32_t arg3_val)
 {
   assert(op == Op::EXTRACT);

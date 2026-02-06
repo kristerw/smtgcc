@@ -643,12 +643,31 @@ void expand_memmove_memset(Function *func)
 		}
 	      destroy_instruction(inst);
 	    }
-	  else if (inst->op == Op::MEMSET)
+	  else if (inst->op == Op::MEMSET
+		   || inst->op == Op::MEMSET_MEM_FLAG
+		   || inst->op == Op::MEMSET_MEM_INDEF)
 	    {
+	      Op store_op;
+	      std::string name;
+	      if (inst->op == Op::MEMSET)
+		{
+		  store_op = Op::STORE;
+		  name = "Op::MEMSET";
+		}
+	      else if (inst->op == Op::MEMSET_MEM_FLAG)
+		{
+		  store_op = Op::SET_MEM_FLAG;
+		  name = "Op::MEMSET_MEM_FLAG";
+		}
+	      else
+		{
+		  store_op = Op::SET_MEM_INDEF;
+		  name = "Op::MEMSET_MEM_INDEF";
+		}
 	      Inst *orig_ptr = inst->args[0];
 	      Inst *value = inst->args[1];
 	      if (inst->args[2]->op != Op::VALUE)
-		throw smtgcc::Not_implemented("non-constant Op::MEMSET size");
+		throw smtgcc::Not_implemented("non-constant " + name + " size");
 	      uint64_t size = inst->args[2]->value();
 	      for (uint64_t i = 0; i < size; i++)
 		{
@@ -658,17 +677,40 @@ void expand_memmove_memset(Function *func)
 		  Inst *ptr = simplify_inst(tmp_ptr);
 		  if (tmp_ptr != ptr)
 		    destroy_instruction(tmp_ptr);
-		  Inst *store = create_inst(Op::STORE, ptr, value);
+		  Inst *store = create_inst(store_op, ptr, value);
 		  store->insert_before(inst);
 		}
 	      destroy_instruction(inst);
 	    }
-	  else if (inst->op == Op::MEMMOVE)
+	  else if (inst->op == Op::MEMMOVE
+		   || inst->op == Op::MEMMOVE_MEM_FLAG
+		   || inst->op == Op::MEMMOVE_MEM_INDEF)
 	    {
+	      Op load_op;
+	      Op store_op;
+	      std::string name;
+	      if (inst->op == Op::MEMMOVE)
+		{
+		  load_op = Op::LOAD;
+		  store_op = Op::STORE;
+		  name = "Op::MEMMOVE";
+		}
+	      else if (inst->op == Op::MEMMOVE_MEM_FLAG)
+		{
+		  load_op = Op::GET_MEM_FLAG;
+		  store_op = Op::SET_MEM_FLAG;
+		  name = "Op::MEMMOVE_MEM_FLAG";
+		}
+	      else
+		{
+		  load_op = Op::GET_MEM_INDEF;
+		  store_op = Op::SET_MEM_INDEF;
+		  name = "Op::MEMMOVE_MEM_INDEF";
+		}
 	      Inst *orig_dst_ptr = inst->args[0];
 	      Inst *orig_src_ptr = inst->args[1];
 	      if (inst->args[2]->op != Op::VALUE)
-		throw smtgcc::Not_implemented("non-constant Op::MEMMOVE size");
+		throw smtgcc::Not_implemented("non-constant " + name + " size");
 	      uint64_t size = inst->args[2]->value();
 	      std::vector<std::pair<Inst*, Inst*>> insts;
 	      insts.reserve(size);
@@ -689,14 +731,14 @@ void expand_memmove_memset(Function *func)
 		  Inst *src_ptr = simplify_inst(tmp_src_ptr);
 		  if (tmp_src_ptr != src_ptr)
 		    destroy_instruction(tmp_src_ptr);
-		  Inst *value = create_inst(Op::LOAD, src_ptr);
+		  Inst *value = create_inst(load_op, src_ptr);
 		  value->insert_before(inst);
 
 		  insts.push_back({dst_ptr, value});
 		}
 	      for (auto [ptr, value] : insts)
 		{
-		  Inst *store = create_inst(Op::STORE, ptr, value);
+		  Inst *store = create_inst(store_op, ptr, value);
 		  store->insert_before(inst);
 		}
 	      destroy_instruction(inst);
