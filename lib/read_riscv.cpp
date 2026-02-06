@@ -1257,17 +1257,7 @@ void Parser::process_load(int size, LStype lstype)
 
   ptr = bb->build_inst(Op::ADD, base, offset);
   load_ub_check(ptr, size);
-  Inst *value = nullptr;
-  for (int i = 0; i < size; i++)
-    {
-      Inst *size_inst = bb->value_inst(i, ptr->bitsize);
-      Inst *addr = bb->build_inst(Op::ADD, ptr, size_inst);
-      Inst *byte = bb->build_inst(Op::LOAD, addr);
-      if (value)
-	value = bb->build_inst(Op::CONCAT, byte, value);
-      else
-	value = byte;
-    }
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size);
   if (lstype == LStype::float_ls && size == 4)
     {
       Inst *m1 = bb->value_m1_inst(32);
@@ -1298,13 +1288,8 @@ void Parser::process_store(int size, LStype lstype)
 
   ptr = bb->build_inst(Op::ADD, base, offset);
   store_ub_check(ptr, size);
-  for (int i = 0; i < size; i++)
-    {
-      Inst *size_inst = bb->value_inst(i, ptr->bitsize);
-      Inst *addr = bb->build_inst(Op::ADD, ptr, size_inst);
-      Inst *byte = bb->build_inst(Op::EXTRACT, value, i * 8 + 7, i * 8);
-      bb->build_inst(Op::STORE, addr, byte);
-    }
+  value = bb->build_trunc(value, size * 8);
+  bb->build_inst(Op::STORE_LE, ptr, value);
 }
 
 void Parser::process_funary(std::string_view name, Op op)
@@ -1860,26 +1845,16 @@ void Parser::process_vle(uint32_t elem_bitsize)
   Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
   Inst *value = nullptr;
   uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  uint32_t elem_size = elem_bitsize / 8;
   for (uint32_t i = 0; i < nof_elem; i++)
     {
-      Inst *elem_offset_inst =
-	bb->value_inst(i * elem_bitsize / 8, ptr->bitsize);
+      Inst *elem_offset_inst = bb->value_inst(i * elem_size, ptr->bitsize);
       Inst *elem_ptr = bb->build_inst(Op::ADD, ptr, elem_offset_inst);
       Inst *orig_elem = extract_vec_elem(orig, elem_bitsize, i);
       Inst *cmp = bb->build_inst(Op::ULT, bb->value_inst(i, vl->bitsize), vl);
       if (mask)
 	cmp = bb->build_inst(Op::AND, cmp, extract_vec_elem(mask, 1, i));
-      Inst *loaded_elem = nullptr;
-      for (uint32_t j = 0; j < elem_bitsize / 8; j++)
-	{
-	  Inst *offset_inst = bb->value_inst(j, ptr->bitsize);
-	  Inst *addr = bb->build_inst(Op::ADD, elem_ptr, offset_inst);
-	  Inst *loaded_byte = bb->build_inst(Op::LOAD, addr);
-	  if (loaded_elem)
-	    loaded_elem = bb->build_inst(Op::CONCAT, loaded_byte, loaded_elem);
-	  else
-	    loaded_elem = loaded_byte;
-	}
+      Inst *loaded_elem = bb->build_inst(Op::LOAD_LE, elem_ptr, elem_size);
       Inst *elem = bb->build_inst(Op::ITE, cmp, loaded_elem, orig_elem);
       if (value)
 	value = bb->build_inst(Op::CONCAT, elem, value);
@@ -1911,6 +1886,7 @@ void Parser::process_vse(uint32_t elem_bitsize)
 
   Inst *vl = bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::vl]);
   uint32_t nof_elem = rstate->vreg_bitsize / elem_bitsize;
+  uint32_t elem_size = elem_bitsize / 8;
   for (uint32_t i = 0; i < nof_elem; i++)
     {
       Basic_block *true_bb = func->build_bb();
@@ -1922,17 +1898,10 @@ void Parser::process_vse(uint32_t elem_bitsize)
       bb->build_br_inst(cmp, true_bb, false_bb);
       bb = true_bb;
 
-      Inst *elem_offset_inst =
-	bb->value_inst(i * elem_bitsize / 8, ptr->bitsize);
+      Inst *elem_offset_inst = bb->value_inst(i * elem_size, ptr->bitsize);
       Inst *elem_ptr = bb->build_inst(Op::ADD, ptr, elem_offset_inst);
       Inst *elem = extract_vec_elem(value, elem_bitsize, i);
-      for (uint32_t j = 0; j < elem_bitsize / 8; j++)
-	{
-	  Inst *offset_inst = bb->value_inst(j, ptr->bitsize);
-	  Inst *addr = bb->build_inst(Op::ADD, elem_ptr, offset_inst);
-	  Inst *byte = extract_vec_elem(elem, 8, j);
-	  bb->build_inst(Op::STORE, addr, byte);
-	}
+      bb->build_inst(Op::STORE_LE, elem_ptr, elem);
       bb->build_br_inst(false_bb);
       bb = false_bb;
     }
