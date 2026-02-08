@@ -109,7 +109,18 @@ void Unroller::ensure_lcssa(Inst *inst)
   for (auto use : inst->used_by)
     {
       if (!contains(loop.bbs, use->bb))
-	push_unique(invalid_use, use);
+	{
+	  if (use->op == Op::PHI)
+	    {
+	      for (auto phi_arg : use->phi_args)
+		{
+		  if (phi_arg.inst == inst && !contains(loop.bbs, phi_arg.bb))
+		    push_unique(invalid_use, use);
+		}
+	    }
+	  else
+	    push_unique(invalid_use, use);
+	}
     }
 
   if (invalid_use.empty())
