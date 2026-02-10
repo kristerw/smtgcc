@@ -2196,6 +2196,60 @@ Inst *Simplify::simplify_extract()
       return build_inst(Op::EXTRACT, arg1->args[0], high, low);
     }
 
+  // Recursively change "extract (concat x, y)" to "extract x" or "extract y"
+  // if the extraction only accesses bits from one of the arguments. It is
+  // common for the memory flags to have a mix of Op::SEXT and Op::CONCAT,
+  // so we recursively iterate on the Op::SEXT value too if the extraction
+  // does not need any bits from the extended part.
+  //
+  // If the final extraction where the recursion stops is of the form
+  //   sext (concat x, y)
+  // and we extract the whole x, and some extension bits, then we simplify
+  // this to
+  //   sext x
+  // as this is common, and the general simplifications below handle the
+  // general case which is more expensive to run.
+  if (arg1->op == Op::CONCAT || arg1->op == Op::SEXT)
+    {
+      Inst *arg = arg1;
+      uint32_t hi_val = high_val;
+      uint32_t lo_val = low_val;
+      while (arg->op == Op::CONCAT || arg->op == Op::SEXT)
+	{
+	  if (arg->op == Op::CONCAT)
+	    {
+	      uint32_t low_bitsize = arg->args[1]->bitsize;
+	      if (hi_val < low_bitsize)
+		arg = arg->args[1];
+	      else if (lo_val >= low_bitsize)
+		{
+		  hi_val -= low_bitsize;
+		  lo_val -= low_bitsize;
+		  arg = arg->args[0];
+		}
+	      else
+		break;
+	    }
+	  else if (arg->op == Op::SEXT)
+	    {
+	      if (hi_val < arg->args[0]->bitsize)
+		arg = arg->args[0];
+	      else
+		break;
+	    }
+	  else
+	    break;
+	}
+      if (low_val == 0 && high_val == arg->bitsize - 1)
+	return arg;
+      if (arg->op == Op::SEXT
+	  && arg->args[0]->op == Op::CONCAT
+	  && lo_val == arg->args[0]->args[1]->bitsize)
+	return build_inst(Op::SEXT, arg->args[0]->args[0], inst->bitsize);
+      if (arg != arg1 || hi_val != high_val || lo_val != low_val)
+	return build_inst(Op::EXTRACT, arg, hi_val, lo_val);
+    }
+
   // Simplify "extract (sext/zext x)":
   //  * If it is only extracting from the extended bits, it is changed
   //    to a sext of the most significant bit of x, or 0 if the instruction
@@ -2269,38 +2323,6 @@ Inst *Simplify::simplify_extract()
       Inst *extract_x = build_inst(Op::EXTRACT, arg1->args[0], arg2, arg3);
       Inst *extract_c = build_inst(Op::EXTRACT, arg1->args[1], arg2, arg3);
       return build_inst(arg1->op, extract_x, extract_c);
-    }
-
-  // "extract (concat x, y)" is changed to "extract x" or "extract y" if the
-  // range only accesses bits from one of the arguments.
-  if (arg1->op == Op::CONCAT)
-    {
-      // We often have chains of concat for loads and vectors, so we iterate
-      // to find the final element instead of needing to recursively simplify
-      // the new instruction.
-      Inst *arg = arg1;
-      uint32_t hi_val = high_val;
-      uint32_t lo_val = low_val;
-      while (arg->op == Op::CONCAT)
-	{
-	  uint32_t low_bitsize = arg->args[1]->bitsize;
-	  if (hi_val < low_bitsize)
-	    arg = arg->args[1];
-	  else if (lo_val >= low_bitsize)
-	    {
-	      hi_val -= low_bitsize;
-	      lo_val -= low_bitsize;
-	      arg = arg->args[0];
-	    }
-	  else
-	    break;
-	}
-      if (arg != arg1 || hi_val != high_val || lo_val != low_val)
-	{
-	  if (low_val == 0 && high_val == arg->bitsize - 1)
-	    return arg;
-	  return build_inst(Op::EXTRACT, arg, hi_val, lo_val);
-	}
     }
 
   // We often have chains of concat (for vectors, structures, etc.), and
