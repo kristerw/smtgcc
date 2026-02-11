@@ -1799,18 +1799,16 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
     load_vec_ub_check(addr.ptr, addr.prov, size, expr);
   else
     load_ub_check(addr.ptr, addr.prov, size);
-  Inst *value = nullptr;
+  Inst *value = bb->build_inst(Op::LOAD_LE, addr.ptr, size);
   Inst *indef = nullptr;
-  Inst *mem_flags2 = nullptr;
+  Inst *mem_flags2 = bb->build_inst(Op::GET_MEM_FLAG_LE, addr.ptr, size);
   for (uint64_t i = 0; i < size; i++)
     {
       Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
       Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
 
-      Inst *data_byte;
       Inst *indef_byte;
       uint8_t padding = padding_at_offset(type, i);
-      data_byte = bb->build_inst(Op::LOAD, ptr);
       indef_byte = bb->build_inst(Op::GET_MEM_INDEF, ptr);
       if (padding != 0)
 	{
@@ -1818,22 +1816,10 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
 	  indef_byte = bb->build_inst(Op::OR, indef_byte, padding_inst);
 	}
 
-      if (value)
-	value = bb->build_inst(Op::CONCAT, data_byte, value);
-      else
-	value = data_byte;
       if (indef)
 	indef = bb->build_inst(Op::CONCAT, indef_byte, indef);
       else
 	indef = indef_byte;
-
-      // TODO: Rename. This is not mem_flags -- we only splats one flag.
-      Inst *flag = bb->build_inst(Op::GET_MEM_FLAG, ptr);
-      flag = bb->build_inst(Op::SEXT, flag, 8);
-      if (mem_flags2)
-	mem_flags2 = bb->build_inst(Op::CONCAT, flag, mem_flags2);
-      else
-	mem_flags2 = flag;
     }
   if (is_bitfield)
     {
@@ -1865,56 +1851,23 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
 }
 
 // Read value/indef from memory. No UB checks etc. are done.
-std::tuple<Inst *, Inst *, Inst *> Converter::load_value(Inst *orig_ptr, uint64_t size)
+std::tuple<Inst *, Inst *, Inst *> Converter::load_value(Inst *ptr, uint64_t size)
 {
-  Inst *value = nullptr;
-  Inst *indef = nullptr;
-  Inst *mem_flags = nullptr;
-  for (uint64_t i = 0; i < size; i++)
-    {
-      Inst *offset = bb->value_inst(i, orig_ptr->bitsize);
-      Inst *ptr = bb->build_inst(Op::ADD, orig_ptr, offset);
-      Inst *data_byte = bb->build_inst(Op::LOAD, ptr);
-      if (value)
-	value = bb->build_inst(Op::CONCAT, data_byte, value);
-      else
-	value = data_byte;
-      Inst *indef_byte = bb->build_inst(Op::GET_MEM_INDEF, ptr);
-      if (indef)
-	indef = bb->build_inst(Op::CONCAT, indef_byte, indef);
-      else
-	indef = indef_byte;
-      Inst *flag = bb->build_inst(Op::GET_MEM_FLAG, ptr);
-      flag = bb->build_inst(Op::SEXT, flag, 8);
-      if (mem_flags)
-	mem_flags = bb->build_inst(Op::CONCAT, flag, mem_flags);
-      else
-	mem_flags = flag;
-    }
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size);
+  Inst *indef = bb->build_inst(Op::GET_MEM_INDEF_LE, ptr, size);
+  Inst *mem_flags = bb->build_inst(Op::GET_MEM_FLAG_LE, ptr, size);
   return {value, indef, mem_flags};
 }
 
 // Write value to memory. No UB checks etc. are done, and memory flags
 // are not updated.
-void Converter::store_value(Inst *orig_ptr, Inst *value, Inst *indef)
+void Converter::store_value(Inst *ptr, Inst *value, Inst *value_indef)
 {
   if ((value->bitsize & 7) != 0)
     throw Not_implemented("store_value: not byte aligned");
-  uint64_t size = value->bitsize / 8;
-  for (uint64_t i = 0; i < size; i++)
-    {
-      Inst *offset = bb->value_inst(i, orig_ptr->bitsize);
-      Inst *ptr = bb->build_inst(Op::ADD, orig_ptr, offset);
-      Inst *high = bb->value_inst(i * 8 + 7, 32);
-      Inst *low = bb->value_inst(i * 8, 32);
-      Inst *byte = bb->build_inst(Op::EXTRACT, value, high, low);
-      bb->build_inst(Op::STORE, ptr, byte);
-      if (indef)
-	{
-	  byte = bb->build_inst(Op::EXTRACT, indef, high, low);
-	  bb->build_inst(Op::SET_MEM_INDEF, ptr, byte);
-	}
-    }
+  bb->build_inst(Op::STORE_LE, ptr, value);
+  if (value_indef)
+    bb->build_inst(Op::SET_MEM_INDEF_LE, ptr, value_indef);
 }
 
 bool Converter::is_load(tree expr)
@@ -1995,9 +1948,9 @@ void Converter::process_store(tree addr_expr, tree value_expr)
 	  uint8_t byte = (i < str_len) ? p[i] : 0;
 	  Inst *value = bb->value_inst(byte, 8);
 	  bb->build_inst(Op::STORE, ptr, value);
-	  bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
-	  bb->build_inst(Op::SET_MEM_INDEF, ptr, indef);
 	}
+      bb->build_inst(Op::MEMSET_MEM_INDEF, addr.ptr, indef, size);
+      bb->build_inst(Op::MEMSET_MEM_FLAG, addr.ptr, memory_flag, size);
       return;
     }
 
@@ -2113,6 +2066,7 @@ void Converter::process_store(tree addr_expr, tree value_expr)
   if (inst2memory_flagsx.contains(value))
     memory_flagsx = inst2memory_flagsx.at(value);
 
+  bb->build_inst(Op::STORE_LE, addr.ptr, value);
   for (uint64_t i = 0; i < size; i++)
     {
       Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
@@ -2122,27 +2076,21 @@ void Converter::process_store(tree addr_expr, tree value_expr)
       Inst *low = bb->value_inst(i * 8, 32);
 
       uint8_t padding = padding_at_offset(value_type, i);
-      Inst *byte = bb->build_inst(Op::EXTRACT, value, high, low);
-      bb->build_inst(Op::STORE, ptr, byte);
 
-      byte = bb->build_inst(Op::EXTRACT, indef, high, low);
+      Inst *byte = bb->build_inst(Op::EXTRACT, indef, high, low);
       if (padding != 0)
 	{
 	  Inst *padding_inst = bb->value_inst(padding, 8);
 	  byte = bb->build_inst(Op::OR, byte, padding_inst);
 	}
       bb->build_inst(Op::SET_MEM_INDEF, ptr, byte);
-
-      Inst *memory_flag;
-      if (memory_flagsx)
-	{
-	  memory_flag = bb->build_inst(Op::EXTRACT, memory_flagsx, high, low);
-	  Inst *zero = bb->value_inst(0, memory_flag->bitsize);
-	  memory_flag = bb->build_inst(Op::NE, memory_flag, zero);
-	}
-      else
-	memory_flag = bb->value_inst(1, 1);
-      bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
+    }
+  if (memory_flagsx)
+    bb->build_inst(Op::SET_MEM_FLAG_LE, addr.ptr, memory_flagsx);
+  else
+    {
+      Inst *memory_flag = bb->value_inst(1, 1);
+      bb->build_inst(Op::MEMSET_MEM_FLAG, addr.ptr, memory_flag, size);
     }
 }
 
@@ -2156,22 +2104,9 @@ void Converter::process_store(tree addr_expr, Inst *value, Inst *value_indef)
   assert(!addr.bitoffset);
   store_ub_check(addr.ptr, addr.prov, size);
   Inst *memory_flag = bb->value_inst(0, 1);
-  for (uint64_t i = 0; i < size; i++)
-    {
-      Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
-      Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
-      Inst *high = bb->value_inst(i * 8 + 7, 32);
-      Inst *low = bb->value_inst(i * 8, 32);
-      Inst *byte = bb->build_inst(Op::EXTRACT, value, high, low);
-      Inst *byte_indef;
-      if (value_indef)
-	byte_indef = bb->build_inst(Op::EXTRACT, value_indef, high, low);
-      else
-	byte_indef = bb->value_inst(0, 8);
-      bb->build_inst(Op::STORE, ptr, byte);
-      bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
-      bb->build_inst(Op::SET_MEM_INDEF, ptr, byte_indef);
-    }
+  bb->build_inst(Op::STORE_LE, addr.ptr, value);
+  bb->build_inst(Op::SET_MEM_INDEF_LE, addr.ptr, value_indef);
+  bb->build_inst(Op::MEMSET_MEM_FLAG, addr.ptr, memory_flag, size);
 }
 
 // Convert a scalar value of src_type to dest_type.
@@ -3879,16 +3814,16 @@ void Converter::process_constructor(tree lhs, tree rhs)
     {
       Inst *zero = bb->value_inst(0, 8);
       Inst *memory_flag = bb->value_inst(0, 1);
+      bb->build_inst(Op::MEMSET, addr.ptr, zero, size);
       for (uint64_t i = 0; i < size; i++)
 	{
 	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
 	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
 	  uint8_t padding = padding_at_offset(TREE_TYPE(rhs), i);
 	  Inst *indef = bb->value_inst(padding, 8);
-	  bb->build_inst(Op::STORE, ptr, zero);
 	  bb->build_inst(Op::SET_MEM_INDEF, ptr, indef);
-	  bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
 	}
+      bb->build_inst(Op::MEMSET_MEM_FLAG, addr.ptr, memory_flag, size);
     }
 
   assert(!CONSTRUCTOR_NELTS(rhs));
@@ -5647,22 +5582,15 @@ void Converter::process_cfn_mask_load_lanes(gimple *stmt)
       assert(!addr.bitoffset);
       store_ub_check(addr.ptr, addr.prov, size);
       Inst *memory_flag = bb->value_inst(0, 1);
-      for (uint64_t i = 0; i < size; i++)
+      bb->build_inst(Op::STORE_LE, addr.ptr, inst);
+      if (indef)
+	bb->build_inst(Op::SET_MEM_INDEF_LE, addr.ptr, indef);
+      else
 	{
-	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
-	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
-	  Inst *high = bb->value_inst(i * 8 + 7, 32);
-	  Inst *low = bb->value_inst(i * 8, 32);
-	  Inst *byte = bb->build_inst(Op::EXTRACT, inst, high, low);
-	  Inst *byte_indef;
-	  if (indef)
-	    byte_indef = bb->build_inst(Op::EXTRACT, indef, high, low);
-	  else
-	    byte_indef = bb->value_inst(0, 8);
-	  bb->build_inst(Op::STORE, ptr, byte);
-	  bb->build_inst(Op::SET_MEM_FLAG, ptr, memory_flag);
-	  bb->build_inst(Op::SET_MEM_INDEF, ptr, byte_indef);
+	  Inst *zero = bb->value_inst(0, 8);
+	  bb->build_inst(Op::MEMSET_MEM_INDEF, addr.ptr, zero, size);
 	}
+      bb->build_inst(Op::MEMSET_MEM_FLAG, addr.ptr, memory_flag, size);
     }
   else
     {
@@ -8162,12 +8090,7 @@ void Converter::init_var(tree decl, Inst *mem_inst)
       // Uninitializied static variables are guaranted to be initialized to 0.
       Inst *zero = entry_bb->value_inst(0, 8);
       uint64_t size = bytesize_for_type(TREE_TYPE(decl));
-      for (uint64_t i = 0; i < size; i++)
-	{
-	  Inst *offset = entry_bb->value_inst(i, mem_inst->bitsize);
-	  Inst *ptr = entry_bb->build_inst(Op::ADD, mem_inst, offset);
-	  entry_bb->build_inst(Op::STORE, ptr, zero);
-	}
+      entry_bb->build_inst(Op::MEMSET, mem_inst, zero, size);
       return;
     }
 
@@ -8183,6 +8106,7 @@ void Converter::init_var(tree decl, Inst *mem_inst)
       Inst *zero = entry_bb->value_inst(0, 8);
       if (size > MAX_MEMORY_UNROLL_LIMIT)
 	throw Not_implemented("init_var: too large constructor");
+      entry_bb->build_inst(Op::MEMSET, mem_inst, zero, size);
       for (uint64_t i = 0; i < size; i++)
 	{
 	  Inst *offset = entry_bb->value_inst(i, mem_inst->bitsize);
@@ -8191,7 +8115,6 @@ void Converter::init_var(tree decl, Inst *mem_inst)
 	  if (padding)
 	    entry_bb->build_inst(Op::SET_MEM_INDEF, ptr,
 				 entry_bb->value_inst(padding, 8));
-	  entry_bb->build_inst(Op::STORE, ptr, zero);
 	}
     }
 

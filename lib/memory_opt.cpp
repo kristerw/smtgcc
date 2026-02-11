@@ -603,11 +603,17 @@ void expand_memmove_memset(Function *func)
 	{
 	  Inst *next_inst = inst->next;
 
-	  if (inst->op == Op::LOAD_LE)
+	  if (inst->op == Op::LOAD_LE
+	      || inst->op == Op::GET_MEM_INDEF_LE)
 	    {
+	      Op load_op;
+	      if (inst->op == Op::LOAD_LE)
+		load_op = Op::LOAD;
+	      else
+		load_op = Op::GET_MEM_INDEF;
 	      Inst *orig_ptr = inst->args[0];
 	      uint64_t size = inst->args[1]->value();
-	      Inst *value = create_inst(Op::LOAD, orig_ptr);
+	      Inst *value = create_inst(load_op, orig_ptr);
 	      value->insert_before(inst);
 	      for (uint64_t i = 1; i < size; i++)
 		{
@@ -615,7 +621,7 @@ void expand_memmove_memset(Function *func)
 		  Inst *ptr = create_inst(Op::ADD, orig_ptr, offset);
 		  ptr->insert_before(inst);
 		  ptr = simplify_inst(ptr);
-		  Inst *data_byte = create_inst(Op::LOAD, ptr);
+		  Inst *data_byte = create_inst(load_op, ptr);
 		  data_byte->insert_before(inst);
 		  value = create_inst(Op::CONCAT, data_byte, value);
 		  value->insert_before(inst);
@@ -623,8 +629,38 @@ void expand_memmove_memset(Function *func)
 	      inst->replace_all_uses_with(value);
 	      destroy_instruction(inst);
 	    }
-	  else if (inst->op == Op::STORE_LE)
+	  else if (inst->op == Op::GET_MEM_FLAG_LE)
 	    {
+	      Inst *orig_ptr = inst->args[0];
+	      uint64_t size = inst->args[1]->value();
+	      Inst *value = create_inst(Op::GET_MEM_FLAG, orig_ptr);
+	      value->insert_before(inst);
+	      value = create_inst(Op::SEXT, value, value->bitsize + 7);
+	      value->insert_before(inst);
+	      for (uint64_t i = 1; i < size; i++)
+		{
+		  Inst *offset = bb->value_inst(i, orig_ptr->bitsize);
+		  Inst *ptr = create_inst(Op::ADD, orig_ptr, offset);
+		  ptr->insert_before(inst);
+		  ptr = simplify_inst(ptr);
+		  Inst *data_byte = create_inst(Op::GET_MEM_FLAG, ptr);
+		  data_byte->insert_before(inst);
+		  value = create_inst(Op::CONCAT, data_byte, value);
+		  value->insert_before(inst);
+		  value = create_inst(Op::SEXT, value, value->bitsize + 7);
+		  value->insert_before(inst);
+		}
+	      inst->replace_all_uses_with(value);
+	      destroy_instruction(inst);
+	    }
+	  else if (inst->op == Op::STORE_LE
+		   || inst->op == Op::SET_MEM_INDEF_LE)
+	    {
+	      Op store_op;
+	      if (inst->op == Op::STORE_LE)
+		store_op = Op::STORE;
+	      else
+		store_op = Op::SET_MEM_INDEF;
 	      Inst *orig_ptr = inst->args[0];
 	      Inst *value = inst->args[1];
 	      for (uint64_t i = 0; i < value->bitsize / 8; i++)
@@ -638,7 +674,30 @@ void expand_memmove_memset(Function *func)
 		  Inst *data_byte = create_inst(Op::EXTRACT, value, hi, lo);
 		  data_byte->insert_before(inst);
 		  data_byte = simplify_inst(data_byte);
-		  Inst *store = create_inst(Op::STORE, ptr, data_byte);
+		  Inst *store = create_inst(store_op, ptr, data_byte);
+		  store->insert_before(inst);
+		}
+	      destroy_instruction(inst);
+	    }
+	  else if (inst->op == Op::SET_MEM_FLAG_LE)
+	    {
+	      Inst *orig_ptr = inst->args[0];
+	      Inst *value = inst->args[1];
+	      Inst *zero = bb->value_inst(0, 8);
+	      for (uint64_t i = 0; i < value->bitsize / 8; i++)
+		{
+		  Inst *offset = bb->value_inst(i, orig_ptr->bitsize);
+		  Inst *ptr = create_inst(Op::ADD, orig_ptr, offset);
+		  ptr->insert_before(inst);
+		  ptr = simplify_inst(ptr);
+		  uint32_t hi = i * 8 + 7;
+		  uint32_t lo = i * 8;
+		  Inst *data_byte = create_inst(Op::EXTRACT, value, hi, lo);
+		  data_byte->insert_before(inst);
+		  data_byte = simplify_inst(data_byte);
+		  Inst *flag = create_inst(Op::NE, data_byte, zero);
+		  flag->insert_before(inst);
+		  Inst *store = create_inst(Op::SET_MEM_FLAG, ptr, flag);
 		  store->insert_before(inst);
 		}
 	      destroy_instruction(inst);
@@ -672,11 +731,9 @@ void expand_memmove_memset(Function *func)
 	      for (uint64_t i = 0; i < size; i++)
 		{
 		  Inst *offset = bb->value_inst(i, orig_ptr->bitsize);
-		  Inst *tmp_ptr = create_inst(Op::ADD, orig_ptr, offset);
-		  tmp_ptr->insert_before(inst);
-		  Inst *ptr = simplify_inst(tmp_ptr);
-		  if (tmp_ptr != ptr)
-		    destroy_instruction(tmp_ptr);
+		  Inst *ptr = create_inst(Op::ADD, orig_ptr, offset);
+		  ptr->insert_before(inst);
+		  ptr = simplify_inst(ptr);
 		  Inst *store = create_inst(store_op, ptr, value);
 		  store->insert_before(inst);
 		}
@@ -718,19 +775,13 @@ void expand_memmove_memset(Function *func)
 		{
 		  Inst *offset = bb->value_inst(i, orig_dst_ptr->bitsize);
 
-		  Inst *tmp_dst_ptr =
-		    create_inst(Op::ADD, orig_dst_ptr, offset);
-		  tmp_dst_ptr->insert_before(inst);
-		  Inst *dst_ptr = simplify_inst(tmp_dst_ptr);
-		  if (tmp_dst_ptr != dst_ptr)
-		    destroy_instruction(tmp_dst_ptr);
+		  Inst *dst_ptr = create_inst(Op::ADD, orig_dst_ptr, offset);
+		  dst_ptr->insert_before(inst);
+		  dst_ptr = simplify_inst(dst_ptr);
 
-		  Inst *tmp_src_ptr =
-		    create_inst(Op::ADD, orig_src_ptr, offset);
-		  tmp_src_ptr->insert_before(inst);
-		  Inst *src_ptr = simplify_inst(tmp_src_ptr);
-		  if (tmp_src_ptr != src_ptr)
-		    destroy_instruction(tmp_src_ptr);
+		  Inst *src_ptr = create_inst(Op::ADD, orig_src_ptr, offset);
+		  src_ptr->insert_before(inst);
+		  src_ptr = simplify_inst(src_ptr);
 		  Inst *value = create_inst(load_op, src_ptr);
 		  value->insert_before(inst);
 
