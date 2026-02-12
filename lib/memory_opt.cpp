@@ -895,7 +895,7 @@ void canonicalize_memory(Module *module)
 	}
     }
 
-  // Remove unised local memory.
+  // Remove unused local memory.
   for (auto inst : src_mem)
     {
       if (!(inst->args[2]->value() & MEM_KEEP)
