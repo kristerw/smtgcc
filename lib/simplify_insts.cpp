@@ -882,6 +882,17 @@ Inst *Simplify::simplify_eq()
       return build_inst(Op::EQ, arg1->args[0], new_const);
     }
 
+  // eq (sub c1, x), c2 -> eq x, (c1 - c2)
+  if (arg1->op == Op::SUB
+      && arg1->args[0]->op == Op::VALUE
+      && arg2->op == Op::VALUE)
+    {
+      unsigned __int128 c1 = arg1->args[0]->value();
+      unsigned __int128 c2 = arg2->value();
+      Inst *new_const = value_inst(c1 - c2, arg1->bitsize);
+      return build_inst(Op::EQ, arg1->args[1], new_const);
+    }
+
   // eq (add x, y), (add x, z) -> eq y, z
   // eq (add x, y), (add z, x) -> eq y, z
   // eq (add y, x), (add x, z) -> eq y, z
@@ -894,6 +905,16 @@ Inst *Simplify::simplify_eq()
 	return build_inst(Op::EQ, arg1->args[1], arg2->args[0]);
       if (arg1->args[1] == arg2->args[0])
 	return build_inst(Op::EQ, arg1->args[0], arg2->args[1]);
+      if (arg1->args[1] == arg2->args[1])
+	return build_inst(Op::EQ, arg1->args[0], arg2->args[0]);
+    }
+
+  // eq (sub x, y), (sub x, z) -> eq y, z
+  // eq (sub y, x), (sub z, x) -> eq y, z
+  if (arg1->op == Op::SUB && arg2->op == Op::SUB)
+    {
+      if (arg1->args[0] == arg2->args[0])
+	return build_inst(Op::EQ, arg1->args[1], arg2->args[1]);
       if (arg1->args[1] == arg2->args[1])
 	return build_inst(Op::EQ, arg1->args[0], arg2->args[0]);
     }
