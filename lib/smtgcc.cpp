@@ -14,7 +14,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 112> inst_info{{
+const std::array<Inst_info, 118> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -91,21 +91,24 @@ const std::array<Inst_info, 112> inst_info{{
 
   // Memory state
   {"memory", Op::MEMORY, Inst_class::mem_ternary, true, false},
-  {"mem_array", Op::MEM_ARRAY, Inst_class::mem_nullary, true, false},
-  {"mem_flag_array", Op::MEM_FLAG_ARRAY, Inst_class::mem_nullary, true, false},
-  {"mem_indef_array", Op::MEM_INDEF_ARRAY, Inst_class::mem_nullary, true, false},
+  {"mem_array", Op::MEM_ARRAY, Inst_class::mem_unary, true, false},
+  {"mem_flag_array", Op::MEM_FLAG_ARRAY, Inst_class::mem_unary, true, false},
+  {"mem_indef_array", Op::MEM_INDEF_ARRAY, Inst_class::mem_unary, true, false},
   {"mem_size_array", Op::MEM_SIZE_ARRAY, Inst_class::mem_nullary, true, false},
 
   // Load/store
   {"free", Op::FREE, Inst_class::ls_unary, false, false},
   {"get_mem_flag", Op::GET_MEM_FLAG, Inst_class::ls_unary, true, false},
+  {"get_mem_flag_as1", Op::GET_MEM_FLAG_AS1, Inst_class::ls_unary, true, false},
   {"get_mem_flag_be", Op::GET_MEM_FLAG_BE, Inst_class::ls_binary, true, false},
   {"get_mem_flag_le", Op::GET_MEM_FLAG_LE, Inst_class::ls_binary, true, false},
   {"get_mem_indef", Op::GET_MEM_INDEF, Inst_class::ls_unary, true, false},
+  {"get_mem_indef_as1", Op::GET_MEM_INDEF_AS1, Inst_class::ls_unary, true, false},
   {"get_mem_indef_be", Op::GET_MEM_INDEF_BE, Inst_class::ls_binary, true, false},
   {"get_mem_indef_le", Op::GET_MEM_INDEF_LE, Inst_class::ls_binary, true, false},
   {"get_mem_size", Op::GET_MEM_SIZE, Inst_class::ls_unary, true, false},
   {"load", Op::LOAD, Inst_class::ls_unary, true, false},
+  {"load_as1", Op::LOAD_AS1, Inst_class::ls_unary, true, false},
   {"load_be", Op::LOAD_BE, Inst_class::ls_binary, true, false},
   {"load_le", Op::LOAD_LE, Inst_class::ls_binary, true, false},
   {"memmove", Op::MEMMOVE, Inst_class::ls_ternary, false, false},
@@ -115,12 +118,15 @@ const std::array<Inst_info, 112> inst_info{{
   {"memset_mem_flag", Op::MEMSET_MEM_FLAG, Inst_class::ls_ternary, false, false},
   {"memset_mem_indef", Op::MEMSET_MEM_INDEF, Inst_class::ls_ternary, false, false},
   {"set_mem_flag", Op::SET_MEM_FLAG, Inst_class::ls_binary, false, false},
+  {"set_mem_flag_as1", Op::SET_MEM_FLAG_AS1, Inst_class::ls_binary, false, false},
   {"set_mem_flag_be", Op::SET_MEM_FLAG_BE, Inst_class::ls_binary, false, false},
   {"set_mem_flag_le", Op::SET_MEM_FLAG_LE, Inst_class::ls_binary, false, false},
   {"set_mem_indef", Op::SET_MEM_INDEF, Inst_class::ls_binary, false, false},
+  {"set_mem_indef_as1", Op::SET_MEM_INDEF_AS1, Inst_class::ls_binary, false, false},
   {"set_mem_indef_be", Op::SET_MEM_INDEF_BE, Inst_class::ls_binary, false, false},
   {"set_mem_indef_le", Op::SET_MEM_INDEF_LE, Inst_class::ls_binary, false, false},
   {"store", Op::STORE, Inst_class::ls_binary, false, false},
+  {"store_as1", Op::STORE_AS1, Inst_class::ls_binary, false, false},
   {"store_be", Op::STORE_BE, Inst_class::ls_binary, false, false},
   {"store_le", Op::STORE_LE, Inst_class::ls_binary, false, false},
 
@@ -232,9 +238,13 @@ Inst *create_inst(Op op, Inst *arg)
       || op == Op::IS_INF
       || op == Op::IS_NAN
       || op == Op::IS_NONCANONICAL_NAN
-      || op == Op::GET_MEM_FLAG)
+      || op == Op::GET_MEM_FLAG
+      || op == Op::GET_MEM_FLAG_AS1)
     inst->bitsize = 1;
-  else if (op == Op::GET_MEM_INDEF || op == Op::LOAD)
+  else if (op == Op::GET_MEM_INDEF
+	   || op == Op::GET_MEM_INDEF_AS1
+	   || op == Op::LOAD
+	   || op == Op::LOAD_AS1)
     inst->bitsize = 8;
   else if (op == Op::GET_MEM_SIZE)
     inst->bitsize = arg->bb->func->module->ptr_offset_bits;
@@ -246,6 +256,10 @@ Inst *create_inst(Op op, Inst *arg)
       inst->bitsize = arg->bitsize;
     }
   else if (!inst_info[(int)op].has_lhs)
+    inst->bitsize = 0;
+  else if (op == Op::MEM_ARRAY
+	   || op == Op::MEM_FLAG_ARRAY
+	   || op == Op::MEM_INDEF_ARRAY)
     inst->bitsize = 0;
   else
     inst->bitsize = arg->bitsize;

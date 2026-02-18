@@ -170,7 +170,9 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	  solver.mkBitVectorSort(func->module->ptr_bits);
 	cvc5::Sort byte_sort = solver.mkBitVectorSort(8);
 	cvc5::Sort array_sort = solver.mkArraySort(address_sort, byte_sort);
-	cvc5::Term memory = solver.mkConst(array_sort, ".memory");
+	char name[100];
+	sprintf(name, ".memory%" PRIu32, (uint32_t)inst->args[0]->value());
+	cvc5::Term memory = solver.mkConst(array_sort, name);
 	inst2array.insert({inst, memory});
       }
       break;
@@ -597,6 +599,7 @@ void Converter::build_smt(const Inst *inst)
       build_bv_comparison_smt(inst);
       break;
     case Inst_class::mem_nullary:
+    case Inst_class::mem_unary:
       build_memory_state_smt(inst);
       break;
     case Inst_class::iunary:

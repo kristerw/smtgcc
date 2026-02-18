@@ -312,7 +312,7 @@ void build_return(aarch64_state *rstate, Function *src_func, function *fun)
       Module *module = rstate->module;
       Inst *id = bb->value_inst(rstate->next_local_id++, module->ptr_id_bits);
       Inst *mem_size = bb->value_inst(ret_bitsize / 8, module->ptr_offset_bits);
-      Inst *flags = bb->value_inst(0, 32);
+      Inst *flags = bb->value_inst(MEM_AS1_CANDIDATE, 32);
       Basic_block *entry_bb = rstate->entry_bb;
       Inst *ret_mem = entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
       Inst *reg = rstate->registers[Aarch64RegIdx::x8];
@@ -365,7 +365,7 @@ Inst *param_in_mem(Basic_block *bb, aarch64_state *rstate, Inst *value)
   Module *module = rstate->module;
   Inst *id = bb->value_inst(rstate->next_local_id++, module->ptr_id_bits);
   Inst *mem_size = bb->value_inst(value->bitsize / 8, module->ptr_offset_bits);
-  Inst *flags = bb->value_inst(0, 32);
+  Inst *flags = bb->value_inst(MEM_AS1_CANDIDATE, 32);
   Inst *mem = bb->build_inst(Op::MEMORY, id, mem_size, flags);
   for (uint64_t i = 0; i < value->bitsize / 8; i++)
     {
@@ -443,7 +443,7 @@ aarch64_state setup_aarch64_function(CommonState *state, Function *src_func, fun
   assert(stack_size < (((uint64_t)1) << module->ptr_offset_bits));
   Inst *id = bb->value_inst(rstate.next_local_id++, module->ptr_id_bits);
   Inst *mem_size = bb->value_inst(stack_size, module->ptr_offset_bits);
-  Inst *flags = bb->value_inst(0, 32);
+  Inst *flags = bb->value_inst(MEM_AS1_CANDIDATE, 32);
   Inst *stack = bb->build_inst(Op::MEMORY, id, mem_size, flags);
   Inst *size = bb->value_inst(stack_size, stack->bitsize);
   stack = bb->build_inst(Op::ADD, stack, size);

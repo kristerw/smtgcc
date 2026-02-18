@@ -209,6 +209,9 @@ class Converter : Simplify_config {
   std::map<Basic_block *, Inst *> bb2memory_size;
   std::map<Basic_block *, Inst *> bb2memory_flag;
   std::map<Basic_block *, Inst *> bb2memory_indef;
+  std::map<Basic_block *, Inst *> bb2memory_as1;
+  std::map<Basic_block *, Inst *> bb2memory_flag_as1;
+  std::map<Basic_block *, Inst *> bb2memory_indef_as1;
 
   // List of the mem_id for the constant memory blocks.
   std::vector<Inst *> const_ids;
@@ -229,6 +232,10 @@ class Converter : Simplify_config {
   Inst *memory_flag;
   Inst *memory_size;
   Inst *memory_indef;
+  // TODO: The as1 memory does not need to be identical.
+  Inst *memory_as1;
+  Inst *memory_flag_as1;
+  Inst *memory_indef_as1;
 
   Basic_block *dest_bb;
 
@@ -1027,10 +1034,16 @@ Converter::Converter(Module *m, bool run_simplify_inst)
   dest_func = module->build_function("check");
   dest_bb = dest_func->build_bb();
 
-  memory = build_inst(Op::MEM_ARRAY);
-  memory_indef = build_inst(Op::MEM_INDEF_ARRAY);
-  memory_flag = build_inst(Op::MEM_FLAG_ARRAY);
+  Inst *as0 = value_inst(0, 32);
+  memory = build_inst(Op::MEM_ARRAY, as0);
+  memory_indef = build_inst(Op::MEM_INDEF_ARRAY, as0);
+  memory_flag = build_inst(Op::MEM_FLAG_ARRAY, as0);
   memory_size = build_inst(Op::MEM_SIZE_ARRAY);
+
+  Inst *as1 = value_inst(1, 32);
+  memory_as1 = build_inst(Op::MEM_ARRAY, as1);
+  memory_indef_as1 = build_inst(Op::MEM_INDEF_ARRAY, as1);
+  memory_flag_as1 = build_inst(Op::MEM_FLAG_ARRAY, as1);
 }
 
 void Converter::add_ub(Basic_block *bb, Inst *cond)
@@ -1651,6 +1664,15 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       if (!new_inst)
 	new_inst = build_inst(Op::ARRAY_LOAD, array, addr);
     }
+  else if (inst->op == Op::LOAD_AS1)
+    {
+      std::map<Inst *, std::pair<Inst *, Inst *>> cache;
+      Inst *array = bb2memory_as1.at(bb);
+      Inst *addr = translate.at(inst->args[0]);
+      std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
+      if (!new_inst)
+	new_inst = build_inst(Op::ARRAY_LOAD, array, addr);
+    }
   else if (inst->op == Op::STORE)
     {
       Inst *array = bb2memory.at(bb);
@@ -1658,6 +1680,15 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       Inst *value = translate.at(inst->args[1]);
       array = build_inst(Op::ARRAY_STORE, array, addr, value);
       bb2memory[bb] = array;
+      return;
+    }
+  else if (inst->op == Op::STORE_AS1)
+    {
+      Inst *array = bb2memory_as1.at(bb);
+      Inst *addr = translate.at(inst->args[0]);
+      Inst *value = translate.at(inst->args[1]);
+      array = build_inst(Op::ARRAY_STORE, array, addr, value);
+      bb2memory_as1[bb] = array;
       return;
     }
   else if (inst->op == Op::UB)
@@ -1679,6 +1710,15 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       bb2memory_flag[bb] = array;
       return;
     }
+  else if (inst->op == Op::SET_MEM_FLAG_AS1)
+    {
+      Inst *array = bb2memory_flag_as1.at(bb);
+      Inst *addr = translate.at(inst->args[0]);
+      Inst *value = translate.at(inst->args[1]);
+      array = build_inst(Op::ARRAY_SET_FLAG, array, addr, value);
+      bb2memory_flag_as1[bb] = array;
+      return;
+    }
   else if (inst->op == Op::SET_MEM_INDEF)
     {
       Inst *array = bb2memory_indef.at(bb);
@@ -1686,6 +1726,15 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       Inst *value = translate.at(inst->args[1]);
       array = build_inst(Op::ARRAY_SET_INDEF, array, addr, value);
       bb2memory_indef[bb] = array;
+      return;
+    }
+  else if (inst->op == Op::SET_MEM_INDEF_AS1)
+    {
+      Inst *array = bb2memory_indef_as1.at(bb);
+      Inst *addr = translate.at(inst->args[0]);
+      Inst *value = translate.at(inst->args[1]);
+      array = build_inst(Op::ARRAY_SET_INDEF, array, addr, value);
+      bb2memory_indef_as1[bb] = array;
       return;
     }
   else if (inst->op == Op::FREE)
@@ -1706,10 +1755,28 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
        if (!new_inst)
 	 new_inst = build_inst(Op::ARRAY_GET_INDEF, array, addr);
      }
+   else if (inst->op == Op::GET_MEM_INDEF_AS1)
+     {
+       std::map<Inst *, std::pair<Inst *, Inst *>> cache;
+       Inst *array = bb2memory_indef_as1.at(bb);
+       Inst *addr = translate.at(inst->args[0]);
+       std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
+       if (!new_inst)
+	 new_inst = build_inst(Op::ARRAY_GET_INDEF, array, addr);
+     }
    else if (inst->op == Op::GET_MEM_FLAG)
      {
        std::map<Inst *, std::pair<Inst *, Inst *>> cache;
        Inst *array = bb2memory_flag.at(bb);
+       Inst *addr = translate.at(inst->args[0]);
+       std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
+       if (!new_inst)
+	 new_inst = build_inst(Op::ARRAY_GET_FLAG, array, addr);
+     }
+   else if (inst->op == Op::GET_MEM_FLAG_AS1)
+     {
+       std::map<Inst *, std::pair<Inst *, Inst *>> cache;
+       Inst *array = bb2memory_flag_as1.at(bb);
        Inst *addr = translate.at(inst->args[0]);
        std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
        if (!new_inst)
@@ -1894,6 +1961,10 @@ void Converter::convert_function(Function *func, Function_role role)
 	  bb2memory_size.insert({bb, memory_size});
 	  bb2memory_flag.insert({bb, memory_flag});
 	  bb2memory_indef.insert({bb, memory_indef});
+
+	  bb2memory_as1.insert({bb, memory_as1});
+	  bb2memory_flag_as1.insert({bb, memory_flag_as1});
+	  bb2memory_indef_as1.insert({bb, memory_indef_as1});
 	}
       else
 	{
@@ -1902,6 +1973,10 @@ void Converter::convert_function(Function *func, Function_role role)
 	  build_mem_state(bb, bb2memory_size);
 	  build_mem_state(bb, bb2memory_flag);
 	  build_mem_state(bb, bb2memory_indef);
+
+	  build_mem_state(bb, bb2memory_as1);
+	  build_mem_state(bb, bb2memory_flag_as1);
+	  build_mem_state(bb, bb2memory_indef_as1);
 	}
 
       for (auto phi : bb->phis)
@@ -1978,6 +2053,9 @@ void Converter::convert_function(Function *func, Function_role role)
   bb2memory_size.clear();
   bb2memory_flag.clear();
   bb2memory_indef.clear();
+  bb2memory_as1.clear();
+  bb2memory_flag_as1.clear();
+  bb2memory_indef_as1.clear();
   const_ids.clear();
   translate.clear();
 }

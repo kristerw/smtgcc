@@ -12,6 +12,7 @@
 #define MEM_KEEP    1
 #define MEM_CONST   2
 #define MEM_UNINIT  4
+#define MEM_AS1_CANDIDATE  8
 
 // How many bytes load, store, __builtin_memset, etc. can expand.
 #define MAX_MEMORY_UNROLL_LIMIT  10000
@@ -127,13 +128,16 @@ enum class Op : uint8_t {
   // Load/store
   FREE,
   GET_MEM_FLAG,
+  GET_MEM_FLAG_AS1,
   GET_MEM_FLAG_BE,
   GET_MEM_FLAG_LE,
   GET_MEM_INDEF,
+  GET_MEM_INDEF_AS1,
   GET_MEM_INDEF_BE,
   GET_MEM_INDEF_LE,
   GET_MEM_SIZE,
   LOAD,
+  LOAD_AS1,
   LOAD_BE,
   LOAD_LE,
   MEMMOVE,
@@ -143,12 +147,15 @@ enum class Op : uint8_t {
   MEMSET_MEM_FLAG,
   MEMSET_MEM_INDEF,
   SET_MEM_FLAG,
+  SET_MEM_FLAG_AS1,
   SET_MEM_FLAG_BE,
   SET_MEM_FLAG_LE,
   SET_MEM_INDEF,
+  SET_MEM_INDEF_AS1,
   SET_MEM_INDEF_BE,
   SET_MEM_INDEF_LE,
   STORE,
+  STORE_AS1,
   STORE_BE,
   STORE_LE,
 
@@ -199,6 +206,7 @@ enum class Inst_class : uint8_t {
 
   // Memory
   mem_nullary,
+  mem_unary,
   mem_ternary,
   ls_unary,
   ls_binary,
@@ -222,7 +230,7 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 112> inst_info;
+extern const std::array<Inst_info, 118> inst_info;
 
 struct Module;
 struct Function;

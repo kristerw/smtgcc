@@ -107,7 +107,9 @@ bool is_unused_memory(Inst *memory_inst)
       for (auto used_by : inst->used_by)
 	{
 	  if (used_by->op == Op::SET_MEM_INDEF
-	      || used_by->op == Op::STORE)
+	      || used_by->op == Op::SET_MEM_INDEF_AS1
+	      || used_by->op == Op::STORE
+	      || used_by->op == Op::STORE_AS1)
 	    sinks.push_back(used_by);
 	  worklist.push_back(used_by);
 	}
@@ -800,6 +802,92 @@ void expand_memmove_memset(Function *func)
     }
 }
 
+bool is_valid_address_space_use(Inst *inst, std::vector<Inst*>& mem_uses)
+{
+  for (auto use : inst->used_by)
+    {
+      switch (use->op)
+	{
+	case Op::ADD:
+	  if (use->args[1]->op != Op::VALUE)
+	    return false;
+	  if (!is_valid_address_space_use(use, mem_uses))
+	    return false;
+	  break;
+	case Op::LOAD:
+	case Op::GET_MEM_FLAG:
+	case Op::GET_MEM_INDEF:
+	  mem_uses.push_back(use);
+	  break;
+	case Op::STORE:
+	case Op::SET_MEM_FLAG:
+	case Op::SET_MEM_INDEF:
+	  if (use->args[1] == inst)
+	    return false;
+	  mem_uses.push_back(use);
+	  break;
+	default:
+	  return false;
+	}
+    }
+
+    return true;
+}
+
+void local_mem_address_space(Inst *mem)
+{
+  assert(mem->op == Op::MEMORY);
+  if (!is_local_memory(mem))
+    return;
+  if (!(mem->args[2]->value() & MEM_AS1_CANDIDATE))
+    return;
+  if (mem->args[2]->value() & MEM_KEEP)
+    return;
+  if (mem->args[2]->value() & MEM_UNINIT)
+    return;
+
+  std::vector<Inst*> mem_uses;
+  if (!is_valid_address_space_use(mem, mem_uses))
+    return;
+  if (mem_uses.empty())
+    return;
+
+  for (auto mem_use : mem_uses)
+    {
+      Inst *inst = nullptr;
+      switch (mem_use->op)
+	{
+	case Op::LOAD:
+	  inst = create_inst(Op::LOAD_AS1, mem_use->args[0]);
+	  break;
+	case Op::GET_MEM_FLAG:
+	  inst = create_inst(Op::GET_MEM_FLAG_AS1, mem_use->args[0]);
+	  break;
+	case Op::GET_MEM_INDEF:
+	  inst = create_inst(Op::GET_MEM_INDEF_AS1, mem_use->args[0]);
+	  break;
+	case Op::STORE:
+	  inst = create_inst(Op::STORE_AS1, mem_use->args[0], mem_use->args[1]);
+	  break;
+	case Op::SET_MEM_FLAG:
+	  inst = create_inst(Op::SET_MEM_FLAG_AS1, mem_use->args[0],
+			     mem_use->args[1]);
+	  break;
+	case Op::SET_MEM_INDEF:
+	  inst = create_inst(Op::SET_MEM_INDEF_AS1, mem_use->args[0],
+			     mem_use->args[1]);
+	  break;
+	default:
+	  throw smtgcc::Not_implemented("local_mem_address_space: "
+					"unknown instruction");
+	}
+      inst->insert_before(mem_use);
+      if (inst->has_lhs())
+	mem_use->replace_all_uses_with(inst);
+      destroy_instruction(mem_use);
+    }
+}
+
 } // end anonymous namespace
 
 // This function makes the memory instructions consistent between src and tgt:
@@ -841,6 +929,12 @@ void canonicalize_memory(Module *module)
 
   std::vector<Inst *> src_mem = collect_mem(src);
   std::vector<Inst *> tgt_mem = collect_mem(tgt);
+
+  for (auto mem : src_mem)
+    local_mem_address_space(mem);
+  for (auto mem : tgt_mem)
+    local_mem_address_space(mem);
+
   std::sort(src_mem.begin(), src_mem.end(), comp);
   std::sort(tgt_mem.begin(), tgt_mem.end(), comp);
 

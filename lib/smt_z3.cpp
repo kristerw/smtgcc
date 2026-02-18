@@ -265,7 +265,9 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	z3::sort address_sort = ctx.bv_sort(func->module->ptr_bits);
 	z3::sort byte_sort = ctx.bv_sort(8);
 	z3::sort array_sort = ctx.array_sort(address_sort, byte_sort);
-	z3::expr memory = ctx.constant(".memory", array_sort);
+	char name[100];
+	sprintf(name, ".memory%" PRIu32, (uint32_t)inst->args[0]->value());
+	z3::expr memory = ctx.constant(name, array_sort);
 	inst2array.insert({inst, memory});
       }
       break;
@@ -812,6 +814,7 @@ void Converter::build_smt(const Inst *inst)
       build_fp_comparison_smt(inst);
       break;
     case Inst_class::mem_nullary:
+    case Inst_class::mem_unary:
       build_memory_state_smt(inst);
       break;
     case Inst_class::iunary:

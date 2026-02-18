@@ -201,6 +201,7 @@ std::string Cache::hash(Function *func)
 	    case Inst_class::ls_binary:
 	    case Inst_class::ls_ternary:
 	    case Inst_class::mem_nullary:
+	    case Inst_class::mem_unary:
 	    case Inst_class::mem_ternary:
 	    case Inst_class::reg_unary:
 	    case Inst_class::reg_binary:
