@@ -81,6 +81,8 @@ struct Converter {
   std::map<tree, Inst *> decl2instruction;
   std::map<Inst *, Inst *> inst2memory_flagsx;
   std::map<Inst *, Inst *> inst2id;
+  std::vector<Inst *> static_var_ids;
+  std::vector<Inst *> constrain_ptr_id;
   Inst *retval = nullptr;
 
   bool is_tgt_func;
@@ -520,6 +522,14 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
 	    cond = bb->build_inst(Op::AND, cond, not_written);
 	  bb->build_inst(Op::UB, cond);
 	}
+
+      // A pointer cannot point to a static variable that has not had
+      // its address taken. But we are processing variables on demand,
+      // so there may be more variables than we know at this point.
+      // We therefore just store the ID here, and add the constraints
+      // after the whole function has been processed.
+      constrain_ptr_id.push_back(id);
+
       return;
     }
   if (SCALAR_FLOAT_TYPE_P(type))
@@ -1604,6 +1614,32 @@ void Converter::alignment_check(tree expr, Inst *ptr)
     }
 }
 
+// Classify the object as local or global Op::MEMORY.
+//
+// Local Op::MEMORY objects have two properties:
+//  * They are not checked when verifying the memory state.
+//  * They cannot be accessed by dereferencing a pointer we get
+//    as input.
+bool is_decl_in_local_mem(tree decl)
+{
+  // Stack variables are local Op::MEMORY objects.
+  if (!is_global_var(decl))
+    return true;
+
+  // External pointers cannot point to compiler-generated objects,
+  // so local Op::MEMORY is the most suitable.
+  if (DECL_ARTIFICIAL(decl))
+    return true;
+
+  // Read-only static variables can be removed by constant propagation,
+  // so we generate false alarms if they are included when comparing
+  // the memory state. Place them in local Op::MEMORY to avoid this.
+  if (TREE_READONLY(decl) && TREE_STATIC(decl))
+    return true;
+
+  return false;
+}
+
 void Converter::process_decl(tree decl)
 {
   if (DECL_REGISTER(decl))
@@ -1618,7 +1654,7 @@ void Converter::process_decl(tree decl)
     id = state->decl2id.at(decl);
   else
     {
-      if (DECL_ARTIFICIAL(decl) || !TREE_PUBLIC(decl))
+      if (is_decl_in_local_mem(decl))
 	{
 	  if (state->id_local <= state->ptr_id_min)
 	    throw Not_implemented("process_decl: too many local variables");
@@ -1629,6 +1665,12 @@ void Converter::process_decl(tree decl)
 	  if (state->id_global >= state->ptr_id_max)
 	    throw Not_implemented("process_decl: too many global variables");
 	  id = ++state->id_global;
+
+	  if (TREE_STATIC(decl) && !TREE_ADDRESSABLE(decl))
+	    {
+	      Inst *id_inst = bb->value_inst(id, module->ptr_id_bits);
+	      static_var_ids.push_back(id_inst);
+	    }
 	}
       state->decl2id.insert({decl, id});
     }
@@ -8548,6 +8590,20 @@ Function *Converter::process_function()
       func->bbs[0]->build_inst(Op::UB, func->bbs[0]->value_inst(1, 1));
 
     process_instructions(nof_blocks, postorder);
+
+    // We did not have all information necessary in constrain_src_value to
+    // constrain pointers. Add the constraints now when the whole function
+    // has been processed.
+    for (auto id : constrain_ptr_id)
+      {
+	for (auto static_var_id : static_var_ids)
+	  {
+	    Inst *cond = create_inst(Op::EQ, id, static_var_id);
+	    cond->insert_after(id);
+	    Inst *ub = create_inst(Op::UB, cond);
+	    ub->insert_after(cond);
+	  }
+      }
 
     free(postorder);
     postorder = nullptr;
