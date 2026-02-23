@@ -342,7 +342,7 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
       Inst *id =
 	tgt->value_inst(rstate->next_local_id++, tgt->module->ptr_id_bits);
       Inst *mem_size = tgt->value_inst(size, tgt->module->ptr_offset_bits);
-      Inst *flags = tgt->value_inst(MEM_AS1_CANDIDATE, 32);
+      Inst *flags = tgt->value_inst(0, 32);
 
       Basic_block *entry_bb = rstate->entry_bb;
       Inst *ret_mem =
@@ -385,7 +385,7 @@ Inst *param_in_mem(Basic_block *bb, riscv_state& rstate, Inst *value)
   Module *module = rstate.module;
   Inst *id = bb->value_inst(rstate.next_local_id++, module->ptr_id_bits);
   Inst *mem_size = bb->value_inst(value->bitsize / 8, module->ptr_offset_bits);
-  Inst *mem_flags = bb->value_inst(MEM_AS1_CANDIDATE, 32);
+  Inst *mem_flags = bb->value_inst(0, 32);
   Inst *mem = bb->build_inst(Op::MEMORY, id, mem_size, mem_flags);
   for (uint64_t i = 0; i < value->bitsize / 8; i++)
     {
@@ -468,7 +468,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
   assert(stack_size < (((uint64_t)1) << module->ptr_offset_bits));
   Inst *id = bb->value_inst(rstate.next_local_id++, module->ptr_id_bits);
   Inst *mem_size = bb->value_inst(stack_size, module->ptr_offset_bits);
-  Inst *flags = bb->value_inst(MEM_AS1_CANDIDATE, 32);
+  Inst *flags = bb->value_inst(0, 32);
   Inst *stack = bb->build_inst(Op::MEMORY, id, mem_size, flags);
   Inst *size = bb->value_inst(stack_size, stack->bitsize);
   stack = bb->build_inst(Op::ADD, stack, size);

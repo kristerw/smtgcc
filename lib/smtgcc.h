@@ -11,8 +11,6 @@
 
 #define MEM_KEEP    1
 #define MEM_CONST   2
-#define MEM_UNINIT  4
-#define MEM_AS1_CANDIDATE  8
 
 // How many bytes load, store, __builtin_memset, etc. can expand.
 #define MAX_MEMORY_UNROLL_LIMIT  10000

@@ -162,7 +162,7 @@ void build_return(sh_state *rstate, Function *src_func, function *fun)
 	bb->value_inst(rstate->next_local_id++, rstate->module->ptr_id_bits);
       Inst *mem_size =
 	bb->value_inst(ret_bitsize / 8, rstate->module->ptr_offset_bits);
-      Inst *flags = bb->value_inst(MEM_AS1_CANDIDATE, 32);
+      Inst *flags = bb->value_inst(0, 32);
 
       Basic_block *entry_bb = rstate->entry_bb;
       Inst *ret_mem =
@@ -251,7 +251,7 @@ sh_state setup_sh_function(CommonState *state, Function *src_func, function *fun
   assert(stack_size < (((uint64_t)1) << module->ptr_offset_bits));
   Inst *id = bb->value_inst(rstate.next_local_id++, module->ptr_id_bits);
   Inst *mem_size = bb->value_inst(stack_size, module->ptr_offset_bits);
-  Inst *flags = bb->value_inst(MEM_AS1_CANDIDATE, 32);
+  Inst *flags = bb->value_inst(0, 32);
   Inst *stack = bb->build_inst(Op::MEMORY, id, mem_size, flags);
   Inst *size = bb->value_inst(stack_size, stack->bitsize);
   stack = bb->build_inst(Op::ADD, stack, size);

@@ -86,7 +86,7 @@ bpf_state setup_bpf_function(CommonState *state, Function *src_func, function *f
   assert(stack_size < (((uint64_t)1) << module->ptr_offset_bits));
   Inst *id = bb->value_inst(rstate.next_local_id++, module->ptr_id_bits);
   Inst *mem_size = bb->value_inst(stack_size, module->ptr_offset_bits);
-  Inst *flags = bb->value_inst(MEM_AS1_CANDIDATE, 32);
+  Inst *flags = bb->value_inst(0, 32);
   Inst *stack = bb->build_inst(Op::MEMORY, id, mem_size, flags);
   Inst *size = bb->value_inst(stack_size, stack->bitsize);
   stack = bb->build_inst(Op::ADD, stack, size);

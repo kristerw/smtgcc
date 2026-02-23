@@ -1806,11 +1806,9 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       // All uses of MEMORY should have been changed to constants.
       assert(inst->used_by.empty());
 
-      uint32_t ptr_bits = module->ptr_bits;
       uint32_t ptr_offset_bits = module->ptr_offset_bits;
       uint32_t ptr_id_bits = module->ptr_id_bits;
       uint64_t id = inst->args[0]->value();
-      uint64_t ptr_val = id << module->ptr_id_low;
       uint64_t size_val = inst->args[1]->value();
       Inst *mem_id = value_inst(id, ptr_id_bits);
       Inst *size = value_inst(size_val, ptr_offset_bits);
@@ -1821,19 +1819,6 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       uint32_t flags = inst->args[2]->value();
       if (flags & MEM_CONST)
 	const_ids.push_back(translate.at(inst->args[0]));
-
-      if (flags & MEM_UNINIT)
-	{
-	  Inst *indef_array = bb2memory_indef.at(bb);
-	  Inst *byte = value_inst(255, 8);
-	  for (uint64_t i = 0; i < size_val; i++)
-	    {
-	      Inst *ptr = value_inst(ptr_val + i, ptr_bits);
-	      indef_array = build_inst(Op::ARRAY_SET_INDEF,
-				       indef_array, ptr, byte);
-	    }
-	  bb2memory_indef[bb] = indef_array;
-	}
 
       return;
     }

@@ -308,13 +308,8 @@ void store_load_forwarding(Function *func)
 	      {
 		uint64_t id = inst->args[0]->value();
 		uint64_t size = inst->args[1]->value();
-		uint32_t flags = inst->args[2]->value();
 		uint64_t addr = id << func->module->ptr_id_low;
-		Inst *indef;
-		if (flags & MEM_UNINIT)
-		  indef = bb->value_inst(255, 8);
-		else
-		  indef = bb->value_inst(0, 8);
+		Inst *indef = bb->value_inst(0, 8);
 		size = std::min(size, max_mem_unroll_limit);
 		for (uint64_t i = 0; i < size; i++)
 		  {
@@ -839,11 +834,7 @@ void local_mem_address_space(Inst *mem)
   assert(mem->op == Op::MEMORY);
   if (!is_local_memory(mem))
     return;
-  if (!(mem->args[2]->value() & MEM_AS1_CANDIDATE))
-    return;
   if (mem->args[2]->value() & MEM_KEEP)
-    return;
-  if (mem->args[2]->value() & MEM_UNINIT)
     return;
 
   std::vector<Inst*> mem_uses;

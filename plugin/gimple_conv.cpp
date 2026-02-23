@@ -95,7 +95,7 @@ struct Converter {
   Inst *from_mem_repr(Inst *inst, tree type);
   uint8_t bitfield_padding_at_offset(tree fld, int64_t offset);
   uint8_t padding_at_offset(tree type, uint64_t offset);
-  Inst *build_memory_inst(uint64_t id, uint64_t size, uint32_t flags);
+  Inst *build_memory_inst(uint64_t id, uint64_t size, uint32_t flags, bool uninit = false);
   void build_ub_if_not_zero(Inst *inst, Inst *cmp = nullptr);
   void constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *indef=nullptr);
   void store_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr);
@@ -598,13 +598,19 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
     }
 }
 
-Inst *Converter::build_memory_inst(uint64_t id, uint64_t size, uint32_t flags)
+Inst *Converter::build_memory_inst(uint64_t id, uint64_t size, uint32_t flags, bool uninit)
 {
   Basic_block *entry_bb = func->bbs[0];
   Inst *arg1 = entry_bb->value_inst(id, module->ptr_id_bits);
   Inst *arg2 = entry_bb->value_inst(size, module->ptr_offset_bits);
   Inst *arg3 = entry_bb->value_inst(flags, 32);
-  return entry_bb->build_inst(Op::MEMORY, arg1, arg2, arg3);
+  Inst *mem = entry_bb->build_inst(Op::MEMORY, arg1, arg2, arg3);
+  if (uninit)
+    {
+      Inst *value = entry_bb->value_inst(255, 8);
+      entry_bb->build_inst(Op::MEMSET_MEM_INDEF, mem, value, size);
+    }
+  return mem;
 }
 
 void Converter::build_ub_if_not_zero(Inst *inst, Inst *cmp)
@@ -1677,13 +1683,14 @@ void Converter::process_decl(tree decl)
   uint64_t flags = 0;
   if (TREE_READONLY(decl))
     flags |= MEM_CONST;
+  bool uninit = false;
   if (auto_var_p(decl))
     {
       if (size > MAX_MEMORY_UNROLL_LIMIT)
 	throw Not_implemented("process_decl: too large local variable");
-      flags |= MEM_UNINIT;
+      uninit = true;
     }
-  Inst *memory_inst = build_memory_inst(id, size, flags);
+  Inst *memory_inst = build_memory_inst(id, size, flags, uninit);
   decl2instruction.insert({decl, memory_inst});
   if (TREE_READONLY(decl))
     init_var(decl, memory_inst);
@@ -8222,10 +8229,9 @@ void Converter::process_func_args()
 
 	  // We use constant ID as it must be the same between src and tgt.
 	  int64_t id = 1;
-	  uint64_t flags = MEM_UNINIT | MEM_KEEP;
 	  uint64_t size = bytesize_for_type(TREE_TYPE(TREE_TYPE(decl)));
 
-	  Inst *param_inst = build_memory_inst(id, size, flags);
+	  Inst *param_inst = build_memory_inst(id, size, MEM_KEEP, true);
 	  tree2prov.insert({decl, param_inst->args[0]});
 	  tree2instruction.insert({decl, param_inst});
 	}
