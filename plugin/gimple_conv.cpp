@@ -1634,7 +1634,11 @@ bool is_decl_in_local_mem(tree decl)
 
   // External pointers cannot point to compiler-generated objects,
   // so local Op::MEMORY is the most suitable.
-  if (DECL_ARTIFICIAL(decl))
+  // Note: The compiler may generate artificial static variables in
+  // some cases, such as for
+  //   int *p = &(static int) { 0 };
+  // These are treated as normal static variables.
+  if (DECL_ARTIFICIAL(decl) && !TREE_STATIC(decl))
     return true;
 
   // Read-only static variables can be removed by constant propagation,
