@@ -14,7 +14,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 118> inst_info{{
+const std::array<Inst_info, 122> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -30,6 +30,7 @@ const std::array<Inst_info, 118> inst_info{{
   {"fne", Op::FNE, Inst_class::fcomparison, true, true},
 
   // Integer unary
+  {"extract_mem_id", Op::EXTRACT_MEM_ID, Inst_class::iunary, true, false},
   {"is_const_mem", Op::IS_CONST_MEM, Inst_class::iunary, true, false},
   {"is_inf", Op::IS_INF, Inst_class::iunary, true, false},
   {"is_nan", Op::IS_NAN, Inst_class::iunary, true, false},
@@ -52,6 +53,8 @@ const std::array<Inst_info, 118> inst_info{{
   {"array_load", Op::ARRAY_LOAD, Inst_class::ibinary, true, false},
   {"ashr", Op::ASHR, Inst_class::ibinary, true, false},
   {"concat", Op::CONCAT, Inst_class::ibinary, true, false},
+  {"is_ub_mem_access0", Op::IS_UB_MEM_ACCESS0, Inst_class::ibinary, true, false},
+  {"is_ub_mem_access1", Op::IS_UB_MEM_ACCESS1, Inst_class::ibinary, true, false},
   {"lshr", Op::LSHR, Inst_class::ibinary, true, false},
   {"mul", Op::MUL, Inst_class::ibinary, true, true},
   {"or", Op::OR, Inst_class::ibinary, true, true},
@@ -107,6 +110,7 @@ const std::array<Inst_info, 118> inst_info{{
   {"get_mem_indef_be", Op::GET_MEM_INDEF_BE, Inst_class::ls_binary, true, false},
   {"get_mem_indef_le", Op::GET_MEM_INDEF_LE, Inst_class::ls_binary, true, false},
   {"get_mem_size", Op::GET_MEM_SIZE, Inst_class::ls_unary, true, false},
+  {"is_ub_mem_access2", Op::IS_UB_MEM_ACCESS2, Inst_class::ls_binary, true, false},
   {"load", Op::LOAD, Inst_class::ls_unary, true, false},
   {"load_as1", Op::LOAD_AS1, Inst_class::ls_unary, true, false},
   {"load_be", Op::LOAD_BE, Inst_class::ls_binary, true, false},
@@ -261,6 +265,11 @@ Inst *create_inst(Op op, Inst *arg)
 	   || op == Op::MEM_FLAG_ARRAY
 	   || op == Op::MEM_INDEF_ARRAY)
     inst->bitsize = 0;
+  else if (op == Op::EXTRACT_MEM_ID)
+    {
+      assert(arg->bitsize == arg->bb->func->module->ptr_bits);
+      inst->bitsize = arg->bb->func->module->ptr_id_bits;
+    }
   else
     inst->bitsize = arg->bitsize;
   return inst;
@@ -355,6 +364,14 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2)
       assert(arg1->op == Op::REGISTER);
       assert(arg1->args[0]->value() == arg2->bitsize);
       inst->bitsize = 0;
+    }
+  else if (op == Op::IS_UB_MEM_ACCESS0
+	   || op == Op::IS_UB_MEM_ACCESS1
+	   || op == Op::IS_UB_MEM_ACCESS2)
+    {
+      assert(arg1->bitsize == arg1->bb->func->module->ptr_bits);
+      assert(arg2->bitsize == arg1->bb->func->module->ptr_id_bits);
+      inst->bitsize = 1;
     }
   else if (!inst_info[(int)op].has_lhs)
     {
@@ -986,14 +1003,6 @@ Inst *Basic_block::value_m1_inst(uint32_t bitsize)
 	res = inst;
     }
   return res;
-}
-
-Inst *Basic_block::build_extract_id(Inst *arg)
-{
-  assert(arg->bitsize == func->module->ptr_bits);
-  Inst *high = value_inst(func->module->ptr_id_high, 32);
-  Inst *low = value_inst(func->module->ptr_id_low, 32);
-  return build_inst(Op::EXTRACT, arg, high, low);
 }
 
 Inst *Basic_block::build_extract_offset(Inst *arg)

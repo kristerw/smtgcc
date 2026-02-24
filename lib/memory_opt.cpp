@@ -108,6 +108,8 @@ bool is_unused_memory(Inst *memory_inst)
 	{
 	  if (used_by->op == Op::SET_MEM_INDEF
 	      || used_by->op == Op::SET_MEM_INDEF_AS1
+	      || used_by->op == Op::SET_MEM_FLAG
+	      || used_by->op == Op::SET_MEM_FLAG_AS1
 	      || used_by->op == Op::STORE
 	      || used_by->op == Op::STORE_AS1)
 	    sinks.push_back(used_by);
@@ -820,6 +822,11 @@ bool is_valid_address_space_use(Inst *inst, std::vector<Inst*>& mem_uses)
 	  if (use->args[1] == inst)
 	    return false;
 	  mem_uses.push_back(use);
+	  break;
+	case Op::EXTRACT_MEM_ID:
+	case Op::IS_UB_MEM_ACCESS0:
+	case Op::IS_UB_MEM_ACCESS1:
+	case Op::IS_UB_MEM_ACCESS2:
 	  break;
 	default:
 	  return false;

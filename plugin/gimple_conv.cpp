@@ -358,11 +358,8 @@ Inst *Converter::extract_id(Inst *inst)
   if (auto it = inst2id.find(inst); it != inst2id.end())
     return it->second;
 
-  Inst *id = bb->build_extract_id(inst);
-  if (inst->op == Op::VALUE)
-    id = constant_fold_inst(id);
-  else
-    id->move_after(inst);
+  Inst *id = create_inst(Op::EXTRACT_MEM_ID, inst);
+  id->insert_after(inst);
   inst2id.insert({inst, id});
   return id;
 }
@@ -760,37 +757,36 @@ void Converter::store_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond)
 
 void Converter::load_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond)
 {
-  // It is UB if the pointer provenance does not correspond to the address.
-  Inst *ptr_mem_id = extract_id(ptr);
-  Inst *is_ub = bb->build_inst(Op::NE, prov, ptr_mem_id);
-  if (cond)
-    is_ub = bb->build_inst(Op::AND, is_ub, cond);
-  bb->build_inst(Op::UB, is_ub);
-
   if (size != 0)
     {
+      // It is UB if the pointer provenance does not correspond to the address.
+      Inst *is_ub = bb->build_inst(Op::IS_UB_MEM_ACCESS0, ptr, prov);
+
       // It is UB if the size overflows the offset field.
       Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
       Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
-      Inst *end_mem_id = extract_id(end);
-      Inst *overflow = bb->build_inst(Op::NE, prov, end_mem_id);
-      if (cond)
-	overflow = bb->build_inst(Op::AND, overflow, cond);
-      bb->build_inst(Op::UB, overflow);
+      Inst *overflow = bb->build_inst(Op::IS_UB_MEM_ACCESS1, end, prov);
 
       // It is UB if the end is outside the memory object.
       // Note: ptr is within the memory object; otherwise, the provenance check
       // or the offset overflow check would have failed.
-      Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
-      Inst *offset = bb->build_extract_offset(end);
-      Inst *out_of_bound = bb->build_inst(Op::ULE, mem_size, offset);
+      Inst *out_of_bound = bb->build_inst(Op::IS_UB_MEM_ACCESS2, end, prov);
+
+      is_ub = bb->build_inst(Op::OR, is_ub, overflow);
+      is_ub = bb->build_inst(Op::OR, is_ub, out_of_bound);
       if (cond)
-	out_of_bound = bb->build_inst(Op::AND, out_of_bound, cond);
-      bb->build_inst(Op::UB, out_of_bound);
+	is_ub = bb->build_inst(Op::AND, is_ub, cond);
+      bb->build_inst(Op::UB, is_ub);
     }
   else
     {
-      // The pointer must point to valid memory, or be one position past
+      // It is UB if the pointer provenance does not correspond to the address.
+      Inst *is_ub = bb->build_inst(Op::IS_UB_MEM_ACCESS0, ptr, prov);
+      if (cond)
+	is_ub = bb->build_inst(Op::AND, is_ub, cond);
+      bb->build_inst(Op::UB, is_ub);
+
+     // The pointer must point to valid memory, or be one position past
       // valid memory.
       // TODO: Handle zero-sized memory blocks (such as malloc(0)).
       Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
@@ -810,15 +806,13 @@ void Converter::load_vec_ub_check(Inst *ptr, Inst *prov, uint64_t size, tree exp
   uint64_t elem_size = bytesize_for_type(elem_type);
 
   // It is UB if the pointer provenance does not correspond to the address.
-  Inst *ptr_mem_id = extract_id(ptr);
-  Inst *is_ub = bb->build_inst(Op::NE, prov, ptr_mem_id);
+  Inst *is_ub = bb->build_inst(Op::IS_UB_MEM_ACCESS0, ptr, prov);
   bb->build_inst(Op::UB, is_ub);
 
   // It is UB if the size overflows the offset field.
   Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
   Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
-  Inst *end_mem_id = extract_id(end);
-  Inst *overflow = bb->build_inst(Op::NE, prov, end_mem_id);
+  Inst *overflow = bb->build_inst(Op::IS_UB_MEM_ACCESS1, end, prov);
   bb->build_inst(Op::UB, overflow);
 
   // A vector load may read outside the object, as long as the first element
@@ -829,9 +823,7 @@ void Converter::load_vec_ub_check(Inst *ptr, Inst *prov, uint64_t size, tree exp
   // TODO: Revisit this when PR120980 is solved.
   Inst *elem_size_inst = bb->value_inst(elem_size - 1, ptr->bitsize);
   Inst *elem_end = bb->build_inst(Op::ADD, ptr, elem_size_inst);
-  Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
-  Inst *offset = bb->build_extract_offset(elem_end);
-  Inst *out_of_bound = bb->build_inst(Op::ULE, mem_size, offset);
+  Inst *out_of_bound = bb->build_inst(Op::IS_UB_MEM_ACCESS2, elem_end, prov);
   bb->build_inst(Op::UB, out_of_bound);
 }
 

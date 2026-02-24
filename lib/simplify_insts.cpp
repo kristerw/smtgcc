@@ -2054,6 +2054,73 @@ Inst *simplify_memory(Inst *inst)
   return inst->bb->value_inst(addr, inst->bb->func->module->ptr_bits);
 }
 
+Inst *simplify_extract_mem_id(Inst *inst)
+{
+  Inst *const arg1 = inst->args[0];
+
+  uint32_t high = inst->bb->func->module->ptr_id_high;
+  uint32_t low = inst->bb->func->module->ptr_id_low;
+  Inst *new_inst = create_inst(Op::EXTRACT, arg1, high, low);
+  new_inst->insert_before(inst);
+  return simplify_inst(new_inst);
+}
+
+Inst *simplify_is_ub_mem_access0(Inst *inst)
+{
+  Inst *const start = inst->args[0];
+  Inst *const prov = inst->args[1];
+
+  // It is UB if the pointer provenance does not correspond to the address.
+  uint32_t id_high = inst->bb->func->module->ptr_id_high;
+  uint32_t id_low = inst->bb->func->module->ptr_id_low;
+  Inst *start_mem_id = create_inst(Op::EXTRACT, start, id_high, id_low);
+  start_mem_id->insert_before(inst);
+  start_mem_id = simplify_inst(start_mem_id);
+  Inst *is_ub = create_inst(Op::NE, prov, start_mem_id);
+  is_ub->insert_before(inst);
+  is_ub = simplify_inst(is_ub);
+  return is_ub;
+}
+
+Inst *simplify_is_ub_mem_access1(Inst *inst)
+{
+  Inst *const end = inst->args[0];
+  Inst *const prov = inst->args[1];
+
+  // It is UB if the size overflows the offset field.
+  uint32_t id_high = inst->bb->func->module->ptr_id_high;
+  uint32_t id_low = inst->bb->func->module->ptr_id_low;
+  Inst *end_mem_id = create_inst(Op::EXTRACT, end, id_high, id_low);
+  end_mem_id->insert_before(inst);
+  end_mem_id = simplify_inst(end_mem_id);
+  Inst *is_ub = create_inst(Op::NE, prov, end_mem_id);
+  is_ub->insert_before(inst);
+  is_ub = simplify_inst(is_ub);
+  return is_ub;
+}
+
+Inst *simplify_is_ub_mem_access2(Inst *inst, const std::map<uint64_t,uint64_t>& id2size)
+{
+  Inst *const end = inst->args[0];
+  Inst *const prov = inst->args[1];
+
+  // It is UB if the end is outside the memory object.
+  // Note: ptr is within the memory object; otherwise, the provenance check
+  // or the offset overflow check would have failed.
+  Inst *mem_size = create_inst(Op::GET_MEM_SIZE, prov);
+  mem_size->insert_before(inst);
+  mem_size = simplify_mem_size(mem_size, id2size);
+  uint32_t offset_high = inst->bb->func->module->ptr_offset_high;
+  uint32_t offset_low = inst->bb->func->module->ptr_offset_low;
+  Inst *offset = create_inst(Op::EXTRACT, end, offset_high, offset_low);
+  offset->insert_before(inst);
+  offset = simplify_inst(offset);
+  Inst *is_ub = create_inst(Op::ULE, mem_size, offset);
+  is_ub->insert_before(inst);
+  is_ub = simplify_inst(is_ub);
+  return is_ub;
+}
+
 bool is_phi_ext(Inst *phi)
 {
   Inst *ext = nullptr;
@@ -3210,6 +3277,15 @@ void simplify_mem(Function *func)
 	    case Op::GET_MEM_SIZE:
 	      res = simplify_mem_size(inst, id2size);
 	      break;
+	    case Op::IS_UB_MEM_ACCESS0:
+	      res = simplify_is_ub_mem_access0(inst);
+	      break;
+	    case Op::IS_UB_MEM_ACCESS1:
+	      res = simplify_is_ub_mem_access1(inst);
+	      break;
+	    case Op::IS_UB_MEM_ACCESS2:
+	      res = simplify_is_ub_mem_access2(inst, id2size);
+	      break;
 	    case Op::FREE:
 	      // Remove the size value for an ID when the size changes -- we
 	      // are iterating in reverse post order, so this prevents use
@@ -3228,6 +3304,9 @@ void simplify_mem(Function *func)
 	      break;
 	    case Op::MEMORY:
 	      res = simplify_memory(inst);
+	      break;
+	    case Op::EXTRACT_MEM_ID:
+	      res = simplify_extract_mem_id(inst);
 	      break;
 	    default:
 	      res = simplify_inst(inst);

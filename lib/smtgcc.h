@@ -57,6 +57,7 @@ enum class Op : uint8_t {
   FNE,
 
   // Integer unary
+  EXTRACT_MEM_ID,
   IS_CONST_MEM,
   IS_INF,
   IS_NAN,
@@ -79,6 +80,8 @@ enum class Op : uint8_t {
   ARRAY_LOAD,
   ASHR,
   CONCAT,
+  IS_UB_MEM_ACCESS0,
+  IS_UB_MEM_ACCESS1,
   LSHR,
   MUL,
   OR,
@@ -134,6 +137,7 @@ enum class Op : uint8_t {
   GET_MEM_INDEF_BE,
   GET_MEM_INDEF_LE,
   GET_MEM_SIZE,
+  IS_UB_MEM_ACCESS2,
   LOAD,
   LOAD_AS1,
   LOAD_BE,
@@ -228,7 +232,7 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 118> inst_info;
+extern const std::array<Inst_info, 122> inst_info;
 
 struct Module;
 struct Function;
@@ -327,7 +331,6 @@ struct Basic_block {
   Inst *build_ret_inst(Inst *arg1, Inst *arg2);
   Inst *build_br_inst(Basic_block *dest_bb);
   Inst *build_br_inst(Inst *cond, Basic_block *true_bb, Basic_block *false_bb);
-  Inst *build_extract_id(Inst *arg);
   Inst *build_extract_offset(Inst *arg);
   Inst *build_extract_bit(Inst *arg, uint32_t bit_idx);
   Inst *build_trunc(Inst *arg, uint32_t nof_bits);
