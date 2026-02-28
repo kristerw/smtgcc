@@ -1198,6 +1198,14 @@ Inst *Simplify::simplify_sext()
   if (arg1->op == Op::ZEXT)
     return build_inst(Op::ZEXT, arg1->args[0], arg2);
 
+  // sext (slt x, 0) -> sext (extract x, x->bitsize-1, x->bitsize-1)
+  if (arg1->op == Op::SLT && is_value_zero(arg1->args[1]))
+    {
+      Inst *x = arg1->args[0];
+      Inst *bit = build_inst(Op::EXTRACT, x, x->bitsize - 1, x->bitsize - 1);
+      return build_inst(Op::SEXT, bit, inst->bitsize);
+    }
+
   return inst;
 }
 
