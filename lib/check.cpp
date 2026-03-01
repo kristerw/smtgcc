@@ -232,10 +232,6 @@ class Converter : Simplify_config {
   Inst *memory_flag;
   Inst *memory_size;
   Inst *memory_indef;
-  // TODO: The as1 memory does not need to be identical.
-  Inst *memory_as1;
-  Inst *memory_flag_as1;
-  Inst *memory_indef_as1;
 
   Basic_block *dest_bb;
 
@@ -1034,16 +1030,10 @@ Converter::Converter(Module *m, bool run_simplify_inst)
   dest_func = module->build_function("check");
   dest_bb = dest_func->build_bb();
 
-  Inst *as0 = value_inst(0, 32);
-  memory = build_inst(Op::MEM_ARRAY, as0);
-  memory_indef = build_inst(Op::MEM_INDEF_ARRAY, as0);
-  memory_flag = build_inst(Op::MEM_FLAG_ARRAY, as0);
+  memory = build_inst(Op::MEM_ARRAY);
+  memory_indef = build_inst(Op::MEM_INDEF_ARRAY);
+  memory_flag = build_inst(Op::MEM_FLAG_ARRAY);
   memory_size = build_inst(Op::MEM_SIZE_ARRAY);
-
-  Inst *as1 = value_inst(1, 32);
-  memory_as1 = build_inst(Op::MEM_ARRAY, as1);
-  memory_indef_as1 = build_inst(Op::MEM_INDEF_ARRAY, as1);
-  memory_flag_as1 = build_inst(Op::MEM_FLAG_ARRAY, as1);
 }
 
 void Converter::add_ub(Basic_block *bb, Inst *cond)
@@ -1947,9 +1937,9 @@ void Converter::convert_function(Function *func, Function_role role)
 	  bb2memory_flag.insert({bb, memory_flag});
 	  bb2memory_indef.insert({bb, memory_indef});
 
-	  bb2memory_as1.insert({bb, memory_as1});
-	  bb2memory_flag_as1.insert({bb, memory_flag_as1});
-	  bb2memory_indef_as1.insert({bb, memory_indef_as1});
+	  bb2memory_as1.insert({bb, memory});
+	  bb2memory_flag_as1.insert({bb, memory_flag});
+	  bb2memory_indef_as1.insert({bb, memory_indef});
 	}
       else
 	{

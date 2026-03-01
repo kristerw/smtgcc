@@ -94,9 +94,9 @@ const std::array<Inst_info, 122> inst_info{{
 
   // Memory state
   {"memory", Op::MEMORY, Inst_class::mem_ternary, true, false},
-  {"mem_array", Op::MEM_ARRAY, Inst_class::mem_unary, true, false},
-  {"mem_flag_array", Op::MEM_FLAG_ARRAY, Inst_class::mem_unary, true, false},
-  {"mem_indef_array", Op::MEM_INDEF_ARRAY, Inst_class::mem_unary, true, false},
+  {"mem_array", Op::MEM_ARRAY, Inst_class::mem_nullary, true, false},
+  {"mem_flag_array", Op::MEM_FLAG_ARRAY, Inst_class::mem_nullary, true, false},
+  {"mem_indef_array", Op::MEM_INDEF_ARRAY, Inst_class::mem_nullary, true, false},
   {"mem_size_array", Op::MEM_SIZE_ARRAY, Inst_class::mem_nullary, true, false},
 
   // Load/store
@@ -260,10 +260,6 @@ Inst *create_inst(Op op, Inst *arg)
       inst->bitsize = arg->bitsize;
     }
   else if (!inst_info[(int)op].has_lhs)
-    inst->bitsize = 0;
-  else if (op == Op::MEM_ARRAY
-	   || op == Op::MEM_FLAG_ARRAY
-	   || op == Op::MEM_INDEF_ARRAY)
     inst->bitsize = 0;
   else if (op == Op::EXTRACT_MEM_ID)
     {

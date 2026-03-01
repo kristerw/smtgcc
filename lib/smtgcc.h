@@ -208,7 +208,6 @@ enum class Inst_class : uint8_t {
 
   // Memory
   mem_nullary,
-  mem_unary,
   mem_ternary,
   ls_unary,
   ls_binary,

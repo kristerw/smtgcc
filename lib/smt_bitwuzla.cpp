@@ -176,9 +176,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	Sort address_sort = tm.mk_bv_sort(func->module->ptr_bits);
 	Sort byte_sort = tm.mk_bv_sort(8);
 	Sort array_sort = tm.mk_array_sort(address_sort, byte_sort);
-	char name[100];
-	sprintf(name, ".memory%" PRIu32, (uint32_t)inst->args[0]->value());
-	Term memory = tm.mk_const(array_sort, name);
+	Term memory = tm.mk_const(array_sort, ".memory");
 	inst2array.insert({inst, memory});
       }
       break;
@@ -650,7 +648,6 @@ void Converter::build_smt(const Inst *inst)
       build_bv_comparison_smt(inst);
       break;
     case Inst_class::mem_nullary:
-    case Inst_class::mem_unary:
       build_memory_state_smt(inst);
       break;
     case Inst_class::iunary:
