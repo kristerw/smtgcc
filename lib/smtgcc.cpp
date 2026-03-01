@@ -1064,18 +1064,9 @@ Inst *Function::value_inst(unsigned __int128 value, uint32_t bitsize)
 
   if (bitsize > 128)
     {
-      Inst *res = nullptr;
-      while (bitsize)
-	{
-	  uint32_t bs = std::min(bitsize, 128u);
-	  bitsize -= bs;
-	  Inst *inst = value_inst(value, bs);
-	  value = 0;
-	  if (res)
-	    res = bbs[0]->build_inst(Op::CONCAT, inst, res);
-	  else
-	    res = inst;
-	}
+      Inst *res = value_inst(value, 128);
+      res = bbs[0]->build_inst(Op::ZEXT, res, bitsize);
+
       // We do not insert the result in the values map since this is not
       // a real value instruction, so it will misbehave if the dead code
       // elimination pass removes it.
