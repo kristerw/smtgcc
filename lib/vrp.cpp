@@ -32,6 +32,8 @@ class Vrp
   void handle_or(Inst *inst);
   void handle_phi(Inst *inst);
   void handle_sadd_overflow(Inst *inst);
+  void handle_sdiv(Inst *inst);
+  void handle_srem(Inst *inst);
   void handle_sext(Inst *inst);
   void handle_slt(Inst *inst);
   void handle_shl(Inst *inst);
@@ -421,6 +423,36 @@ void Vrp::handle_ssub_overflow(Inst *inst)
     }
 }
 
+void Vrp::handle_sdiv(Inst *inst)
+{
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+
+  if (leading_zeros(arg1) > 0 && leading_zeros(arg2) > 0)
+    {
+      Inst *new_inst = create_inst(Op::UDIV, arg1, arg2);
+      new_inst->insert_before(inst);
+      inst->replace_all_uses_with(new_inst);
+      handle_inst(new_inst);
+      return;
+    }
+}
+
+void Vrp::handle_srem(Inst *inst)
+{
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+
+  if (leading_zeros(arg1) > 0 && leading_zeros(arg2) > 0)
+    {
+      Inst *new_inst = create_inst(Op::UREM, arg1, arg2);
+      new_inst->insert_before(inst);
+      inst->replace_all_uses_with(new_inst);
+      handle_inst(new_inst);
+      return;
+    }
+}
+
 void Vrp::handle_ult(Inst *inst)
 {
   Inst *const arg1 = inst->args[0];
@@ -533,6 +565,12 @@ void Vrp::handle_inst(Inst *inst)
       break;
     case Op::SADD_OVERFLOW:
       handle_sadd_overflow(inst);
+      break;
+    case Op::SDIV:
+      handle_sdiv(inst);
+      break;
+    case Op::SREM:
+      handle_srem(inst);
       break;
     case Op::SEXT:
       handle_sext(inst);
