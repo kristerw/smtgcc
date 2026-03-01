@@ -326,6 +326,14 @@ Inst *Cse::get_inst(const Cse_key& key)
 
 Inst *Converter::value_inst(unsigned __int128 value, uint32_t bitsize)
 {
+  // BB::value_inst with bitsize > 128 may create multiple instructions.
+  // Create the wide constant here instead of fixing it up later.
+  if (bitsize > 128)
+    {
+      Inst *val = dest_bb->value_inst(value, 128);
+      Inst *bs = dest_bb->value_inst(bitsize, 32);
+      return build_inst(Op::ZEXT, val, bs);
+    }
   return dest_bb->value_inst(value, bitsize);
 }
 
