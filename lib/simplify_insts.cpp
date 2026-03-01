@@ -1222,6 +1222,23 @@ Inst *Simplify::simplify_zext()
   if (arg1->op == Op::ZEXT)
     return build_inst(Op::ZEXT, arg1->args[0], arg2);
 
+  // zext (concat c, x) -> concat c', x
+  if (arg1->op == Op::CONCAT
+      && arg1->args[0]->op == Op::VALUE
+      && arg1->args[0]->bitsize < 128)
+    {
+      Inst *c = arg1->args[0];
+      uint32_t ext_bitsize = inst->bitsize - arg1->bitsize;
+      uint32_t const_bitsize = c->bitsize + ext_bitsize;
+      if (const_bitsize > 128)
+	const_bitsize = 128;
+      Inst *new_c = value_inst(c->value(), const_bitsize);
+      Inst *res = build_inst(Op::CONCAT, new_c, arg1->args[1]);
+      if (res->bitsize < inst->bitsize)
+	res = build_inst(Op::ZEXT, res, inst->bitsize);
+      return res;
+    }
+
   return inst;
 }
 
