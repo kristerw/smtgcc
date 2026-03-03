@@ -1544,4 +1544,83 @@ uint64_t get_time()
   return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+bool need_checking_ub(const Result_state& src, const Result_state& tgt)
+{
+  // There is nothing to check if src is always UB.
+  if (is_value_m1(src.common_ub) || is_value_m1(src.unique_ub))
+    return false;
+
+  assert(src.common_ub == tgt.common_ub);
+  if (src.unique_ub == tgt.unique_ub)
+    return false;
+
+  if (is_value_zero(tgt.unique_ub))
+    return false;
+
+  return true;
+}
+
+bool need_checking_abort(const Result_state& src, const Result_state& tgt)
+{
+  // There is nothing to check if src is always UB.
+  if (is_value_m1(src.common_ub) || is_value_m1(src.unique_ub))
+    return false;
+
+  if (src.abort == tgt.abort
+      && src.exit == tgt.exit
+      && src.exit_val == tgt.exit_val)
+    return false;
+
+  return true;
+}
+
+bool need_checking_retval(const Result_state& src, const Result_state& tgt)
+{
+  // There is nothing to check if src is always UB.
+  if (is_value_m1(src.common_ub) || is_value_m1(src.unique_ub))
+    return false;
+
+  if (!src.retval)
+    {
+      assert(!tgt.retval);
+      return false;
+    }
+
+  if (src.retval_indef && is_m1(src.retval_indef))
+    return false;
+
+  if (src.retval == tgt.retval)
+    {
+      if (src.retval_indef == tgt.retval_indef)
+	return false;
+
+      if (tgt.retval_indef && is_zero(tgt.retval_indef))
+	return false;
+    }
+
+  return true;
+}
+
+bool need_checking_memory(const Result_state& src, const Result_state& tgt)
+{
+  // There is nothing to check if src is always UB.
+  if (is_value_m1(src.common_ub) || is_value_m1(src.unique_ub))
+    return false;
+
+  if (src.memory == tgt.memory
+      && src.memory_size == tgt.memory_size
+      && src.memory_indef == tgt.memory_indef)
+    return false;
+
+  return true;
+}
+
+bool need_checking(const Result_state& src, const Result_state& tgt)
+{
+  return need_checking_ub(src, tgt)
+    || need_checking_abort(src, tgt)
+    || need_checking_retval(src, tgt)
+    || need_checking_memory(src, tgt);
+}
+
 } // end namespace smtgcc

@@ -46,29 +46,10 @@ public:
 
   std::vector<const Inst *> print;
 
+  Result_state src;
+  Result_state tgt;
   Inst *src_assert = nullptr;
-  Inst *src_memory = nullptr;
-  Inst *src_memory_size = nullptr;
-  Inst *src_memory_indef = nullptr;
-  Inst *src_retval = nullptr;
-  Inst *src_retval_indef = nullptr;
-  Inst *src_unique_ub = nullptr;
-  Inst *src_common_ub = nullptr;
-  Inst *src_abort  = nullptr;
-  Inst *src_exit = nullptr;
-  Inst *src_exit_val  = nullptr;
-
   Inst *tgt_assert = nullptr;
-  Inst *tgt_memory = nullptr;
-  Inst *tgt_memory_size = nullptr;
-  Inst *tgt_memory_indef = nullptr;
-  Inst *tgt_retval = nullptr;
-  Inst *tgt_retval_indef = nullptr;
-  Inst *tgt_unique_ub = nullptr;
-  Inst *tgt_common_ub = nullptr;
-  Inst *tgt_abort  = nullptr;
-  Inst *tgt_exit = nullptr;
-  Inst *tgt_exit_val  = nullptr;
 };
 
 cvc5::Term Converter::ite(cvc5::Term c, cvc5::Term a, cvc5::Term b)
@@ -483,15 +464,15 @@ void Converter::build_solver_smt(const Inst *inst)
 	  print.push_back(inst);
 	  break;
 	case Op::SRC_RETVAL:
-	  assert(!src_retval);
-	  assert(!src_retval_indef);
-	  src_retval = inst->args[0];
-	  src_retval_indef = inst->args[1];
+	  assert(!src.retval);
+	  assert(!src.retval_indef);
+	  src.retval = inst->args[0];
+	  src.retval_indef = inst->args[1];
 	  return;
 	case Op::SRC_UB:
-	  assert(!src_unique_ub && !src_common_ub);
-	  src_common_ub = inst->args[0];
-	  src_unique_ub = inst->args[1];
+	  assert(!src.unique_ub && !src.common_ub);
+	  src.common_ub = inst->args[0];
+	  src.unique_ub = inst->args[1];
 	  return;
 	case Op::SYMBOLIC:
 	  {
@@ -504,15 +485,15 @@ void Converter::build_solver_smt(const Inst *inst)
 	  }
 	  break;
 	case Op::TGT_RETVAL:
-	  assert(!tgt_retval);
-	  assert(!tgt_retval_indef);
-	  tgt_retval = inst->args[0];
-	  tgt_retval_indef = inst->args[1];
+	  assert(!tgt.retval);
+	  assert(!tgt.retval_indef);
+	  tgt.retval = inst->args[0];
+	  tgt.retval_indef = inst->args[1];
 	  return;
 	case Op::TGT_UB:
-	  assert(!tgt_unique_ub && !tgt_common_ub);
-	  tgt_common_ub = inst->args[0];
-	  tgt_unique_ub = inst->args[1];
+	  assert(!tgt.unique_ub && !tgt.common_ub);
+	  tgt.common_ub = inst->args[0];
+	  tgt.unique_ub = inst->args[1];
 	  return;
 	default:
 	  throw Not_implemented("build_solver_smt: "s + inst->name());
@@ -523,34 +504,34 @@ void Converter::build_solver_smt(const Inst *inst)
       switch (inst->op)
 	{
 	case Op::SRC_MEM:
-	  assert(!src_memory);
-	  assert(!src_memory_size);
-	  src_memory = inst->args[0];
-	  src_memory_size = inst->args[1];
-	  src_memory_indef = inst->args[2];
+	  assert(!src.memory);
+	  assert(!src.memory_size);
+	  src.memory = inst->args[0];
+	  src.memory_size = inst->args[1];
+	  src.memory_indef = inst->args[2];
 	  return;
 	case Op::TGT_MEM:
-	  assert(!tgt_memory);
-	  assert(!tgt_memory_size);
-	  tgt_memory = inst->args[0];
-	  tgt_memory_size = inst->args[1];
-	  tgt_memory_indef = inst->args[2];
+	  assert(!tgt.memory);
+	  assert(!tgt.memory_size);
+	  tgt.memory = inst->args[0];
+	  tgt.memory_size = inst->args[1];
+	  tgt.memory_indef = inst->args[2];
 	  return;
 	case Op::SRC_EXIT:
-	  assert(!src_abort);
-	  assert(!src_exit);
-	  assert(!src_exit_val);
-	  src_abort = inst->args[0];
-	  src_exit = inst->args[1];
-	  src_exit_val = inst->args[2];
+	  assert(!src.abort);
+	  assert(!src.exit);
+	  assert(!src.exit_val);
+	  src.abort = inst->args[0];
+	  src.exit = inst->args[1];
+	  src.exit_val = inst->args[2];
 	  return;
 	case Op::TGT_EXIT:
-	  assert(!tgt_abort);
-	  assert(!tgt_exit);
-	  assert(!tgt_exit_val);
-	  tgt_abort = inst->args[0];
-	  tgt_exit = inst->args[1];
-	  tgt_exit_val = inst->args[2];
+	  assert(!tgt.abort);
+	  assert(!tgt.exit);
+	  assert(!tgt.exit_val);
+	  tgt.abort = inst->args[0];
+	  tgt.exit = inst->args[1];
+	  tgt.exit_val = inst->args[2];
 	  return;
 	default:
 	  throw Not_implemented("build_solver_smt: "s + inst->name());
@@ -641,28 +622,27 @@ void Converter::convert_function()
 
   // If both src and tgt retval_indef is 0, then it is the same as no
   // retval_indef.
-  if (src_retval_indef
-      && src_retval_indef == tgt_retval_indef
-      && src_retval_indef->op == Op::VALUE
-      && !src_retval_indef->value())
+  if (src.retval_indef
+      && src.retval_indef == tgt.retval_indef
+      && is_zero(src.retval_indef))
     {
-      src_retval_indef = nullptr;
-      tgt_retval_indef = nullptr;
+      src.retval_indef = nullptr;
+      tgt.retval_indef = nullptr;
     }
 
-  if (!src_abort && tgt_abort)
+  if (!src.abort && tgt.abort)
     {
       Basic_block *bb = func->bbs[0];
-      src_abort = bb->value_inst(0, 1);
-      src_exit = bb->value_inst(0, 1);
-      src_exit_val = bb->value_inst(0, tgt_exit_val->bitsize);
+      src.abort = bb->value_inst(0, 1);
+      src.exit = bb->value_inst(0, 1);
+      src.exit_val = bb->value_inst(0, tgt.exit_val->bitsize);
     }
-  if (!tgt_abort && src_abort)
+  if (!tgt.abort && src.abort)
     {
       Basic_block *bb = func->bbs[0];
-      tgt_abort = bb->value_inst(0, 1);
-      tgt_exit = bb->value_inst(0, 1);
-      tgt_exit_val = bb->value_inst(0, src_exit_val->bitsize);
+      tgt.abort = bb->value_inst(0, 1);
+      tgt.exit = bb->value_inst(0, 1);
+      tgt.exit_val = bb->value_inst(0, src.exit_val->bitsize);
     }
 }
 
@@ -710,13 +690,13 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
   stats.skipped = false;
 
   Converter conv(solver, func);
-  cvc5::Term src_common_ub_term = conv.inst_as_bool(conv.src_common_ub);
-  cvc5::Term src_unique_ub_term = conv.inst_as_bool(conv.src_unique_ub);
+  cvc5::Term src_common_ub_term = conv.inst_as_bool(conv.src.common_ub);
+  cvc5::Term src_unique_ub_term = conv.inst_as_bool(conv.src.unique_ub);
   cvc5::Term not_src_common_ub_term =
     solver.mkTerm(cvc5::Kind::NOT, {src_common_ub_term});
   cvc5::Term not_src_unique_ub_term =
     solver.mkTerm(cvc5::Kind::NOT, {src_unique_ub_term});
-  cvc5::Term tgt_unique_ub_term = conv.inst_as_bool(conv.tgt_unique_ub);
+  cvc5::Term tgt_unique_ub_term = conv.inst_as_bool(conv.tgt.unique_ub);
 
   solver.assertFormula(not_src_common_ub_term);
   solver.assertFormula(not_src_unique_ub_term);
@@ -724,11 +704,7 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
   std::string warning;
 
   // Check that tgt does not have UB that is not in src.
-  assert(conv.src_common_ub == conv.tgt_common_ub);
-  if (config.optimize_ub
-      && conv.src_unique_ub != conv.tgt_unique_ub
-      && !(conv.tgt_unique_ub->op == Op::VALUE
-	   && conv.tgt_unique_ub->value() == 0))
+  if (config.optimize_ub && need_checking_ub(conv.src, conv.tgt))
     {
       std::vector<cvc5::Term> assumptions;
       assumptions.push_back(tgt_unique_ub_term);
@@ -745,21 +721,19 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
     }
 
   // Check that the function calls abort/exit identically for src and tgt.
-  if (conv.src_abort != conv.tgt_abort
-      || conv.src_exit != conv.tgt_exit
-      || conv.src_exit_val != conv.tgt_exit_val)
+  if (need_checking_abort(conv.src, conv.tgt))
     {
       std::vector<cvc5::Term> assumptions;
-      cvc5::Term src_abort_term = conv.inst_as_bool(conv.src_abort);
-      cvc5::Term tgt_abort_term = conv.inst_as_bool(conv.tgt_abort);
+      cvc5::Term src_abort_term = conv.inst_as_bool(conv.src.abort);
+      cvc5::Term tgt_abort_term = conv.inst_as_bool(conv.tgt.abort);
       cvc5::Term abort_differ =
 	solver.mkTerm(cvc5::Kind::XOR, {src_abort_term, tgt_abort_term});
-      cvc5::Term src_exit_term = conv.inst_as_bool(conv.src_exit);
-      cvc5::Term tgt_exit_term = conv.inst_as_bool(conv.tgt_exit);
+      cvc5::Term src_exit_term = conv.inst_as_bool(conv.src.exit);
+      cvc5::Term tgt_exit_term = conv.inst_as_bool(conv.tgt.exit);
       cvc5::Term exit_differ =
 	solver.mkTerm(cvc5::Kind::XOR, {src_exit_term, tgt_exit_term});
-      cvc5::Term src_exit_val_term = conv.inst_as_bv(conv.src_exit_val);
-      cvc5::Term tgt_exit_val_term = conv.inst_as_bv(conv.tgt_exit_val);
+      cvc5::Term src_exit_val_term = conv.inst_as_bv(conv.src.exit_val);
+      cvc5::Term tgt_exit_val_term = conv.inst_as_bv(conv.tgt.exit_val);
       cvc5::Term exit_val_differ =
 	solver.mkTerm(cvc5::Kind::DISTINCT,
 		      {src_exit_val_term, tgt_exit_val_term});
@@ -783,19 +757,16 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
     }
 
   // Check that the returned value (if any) is the same for src and tgt.
-  if ((conv.src_retval != conv.tgt_retval
-       || conv.src_retval_indef != conv.tgt_retval_indef)
-      && !(conv.src_retval_indef && is_value_m1(conv.src_retval_indef)))
+  if (need_checking_retval(conv.src, conv.tgt))
     {
       std::vector<cvc5::Term> assumptions;
-      assert(conv.src_retval && conv.tgt_retval);
-      cvc5::Term src_term = conv.inst_as_bv(conv.src_retval);
-      cvc5::Term tgt_term = conv.inst_as_bv(conv.tgt_retval);
+      cvc5::Term src_term = conv.inst_as_bv(conv.src.retval);
+      cvc5::Term tgt_term = conv.inst_as_bv(conv.tgt.retval);
 
       cvc5::Term is_more_indef = solver.mkBoolean(false);
-      if (conv.src_retval_indef)
+      if (conv.src.retval_indef)
 	{
-	  cvc5::Term src_indef = conv.inst_as_bv(conv.src_retval_indef);
+	  cvc5::Term src_indef = conv.inst_as_bv(conv.src.retval_indef);
 	  cvc5::Term src_mask =
 	    solver.mkTerm(cvc5::Kind::BITVECTOR_NOT, {src_indef});
 	  src_term =
@@ -804,29 +775,29 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	    solver.mkTerm(cvc5::Kind::BITVECTOR_AND, {tgt_term, src_mask});
 
 	  // Check that tgt is not more indef than src.
-	  if (conv.tgt_retval_indef != conv.src_retval_indef)
+	  if (conv.tgt.retval_indef != conv.src.retval_indef)
 	    {
-	      cvc5::Term tgt_indef = conv.inst_as_bv(conv.tgt_retval_indef);
+	      cvc5::Term tgt_indef = conv.inst_as_bv(conv.tgt.retval_indef);
 	      cvc5::Term indef_result =
 		solver.mkTerm(cvc5::Kind::BITVECTOR_AND, {tgt_indef, src_mask});
-	      cvc5::Term zero = solver.mkBitVector(conv.tgt_retval->bitsize, 0);
+	      cvc5::Term zero = solver.mkBitVector(conv.tgt.retval->bitsize, 0);
 	      is_more_indef =
 		solver.mkTerm(cvc5::Kind::DISTINCT, {indef_result, zero});
 	    }
 	}
 
-      if (conv.src_abort)
+      if (conv.src.abort)
 	{
-	  cvc5::Term aborted_term = conv.inst_as_bool(conv.src_abort);
+	  cvc5::Term aborted_term = conv.inst_as_bool(conv.src.abort);
 	  cvc5::Term not_aborted =
-	    solver.mkTerm(cvc5::Kind::NOT, {conv.inst_as_bool(conv.src_abort)});
+	    solver.mkTerm(cvc5::Kind::NOT, {conv.inst_as_bool(conv.src.abort)});
 	  assumptions.push_back(not_aborted);
 	}
-      if (conv.src_exit)
+      if (conv.src.exit)
 	{
-	  cvc5::Term exited_term = conv.inst_as_bool(conv.src_exit);
+	  cvc5::Term exited_term = conv.inst_as_bool(conv.src.exit);
 	  cvc5::Term not_exited =
-	    solver.mkTerm(cvc5::Kind::NOT, {conv.inst_as_bool(conv.src_exit)});
+	    solver.mkTerm(cvc5::Kind::NOT, {conv.inst_as_bool(conv.src.exit)});
 	  assumptions.push_back(not_exited);
 	}
       cvc5::Term res1 =
@@ -844,10 +815,10 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 	  std::string msg = *solver_result.message;
 	  msg = msg + "src retval: " + src_val.getBitVectorValue(16) + "\n";
 	  msg = msg + "tgt retval: " + tgt_val.getBitVectorValue(16) + "\n";
-	  if (conv.src_retval_indef)
+	  if (conv.src.retval_indef)
 	    {
-	      cvc5::Term src_indef = conv.inst_as_bv(conv.src_retval_indef);
-	      cvc5::Term tgt_indef = conv.inst_as_bv(conv.tgt_retval_indef);
+	      cvc5::Term src_indef = conv.inst_as_bv(conv.src.retval_indef);
+	      cvc5::Term tgt_indef = conv.inst_as_bv(conv.tgt.retval_indef);
 	      cvc5::Term src_indef_val = solver.getValue(src_indef);
 	      cvc5::Term tgt_indef_val = solver.getValue(tgt_indef);
 	      msg = msg + "src indef: " + src_indef_val.getBitVectorValue(16) + "\n";
@@ -864,17 +835,15 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
     }
 
   // Check that the global memory is consistent for src and tgt.
-  if (conv.src_memory != conv.tgt_memory
-      || conv.src_memory_size != conv.tgt_memory_size
-      || conv.src_memory_indef != conv.tgt_memory_indef)
+  if (need_checking_memory(conv.src, conv.tgt))
     {
       std::vector<cvc5::Term> assumptions;
-      cvc5::Term src_mem = conv.inst_as_array(conv.src_memory);
-      cvc5::Term src_mem_size = conv.inst_as_array(conv.src_memory_size);
-      cvc5::Term src_mem_indef = conv.inst_as_array(conv.src_memory_indef);
+      cvc5::Term src_mem = conv.inst_as_array(conv.src.memory);
+      cvc5::Term src_mem_size = conv.inst_as_array(conv.src.memory_size);
+      cvc5::Term src_mem_indef = conv.inst_as_array(conv.src.memory_indef);
 
-      cvc5::Term tgt_mem = conv.inst_as_array(conv.tgt_memory);
-      cvc5::Term tgt_mem_indef = conv.inst_as_array(conv.tgt_memory_indef);
+      cvc5::Term tgt_mem = conv.inst_as_array(conv.tgt.memory);
+      cvc5::Term tgt_mem_indef = conv.inst_as_array(conv.tgt.memory_indef);
 
       cvc5::Sort ptr_sort = solver.mkBitVectorSort(func->module->ptr_bits);
       cvc5::Term ptr = solver.mkConst(ptr_sort, ".ptr");
@@ -956,11 +925,7 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
     }
 
   // Check that tgt does not have UB that is not in src.
-  assert(conv.src_common_ub == conv.tgt_common_ub);
-  if (!config.optimize_ub
-      && conv.src_unique_ub != conv.tgt_unique_ub
-      && !(conv.tgt_unique_ub->op == Op::VALUE
-	   && conv.tgt_unique_ub->value() == 0))
+  if (!config.optimize_ub && need_checking_ub(conv.src, conv.tgt))
     {
       std::vector<cvc5::Term> assumptions;
       assumptions.push_back(tgt_unique_ub_term);

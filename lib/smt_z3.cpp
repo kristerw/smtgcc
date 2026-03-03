@@ -53,29 +53,10 @@ public:
 
   std::vector<const Inst *> print;
 
+  Result_state src;
+  Result_state tgt;
   Inst *src_assert = nullptr;
-  Inst *src_memory = nullptr;
-  Inst *src_memory_size = nullptr;
-  Inst *src_memory_indef = nullptr;
-  Inst *src_retval = nullptr;
-  Inst *src_retval_indef = nullptr;
-  Inst *src_unique_ub = nullptr;
-  Inst *src_common_ub = nullptr;
-  Inst *src_abort  = nullptr;
-  Inst *src_exit = nullptr;
-  Inst *src_exit_val  = nullptr;
-
   Inst *tgt_assert = nullptr;
-  Inst *tgt_memory = nullptr;
-  Inst *tgt_memory_size = nullptr;
-  Inst *tgt_memory_indef = nullptr;
-  Inst *tgt_retval = nullptr;
-  Inst *tgt_retval_indef = nullptr;
-  Inst *tgt_unique_ub = nullptr;
-  Inst *tgt_common_ub = nullptr;
-  Inst *tgt_abort  = nullptr;
-  Inst *tgt_exit = nullptr;
-  Inst *tgt_exit_val  = nullptr;
 };
 
 z3::expr Converter::ite(z3::expr c, z3::expr a, z3::expr b)
@@ -708,15 +689,15 @@ void Converter::build_solver_smt(const Inst *inst)
 	  print.push_back(inst);
 	  break;
 	case Op::SRC_RETVAL:
-	  assert(!src_retval);
-	  assert(!src_retval_indef);
-	  src_retval = inst->args[0];
-	  src_retval_indef = inst->args[1];
+	  assert(!src.retval);
+	  assert(!src.retval_indef);
+	  src.retval = inst->args[0];
+	  src.retval_indef = inst->args[1];
 	  return;
 	case Op::SRC_UB:
-	  assert(!src_unique_ub && !src_common_ub);
-	  src_common_ub = inst->args[0];
-	  src_unique_ub = inst->args[1];
+	  assert(!src.unique_ub && !src.common_ub);
+	  src.common_ub = inst->args[0];
+	  src.unique_ub = inst->args[1];
 	  return;
 	case Op::SYMBOLIC:
 	  {
@@ -728,15 +709,15 @@ void Converter::build_solver_smt(const Inst *inst)
 	  }
 	  break;
 	case Op::TGT_RETVAL:
-	  assert(!tgt_retval);
-	  assert(!tgt_retval_indef);
-	  tgt_retval = inst->args[0];
-	  tgt_retval_indef = inst->args[1];
+	  assert(!tgt.retval);
+	  assert(!tgt.retval_indef);
+	  tgt.retval = inst->args[0];
+	  tgt.retval_indef = inst->args[1];
 	  return;
 	case Op::TGT_UB:
-	  assert(!tgt_unique_ub && !tgt_common_ub);
-	  tgt_common_ub = inst->args[0];
-	  tgt_unique_ub = inst->args[1];
+	  assert(!tgt.unique_ub && !tgt.common_ub);
+	  tgt.common_ub = inst->args[0];
+	  tgt.unique_ub = inst->args[1];
 	  return;
 	default:
 	  throw Not_implemented("build_solver_smt: "s + inst->name());
@@ -747,34 +728,34 @@ void Converter::build_solver_smt(const Inst *inst)
       switch (inst->op)
 	{
 	case Op::SRC_MEM:
-	  assert(!src_memory);
-	  assert(!src_memory_size);
-	  src_memory = inst->args[0];
-	  src_memory_size = inst->args[1];
-	  src_memory_indef = inst->args[2];
+	  assert(!src.memory);
+	  assert(!src.memory_size);
+	  src.memory = inst->args[0];
+	  src.memory_size = inst->args[1];
+	  src.memory_indef = inst->args[2];
 	  return;
 	case Op::TGT_MEM:
-	  assert(!tgt_memory);
-	  assert(!tgt_memory_size);
-	  tgt_memory = inst->args[0];
-	  tgt_memory_size = inst->args[1];
-	  tgt_memory_indef = inst->args[2];
+	  assert(!tgt.memory);
+	  assert(!tgt.memory_size);
+	  tgt.memory = inst->args[0];
+	  tgt.memory_size = inst->args[1];
+	  tgt.memory_indef = inst->args[2];
 	  return;
 	case Op::SRC_EXIT:
-	  assert(!src_abort);
-	  assert(!src_exit);
-	  assert(!src_exit_val);
-	  src_abort = inst->args[0];
-	  src_exit = inst->args[1];
-	  src_exit_val = inst->args[2];
+	  assert(!src.abort);
+	  assert(!src.exit);
+	  assert(!src.exit_val);
+	  src.abort = inst->args[0];
+	  src.exit = inst->args[1];
+	  src.exit_val = inst->args[2];
 	  return;
 	case Op::TGT_EXIT:
-	  assert(!tgt_abort);
-	  assert(!tgt_exit);
-	  assert(!tgt_exit_val);
-	  tgt_abort = inst->args[0];
-	  tgt_exit = inst->args[1];
-	  tgt_exit_val = inst->args[2];
+	  assert(!tgt.abort);
+	  assert(!tgt.exit);
+	  assert(!tgt.exit_val);
+	  tgt.abort = inst->args[0];
+	  tgt.exit = inst->args[1];
+	  tgt.exit_val = inst->args[2];
 	  return;
 	default:
 	  throw Not_implemented("build_solver_smt: "s + inst->name());
@@ -858,28 +839,27 @@ void Converter::convert_function()
 
   // If both src and tgt retval_indef is 0, then it is the same as no
   // retval_indef.
-  if (src_retval_indef
-      && src_retval_indef == tgt_retval_indef
-      && src_retval_indef->op == Op::VALUE
-      && !src_retval_indef->value())
+  if (src.retval_indef
+      && src.retval_indef == tgt.retval_indef
+      && is_zero(src.retval_indef))
     {
-      src_retval_indef = nullptr;
-      tgt_retval_indef = nullptr;
+      src.retval_indef = nullptr;
+      tgt.retval_indef = nullptr;
     }
 
-  if (!src_abort && tgt_abort)
+  if (!src.abort && tgt.abort)
     {
       Basic_block *bb = func->bbs[0];
-      src_abort = bb->value_inst(0, 1);
-      src_exit = bb->value_inst(0, 1);
-      src_exit_val = bb->value_inst(0, tgt_exit_val->bitsize);
+      src.abort = bb->value_inst(0, 1);
+      src.exit = bb->value_inst(0, 1);
+      src.exit_val = bb->value_inst(0, tgt.exit_val->bitsize);
     }
-  if (!tgt_abort && src_abort)
+  if (!tgt.abort && src.abort)
     {
       Basic_block *bb = func->bbs[0];
-      tgt_abort = bb->value_inst(0, 1);
-      tgt_exit = bb->value_inst(0, 1);
-      tgt_exit_val = bb->value_inst(0, src_exit_val->bitsize);
+      tgt.abort = bb->value_inst(0, 1);
+      tgt.exit = bb->value_inst(0, 1);
+      tgt.exit_val = bb->value_inst(0, src.exit_val->bitsize);
     }
 }
 
@@ -972,9 +952,9 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
   stats.skipped = false;
 
   Converter conv(ctx, func);
-  z3::expr src_common_ub_expr = conv.inst_as_bool(conv.src_common_ub);
-  z3::expr src_unique_ub_expr = conv.inst_as_bool(conv.src_unique_ub);
-  z3::expr tgt_unique_ub_expr = conv.inst_as_bool(conv.tgt_unique_ub);
+  z3::expr src_common_ub_expr = conv.inst_as_bool(conv.src.common_ub);
+  z3::expr src_unique_ub_expr = conv.inst_as_bool(conv.src.unique_ub);
+  z3::expr tgt_unique_ub_expr = conv.inst_as_bool(conv.tgt.unique_ub);
   z3::expr false_expr = ctx.bool_val(false);
   z3::expr solver_ub_expr =
     config.optimize_ub ? tgt_unique_ub_expr : false_expr;
@@ -986,11 +966,7 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
   std::string warning;
 
   // Check that tgt does not have UB that is not in src.
-  assert(conv.src_common_ub == conv.tgt_common_ub);
-  if (config.optimize_ub
-      && conv.src_unique_ub != conv.tgt_unique_ub
-      && !(conv.tgt_unique_ub->op == Op::VALUE
-	   && conv.tgt_unique_ub->value() == 0))
+  if (config.optimize_ub && need_checking_ub(conv.src, conv.tgt))
     {
       z3::expr_vector assumptions(ctx);
       assumptions.push_back(tgt_unique_ub_expr);
@@ -1014,17 +990,15 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
     }
 
   // Check that the function calls abort/exit identically for src and tgt.
-  if (conv.src_abort != conv.tgt_abort
-      || conv.src_exit != conv.tgt_exit
-      || conv.src_exit_val != conv.tgt_exit_val)
+  if (need_checking_abort(conv.src, conv.tgt))
     {
       z3::expr_vector assumptions(ctx);
-      z3::expr src_abort_expr = conv.inst_as_bool(conv.src_abort);
-      z3::expr tgt_abort_expr = conv.inst_as_bool(conv.tgt_abort);
-      z3::expr src_exit_expr = conv.inst_as_bool(conv.src_exit);
-      z3::expr tgt_exit_expr = conv.inst_as_bool(conv.tgt_exit);
-      z3::expr src_exit_val_expr = conv.inst_as_bv(conv.src_exit_val);
-      z3::expr tgt_exit_val_expr = conv.inst_as_bv(conv.tgt_exit_val);
+      z3::expr src_abort_expr = conv.inst_as_bool(conv.src.abort);
+      z3::expr tgt_abort_expr = conv.inst_as_bool(conv.tgt.abort);
+      z3::expr src_exit_expr = conv.inst_as_bool(conv.src.exit);
+      z3::expr tgt_exit_expr = conv.inst_as_bool(conv.tgt.exit);
+      z3::expr src_exit_val_expr = conv.inst_as_bv(conv.src.exit_val);
+      z3::expr tgt_exit_val_expr = conv.inst_as_bv(conv.tgt.exit_val);
 
       assumptions.push_back(src_abort_expr != tgt_abort_expr
 			    || src_exit_expr != tgt_exit_expr
@@ -1058,19 +1032,16 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
     }
 
   // Check that the returned value (if any) is the same for src and tgt.
-  if ((conv.src_retval != conv.tgt_retval
-       || conv.src_retval_indef != conv.tgt_retval_indef)
-      && !(conv.src_retval_indef && is_value_m1(conv.src_retval_indef)))
+  if (need_checking_retval(conv.src, conv.tgt))
     {
-      assert(conv.src_retval && conv.tgt_retval);
-      z3::expr src_expr = conv.inst_as_bv(conv.src_retval);
-      z3::expr tgt_expr = conv.inst_as_bv(conv.tgt_retval);
+      z3::expr src_expr = conv.inst_as_bv(conv.src.retval);
+      z3::expr tgt_expr = conv.inst_as_bv(conv.tgt.retval);
 
       z3::expr is_more_indef = ctx.bool_val(false);
-      if (conv.src_retval_indef)
+      if (conv.src.retval_indef)
 	{
-	  z3::expr src_indef = conv.inst_as_bv(conv.src_retval_indef);
-	  z3::expr tgt_indef = conv.inst_as_bv(conv.tgt_retval_indef);
+	  z3::expr src_indef = conv.inst_as_bv(conv.src.retval_indef);
+	  z3::expr tgt_indef = conv.inst_as_bv(conv.tgt.retval_indef);
 	  z3::expr src_mask = ~src_indef;
 	  z3::expr new_src_expr = src_expr & src_mask;
 	  src_expr = new_src_expr;
@@ -1078,9 +1049,9 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 	  tgt_expr = new_tgt_expr;
 
 	  // Check that tgt is not more indef than src.
-	  if (conv.tgt_retval_indef != conv.src_retval_indef)
+	  if (conv.tgt.retval_indef != conv.src.retval_indef)
 	    {
-	      z3::expr new_tgt_indef = conv.inst_as_bv(conv.tgt_retval_indef);
+	      z3::expr new_tgt_indef = conv.inst_as_bv(conv.tgt.retval_indef);
 	      tgt_indef = new_tgt_indef;
 	      z3::expr new_is_more_indef = (src_mask & tgt_indef) != 0;
 	      is_more_indef = new_is_more_indef;
@@ -1088,10 +1059,10 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 	}
 
       z3::expr_vector assumptions(ctx);
-      if (conv.src_abort)
-	assumptions.push_back(!conv.inst_as_bool(conv.src_abort));
-      if (conv.src_exit)
-	assumptions.push_back(!conv.inst_as_bool(conv.src_exit));
+      if (conv.src.abort)
+	assumptions.push_back(!conv.inst_as_bool(conv.src.abort));
+      if (conv.src.exit)
+	assumptions.push_back(!conv.inst_as_bool(conv.src.exit));
       assumptions.push_back((src_expr != tgt_expr) || is_more_indef);
       uint64_t start_time = get_time();
       Solver_result solver_result =
@@ -1104,10 +1075,10 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 	  std::string msg = *solver_result.message;
 	  msg = msg + "src retval: " + model.eval(src_expr).to_string() + "\n";
 	  msg = msg + "tgt retval: " + model.eval(tgt_expr).to_string() + "\n";
-	  if (conv.src_retval_indef)
+	  if (conv.src.retval_indef)
 	    {
-	      z3::expr src_indef = conv.inst_as_bv(conv.src_retval_indef);
-	      z3::expr tgt_indef = conv.inst_as_bv(conv.tgt_retval_indef);
+	      z3::expr src_indef = conv.inst_as_bv(conv.src.retval_indef);
+	      z3::expr tgt_indef = conv.inst_as_bv(conv.tgt.retval_indef);
 	      msg = msg + "src indef: " + model.eval(src_indef).to_string() + "\n";
 	      msg = msg +  "tgt indef: " + model.eval(tgt_indef).to_string() + "\n";
 	    }
@@ -1124,16 +1095,14 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
     }
 
   // Check that the global memory is consistent for src and tgt.
-  if (conv.src_memory != conv.tgt_memory
-      || conv.src_memory_size != conv.tgt_memory_size
-      || conv.src_memory_indef != conv.tgt_memory_indef)
+  if (need_checking_memory(conv.src, conv.tgt))
     {
-      z3::expr src_mem = conv.inst_as_array(conv.src_memory);
-      z3::expr src_mem_size = conv.inst_as_array(conv.src_memory_size);
-      z3::expr src_mem_indef = conv.inst_as_array(conv.src_memory_indef);
+      z3::expr src_mem = conv.inst_as_array(conv.src.memory);
+      z3::expr src_mem_size = conv.inst_as_array(conv.src.memory_size);
+      z3::expr src_mem_indef = conv.inst_as_array(conv.src.memory_indef);
 
-      z3::expr tgt_mem = conv.inst_as_array(conv.tgt_memory);
-      z3::expr tgt_mem_indef = conv.inst_as_array(conv.tgt_memory_indef);
+      z3::expr tgt_mem = conv.inst_as_array(conv.tgt.memory);
+      z3::expr tgt_mem_indef = conv.inst_as_array(conv.tgt.memory_indef);
 
       z3::expr ptr = ctx.bv_const(".ptr", func->module->ptr_bits);
       uint32_t ptr_id_high = func->module->ptr_id_high;
@@ -1191,11 +1160,7 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
     }
 
   // Check that tgt does not have UB that is not in src.
-  assert(conv.src_common_ub == conv.tgt_common_ub);
-  if (!config.optimize_ub
-      && conv.src_unique_ub != conv.tgt_unique_ub
-      && !(conv.tgt_unique_ub->op == Op::VALUE
-	   && conv.tgt_unique_ub->value() == 0))
+  if (!config.optimize_ub && need_checking_ub(conv.src, conv.tgt))
     {
       z3::expr_vector assumptions(ctx);
       assumptions.push_back(tgt_unique_ub_expr);

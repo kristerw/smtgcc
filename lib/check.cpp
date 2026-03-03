@@ -235,27 +235,6 @@ class Converter : Simplify_config {
 
   Basic_block *dest_bb;
 
-  Inst *src_memory = nullptr;
-  Inst *src_memory_size = nullptr;
-  Inst *src_memory_indef = nullptr;
-  Inst *src_retval = nullptr;
-  Inst *src_retval_indef = nullptr;
-  Inst *src_unique_ub = nullptr;
-  Inst *src_common_ub = nullptr;
-  Inst *src_abort  = nullptr;
-  Inst *src_exit = nullptr;
-  Inst *src_exit_val  = nullptr;
-  Inst *tgt_memory = nullptr;
-  Inst *tgt_memory_size = nullptr;
-  Inst *tgt_memory_indef = nullptr;
-  Inst *tgt_retval = nullptr;
-  Inst *tgt_retval_indef = nullptr;
-  Inst *tgt_unique_ub = nullptr;
-  Inst *tgt_common_ub = nullptr;
-  Inst *tgt_abort  = nullptr;
-  Inst *tgt_exit = nullptr;
-  Inst *tgt_exit_val  = nullptr;
-
   void add_ub(Basic_block *bb, Inst *cond);
   void add_assert(Basic_block *bb, Inst *cond);
   void move_ub_earlier(Function *func);
@@ -291,6 +270,9 @@ public:
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2) final;
   Inst *build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3) final;
 
+  Result_state src;
+  Result_state tgt;
+
   Converter(Module *m, bool run_simplify_inst = true);
   ~Converter()
   {
@@ -300,7 +282,6 @@ public:
 
   void convert_function(Function *func, Function_role role);
   void finalize();
-  bool need_checking();
 
   Module *module = nullptr;
   Function *dest_func = nullptr;
@@ -1339,13 +1320,13 @@ void Converter::generate_ub()
     }
 
   build_inst(Op::SRC_UB, common_ub, src_ub);
-  src_unique_ub = src_ub;
-  src_common_ub = common_ub;
+  src.unique_ub = src_ub;
+  src.common_ub = common_ub;
   if (has_tgt)
     {
       build_inst(Op::TGT_UB, common_ub, tgt_ub);
-      tgt_unique_ub = tgt_ub;
-      tgt_common_ub = common_ub;
+      tgt.unique_ub = tgt_ub;
+      tgt.common_ub = common_ub;
     }
 }
 
@@ -1838,13 +1819,13 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
 	  build_inst(op, arg1, arg2);
 	  if (role == Function_role::src)
 	    {
-	      src_retval = arg1;
-	      src_retval_indef = arg2;
+	      src.retval = arg1;
+	      src.retval_indef = arg2;
 	    }
 	  else
 	    {
-	      tgt_retval = arg1;
-	      tgt_retval_indef = arg2;
+	      tgt.retval = arg1;
+	      tgt.retval_indef = arg2;
 	    }
 	}
       return;
@@ -1860,22 +1841,22 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
 	{
 	  if (role == Function_role::src)
 	    {
-	      assert(!src_abort);
-	      assert(!src_exit);
-	      assert(!src_exit_val);
-	      src_abort = arg1;
-	      src_exit = arg2;
-	      src_exit_val = arg3;
+	      assert(!src.abort);
+	      assert(!src.exit);
+	      assert(!src.exit_val);
+	      src.abort = arg1;
+	      src.exit = arg2;
+	      src.exit_val = arg3;
 	      build_inst(Op::SRC_EXIT, arg1, arg2, arg3);
 	    }
 	  else
 	    {
-	      assert(!tgt_abort);
-	      assert(!tgt_exit);
-	      assert(!tgt_exit_val);
-	      tgt_abort = arg1;
-	      tgt_exit = arg2;
-	      tgt_exit_val = arg3;
+	      assert(!tgt.abort);
+	      assert(!tgt.exit);
+	      assert(!tgt.exit_val);
+	      tgt.abort = arg1;
+	      tgt.exit = arg2;
+	      tgt.exit_val = arg3;
 	      build_inst(Op::TGT_EXIT, arg1, arg2, arg3);
 	    }
 	}
@@ -2011,15 +1992,15 @@ void Converter::convert_function(Function *func, Function_role role)
   build_inst(mem_op, memory, memory_size, memory_indef);
   if (role == Function_role::src)
     {
-      src_memory = memory;
-      src_memory_size = memory_size;
-      src_memory_indef = memory_indef;
+      src.memory = memory;
+      src.memory_size = memory_size;
+      src.memory_indef = memory_indef;
     }
   else
     {
-      tgt_memory = memory;
-      tgt_memory_size = memory_size;
-      tgt_memory_indef = memory_indef;
+      tgt.memory = memory;
+      tgt.memory_size = memory_size;
+      tgt.memory_indef = memory_indef;
     }
 
   // Dominance information can be extensive for large functions, and it is
@@ -2055,35 +2036,6 @@ void Converter::finalize()
   src_bbcond2ub.clear();
   tgt_bbcond2ub.clear();
   cse.clear();
-}
-
-bool Converter::need_checking()
-{
-  if ((src_common_ub->op == Op::VALUE && src_common_ub->value() != 0)
-      || (src_unique_ub->op == Op::VALUE && src_unique_ub->value() != 0))
-    return false;
-
-  if (src_abort != tgt_abort
-      || src_exit != tgt_exit
-      || src_exit_val != tgt_exit_val)
-    return true;
-
-  if ((src_retval != tgt_retval
-       || src_retval_indef != tgt_retval_indef)
-      && !(src_retval_indef && is_value_m1(src_retval_indef)))
-    return true;
-
-  if (src_memory != tgt_memory
-      || src_memory_size != tgt_memory_size
-      || src_memory_indef != tgt_memory_indef)
-    return true;
-
-  assert(src_common_ub == tgt_common_ub);
-  if (src_unique_ub != tgt_unique_ub
-      && !(tgt_unique_ub->op == Op::VALUE && tgt_unique_ub->value() == 0))
-    return true;
-
-  return false;
 }
 
 bool identical(Inst *inst1, Inst *inst2)
@@ -2226,7 +2178,7 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
       converter.module->print(stderr);
     }
 
-  if (!converter.need_checking())
+  if (!need_checking(converter.src, converter.tgt))
     {
       if (config.verbose > 0)
 	fprintf(stderr, "SMTGCC: No checking is needed\n");

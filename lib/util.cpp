@@ -83,6 +83,13 @@ bool is_value_zero(Inst *inst)
   return inst->op == Op::VALUE && inst->value() == 0;
 }
 
+bool is_zero(Inst *inst)
+{
+  if (inst->op == Op::ZEXT && is_value_zero(inst->args[0]))
+    return true;
+  return is_value_zero(inst);
+}
+
 bool is_value_one(Inst *inst)
 {
   return inst->op == Op::VALUE && inst->value() == 1;
@@ -128,6 +135,13 @@ bool is_value_m1(Inst *inst)
   unsigned __int128 m1 = ~((unsigned __int128)0);
   m1 = (m1 << (128 - inst->bitsize)) >> (128 - inst->bitsize);
   return inst->value() == m1;
+}
+
+bool is_m1(Inst *inst)
+{
+  if (inst->op == Op::SEXT && is_value_m1(inst->args[0]))
+    return true;
+  return is_value_m1(inst);
 }
 
 bool is_value_pow2(Inst *inst)

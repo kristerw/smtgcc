@@ -420,6 +420,26 @@ struct Solver_result {
   std::optional<std::string> message;
 };
 
+struct Result_state
+{
+  Inst *common_ub = nullptr;
+  Inst *unique_ub = nullptr;
+  Inst *retval = nullptr;
+  Inst *retval_indef = nullptr;
+  Inst *abort = nullptr;
+  Inst *exit = nullptr;
+  Inst *exit_val = nullptr;
+  Inst *memory = nullptr;
+  Inst *memory_size = nullptr;
+  Inst *memory_indef = nullptr;
+};
+
+bool need_checking_ub(const Result_state& src, const Result_state& tgt);
+bool need_checking_abort(const Result_state& src, const Result_state& tgt);
+bool need_checking_retval(const Result_state& src, const Result_state& tgt);
+bool need_checking_memory(const Result_state& src, const Result_state& tgt);
+bool need_checking(const Result_state& src, const Result_state& tgt);
+
 Module *create_module(uint32_t ptr_bits, uint32_t id_bits, uint32_t offset_bits);
 void destroy_module(Module *);
 void destroy_function(Function *);
@@ -935,12 +955,14 @@ uint32_t clz(unsigned __int128 x);
 uint32_t ctz(unsigned __int128 x);
 bool is_pow2(unsigned __int128 x);
 bool is_value_zero(Inst *inst);
+bool is_zero(Inst *inst);
 bool is_value_one(Inst *inst);
 bool is_value_signed_min(Inst *inst);
 bool is_value_signed_min(Inst *inst, uint32_t bitsize);
 bool is_value_signed_max(Inst *inst);
 bool is_value_signed_max(Inst *inst, uint32_t bitsize);
 bool is_value_m1(Inst *inst);
+bool is_m1(Inst *inst);
 bool is_value_pow2(Inst *inst);
 Inst *gen_fmin(Basic_block *bb, Inst *elem1, Inst *elem2);
 Inst *gen_fmax(Basic_block *bb, Inst *elem1, Inst *elem2);
