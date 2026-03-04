@@ -1618,7 +1618,8 @@ bool need_checking_memory(const Result_state& src, const Result_state& tgt)
 
   if (src.memory == tgt.memory
       && src.memory_size == tgt.memory_size
-      && src.memory_indef == tgt.memory_indef)
+      && (src.memory_indef == tgt.memory_indef
+	  || tgt.memory_indef->op == Op::MEM_INDEF_ARRAY))
     return false;
 
   return true;

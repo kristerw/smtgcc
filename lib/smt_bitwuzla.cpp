@@ -961,18 +961,38 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 
       // Check that src and tgt are the same for the bits where src is defined
       // and that tgt is not more indefinite than src.
-      Term src_indef = tm.mk_term(Kind::ARRAY_SELECT, {src_mem_indef, ptr});
-      Term src_mask = tm.mk_term(Kind::BV_NOT, {src_indef});
-      Term src_byte = tm.mk_term(Kind::ARRAY_SELECT, {src_mem, ptr});
-      src_byte = tm.mk_term(Kind::BV_AND, {src_byte, src_mask});
-      Term tgt_byte = tm.mk_term(Kind::ARRAY_SELECT, {tgt_mem, ptr});
-      tgt_byte = tm.mk_term(Kind::BV_AND, {tgt_byte, src_mask});
-      Term cond3 = tm.mk_term(Kind::DISTINCT, {src_byte, tgt_byte});
-      Term tgt_indef = tm.mk_term(Kind::ARRAY_SELECT, {tgt_mem_indef, ptr});
-      Term tgt_more_indef = tm.mk_term(Kind::BV_AND, {tgt_indef, src_mask});
       Term zero_byte = tm.mk_bv_zero(tm.mk_bv_sort(8));
-      Term cond4 = tm.mk_term(Kind::DISTINCT, {tgt_more_indef, zero_byte});
-      assumptions.push_back(tm.mk_term(Kind::OR, {cond3, cond4}));
+      Term src_byte = tm.mk_term(Kind::ARRAY_SELECT, {src_mem, ptr});
+      Term tgt_byte = tm.mk_term(Kind::ARRAY_SELECT, {tgt_mem, ptr});
+      Term src_indef = zero_byte;
+      Term tgt_indef = zero_byte;
+      if (conv.src.memory_indef->op != Op::MEM_INDEF_ARRAY
+	  || conv.tgt.memory_indef->op != Op::MEM_INDEF_ARRAY)
+	{
+	  Term src_mask = tm.mk_bv_value_uint64(tm.mk_bv_sort(8), 255);
+	  tgt_indef = tm.mk_term(Kind::ARRAY_SELECT, {tgt_mem_indef, ptr});
+	  if (conv.src.memory_indef->op != Op::MEM_INDEF_ARRAY)
+	    {
+	      src_indef = tm.mk_term(Kind::ARRAY_SELECT, {src_mem_indef, ptr});
+	      src_mask = tm.mk_term(Kind::BV_NOT, {src_indef});
+	      src_byte = tm.mk_term(Kind::BV_AND, {src_byte, src_mask});
+	      tgt_byte = tm.mk_term(Kind::BV_AND, {tgt_byte, src_mask});
+	    }
+	  Term cond3 = tm.mk_term(Kind::DISTINCT, {src_byte, tgt_byte});
+	  if (conv.tgt.memory_indef->op != Op::MEM_INDEF_ARRAY)
+	    {
+	      if (conv.src.memory_indef->op != Op::MEM_INDEF_ARRAY)
+		tgt_indef = tm.mk_term(Kind::BV_AND, {tgt_indef, src_mask});
+	      Term cond4 = tm.mk_term(Kind::DISTINCT, {tgt_indef, zero_byte});
+	      cond3 = tm.mk_term(Kind::OR, {cond3, cond4});
+	    }
+	  assumptions.push_back(cond3);
+	}
+      else
+	{
+	  Term cond3 = tm.mk_term(Kind::DISTINCT, {src_byte, tgt_byte});
+	  assumptions.push_back(cond3);
+	}
 
       uint64_t start_time = get_time();
       Solver_result solver_result =
