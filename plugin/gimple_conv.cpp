@@ -833,18 +833,10 @@ void Converter::overlap_ub_check(Inst *src_ptr, Inst *dst_ptr, uint64_t size)
 {
   if (size <= 1)
     return;
-
-  Inst *size_inst = bb->value_inst(size - 1, src_ptr->bitsize);
-  Inst *src_end = bb->build_inst(Op::ADD, src_ptr, size_inst);
-  Inst *dst_end = bb->build_inst(Op::ADD, dst_ptr, size_inst);
-
-  Inst *cond1 = bb->build_inst(Op::ULT, src_ptr, dst_ptr);
-  Inst *cond2 = bb->build_inst(Op::ULE, dst_ptr, src_end);
-  bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
-
-  Inst *cond3 = bb->build_inst(Op::ULT, dst_ptr, src_ptr);
-  Inst *cond4 = bb->build_inst(Op::ULE, src_ptr, dst_end);
-  bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond3, cond4));
+  Inst *size_inst = bb->value_inst(size, src_ptr->bitsize);
+  Inst *is_ub =
+    bb->build_inst(Op::IS_UB_MEM_OVERLAP, src_ptr, dst_ptr, size_inst);
+  bb->build_inst(Op::UB, is_ub);
 }
 
 std::pair<Inst *, Inst *> Converter::to_mem_repr(Inst *inst, Inst *indef, tree type)

@@ -827,6 +827,7 @@ bool is_valid_address_space_use(Inst *inst, std::vector<Inst*>& mem_uses)
 	case Op::IS_UB_MEM_ACCESS0:
 	case Op::IS_UB_MEM_ACCESS1:
 	case Op::IS_UB_MEM_ACCESS2:
+	case Op::IS_UB_MEM_OVERLAP:
 	  break;
 	default:
 	  return false;

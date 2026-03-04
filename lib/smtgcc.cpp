@@ -14,7 +14,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 122> inst_info{{
+const std::array<Inst_info, 123> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -81,6 +81,7 @@ const std::array<Inst_info, 122> inst_info{{
   {"array_set_size", Op::ARRAY_SET_SIZE, Inst_class::ternary, true, false},
   {"array_store", Op::ARRAY_STORE, Inst_class::ternary, true, false},
   {"extract", Op::EXTRACT, Inst_class::ternary, true, false},
+  {"is_ub_mem_overlap", Op::IS_UB_MEM_OVERLAP, Inst_class::ternary, true, false},
   {"ite", Op::ITE, Inst_class::ternary, true, false},
 
   // Conversions
@@ -426,6 +427,14 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
       assert(arg1->bitsize == 1);
       assert(arg2->bitsize == arg3->bitsize);
       inst->bitsize = arg2->bitsize;
+    }
+  else if (op == Op::IS_UB_MEM_OVERLAP)
+    {
+      assert(arg1->bitsize == arg1->bb->func->module->ptr_bits);
+      assert(arg2->bitsize == arg1->bb->func->module->ptr_bits);
+      assert(arg3->bitsize == arg1->bb->func->module->ptr_bits);
+      assert(arg3->op == Op::VALUE && arg3->value() > 1);
+      inst->bitsize = 1;
     }
   else
     {

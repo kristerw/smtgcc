@@ -108,6 +108,7 @@ enum class Op : uint8_t {
   ARRAY_SET_SIZE,
   ARRAY_STORE,
   EXTRACT,
+  IS_UB_MEM_OVERLAP,
   ITE,
 
   // Conversions
@@ -231,7 +232,7 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 122> inst_info;
+extern const std::array<Inst_info, 123> inst_info;
 
 struct Module;
 struct Function;

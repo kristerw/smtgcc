@@ -2146,6 +2146,49 @@ Inst *simplify_is_ub_mem_access2(Inst *inst, const std::map<uint64_t,uint64_t>& 
   return is_ub;
 }
 
+Inst *simplify_is_ub_mem_overlap(Inst *inst)
+{
+  Inst *const src_ptr = inst->args[0];
+  Inst *const dst_ptr = inst->args[1];
+  Inst *const size = inst->args[2];
+  assert(size->op == Op::VALUE);
+  assert(size->value() > 1);
+  Inst *new_size = inst->bb->value_inst(size->value() - 1, size->bitsize);
+
+  Inst *src_end = create_inst(Op::ADD, src_ptr, new_size);
+  src_end->insert_before(inst);
+  src_end = simplify_inst(src_end);
+  Inst *dst_end = create_inst(Op::ADD, dst_ptr, new_size);
+  dst_end ->insert_before(inst);
+  dst_end = simplify_inst(dst_end);
+
+  Inst *cond1 = create_inst(Op::ULT, src_ptr, dst_ptr);
+  cond1->insert_before(inst);
+  cond1 = simplify_inst(cond1);
+  Inst *cond2 = create_inst(Op::ULE, dst_ptr, src_end);
+  cond2->insert_before(inst);
+  cond2 = simplify_inst(cond2);
+  Inst *is_overlap1 = create_inst(Op::AND, cond1, cond2);
+  is_overlap1->insert_before(inst);
+  is_overlap1 = simplify_inst(is_overlap1);
+
+  Inst *cond3 = create_inst(Op::ULT, dst_ptr, src_ptr);
+  cond3->insert_before(inst);
+  cond3 = simplify_inst(cond3);
+  Inst *cond4 = create_inst(Op::ULE, src_ptr, dst_end);
+  cond4 ->insert_before(inst);
+  cond4 = simplify_inst(cond4);
+  Inst *is_overlap2 = create_inst(Op::AND, cond3, cond4);
+  is_overlap2->insert_before(inst);
+  is_overlap2 = simplify_inst(is_overlap2);
+
+  Inst *is_overlap = create_inst(Op::OR, is_overlap1, is_overlap2);
+  is_overlap->insert_before(inst);
+  is_overlap = simplify_inst(is_overlap);
+  return is_overlap;
+}
+
+
 bool is_phi_ext(Inst *phi)
 {
   Inst *ext = nullptr;
@@ -3310,6 +3353,9 @@ void simplify_mem(Function *func)
 	      break;
 	    case Op::IS_UB_MEM_ACCESS2:
 	      res = simplify_is_ub_mem_access2(inst, id2size);
+	      break;
+	    case Op::IS_UB_MEM_OVERLAP:
+	      res = simplify_is_ub_mem_overlap(inst);
 	      break;
 	    case Op::FREE:
 	      // Remove the size value for an ID when the size changes -- we
