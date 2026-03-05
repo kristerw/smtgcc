@@ -200,10 +200,6 @@ class Converter : Simplify_config {
   // Maps basic blocks to the expressions determining if it contain UB.
   std::map<Basic_block *, std::set<Inst *, Inst_comp>> bb2ub;
 
-  // Maps basic blocks to an expression determining if it contain an
-  // assertion failure.
-  std::map<Basic_block *, Inst *> bb2not_assert;
-
   // Maps basic blocks to the memory state at the end of the basic block.
   std::map<Basic_block *, Inst *> bb2memory;
   std::map<Basic_block *, Inst *> bb2memory_size;
@@ -236,12 +232,10 @@ class Converter : Simplify_config {
   Basic_block *dest_bb;
 
   void add_ub(Basic_block *bb, Inst *cond);
-  void add_assert(Basic_block *bb, Inst *cond);
   void move_ub_earlier(Function *func);
   void remove_redundant_ub(Function *func);
   std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> prepare_ub(Function *func);
   void generate_ub();
-  Inst *generate_assert(Function *func);
   Inst *get_full_edge_cond(Basic_block *src, Basic_block *dest);
   Inst *build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic_block *)>& pred2inst);
   void build_mem_state(Basic_block *bb, std::map<Basic_block*, Inst *>& map);
@@ -1053,17 +1047,6 @@ void Converter::add_ub(Basic_block *bb, Inst *cond)
     bb2ub[bb].insert(cond);
 }
 
-void Converter::add_assert(Basic_block *bb, Inst *cond)
-{
-  cond = build_inst(Op::NOT, cond);
-  if (bb2not_assert.contains(bb))
-    {
-      cond = build_inst(Op::OR, bb2not_assert.at(bb), cond);
-      bb2not_assert.erase(bb);
-    }
-  bb2not_assert.insert({bb, cond});
-}
-
 // Duplicate UB checks on dominating BBs when they are checked on all paths.
 void Converter::move_ub_earlier(Function *func)
 {
@@ -1328,22 +1311,6 @@ void Converter::generate_ub()
       tgt.unique_ub = tgt_ub;
       tgt.common_ub = common_ub;
     }
-}
-
-Inst *Converter::generate_assert(Function *func)
-{
-  Inst *assrt = value_inst(0, 1);
-  for (auto bb : func->bbs)
-    {
-      if (!bb2not_assert.contains(bb))
-	continue;
-
-      assrt =
-	build_inst(Op::OR, assrt,
-		   build_inst(Op::AND, bb2not_assert.at(bb), bb2cond.at(bb)));
-    }
-
-  return assrt;
 }
 
 Inst *Converter::get_full_edge_cond(Basic_block *src, Basic_block *dest)
@@ -1675,11 +1642,6 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       add_ub(bb, translate.at(inst->args[0]));
       return;
     }
-  else if (inst->op == Op::ASSERT)
-    {
-      add_assert(bb, translate.at(inst->args[0]));
-      return;
-    }
   else if (inst->op == Op::SET_MEM_FLAG)
     {
       Inst *array = bb2memory_flag.at(bb);
@@ -1969,9 +1931,6 @@ void Converter::convert_function(Function *func, Function_role role)
       has_tgt = true;
     }
 
-  Op assert_op = role == Function_role::src ? Op::SRC_ASSERT : Op::TGT_ASSERT;
-  build_inst(assert_op, generate_assert(func));
-
   Basic_block *exit_block = func->bbs.back();
   Op mem_op = role == Function_role::src ? Op::SRC_MEM : Op::TGT_MEM;
   Inst *memory = bb2memory.at(exit_block);
@@ -2012,7 +1971,6 @@ void Converter::convert_function(Function *func, Function_role role)
   // for the other use cases.
   bb2cond.clear();
   bb2ub.clear();
-  bb2not_assert.clear();
   bb2memory.clear();
   bb2memory_size.clear();
   bb2memory_flag.clear();

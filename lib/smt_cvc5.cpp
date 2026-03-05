@@ -48,8 +48,6 @@ public:
 
   Result_state src;
   Result_state tgt;
-  Inst *src_assert = nullptr;
-  Inst *tgt_assert = nullptr;
 };
 
 cvc5::Term Converter::ite(cvc5::Term c, cvc5::Term a, cvc5::Term b)
@@ -434,14 +432,6 @@ void Converter::build_solver_smt(const Inst *inst)
     {
       switch (inst->op)
 	{
-	case Op::SRC_ASSERT:
-	  assert(!src_assert);
-	  src_assert = inst->args[0];
-	  break;
-	case Op::TGT_ASSERT:
-	  assert(!tgt_assert);
-	  tgt_assert = inst->args[0];
-	  break;
 	default:
 	  throw Not_implemented("build_solver_smt: "s + inst->name());
 	}

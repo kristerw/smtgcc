@@ -168,17 +168,14 @@ enum class Op : uint8_t {
   WRITE,
 
   // Solver
-  ASSERT,
   EXIT,
   PARAM,
   PRINT,
-  SRC_ASSERT,
   SRC_EXIT,
   SRC_MEM,
   SRC_RETVAL,
   SRC_UB,
   SYMBOLIC,
-  TGT_ASSERT,
   TGT_EXIT,
   TGT_MEM,
   TGT_RETVAL,
@@ -232,7 +229,7 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 123> inst_info;
+extern const std::array<Inst_info, 120> inst_info;
 
 struct Module;
 struct Function;

@@ -14,7 +14,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 123> inst_info{{
+const std::array<Inst_info, 120> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -141,17 +141,14 @@ const std::array<Inst_info, 123> inst_info{{
   {"write", Op::WRITE, Inst_class::reg_binary, false, false},
 
   // Solver
-  {"assert", Op::ASSERT, Inst_class::solver_unary, false, false},
   {"exit", Op::EXIT, Inst_class::solver_ternary, false, false},
   {"param", Op::PARAM, Inst_class::solver_binary, true, false},
   {"print", Op::PRINT, Inst_class::solver_binary, false, false},
-  {"src_assert", Op::SRC_ASSERT, Inst_class::solver_unary, false, false},
   {"src_exit", Op::SRC_EXIT, Inst_class::solver_ternary, false, false},
   {"src_mem", Op::SRC_MEM, Inst_class::solver_ternary, false, false},
   {"src_retval", Op::SRC_RETVAL, Inst_class::solver_binary, false, false},
   {"src_ub", Op::SRC_UB, Inst_class::solver_binary, false, false},
   {"symbolic", Op::SYMBOLIC, Inst_class::solver_binary, true, false},
-  {"tgt_assert", Op::TGT_ASSERT, Inst_class::solver_unary, false, false},
   {"tgt_exit", Op::TGT_EXIT, Inst_class::solver_ternary, false, false},
   {"tgt_mem", Op::TGT_MEM, Inst_class::solver_ternary, false, false},
   {"tgt_retval", Op::TGT_RETVAL, Inst_class::solver_binary, false, false},
