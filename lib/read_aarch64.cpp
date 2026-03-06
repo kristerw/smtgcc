@@ -3113,10 +3113,10 @@ Inst *Parser::process_arg_shift(unsigned idx, Inst *arg)
     arg = bb->build_inst(Op::ASHR, arg, shift);
   else if (cmd == "ror")
     {
-      Inst *lshr = bb->build_inst(Op::LSHR, arg, shift);
-      Inst *lshift = bb->value_inst(arg->bitsize - shift_value, arg->bitsize);
-      Inst *shl = bb->build_inst(Op::SHL, arg, lshift);
-      arg = bb->build_inst(Op::OR, lshr, shl);
+      Inst *concat = bb->build_inst(Op::CONCAT, arg, arg);
+      Inst *shift = bb->value_inst(shift_value, concat->bitsize);
+      Inst *shifted = bb->build_inst(Op::LSHR, concat, shift);
+      arg = bb->build_trunc(shifted, arg->bitsize);
     }
   else
     throw Parse_error("unknown shift " + std::string(cmd), line_number);
@@ -3583,13 +3583,11 @@ void Parser::process_ror()
   Inst *arg2 = get_reg_or_imm_value(5, arg1->bitsize);
   get_end_of_line(6);
 
+  Inst *concat = bb->build_inst(Op::CONCAT, arg1, arg1);
   Inst *shift = bb->build_trunc(arg2, arg1->bitsize == 32 ? 5 : 6);
-  shift = bb->build_inst(Op::ZEXT, shift, arg1->bitsize);
-  Inst *lshr = bb->build_inst(Op::LSHR, arg1, shift);
-  Inst *bs = bb->value_inst(arg1->bitsize, arg1->bitsize);
-  Inst *lshift = bb->build_inst(Op::SUB, bs, shift);
-  Inst *shl = bb->build_inst(Op::SHL, arg1, lshift);
-  Inst *res = bb->build_inst(Op::OR, lshr, shl);
+  shift = bb->build_inst(Op::ZEXT, shift, concat->bitsize);
+  Inst *shifted = bb->build_inst(Op::LSHR, concat, shift);
+  Inst *res = bb->build_trunc(shifted, arg1->bitsize);
   write_reg(dest, res);
 }
 
