@@ -266,6 +266,17 @@ static void pass_execution(void *event_data, void *data)
     ipa_pass(pass, plugin_data);
 }
 
+static void finish(void *, void *data)
+{
+  my_plugin *plugin_data = (my_plugin *)data;
+  for (auto [_, tvfun] : plugin_data->fun2tvfun)
+    {
+      tvfun->delete_ir();
+      delete tvfun;
+    }
+  delete plugin_data;
+}
+
 int
 plugin_init(struct plugin_name_args *plugin_info,
 	    struct plugin_gcc_version *version)
@@ -276,6 +287,7 @@ plugin_init(struct plugin_name_args *plugin_info,
   const char * const plugin_name = plugin_info->base_name;
   my_plugin *mp = new my_plugin;
   register_callback(plugin_name, PLUGIN_PASS_EXECUTION, pass_execution, (void*)mp);
+  register_callback(plugin_name, PLUGIN_FINISH, finish, (void*)mp);
 
   return 0;
 }

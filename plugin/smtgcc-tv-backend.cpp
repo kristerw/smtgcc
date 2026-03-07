@@ -169,6 +169,10 @@ static void finish(void *, void *data)
 	  // of (incorrectly) processing the subsequent functions.
 	  return;
 	}
+
+      destroy_module(state.module);
+      state.module = nullptr;
+      state.sym_name2mem.clear();
     }
 }
 
