@@ -94,7 +94,7 @@ z3::expr Converter::inst_as_bv(const Inst *inst)
       // be a Boolean value for this instruction. Convert it to a bitvector.
       z3::expr expr =
 	z3::ite(inst2bool.at(inst), ctx.bv_val(1, 1), ctx.bv_val(0, 1));
-      inst2bv.insert({inst, expr});
+      inst2bv.emplace(inst, expr);
       return expr;
     }
   else
@@ -104,7 +104,7 @@ z3::expr Converter::inst_as_bv(const Inst *inst)
       // bitvector.
       z3::expr expr =
 	z3::expr(ctx, Z3_mk_fpa_to_ieee_bv(ctx, inst2fp.at(inst)));
-      inst2bv.insert({inst, expr});
+      inst2bv.emplace(inst, expr);
       return expr;
     }
 }
@@ -121,9 +121,9 @@ z3::expr Converter::inst_as_bool(const Inst *inst)
   z3::expr bv = inst2bv.at(inst);
   z3::expr expr = bv != ctx.bv_val(0, 1);
   if (Z3_is_numeral_ast(ctx, bv))
-    inst2bool.insert({inst, expr.simplify()});
+    inst2bool.emplace(inst, expr.simplify());
   else
-    inst2bool.insert({inst, expr});
+    inst2bool.emplace(inst, expr);
   return inst2bool.at(inst);
 }
 
@@ -141,9 +141,9 @@ z3::expr Converter::inst_as_fp(const Inst *inst)
   Z3_ast r = Z3_mk_fpa_to_fp_bv(ctx, bv, sort);
   z3::expr expr = z3::expr(ctx, r);
   if (Z3_is_numeral_ast(ctx, bv))
-    inst2fp.insert({inst, expr.simplify()});
+    inst2fp.emplace(inst, expr.simplify());
   else
-    inst2fp.insert({inst, expr});
+    inst2fp.emplace(inst, expr);
   return inst2fp.at(inst);
 }
 
@@ -160,9 +160,9 @@ void Converter::build_bv_comparison_smt(const Inst *inst)
       z3::expr arg2 = inst_as_bool(inst->args[1]);
 
       if (inst->op == Op::EQ)
-	inst2bool.insert({inst, arg1 == arg2});
+	inst2bool.emplace(inst, arg1 == arg2);
       else
-	inst2bool.insert({inst, arg1 != arg2});
+	inst2bool.emplace(inst, arg1 != arg2);
       return;
     }
 
@@ -171,22 +171,22 @@ void Converter::build_bv_comparison_smt(const Inst *inst)
   switch (inst->op)
     {
     case Op::EQ:
-      inst2bool.insert({inst, arg1 == arg2});
+      inst2bool.emplace(inst, arg1 == arg2);
       break;
     case Op::NE:
-      inst2bool.insert({inst, arg1 != arg2});
+      inst2bool.emplace(inst, arg1 != arg2);
       break;
     case Op::SLE:
-      inst2bool.insert({inst, z3::sle(arg1, arg2)});
+      inst2bool.emplace(inst, z3::sle(arg1, arg2));
       break;
     case Op::SLT:
-      inst2bool.insert({inst, z3::slt(arg1, arg2)});
+      inst2bool.emplace(inst, z3::slt(arg1, arg2));
       break;
     case Op::ULE:
-      inst2bool.insert({inst, z3::ule(arg1, arg2)});
+      inst2bool.emplace(inst, z3::ule(arg1, arg2));
       break;
     case Op::ULT:
-      inst2bool.insert({inst, z3::ult(arg1, arg2)});
+      inst2bool.emplace(inst, z3::ult(arg1, arg2));
       break;
     default:
       throw Not_implemented("build_comparison_smt: "s + inst->name());
@@ -219,16 +219,16 @@ void Converter::build_fp_comparison_smt(const Inst *inst)
   switch (inst->op)
     {
     case Op::FEQ:
-      inst2bool.insert({inst, z3::fp_eq(arg1, arg2)});
+      inst2bool.emplace(inst, z3::fp_eq(arg1, arg2));
       break;
     case Op::FNE:
-      inst2bool.insert({inst, !z3::fp_eq(arg1, arg2)});
+      inst2bool.emplace(inst, !z3::fp_eq(arg1, arg2));
       break;
     case Op::FLE:
-      inst2bool.insert({inst, arg1 <= arg2});
+      inst2bool.emplace(inst, arg1 <= arg2);
       break;
     case Op::FLT:
-      inst2bool.insert({inst, arg1 < arg2});
+      inst2bool.emplace(inst, arg1 < arg2);
       break;
     default:
       throw Not_implemented("build_comparison_smt: "s + inst->name());
@@ -245,7 +245,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	z3::sort byte_sort = ctx.bv_sort(8);
 	z3::sort array_sort = ctx.array_sort(address_sort, byte_sort);
 	z3::expr memory = ctx.constant(".memory", array_sort);
-	inst2array.insert({inst, memory});
+	inst2array.emplace(inst, memory);
       }
       break;
     case Op::MEM_FLAG_ARRAY:
@@ -253,7 +253,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	z3::sort address_sort = ctx.bv_sort(func->module->ptr_bits);
 	z3::expr memory_flag =
 	  z3::expr(ctx, Z3_mk_const_array(ctx, address_sort, ctx.bv_val(0, 1)));
-	inst2array.insert({inst, memory_flag});
+	inst2array.emplace(inst, memory_flag);
       }
       break;
     case Op::MEM_SIZE_ARRAY:
@@ -262,7 +262,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	z3::expr zero_offset = ctx.bv_val(0, func->module->ptr_offset_bits);
 	z3::expr memory_size =
 	  z3::expr(ctx, Z3_mk_const_array(ctx, id_sort, zero_offset));
-	inst2array.insert({inst, memory_size});
+	inst2array.emplace(inst, memory_size);
       }
       break;
     case Op::MEM_INDEF_ARRAY:
@@ -270,7 +270,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	z3::sort address_sort = ctx.bv_sort(func->module->ptr_bits);
 	z3::expr memory_indef =
 	  z3::expr(ctx, Z3_mk_const_array(ctx, address_sort, ctx.bv_val(0, 8)));
-	inst2array.insert({inst, memory_indef});
+	inst2array.emplace(inst, memory_indef);
       }
       break;
     default:
@@ -290,7 +290,7 @@ void Converter::build_bv_unary_smt(const Inst *inst)
       && inst2bool.contains(inst->args[0]))
     {
       z3::expr arg1 = inst_as_bool(inst->args[0]);
-      inst2bool.insert({inst, !arg1});
+      inst2bool.emplace(inst, !arg1);
       return;
     }
 
@@ -301,14 +301,14 @@ void Converter::build_bv_unary_smt(const Inst *inst)
       {
 	z3::expr farg1 = inst_as_fp(inst->args[0]);
 	z3::expr is_inf = z3::expr(ctx, Z3_mk_fpa_is_infinite(ctx, farg1));
-	inst2bool.insert({inst, is_inf});
+	inst2bool.emplace(inst, is_inf);
       }
       break;
     case Op::IS_NAN:
       {
 	z3::expr farg1 = inst_as_fp(inst->args[0]);
 	z3::expr is_nan = z3::expr(ctx, Z3_mk_fpa_is_nan(ctx, farg1));
-	inst2bool.insert({inst, is_nan});
+	inst2bool.emplace(inst, is_nan);
       }
       break;
     case Op::IS_NONCANONICAL_NAN:
@@ -318,17 +318,17 @@ void Converter::build_bv_unary_smt(const Inst *inst)
 	Z3_sort sort = fp_sort(inst->args[0]->bitsize);
 	z3::expr nan = z3::expr(ctx, Z3_mk_fpa_nan(ctx, sort));
 	z3::expr nan_bv = z3::expr(ctx, Z3_mk_fpa_to_ieee_bv(ctx, nan));
-	inst2bool.insert({inst, is_nan && (nan_bv != arg1)});
+	inst2bool.emplace(inst, is_nan && (nan_bv != arg1));
       }
       break;
     case Op::MOV:
-      inst2bv.insert({inst, arg1});
+      inst2bv.emplace(inst, arg1);
       break;
     case Op::NEG:
-      inst2bv.insert({inst, -arg1});
+      inst2bv.emplace(inst, -arg1);
       break;
     case Op::NOT:
-      inst2bv.insert({inst, ~arg1});
+      inst2bv.emplace(inst, ~arg1);
       break;
     default:
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
@@ -341,15 +341,15 @@ void Converter::build_fp_unary_smt(const Inst *inst)
   switch (inst->op)
     {
     case Op::FABS:
-      inst2fp.insert({inst, z3::abs(arg1)});
+      inst2fp.emplace(inst, z3::abs(arg1));
       break;
     case Op::FNEG:
-      inst2fp.insert({inst, -arg1});
+      inst2fp.emplace(inst, -arg1);
       break;
     case Op::NAN:
       {
 	Z3_sort sort = fp_sort(inst->args[0]->value());
-	inst2fp.insert({inst, z3::expr(ctx, Z3_mk_fpa_nan(ctx, sort))});
+	inst2fp.emplace(inst, z3::expr(ctx, Z3_mk_fpa_nan(ctx, sort)));
       }
       break;
     default:
@@ -370,7 +370,7 @@ void Converter::build_bv_binary_smt(const Inst *inst)
       {
 	z3::expr arg1 = inst_as_array(inst->args[0]);
 	z3::expr arg2 = inst_as_bv(inst->args[1]);
-	inst2bv.insert({inst, z3::select(arg1, arg2)});
+	inst2bv.emplace(inst, z3::select(arg1, arg2));
       }
       return;
     default:
@@ -391,11 +391,11 @@ void Converter::build_bv_binary_smt(const Inst *inst)
       z3::expr arg1 = inst_as_bool(inst->args[0]);
       z3::expr arg2 = inst_as_bool(inst->args[1]);
       if (inst->op == Op::AND)
-	inst2bool.insert({inst, arg1 && arg2});
+	inst2bool.emplace(inst, arg1 && arg2);
       else if (inst->op == Op::OR)
-	inst2bool.insert({inst, arg1 || arg2});
+	inst2bool.emplace(inst, arg1 || arg2);
       else
-	inst2bool.insert({inst, arg1 ^ arg2});
+	inst2bool.emplace(inst, arg1 ^ arg2);
       return;
     }
 
@@ -404,19 +404,19 @@ void Converter::build_bv_binary_smt(const Inst *inst)
   switch (inst->op)
     {
     case Op::ADD:
-      inst2bv.insert({inst, arg1 + arg2});
+      inst2bv.emplace(inst, arg1 + arg2);
       break;
     case Op::SUB:
-      inst2bv.insert({inst, arg1 - arg2});
+      inst2bv.emplace(inst, arg1 - arg2);
       break;
     case Op::MUL:
-      inst2bv.insert({inst, arg1 * arg2});
+      inst2bv.emplace(inst, arg1 * arg2);
       break;
     case Op::SDIV:
-      inst2bv.insert({inst, arg1 / arg2});
+      inst2bv.emplace(inst, arg1 / arg2);
       break;
     case Op::UDIV:
-      inst2bv.insert({inst, z3::udiv(arg1, arg2)});
+      inst2bv.emplace(inst, z3::udiv(arg1, arg2));
       break;
     case Op::SADD_OVERFLOW:
       {
@@ -424,7 +424,7 @@ void Converter::build_bv_binary_smt(const Inst *inst)
 	z3::expr earg2 = z3::sext(arg2, 1);
 	z3::expr eadd = earg1 + earg2;
 	z3::expr eres = z3::sext(arg1 + arg2, 1);
-	inst2bool.insert({inst, eadd != eres});
+	inst2bool.emplace(inst, eadd != eres);
       }
       break;
     case Op::SMUL_OVERFLOW:
@@ -433,11 +433,11 @@ void Converter::build_bv_binary_smt(const Inst *inst)
 	z3::expr earg2 = z3::sext(arg2, inst->args[0]->bitsize);
 	z3::expr emul = earg1 * earg2;
 	z3::expr eres = z3::sext(arg1 * arg2, inst->args[0]->bitsize);
-	inst2bool.insert({inst, emul != eres});
+	inst2bool.emplace(inst, emul != eres);
       }
       break;
     case Op::SREM:
-      inst2bv.insert({inst, z3::srem(arg1, arg2)});
+      inst2bv.emplace(inst, z3::srem(arg1, arg2));
       break;
     case Op::SSUB_OVERFLOW:
       {
@@ -445,29 +445,29 @@ void Converter::build_bv_binary_smt(const Inst *inst)
 	z3::expr earg2 = z3::sext(arg2, 1);
 	z3::expr esub = earg1 - earg2;
 	z3::expr eres = z3::sext(arg1 - arg2, 1);
-	inst2bool.insert({inst, esub != eres});
+	inst2bool.emplace(inst, esub != eres);
       }
       break;
     case Op::UREM:
-      inst2bv.insert({inst, z3::urem(arg1, arg2)});
+      inst2bv.emplace(inst, z3::urem(arg1, arg2));
       break;
     case Op::ASHR:
-      inst2bv.insert({inst, z3::ashr(arg1, arg2)});
+      inst2bv.emplace(inst, z3::ashr(arg1, arg2));
       break;
     case Op::LSHR:
-      inst2bv.insert({inst, z3::lshr(arg1, arg2)});
+      inst2bv.emplace(inst, z3::lshr(arg1, arg2));
       break;
     case Op::SHL:
-      inst2bv.insert({inst, z3::shl(arg1, arg2)});
+      inst2bv.emplace(inst, z3::shl(arg1, arg2));
       break;
     case Op::AND:
-      inst2bv.insert({inst, arg1 & arg2});
+      inst2bv.emplace(inst, arg1 & arg2);
       break;
     case Op::OR:
-      inst2bv.insert({inst, arg1 | arg2});
+      inst2bv.emplace(inst, arg1 | arg2);
       break;
     case Op::XOR:
-      inst2bv.insert({inst, arg1 ^ arg2});
+      inst2bv.emplace(inst, arg1 ^ arg2);
       break;
     case Op::CONCAT:
       {
@@ -476,9 +476,9 @@ void Converter::build_bv_binary_smt(const Inst *inst)
 	// folded at IR level (as the IR limits constant width to 128 bits),
 	// so we we fold it here to get nicer SMT2 code when debugging.
 	if (Z3_is_numeral_ast(ctx, arg1) && Z3_is_numeral_ast(ctx, arg2))
-	  inst2bv.insert({inst, res.simplify()});
+	  inst2bv.emplace(inst, res.simplify());
 	else
-	  inst2bv.insert({inst, res});
+	  inst2bv.emplace(inst, res);
       }
       break;
     default:
@@ -494,16 +494,16 @@ void Converter::build_fp_binary_smt(const Inst *inst)
   switch (inst->op)
     {
     case Op::FADD:
-      inst2fp.insert({inst, arg1 + arg2});
+      inst2fp.emplace(inst, arg1 + arg2);
       break;
     case Op::FSUB:
-      inst2fp.insert({inst, arg1 - arg2});
+      inst2fp.emplace(inst, arg1 - arg2);
       break;
     case Op::FMUL:
-      inst2fp.insert({inst, arg1 * arg2});
+      inst2fp.emplace(inst, arg1 * arg2);
       break;
     case Op::FDIV:
-      inst2fp.insert({inst, arg1 / arg2});
+      inst2fp.emplace(inst, arg1 / arg2);
       break;
     default:
       throw Not_implemented("build_binary_smt: "s + inst->name());
@@ -523,7 +523,7 @@ void Converter::build_ternary_smt(const Inst *inst)
 	z3::expr arg1 = inst_as_array(inst->args[0]);
 	z3::expr arg2 = inst_as_bv(inst->args[1]);
 	z3::expr arg3 = inst_as_bv(inst->args[2]);
-	inst2array.insert({inst, z3::store(arg1, arg2, arg3)});
+	inst2array.emplace(inst, z3::store(arg1, arg2, arg3));
       }
       break;
     case Op::EXTRACT:
@@ -531,7 +531,7 @@ void Converter::build_ternary_smt(const Inst *inst)
 	z3::expr arg = inst_as_bv(inst->args[0]);
 	uint32_t high = inst->args[1]->value();
 	uint32_t low = inst->args[2]->value();
-	inst2bv.insert({inst, arg.extract(high, low)});
+	inst2bv.emplace(inst, arg.extract(high, low));
       }
       break;
     case Op::ITE:
@@ -540,7 +540,7 @@ void Converter::build_ternary_smt(const Inst *inst)
 	  z3::expr arg1 = inst_as_bool(inst->args[0]);
 	  z3::expr arg2 = inst_as_array(inst->args[1]);
 	  z3::expr arg3 = inst_as_array(inst->args[2]);
-	  inst2array.insert({inst, ite(arg1, arg2, arg3)});
+	  inst2array.emplace(inst, ite(arg1, arg2, arg3));
 	}
       else if (inst->bitsize == 1
 	       && inst2bool.contains(inst->args[1])
@@ -549,14 +549,14 @@ void Converter::build_ternary_smt(const Inst *inst)
 	  z3::expr arg1 = inst_as_bool(inst->args[0]);
 	  z3::expr arg2 = inst_as_bool(inst->args[1]);
 	  z3::expr arg3 = inst_as_bool(inst->args[2]);
-	  inst2bool.insert({inst, ite(arg1, arg2, arg3)});
+	  inst2bool.emplace(inst, ite(arg1, arg2, arg3));
 	}
       else
 	{
 	  z3::expr arg1 = inst_as_bool(inst->args[0]);
 	  z3::expr arg2 = inst_as_bv(inst->args[1]);
 	  z3::expr arg3 = inst_as_bv(inst->args[2]);
-	  inst2bv.insert({inst, ite(arg1, arg2, arg3)});
+	  inst2bv.emplace(inst, ite(arg1, arg2, arg3));
 	}
       break;
     default:
@@ -577,12 +577,12 @@ void Converter::build_conversion_smt(const Inst *inst)
 	    z3::expr arg = inst_as_bool(inst->args[0]);
 	    z3::expr zero = get_value(0, inst->bitsize);
 	    z3::expr m1 = get_value(-1, inst->bitsize);
-	    inst2bv.insert({inst, ite(arg, m1, zero)});
+	    inst2bv.emplace(inst, ite(arg, m1, zero));
 	  }
 	else
 	  {
 	    z3::expr arg = inst_as_bv(inst->args[0]);
-	    inst2bv.insert({inst, z3::sext(arg, inst->bitsize - arg_bitsize)});
+	    inst2bv.emplace(inst, z3::sext(arg, inst->bitsize - arg_bitsize));
 	  }
       }
       break;
@@ -595,12 +595,12 @@ void Converter::build_conversion_smt(const Inst *inst)
 	    z3::expr arg = inst_as_bool(inst->args[0]);
 	    z3::expr zero = get_value(0, inst->bitsize);
 	    z3::expr one = get_value(1, inst->bitsize);
-	    inst2bv.insert({inst, ite(arg, one, zero)});
+	    inst2bv.emplace(inst, ite(arg, one, zero));
 	  }
 	else
 	  {
 	    z3::expr arg = inst_as_bv(inst->args[0]);
-	    inst2bv.insert({inst, z3::zext(arg, inst->bitsize - arg_bitsize)});
+	    inst2bv.emplace(inst, z3::zext(arg, inst->bitsize - arg_bitsize));
 	  }
       }
       break;
@@ -609,7 +609,7 @@ void Converter::build_conversion_smt(const Inst *inst)
 	z3::expr arg = inst_as_fp(inst->args[0]);
 	z3::expr rtz = to_expr(ctx, Z3_mk_fpa_rtz(ctx));
 	Z3_ast r = Z3_mk_fpa_to_ubv(ctx, rtz, arg, inst->bitsize);
-	inst2bv.insert({inst, z3::expr(ctx, r)});
+	inst2bv.emplace(inst, z3::expr(ctx, r));
       }
       break;
     case Op::F2S:
@@ -617,7 +617,7 @@ void Converter::build_conversion_smt(const Inst *inst)
 	z3::expr arg = inst_as_fp(inst->args[0]);
 	z3::expr rtz = to_expr(ctx, Z3_mk_fpa_rtz(ctx));
 	Z3_ast r = Z3_mk_fpa_to_sbv(ctx, rtz, arg, inst->bitsize);
-	inst2bv.insert({inst, z3::expr(ctx, r)});
+	inst2bv.emplace(inst, z3::expr(ctx, r));
       }
       break;
     case Op::S2F:
@@ -626,7 +626,7 @@ void Converter::build_conversion_smt(const Inst *inst)
 	z3::expr rne = to_expr(ctx, Z3_mk_fpa_rne(ctx));
 	Z3_sort sort = fp_sort(inst->bitsize);
 	Z3_ast r = Z3_mk_fpa_to_fp_signed(ctx, rne, arg, sort);
-	inst2fp.insert({inst, z3::expr(ctx, r)});
+	inst2fp.emplace(inst, z3::expr(ctx, r));
       }
       break;
     case Op::U2F:
@@ -635,7 +635,7 @@ void Converter::build_conversion_smt(const Inst *inst)
 	z3::expr rne = to_expr(ctx, Z3_mk_fpa_rne(ctx));
 	Z3_sort sort = fp_sort(inst->bitsize);
 	Z3_ast r = Z3_mk_fpa_to_fp_unsigned(ctx, rne, arg, sort);
-	inst2fp.insert({inst, z3::expr(ctx, r)});
+	inst2fp.emplace(inst, z3::expr(ctx, r));
       }
       break;
     case Op::FCHPREC:
@@ -644,7 +644,7 @@ void Converter::build_conversion_smt(const Inst *inst)
 	z3::expr rne = to_expr(ctx, Z3_mk_fpa_rne(ctx));
 	Z3_sort sort = fp_sort(inst->bitsize);
 	Z3_ast r = Z3_mk_fpa_to_fp_float(ctx, rne, arg, sort);
-	inst2fp.insert({inst, z3::expr(ctx, r)});
+	inst2fp.emplace(inst, z3::expr(ctx, r));
       }
       break;
     default:
@@ -672,7 +672,7 @@ void Converter::build_solver_smt(const Inst *inst)
 	    char name[100];
 	    sprintf(name, ".param%" PRIu32, index);
 	    z3::expr param = ctx.bv_const(name, inst->bitsize);
-	    inst2bv.insert({inst, param});
+	    inst2bv.emplace(inst, param);
 	  }
 	  break;
 	case Op::PRINT:
@@ -695,7 +695,7 @@ void Converter::build_solver_smt(const Inst *inst)
 	    char name[100];
 	    sprintf(name, ".symbolic%" PRIu32, index);
 	    z3::expr symbolic = ctx.bv_const(name, inst->bitsize);
-	    inst2bv.insert({inst, symbolic});
+	    inst2bv.emplace(inst, symbolic);
 	  }
 	  break;
 	case Op::TGT_RETVAL:
@@ -763,9 +763,9 @@ void Converter::build_special_smt(const Inst *inst)
       assert(inst->nof_args == 0);
       break;
     case Op::VALUE:
-      inst2bv.insert({inst, get_value(inst->value(), inst->bitsize)});
+      inst2bv.emplace(inst, get_value(inst->value(), inst->bitsize));
       if (inst->bitsize == 1)
-	inst2bool.insert({inst, ctx.bool_val(inst->value())});
+	inst2bool.emplace(inst, ctx.bool_val(inst->value()));
       break;
     default:
       throw Not_implemented("build_special_smt: "s + inst->name());

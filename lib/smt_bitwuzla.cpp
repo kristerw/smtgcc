@@ -78,7 +78,7 @@ Term Converter::inst_as_bv(const Inst *inst)
   assert(inst->bitsize == 1);
   Sort bv1 = tm.mk_bv_sort(1);
   Term term = ite(inst2bool.at(inst), tm.mk_bv_one(bv1), tm.mk_bv_zero(bv1));
-  inst2bv.insert({inst, term});
+  inst2bv.emplace(inst, term);
   return term;
 }
 
@@ -96,7 +96,7 @@ Term Converter::inst_as_bool(const Inst *inst)
   Term term = tm.mk_term(Kind::EQUAL, {bv, tm.mk_bv_one(bv1)});
   if (bv.is_value())
     term = solver.simplify(term);
-  inst2bool.insert({inst, term});
+  inst2bool.emplace(inst, term);
   return term;
 }
 
@@ -113,9 +113,9 @@ void Converter::build_bv_comparison_smt(const Inst *inst)
       Term arg2 = inst_as_bool(inst->args[1]);
 
       if (inst->op == Op::EQ)
-	inst2bool.insert({inst, tm.mk_term(Kind::EQUAL, {arg1, arg2})});
+	inst2bool.emplace(inst, tm.mk_term(Kind::EQUAL, {arg1, arg2}));
       else
-	inst2bool.insert({inst, tm.mk_term(Kind::DISTINCT, {arg1, arg2})});
+	inst2bool.emplace(inst, tm.mk_term(Kind::DISTINCT, {arg1, arg2}));
       return;
     }
 
@@ -124,22 +124,22 @@ void Converter::build_bv_comparison_smt(const Inst *inst)
   switch (inst->op)
     {
     case Op::EQ:
-      inst2bool.insert({inst, tm.mk_term(Kind::EQUAL, {arg1, arg2})});
+      inst2bool.emplace(inst, tm.mk_term(Kind::EQUAL, {arg1, arg2}));
       break;
     case Op::NE:
-      inst2bool.insert({inst, tm.mk_term(Kind::DISTINCT, {arg1, arg2})});
+      inst2bool.emplace(inst, tm.mk_term(Kind::DISTINCT, {arg1, arg2}));
       break;
     case Op::SLE:
-      inst2bool.insert({inst, tm.mk_term(Kind::BV_SLE, {arg1, arg2})});
+      inst2bool.emplace(inst, tm.mk_term(Kind::BV_SLE, {arg1, arg2}));
       break;
     case Op::SLT:
-      inst2bool.insert({inst, tm.mk_term(Kind::BV_SLT, {arg1, arg2})});
+      inst2bool.emplace(inst, tm.mk_term(Kind::BV_SLT, {arg1, arg2}));
       break;
     case Op::ULE:
-      inst2bool.insert({inst, tm.mk_term(Kind::BV_ULE, {arg1, arg2})});
+      inst2bool.emplace(inst, tm.mk_term(Kind::BV_ULE, {arg1, arg2}));
       break;
     case Op::ULT:
-      inst2bool.insert({inst, tm.mk_term(Kind::BV_ULT, {arg1, arg2})});
+      inst2bool.emplace(inst, tm.mk_term(Kind::BV_ULT, {arg1, arg2}));
       break;
     default:
       throw Not_implemented("build_comparison_smt: "s + inst->name());
@@ -156,7 +156,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	Sort byte_sort = tm.mk_bv_sort(8);
 	Sort array_sort = tm.mk_array_sort(address_sort, byte_sort);
 	Term memory = tm.mk_const(array_sort, ".memory");
-	inst2array.insert({inst, memory});
+	inst2array.emplace(inst, memory);
       }
       break;
     case Op::MEM_FLAG_ARRAY:
@@ -166,7 +166,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	Sort array_sort = tm.mk_array_sort(address_sort, bit_sort);
 	Term memory_flag =
 	  tm.mk_const_array(array_sort, tm.mk_bv_zero(bit_sort));
-	inst2array.insert({inst, memory_flag});
+	inst2array.emplace(inst, memory_flag);
       }
       break;
     case Op::MEM_SIZE_ARRAY:
@@ -178,7 +178,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	Sort array_sort = tm.mk_array_sort(id_sort, offset_sort);
 	Term memory_size =
 	  tm.mk_const_array(array_sort, tm.mk_bv_zero(offset_sort));
-	inst2array.insert({inst, memory_size});
+	inst2array.emplace(inst, memory_size);
       }
       break;
     case Op::MEM_INDEF_ARRAY:
@@ -188,7 +188,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	Sort array_sort = tm.mk_array_sort(address_sort, byte_sort);
 	Term memory_indef =
 	  tm.mk_const_array(array_sort, tm.mk_bv_zero(byte_sort));
-	inst2array.insert({inst, memory_indef});
+	inst2array.emplace(inst, memory_indef);
       }
       break;
     default:
@@ -208,7 +208,7 @@ void Converter::build_bv_unary_smt(const Inst *inst)
       && inst2bool.contains(inst->args[0]))
     {
       Term arg1 = inst_as_bool(inst->args[0]);
-      inst2bool.insert({inst, tm.mk_term(Kind::NOT, {arg1})});
+      inst2bool.emplace(inst, tm.mk_term(Kind::NOT, {arg1}));
       return;
     }
 
@@ -220,13 +220,13 @@ void Converter::build_bv_unary_smt(const Inst *inst)
     case Op::IS_NONCANONICAL_NAN:
       throw Not_implemented("floating-point support in smt_bitwuzla");
     case Op::MOV:
-      inst2bv.insert({inst, arg1});
+      inst2bv.emplace(inst, arg1);
       break;
     case Op::NEG:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_NEG, {arg1})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_NEG, {arg1}));
       break;
     case Op::NOT:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_NOT, {arg1})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_NOT, {arg1}));
       break;
     default:
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
@@ -246,7 +246,7 @@ void Converter::build_bv_binary_smt(const Inst *inst)
       {
 	Term arg1 = inst_as_array(inst->args[0]);
 	Term arg2 = inst_as_bv(inst->args[1]);
-	inst2bv.insert({inst, tm.mk_term(Kind::ARRAY_SELECT, {arg1, arg2})});
+	inst2bv.emplace(inst, tm.mk_term(Kind::ARRAY_SELECT, {arg1, arg2}));
       }
       return;
     default:
@@ -267,11 +267,11 @@ void Converter::build_bv_binary_smt(const Inst *inst)
       Term arg1 = inst_as_bool(inst->args[0]);
       Term arg2 = inst_as_bool(inst->args[1]);
       if (inst->op == Op::AND)
-	inst2bool.insert({inst, tm.mk_term(Kind::AND, {arg1, arg2})});
+	inst2bool.emplace(inst, tm.mk_term(Kind::AND, {arg1, arg2}));
       else if (inst->op == Op::OR)
-	inst2bool.insert({inst, tm.mk_term(Kind::OR, {arg1, arg2})});
+	inst2bool.emplace(inst, tm.mk_term(Kind::OR, {arg1, arg2}));
       else
-	inst2bool.insert({inst, tm.mk_term(Kind::XOR, {arg1, arg2})});
+	inst2bool.emplace(inst, tm.mk_term(Kind::XOR, {arg1, arg2}));
       return;
     }
 
@@ -280,52 +280,52 @@ void Converter::build_bv_binary_smt(const Inst *inst)
   switch (inst->op)
     {
     case Op::ADD:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_ADD, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_ADD, {arg1, arg2}));
       break;
     case Op::SUB:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_SUB, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_SUB, {arg1, arg2}));
       break;
     case Op::MUL:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_MUL, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_MUL, {arg1, arg2}));
       break;
     case Op::SDIV:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_SDIV, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_SDIV, {arg1, arg2}));
       break;
     case Op::UDIV:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_UDIV, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_UDIV, {arg1, arg2}));
       break;
     case Op::SADD_OVERFLOW:
-      inst2bool.insert({inst, tm.mk_term(Kind::BV_SADD_OVERFLOW, {arg1, arg2})});
+      inst2bool.emplace(inst, tm.mk_term(Kind::BV_SADD_OVERFLOW, {arg1, arg2}));
       break;
     case Op::SMUL_OVERFLOW:
-      inst2bool.insert({inst, tm.mk_term(Kind::BV_SMUL_OVERFLOW, {arg1, arg2})});
+      inst2bool.emplace(inst, tm.mk_term(Kind::BV_SMUL_OVERFLOW, {arg1, arg2}));
       break;
     case Op::SREM:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_SREM, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_SREM, {arg1, arg2}));
       break;
     case Op::SSUB_OVERFLOW:
-      inst2bool.insert({inst, tm.mk_term(Kind::BV_SSUB_OVERFLOW, {arg1, arg2})});
+      inst2bool.emplace(inst, tm.mk_term(Kind::BV_SSUB_OVERFLOW, {arg1, arg2}));
       break;
     case Op::UREM:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_UREM, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_UREM, {arg1, arg2}));
       break;
     case Op::ASHR:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_ASHR, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_ASHR, {arg1, arg2}));
       break;
     case Op::LSHR:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_SHR, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_SHR, {arg1, arg2}));
       break;
     case Op::SHL:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_SHL, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_SHL, {arg1, arg2}));
       break;
     case Op::AND:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_AND, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_AND, {arg1, arg2}));
       break;
     case Op::OR:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_OR, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_OR, {arg1, arg2}));
       break;
     case Op::XOR:
-      inst2bv.insert({inst, tm.mk_term(Kind::BV_XOR, {arg1, arg2})});
+      inst2bv.emplace(inst, tm.mk_term(Kind::BV_XOR, {arg1, arg2}));
       break;
     case Op::CONCAT:
       {
@@ -335,7 +335,7 @@ void Converter::build_bv_binary_smt(const Inst *inst)
 	Term concat = tm.mk_term(Kind::BV_CONCAT, {arg1, arg2});
 	if (arg1.is_value() && arg2.is_value())
 	  concat = solver.simplify(concat);
-	inst2bv.insert({inst, concat});
+	inst2bv.emplace(inst, concat);
       }
       break;
     default:
@@ -357,7 +357,7 @@ void Converter::build_ternary_smt(const Inst *inst)
 	Term arg2 = inst_as_bv(inst->args[1]);
 	Term arg3 = inst_as_bv(inst->args[2]);
 	Term array = tm.mk_term(Kind::ARRAY_STORE, {arg1, arg2, arg3});
-	inst2array.insert({inst, array});
+	inst2array.emplace(inst, array);
       }
       break;
     case Op::EXTRACT:
@@ -366,7 +366,7 @@ void Converter::build_ternary_smt(const Inst *inst)
 	uint32_t high = inst->args[1]->value();
 	uint32_t low = inst->args[2]->value();
 	Term res = tm.mk_term(Kind::BV_EXTRACT, {arg}, {high, low});
-	inst2bv.insert({inst, res});
+	inst2bv.emplace(inst, res);
       }
       break;
     case Op::ITE:
@@ -375,7 +375,7 @@ void Converter::build_ternary_smt(const Inst *inst)
 	  Term arg1 = inst_as_bool(inst->args[0]);
 	  Term arg2 = inst_as_array(inst->args[1]);
 	  Term arg3 = inst_as_array(inst->args[2]);
-	  inst2array.insert({inst, ite(arg1, arg2, arg3)});
+	  inst2array.emplace(inst, ite(arg1, arg2, arg3));
 	}
       else if (inst->bitsize == 1
 	       && inst2bool.contains(inst->args[1])
@@ -384,14 +384,14 @@ void Converter::build_ternary_smt(const Inst *inst)
 	  Term arg1 = inst_as_bool(inst->args[0]);
 	  Term arg2 = inst_as_bool(inst->args[1]);
 	  Term arg3 = inst_as_bool(inst->args[2]);
-	  inst2bool.insert({inst, ite(arg1, arg2, arg3)});
+	  inst2bool.emplace(inst, ite(arg1, arg2, arg3));
 	}
       else
 	{
 	  Term arg1 = inst_as_bool(inst->args[0]);
 	  Term arg2 = inst_as_bv(inst->args[1]);
 	  Term arg3 = inst_as_bv(inst->args[2]);
-	  inst2bv.insert({inst, ite(arg1, arg2, arg3)});
+	  inst2bv.emplace(inst, ite(arg1, arg2, arg3));
 	}
       break;
     default:
@@ -418,12 +418,12 @@ void Converter::build_conversion_smt(const Inst *inst)
 	    Term m1 = tm.mk_bv_value_uint64(b1_sort, 1);
 	    m1 = tm.mk_term(Kind::BV_SIGN_EXTEND, {m1}, {bits});
 	    m1 = solver.simplify(m1);
-	    inst2bv.insert({inst, ite(arg, m1, zero)});
+	    inst2bv.emplace(inst, ite(arg, m1, zero));
 	  }
 	else
 	  {
 	    Term res = tm.mk_term(Kind::BV_SIGN_EXTEND, {arg}, {bits});
-	    inst2bv.insert({inst, res});
+	    inst2bv.emplace(inst, res);
 	  }
       }
       break;
@@ -442,12 +442,12 @@ void Converter::build_conversion_smt(const Inst *inst)
 	    Term one = tm.mk_bv_value_uint64(b1_sort, 1);
 	    one = tm.mk_term(Kind::BV_ZERO_EXTEND, {one}, {bits});
 	    one = solver.simplify(one);
-	    inst2bv.insert({inst, ite(arg, one, zero)});
+	    inst2bv.emplace(inst, ite(arg, one, zero));
 	  }
 	else
 	  {
 	    Term res = tm.mk_term(Kind::BV_ZERO_EXTEND, {arg}, {bits});
-	    inst2bv.insert({inst, res});
+	    inst2bv.emplace(inst, res);
 	  }
       }
       break;
@@ -484,14 +484,14 @@ void Converter::build_solver_smt(const Inst *inst)
 	    Sort sort = tm.mk_bv_sort(inst->bitsize);
 	    Term param = tm.mk_const(sort, name);
 	    input.push_back(param);
-	    inst2bv.insert({inst, param});
+	    inst2bv.emplace(inst, param);
 	  }
 	  break;
 	case Op::PRINT:
 	  {
 	    Term arg1 = inst_as_bv(inst->args[0]);
 	    Term arg2 = inst_as_bv(inst->args[1]);
-	    print.push_back({arg1, arg2});
+	    print.emplace_back(arg1, arg2);
 	  }
 	  break;
 	case Op::SRC_RETVAL:
@@ -512,7 +512,7 @@ void Converter::build_solver_smt(const Inst *inst)
 	    sprintf(name, ".symbolic%" PRIu32, index);
 	    Sort sort = tm.mk_bv_sort(inst->bitsize);
 	    Term symbolic = tm.mk_const(sort, name);
-	    inst2bv.insert({inst, symbolic});
+	    inst2bv.emplace(inst, symbolic);
 	  }
 	  break;
 	case Op::TGT_RETVAL:
@@ -590,19 +590,19 @@ void Converter::build_special_smt(const Inst *inst)
 	    Sort hi_sort = tm.mk_bv_sort(inst->bitsize - 64);
 	    Term hi = tm.mk_bv_value_uint64(hi_sort, high);
 	    Term concat = tm.mk_term(Kind::BV_CONCAT, {hi, lo});
-	    inst2bv.insert({inst, solver.simplify(concat)});
+	    inst2bv.emplace(inst, solver.simplify(concat));
 	  }
 	else
 	  {
 	    Sort lo_sort = tm.mk_bv_sort(inst->bitsize);
-	    inst2bv.insert({inst, tm.mk_bv_value_uint64(lo_sort, low)});
+	    inst2bv.emplace(inst, tm.mk_bv_value_uint64(lo_sort, low));
 	  }
 	if (inst->bitsize == 1)
 	  {
 	    if (low)
-	      inst2bool.insert({inst, tm.mk_true()});
+	      inst2bool.emplace(inst, tm.mk_true());
 	    else
-	      inst2bool.insert({inst, tm.mk_false()});
+	      inst2bool.emplace(inst, tm.mk_false());
 	  }
       }
       break;

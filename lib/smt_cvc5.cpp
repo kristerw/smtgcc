@@ -73,7 +73,7 @@ cvc5::Term Converter::inst_as_bv(const Inst *inst)
   assert(inst->bitsize == 1);
   cvc5::Term term =
     ite(inst2bool.at(inst), solver.mkBitVector(1, 1), solver.mkBitVector(1, 0));
-  inst2bv.insert({inst, term});
+  inst2bv.emplace(inst, term);
   return term;
 }
 
@@ -89,7 +89,7 @@ cvc5::Term Converter::inst_as_bool(const Inst *inst)
   cvc5::Term bv = inst2bv.at(inst);
   cvc5::Term term =
     solver.mkTerm(cvc5::Kind::EQUAL, {bv, solver.mkBitVector(1, 1)});
-  inst2bool.insert({inst, term});
+  inst2bool.emplace(inst, term);
   return term;
 }
 
@@ -106,9 +106,9 @@ void Converter::build_bv_comparison_smt(const Inst *inst)
       cvc5::Term arg2 = inst_as_bool(inst->args[1]);
 
       if (inst->op == Op::EQ)
-	inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::EQUAL, {arg1, arg2})});
+	inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::EQUAL, {arg1, arg2}));
       else
-	inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::DISTINCT, {arg1, arg2})});
+	inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::DISTINCT, {arg1, arg2}));
       return;
     }
 
@@ -117,22 +117,22 @@ void Converter::build_bv_comparison_smt(const Inst *inst)
   switch (inst->op)
     {
     case Op::EQ:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::EQUAL, {arg1, arg2})});
+      inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::EQUAL, {arg1, arg2}));
       break;
     case Op::NE:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::DISTINCT, {arg1, arg2})});
+      inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::DISTINCT, {arg1, arg2}));
       break;
     case Op::SLE:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SLE, {arg1, arg2})});
+      inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SLE, {arg1, arg2}));
       break;
     case Op::SLT:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SLT, {arg1, arg2})});
+      inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SLT, {arg1, arg2}));
       break;
     case Op::ULE:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_ULE, {arg1, arg2})});
+      inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_ULE, {arg1, arg2}));
       break;
     case Op::ULT:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_ULT, {arg1, arg2})});
+      inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_ULT, {arg1, arg2}));
       break;
     default:
       throw Not_implemented("build_comparison_smt: "s + inst->name());
@@ -150,7 +150,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	cvc5::Sort byte_sort = solver.mkBitVectorSort(8);
 	cvc5::Sort array_sort = solver.mkArraySort(address_sort, byte_sort);
 	cvc5::Term memory = solver.mkConst(array_sort, ".memory");
-	inst2array.insert({inst, memory});
+	inst2array.emplace(inst, memory);
       }
       break;
     case Op::MEM_FLAG_ARRAY:
@@ -161,7 +161,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	cvc5::Sort array_sort = solver.mkArraySort(address_sort, bit_sort);
 	cvc5::Term memory_flag =
 	  solver.mkConstArray(array_sort, solver.mkBitVector(1, 0));
-	inst2array.insert({inst, memory_flag});
+	inst2array.emplace(inst, memory_flag);
       }
       break;
     case Op::MEM_SIZE_ARRAY:
@@ -174,7 +174,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	cvc5::Term memory_size =
 	  solver.mkConstArray(array_sort,
 			      solver.mkBitVector(ptr_offset_bits, 0));
-	inst2array.insert({inst, memory_size});
+	inst2array.emplace(inst, memory_size);
       }
       break;
     case Op::MEM_INDEF_ARRAY:
@@ -185,7 +185,7 @@ void Converter::build_memory_state_smt(const Inst *inst)
 	cvc5::Sort array_sort = solver.mkArraySort(address_sort, byte_sort);
 	cvc5::Term memory_indef =
 	  solver.mkConstArray(array_sort, solver.mkBitVector(8, 0));
-	inst2array.insert({inst, memory_indef});
+	inst2array.emplace(inst, memory_indef);
       }
       break;
     default:
@@ -205,7 +205,7 @@ void Converter::build_bv_unary_smt(const Inst *inst)
       && inst2bool.contains(inst->args[0]))
     {
       cvc5::Term arg1 = inst_as_bool(inst->args[0]);
-      inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::NOT, {arg1})});
+      inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::NOT, {arg1}));
       return;
     }
 
@@ -217,13 +217,13 @@ void Converter::build_bv_unary_smt(const Inst *inst)
     case Op::IS_NONCANONICAL_NAN:
       throw Not_implemented("floating-point support in smt_cvc5");
     case Op::MOV:
-      inst2bv.insert({inst, arg1});
+      inst2bv.emplace(inst, arg1);
       break;
     case Op::NEG:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_NEG, {arg1})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_NEG, {arg1}));
       break;
     case Op::NOT:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_NOT, {arg1})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_NOT, {arg1}));
       break;
     default:
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
@@ -243,7 +243,7 @@ void Converter::build_bv_binary_smt(const Inst *inst)
       {
 	cvc5::Term arg1 = inst_as_array(inst->args[0]);
 	cvc5::Term arg2 = inst_as_bv(inst->args[1]);
-	inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::SELECT, {arg1, arg2})});
+	inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::SELECT, {arg1, arg2}));
       }
       return;
     default:
@@ -264,11 +264,11 @@ void Converter::build_bv_binary_smt(const Inst *inst)
       cvc5::Term arg1 = inst_as_bool(inst->args[0]);
       cvc5::Term arg2 = inst_as_bool(inst->args[1]);
       if (inst->op == Op::AND)
-	inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::AND, {arg1, arg2})});
+	inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::AND, {arg1, arg2}));
       else if (inst->op == Op::OR)
-	inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::OR, {arg1, arg2})});
+	inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::OR, {arg1, arg2}));
       else
-	inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::XOR, {arg1, arg2})});
+	inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::XOR, {arg1, arg2}));
       return;
     }
 
@@ -277,57 +277,57 @@ void Converter::build_bv_binary_smt(const Inst *inst)
   switch (inst->op)
     {
     case Op::ADD:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_ADD, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_ADD, {arg1, arg2}));
       break;
     case Op::SUB:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SUB, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SUB, {arg1, arg2}));
       break;
     case Op::MUL:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_MULT, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_MULT, {arg1, arg2}));
       break;
     case Op::SDIV:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SDIV, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SDIV, {arg1, arg2}));
       break;
     case Op::UDIV:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_UDIV, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_UDIV, {arg1, arg2}));
       break;
     case Op::SADD_OVERFLOW:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SADDO, {arg1, arg2})});
+      inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SADDO, {arg1, arg2}));
       break;
     case Op::SMUL_OVERFLOW:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SMULO, {arg1, arg2})});
+      inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SMULO, {arg1, arg2}));
       break;
     case Op::SREM:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SREM, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SREM, {arg1, arg2}));
       break;
     case Op::SSUB_OVERFLOW:
-      inst2bool.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SSUBO, {arg1, arg2})});
+      inst2bool.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SSUBO, {arg1, arg2}));
       break;
     case Op::UREM:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_UREM, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_UREM, {arg1, arg2}));
       break;
     case Op::ASHR:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_ASHR, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_ASHR, {arg1, arg2}));
       break;
     case Op::LSHR:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_LSHR, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_LSHR, {arg1, arg2}));
       break;
     case Op::SHL:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SHL, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_SHL, {arg1, arg2}));
       break;
     case Op::AND:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_AND, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_AND, {arg1, arg2}));
       break;
     case Op::OR:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_OR, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_OR, {arg1, arg2}));
       break;
     case Op::XOR:
-      inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_XOR, {arg1, arg2})});
+      inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_XOR, {arg1, arg2}));
       break;
     case Op::CONCAT:
       {
 	cvc5::Term res = solver.mkTerm(cvc5::Kind::BITVECTOR_CONCAT, {arg1, arg2});
-	inst2bv.insert({inst, res});
+	inst2bv.emplace(inst, res);
       }
       break;
     default:
@@ -350,7 +350,7 @@ void Converter::build_ternary_smt(const Inst *inst)
 	cvc5::Term arg3 = inst_as_bv(inst->args[2]);
 	cvc5::Term array =
 	  solver.mkTerm(cvc5::Kind::STORE, {arg1, arg2, arg3});
-	inst2array.insert({inst, array});
+	inst2array.emplace(inst, array);
       }
       break;
     case Op::EXTRACT:
@@ -360,7 +360,7 @@ void Converter::build_ternary_smt(const Inst *inst)
 	uint32_t low = inst->args[2]->value();
 	cvc5::Op extract =
 	  solver.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {high, low});
-	inst2bv.insert({inst, solver.mkTerm(extract, {arg})});
+	inst2bv.emplace(inst, solver.mkTerm(extract, {arg}));
       }
       break;
     case Op::ITE:
@@ -369,7 +369,7 @@ void Converter::build_ternary_smt(const Inst *inst)
 	  cvc5::Term arg1 = inst_as_bool(inst->args[0]);
 	  cvc5::Term arg2 = inst_as_array(inst->args[1]);
 	  cvc5::Term arg3 = inst_as_array(inst->args[2]);
-	  inst2array.insert({inst, ite(arg1, arg2, arg3)});
+	  inst2array.emplace(inst, ite(arg1, arg2, arg3));
 	}
       else if (inst->bitsize == 1
 	       && inst2bool.contains(inst->args[1])
@@ -378,14 +378,14 @@ void Converter::build_ternary_smt(const Inst *inst)
 	  cvc5::Term arg1 = inst_as_bool(inst->args[0]);
 	  cvc5::Term arg2 = inst_as_bool(inst->args[1]);
 	  cvc5::Term arg3 = inst_as_bool(inst->args[2]);
-	  inst2bool.insert({inst, ite(arg1, arg2, arg3)});
+	  inst2bool.emplace(inst, ite(arg1, arg2, arg3));
 	}
       else
 	{
 	  cvc5::Term arg1 = inst_as_bool(inst->args[0]);
 	  cvc5::Term arg2 = inst_as_bv(inst->args[1]);
 	  cvc5::Term arg3 = inst_as_bv(inst->args[2]);
-	  inst2bv.insert({inst, ite(arg1, arg2, arg3)});
+	  inst2bv.emplace(inst, ite(arg1, arg2, arg3));
 	}
       break;
     default:
@@ -403,7 +403,7 @@ void Converter::build_conversion_smt(const Inst *inst)
 	assert(inst->args[0]->bitsize < inst->bitsize);
 	unsigned bits =  inst->bitsize - inst->args[0]->bitsize;
 	cvc5::Op op = solver.mkOp(cvc5::Kind::BITVECTOR_SIGN_EXTEND, {bits});
-	inst2bv.insert({inst, solver.mkTerm(op, {arg})});
+	inst2bv.emplace(inst, solver.mkTerm(op, {arg}));
       }
       break;
     case Op::ZEXT:
@@ -412,7 +412,7 @@ void Converter::build_conversion_smt(const Inst *inst)
 	assert(inst->args[0]->bitsize < inst->bitsize);
 	unsigned bits =  inst->bitsize - inst->args[0]->bitsize;
 	cvc5::Op op = solver.mkOp(cvc5::Kind::BITVECTOR_ZERO_EXTEND, {bits});
-	inst2bv.insert({inst, solver.mkTerm(op, {arg})});
+	inst2bv.emplace(inst, solver.mkTerm(op, {arg}));
       }
       break;
     case Op::F2U:
@@ -447,7 +447,7 @@ void Converter::build_solver_smt(const Inst *inst)
 	    sprintf(name, ".param%" PRIu32, index);
 	    cvc5::Sort sort = solver.mkBitVectorSort(inst->bitsize);
 	    cvc5::Term param = solver.mkConst(sort, name);
-	    inst2bv.insert({inst, param});
+	    inst2bv.emplace(inst, param);
 	  }
 	  break;
 	case Op::PRINT:
@@ -471,7 +471,7 @@ void Converter::build_solver_smt(const Inst *inst)
 	    sprintf(name, ".symbolic%" PRIu32, index);
 	    cvc5::Sort sort = solver.mkBitVectorSort(inst->bitsize);
 	    cvc5::Term symbolic = solver.mkConst(sort, name);
-	    inst2bv.insert({inst, symbolic});
+	    inst2bv.emplace(inst, symbolic);
 	  }
 	  break;
 	case Op::TGT_RETVAL:
@@ -546,13 +546,13 @@ void Converter::build_special_smt(const Inst *inst)
 	  {
 	    cvc5::Term lo = solver.mkBitVector(64, low);
 	    cvc5::Term hi = solver.mkBitVector(inst->bitsize - 64, high);
-	    inst2bv.insert({inst, solver.mkTerm(cvc5::Kind::BITVECTOR_CONCAT,
-						{hi, lo})});
+	    inst2bv.emplace(inst, solver.mkTerm(cvc5::Kind::BITVECTOR_CONCAT,
+						{hi, lo}));
 	  }
 	else
-	  inst2bv.insert({inst, solver.mkBitVector(inst->bitsize, low)});
+	  inst2bv.emplace(inst, solver.mkBitVector(inst->bitsize, low));
 	if (inst->bitsize == 1)
-	  inst2bool.insert({inst, solver.mkBoolean(low != 0)});
+	  inst2bool.emplace(inst, solver.mkBoolean(low != 0));
       }
       break;
     default:
