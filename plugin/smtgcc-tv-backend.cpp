@@ -123,7 +123,6 @@ static void finish(void *, void *data)
 	  cse(module);
 	  vrp(module);
 	  simplify_mem(module);
-	  ls_elim(module);
 	  reduce_bitsize(module);
 	  bool cfg_modified;
 	  do

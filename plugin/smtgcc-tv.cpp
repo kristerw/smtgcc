@@ -86,7 +86,6 @@ void tv_function::check(my_plugin *plugin_data)
       cse(module);
       vrp(module);
       simplify_mem(module);
-      ls_elim(module);
       reduce_bitsize(module);
       bool cfg_modified;
       do

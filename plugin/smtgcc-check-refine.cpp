@@ -67,7 +67,6 @@ unsigned int tv_pass::execute(function *fun)
 	  cse(module);
 	  vrp(module);
 	  simplify_mem(module);
-	  ls_elim(module);
 	  reduce_bitsize(module);
 	  simplify_insts(module);
 	  dead_code_elimination(module);
