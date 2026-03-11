@@ -1347,14 +1347,28 @@ Inst *Converter::build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic
 {
   assert(bb->preds.size() > 0);
 
+  std::vector<Basic_block *> preds;
+  preds.reserve(bb->preds.size());
+  for (auto pred : bb->preds)
+    {
+      Inst *full_cond = get_full_edge_cond(pred, bb);
+      if (!is_value_zero(full_cond))
+	preds.push_back(pred);
+    }
+
+  if (preds.empty())
+    return pred2inst(bb->preds.back());
+  if (preds.size() == 1)
+    return pred2inst(preds.back());
+
   Inst_comp comp;
-  Inst *inst = pred2inst(bb->preds.back());
+  Inst *inst = pred2inst(preds.back());
   std::set<Inst *, Inst_comp> common;
-  flatten_and(get_full_edge_cond(bb->preds.back(), bb), common);
-  for (int i = bb->preds.size() - 2; i >= 0; i--)
+  flatten_and(get_full_edge_cond(preds.back(), bb), common);
+  for (int i = preds.size() - 2; i >= 0; i--)
     {
       std::set<Inst *, Inst_comp> conds;
-      Inst *full_cond = get_full_edge_cond(bb->preds[i], bb);
+      Inst *full_cond = get_full_edge_cond(preds[i], bb);
       flatten_and(full_cond, conds);
 
       std::set<Inst*, Inst_comp> tmp;
@@ -1382,7 +1396,7 @@ Inst *Converter::build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic
 	    cond = build_inst(Op::AND, cond, needed_conds[j]);
 	}
 
-      inst = build_inst(Op::ITE, cond, pred2inst(bb->preds[i]), inst);
+      inst = build_inst(Op::ITE, cond, pred2inst(preds[i]), inst);
     }
   return inst;
 }
