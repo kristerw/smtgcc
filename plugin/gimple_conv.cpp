@@ -4206,7 +4206,9 @@ void Converter::process_cfn_binary(gimple *stmt, const std::function<std::pair<I
   // types for the arguments. This seems like a bug to me, but adjust the
   // types to make it work anyway.
   // TODO: Figure out the rules for type correctness.
-  if (adjust_types && !VECTOR_TYPE_P(lhs_type))
+  if (adjust_types
+      && !VECTOR_TYPE_P(lhs_type)
+      && arg1->bitsize != arg2->bitsize)
     {
       Inst *prov = nullptr;
       std::tie(arg1, arg1_indef, prov) =
@@ -4243,6 +4245,13 @@ void Converter::process_cfn_binary(gimple *stmt, const std::function<std::pair<I
 	  else
 	    res_indef = indef;
 	}
+    }
+  if (adjust_types && res->bitsize != bitsize_for_type(lhs_type))
+    {
+      assert(!VECTOR_TYPE_P(lhs_type));
+      Inst *prov;
+      std::tie(res, res_indef, prov) =
+	type_convert(res, res_indef, nullptr, elem_type, lhs_type);
     }
   constrain_range(bb, lhs, res);
   tree2instruction.insert({lhs, res});
