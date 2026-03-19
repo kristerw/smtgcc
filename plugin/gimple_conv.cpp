@@ -6506,9 +6506,9 @@ void Converter::process_cfn_sat_sub(gimple *stmt)
       Inst *res_indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
       if (TYPE_UNSIGNED(elem_type))
 	{
-	  Inst *cmp = bb->build_inst(Op::ULT, elem1, res);
+	  Inst *cmp = bb->build_inst(Op::ULT, elem2, elem1);
 	  Inst *zero = bb->value_inst(0, res->bitsize);
-	  res = bb->build_inst(Op::ITE, cmp, zero, res);
+	  res = bb->build_inst(Op::ITE, cmp, res, zero);
 	}
       else
 	{
