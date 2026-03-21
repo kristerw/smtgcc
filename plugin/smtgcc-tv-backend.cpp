@@ -121,17 +121,15 @@ static void finish(void *, void *data)
 
 	  canonicalize_memory(module);
 	  cse(module);
-	  vrp(module);
 	  simplify_mem(module);
-	  reduce_bitsize(module);
-	  bool cfg_modified;
-	  do
+	  dead_code_elimination(module);
+	  bool cfg_modified = simplify_cfg(module);
+	  while (cfg_modified)
 	    {
 	      simplify_insts(module);
 	      dead_code_elimination(module);
 	      cfg_modified = simplify_cfg(module);
 	    }
-	  while (cfg_modified);
 	  sort_stores(module);
 
 	  Solver_result result = check_refine(module);

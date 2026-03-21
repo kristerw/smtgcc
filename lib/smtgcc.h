@@ -430,6 +430,8 @@ struct Result_state
   Inst *memory = nullptr;
   Inst *memory_size = nullptr;
   Inst *memory_indef = nullptr;
+
+  void clear();
 };
 
 bool need_checking_ub(const Result_state& src, const Result_state& tgt);

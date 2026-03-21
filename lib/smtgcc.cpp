@@ -178,6 +178,20 @@ struct Inst_info_validator
 Inst_info_validator inst_info_validator;
 #endif
 
+void Result_state::clear()
+{
+  common_ub = nullptr;
+  unique_ub = nullptr;
+  retval = nullptr;
+  retval_indef = nullptr;
+  abort = nullptr;
+  exit = nullptr;
+  exit_val = nullptr;
+  memory = nullptr;
+  memory_size = nullptr;
+  memory_indef = nullptr;
+}
+
 Config::Config()
 {
   if (char *p = getenv("SMTGCC_VERBOSE"))

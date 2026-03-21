@@ -521,6 +521,8 @@ void Vrp::handle_inst(Inst *inst)
 {
   if (!inst->has_lhs())
     return;
+  if (inst->bitsize == 0)
+    return;
 
   switch (inst->op)
     {

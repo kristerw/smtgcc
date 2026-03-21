@@ -61,16 +61,18 @@ unsigned int tv_pass::execute(function *fun)
       unroll_and_optimize(func, state.symbolic_id);
       if (module->functions.size() == 2)
 	{
-	  // TODO: Is canonicalize memory needed? It should obviously be
-	  // the same globals in both.
 	  canonicalize_memory(module);
 	  cse(module);
-	  vrp(module);
 	  simplify_mem(module);
-	  reduce_bitsize(module);
-	  simplify_insts(module);
 	  dead_code_elimination(module);
-	  simplify_cfg(module);
+	  bool cfg_modified = simplify_cfg(module);
+	  while (cfg_modified)
+	    {
+	      simplify_insts(module);
+	      dead_code_elimination(module);
+	      cfg_modified = simplify_cfg(module);
+	    }
+	  sort_stores(module);
 
 	  Solver_result result = check_refine(module);
 	  if (result.status != Result_status::correct)

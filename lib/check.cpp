@@ -244,6 +244,7 @@ class Converter : Simplify_config {
   Inst *strip_local_mem(Inst *array, std::map<Inst *, Inst *>& cache);
   bool may_alias(Inst *p1, Inst *p2);
   void convert(Basic_block *bb, Inst *inst, Function_role role);
+  void convert2(Inst *inst);
 
   Inst *get_cmp_inst(const Cse_key& key);
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
@@ -257,6 +258,7 @@ class Converter : Simplify_config {
   Inst *specialize_cond(Inst *inst, Inst *cond, bool cond_value);
   Inst *specialize_cond_arg(Inst *inst, Inst *cond, bool cond_value,
 			    int depth = 0);
+  void reprocess_dest_func();
 
 public:
   Inst *build_inst(Op op) final;
@@ -1877,7 +1879,143 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
 	  }
 	  break;
 	default:
-	  throw Not_implemented("Converter::duplicate: "s + inst->name());
+	  throw Not_implemented("Converter::convert: "s + inst->name());
+	}
+    }
+  assert(new_inst);
+  translate.insert({inst, new_inst});
+}
+
+void Converter::convert2(Inst *inst)
+{
+  Inst *new_inst = nullptr;
+  if (inst->op == Op::VALUE)
+    {
+      new_inst = value_inst(inst->value(), inst->bitsize);
+    }
+  else if (inst->op == Op::PARAM
+	   || inst->op == Op::PRINT
+	   || inst->op == Op::SYMBOLIC)
+    {
+      Inst *arg1 = translate.at(inst->args[0]);
+      Inst *arg2 = translate.at(inst->args[1]);
+      new_inst = build_inst(inst->op, arg1, arg2);
+    }
+  else if (inst->op == Op::SRC_RETVAL)
+    {
+      Inst *retval = translate.at(inst->args[0]);
+      Inst *retval_indef = translate.at(inst->args[1]);
+      new_inst = build_inst(Op::SRC_RETVAL, retval, retval_indef);
+      src.retval = retval;
+      src.retval_indef = retval_indef;
+    }
+  else if (inst->op == Op::TGT_RETVAL)
+    {
+      Inst *retval = translate.at(inst->args[0]);
+      Inst *retval_indef = translate.at(inst->args[1]);
+      new_inst = build_inst(Op::TGT_RETVAL, retval, retval_indef);
+      tgt.retval = retval;
+      tgt.retval_indef = retval_indef;
+    }
+  else if (inst->op == Op::SRC_MEM)
+    {
+      Inst *memory = translate.at(inst->args[0]);
+      Inst *memory_size = translate.at(inst->args[1]);
+      Inst *memory_indef = translate.at(inst->args[2]);
+      new_inst = build_inst(Op::SRC_MEM, memory, memory_size, memory_indef);
+      src.memory = memory;
+      src.memory_size = memory_size;
+      src.memory_indef = memory_indef;
+    }
+  else if (inst->op == Op::TGT_MEM)
+    {
+      Inst *memory = translate.at(inst->args[0]);
+      Inst *memory_size = translate.at(inst->args[1]);
+      Inst *memory_indef = translate.at(inst->args[2]);
+      new_inst = build_inst(Op::TGT_MEM, memory, memory_size, memory_indef);
+      tgt.memory = memory;
+      tgt.memory_size = memory_size;
+      tgt.memory_indef = memory_indef;
+    }
+  else if (inst->op == Op::SRC_EXIT)
+    {
+      Inst *abort = translate.at(inst->args[0]);
+      Inst *exit = translate.at(inst->args[1]);
+      Inst *exit_val = translate.at(inst->args[2]);
+      new_inst = build_inst(Op::SRC_EXIT, abort, exit, exit_val);
+      src.abort = abort;
+      src.exit = exit;
+      src.exit_val = exit_val;
+    }
+  else if (inst->op == Op::TGT_EXIT)
+    {
+      Inst *abort = translate.at(inst->args[0]);
+      Inst *exit = translate.at(inst->args[1]);
+      Inst *exit_val = translate.at(inst->args[2]);
+      new_inst = build_inst(Op::TGT_EXIT, abort, exit, exit_val);
+      tgt.abort = abort;
+      tgt.exit = exit;
+      tgt.exit_val = exit_val;
+    }
+  else if (inst->op == Op::SRC_UB)
+    {
+      Inst *common_ub = translate.at(inst->args[0]);
+      Inst *unique_ub = translate.at(inst->args[1]);
+      new_inst = build_inst(Op::SRC_UB, common_ub, unique_ub);
+      src.common_ub = common_ub;
+      src.unique_ub = unique_ub;
+    }
+  else if (inst->op == Op::TGT_UB)
+    {
+      Inst *common_ub = translate.at(inst->args[0]);
+      Inst *unique_ub = translate.at(inst->args[1]);
+      new_inst = build_inst(Op::TGT_UB, common_ub, unique_ub);
+      tgt.common_ub = common_ub;
+      tgt.unique_ub = unique_ub;
+    }
+  else if (inst->op == Op::RET)
+    {
+      assert(inst->nof_args == 0);
+      new_inst = build_inst(Op::RET);
+    }
+  else
+    {
+      Inst_class iclass = inst->iclass();
+      switch (iclass)
+	{
+	case Inst_class::mem_nullary:
+	  new_inst = build_inst(inst->op);
+	  break;
+	case Inst_class::iunary:
+	case Inst_class::funary:
+	case Inst_class::reg_unary:
+	  {
+	    Inst *arg = translate.at(inst->args[0]);
+	    new_inst = build_inst(inst->op, arg);
+	  }
+	  break;
+	case Inst_class::icomparison:
+	case Inst_class::fcomparison:
+	case Inst_class::ibinary:
+	case Inst_class::fbinary:
+	case Inst_class::conv:
+	case Inst_class::reg_binary:
+	  {
+	    Inst *arg1 = translate.at(inst->args[0]);
+	    Inst *arg2 = translate.at(inst->args[1]);
+	    new_inst = build_inst(inst->op, arg1, arg2);
+	  }
+	  break;
+	case Inst_class::ternary:
+	  {
+	    Inst *arg1 = translate.at(inst->args[0]);
+	    Inst *arg2 = translate.at(inst->args[1]);
+	    Inst *arg3 = translate.at(inst->args[2]);
+	    new_inst = build_inst(inst->op, arg1, arg2, arg3);
+	  }
+	  break;
+	default:
+	  throw Not_implemented("Converter::convert2: "s + inst->name());
 	}
     }
   assert(new_inst);
@@ -1996,6 +2134,38 @@ void Converter::convert_function(Function *func, Function_role role)
   translate.clear();
 }
 
+void Converter::reprocess_dest_func()
+{
+  assert(dest_func->bbs.size() == 1);
+
+  src.clear();
+  tgt.clear();
+
+  Function *old_dest_func = dest_func;
+
+  vrp(old_dest_func);
+  reduce_bitsize(old_dest_func);
+
+  dest_func = module->build_function("check");
+  dest_bb = dest_func->build_bb();
+
+  // Create true and false to give them canonical order when sorted by ID.
+  value_inst(0, 1);
+  value_inst(1, 1);
+
+  for (Inst *inst = old_dest_func->bbs[0]->first_inst; inst; inst = inst->next)
+    {
+      convert2(inst);
+    }
+
+  translate.clear();
+  cse.clear();
+  destroy_function(old_dest_func);
+
+  dead_code_elimination(dest_func);
+  dest_func->canonicalize();
+}
+
 void Converter::finalize()
 {
   generate_ub();
@@ -2008,6 +2178,9 @@ void Converter::finalize()
   src_bbcond2ub.clear();
   tgt_bbcond2ub.clear();
   cse.clear();
+
+  if (run_simplify_inst)
+    reprocess_dest_func();
 }
 
 bool identical(Inst *inst1, Inst *inst2)
