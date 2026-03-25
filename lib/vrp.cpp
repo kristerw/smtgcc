@@ -25,7 +25,6 @@ class Vrp
   void handle_concat(Inst *inst);
   void handle_ite(Inst *inst);
   void handle_lshr(Inst *inst);
-  void handle_memory(Inst *inst);
   void handle_mov(Inst *inst);
   void handle_mul(Inst *inst);
   void handle_neg(Inst *inst);
@@ -235,12 +234,6 @@ void Vrp::handle_lshr(Inst *inst)
       if (tz > shift)
 	trailing_zeros_map.insert({inst, tz - shift});
     }
-}
-
-void Vrp::handle_memory(Inst *inst)
-{
-  if (inst->bb->func->module->ptr_offset_low == 0)
-    trailing_zeros_map.insert({inst, inst->bb->func->module->ptr_offset_bits});
 }
 
 void Vrp::handle_mov(Inst *inst)
@@ -546,9 +539,6 @@ void Vrp::handle_inst(Inst *inst)
       break;
     case Op::LSHR:
       handle_lshr(inst);
-      break;
-    case Op::MEMORY:
-      handle_memory(inst);
       break;
     case Op::MOV:
       handle_mov(inst);
