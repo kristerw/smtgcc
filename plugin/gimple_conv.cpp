@@ -4386,8 +4386,11 @@ void Converter::process_cfn_add_overflow(gimple *stmt)
     }
 
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
-  unsigned bitsize = 1 + std::max(arg1->bitsize, arg2->bitsize);
+  unsigned bitsize = std::max(arg1->bitsize, arg2->bitsize);
   bitsize = 1 + std::max(bitsize, lhs_elem_bitsize);
+  if (TYPE_UNSIGNED(lhs_elem_type) != TYPE_UNSIGNED(arg1_type)
+      || TYPE_UNSIGNED(lhs_elem_type) != TYPE_UNSIGNED(arg2_type))
+    bitsize++;
   if (TYPE_UNSIGNED(arg1_type))
     arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize);
   else
@@ -6653,8 +6656,11 @@ void Converter::process_cfn_sub_overflow(gimple *stmt)
       res_indef = bb->build_inst(Op::CONCAT, overflow_indef, res_indef);
     }
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
-  unsigned bitsize = 1 + std::max(arg1->bitsize, arg2->bitsize);
+  unsigned bitsize = std::max(arg1->bitsize, arg2->bitsize);
   bitsize = 1 + std::max(bitsize, lhs_elem_bitsize);
+  if (TYPE_UNSIGNED(lhs_elem_type) != TYPE_UNSIGNED(arg1_type)
+      || TYPE_UNSIGNED(lhs_elem_type) != TYPE_UNSIGNED(arg2_type))
+    bitsize++;
   if (TYPE_UNSIGNED(arg1_type))
     arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize);
   else
