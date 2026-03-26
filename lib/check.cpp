@@ -1403,6 +1403,18 @@ Inst *Converter::build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic
   return inst;
 }
 
+bool are_all_same(Basic_block *bb, const std::function<Inst *(Basic_block *)>& pred2inst)
+{
+  assert(bb->preds.size() > 0);
+  Inst *inst = pred2inst(bb->preds.back());
+  for (int i = bb->preds.size() - 2; i >= 0; i--)
+    {
+      if (pred2inst(bb->preds[i]) != inst)
+	return false;
+    }
+  return true;
+}
+
 void Converter::build_mem_state(Basic_block *bb, std::map<Basic_block*, Inst *>& map)
 {
   assert(bb->preds.size() > 0);
@@ -1411,7 +1423,11 @@ void Converter::build_mem_state(Basic_block *bb, std::map<Basic_block*, Inst *>&
     {
       return map.at(pred);
     };
-  Inst *inst = build_phi_ite(bb, pred2inst);
+  Inst *inst;
+  if (are_all_same(bb, pred2inst))
+    inst = pred2inst(bb->preds[0]);
+  else
+    inst = build_phi_ite(bb, pred2inst);
   map.insert({bb, inst});
 }
 
