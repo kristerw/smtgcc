@@ -87,7 +87,7 @@ private:
   Inst *get_freg(unsigned idx);
   Inst *get_vreg(unsigned idx);
   void build_mem(const std::string& name);
-  Inst *get_hilo_addr(const Token& tok);
+  std::pair<Inst *, uint64_t> get_hilo_addr(const Token& tok);
   Inst *get_hi(unsigned idx);
   Inst *get_lo(unsigned idx);
   Inst *get_imm(unsigned idx);
@@ -561,7 +561,7 @@ void Parser::build_mem(const std::string& sym_name)
     }
 }
 
-Inst *Parser::get_hilo_addr(const Token& tok)
+std::pair<Inst *, uint64_t> Parser::get_hilo_addr(const Token& tok)
 {
   assert(tok.size > 5);
   assert(buf[tok.pos + 3] == '(');
@@ -577,9 +577,7 @@ Inst *Parser::get_hilo_addr(const Token& tok)
     std::tie(sym_name, offset) = sym_alias[sym_name];
   if (!rstate->sym_name2mem.contains(sym_name))
     build_mem(sym_name);
-  Inst *addr = rstate->sym_name2mem.at(sym_name);
-  if (offset)
-    addr = bb->build_inst(Op::ADD, addr, bb->value_inst(offset, addr->bitsize));
+  Inst *sym_addr = rstate->sym_name2mem.at(sym_name);
   if (buf[pos] == '+')
     {
       pos++;
@@ -592,8 +590,7 @@ Inst *Parser::get_hilo_addr(const Token& tok)
 	    throw Parse_error("too large decimal integer value", line_number);
 	  pos++;
 	}
-      Inst *value_inst = bb->value_inst(value, addr->bitsize);
-      addr = bb->build_inst(Op::ADD, addr, value_inst);
+      offset = offset + value;
     }
   else if (buf[pos] == '-')
     {
@@ -607,11 +604,10 @@ Inst *Parser::get_hilo_addr(const Token& tok)
 	    throw Parse_error("too large decimal integer value", line_number);
 	  pos++;
 	}
-      Inst *value_inst = bb->value_inst(value, addr->bitsize);
-      addr = bb->build_inst(Op::SUB, addr, value_inst);
+      offset = offset - value;
     }
   assert(buf[pos] == ')');
-  return addr;
+  return {sym_addr, offset};
 }
 
 Inst *Parser::get_hi(unsigned idx)
@@ -621,13 +617,16 @@ Inst *Parser::get_hi(unsigned idx)
   if (tokens[idx].kind != Lexeme::hi)
     throw Parse_error("expected %lo instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
-  Inst *addr = get_hilo_addr(tokens[idx]);
-  Inst *res = bb->build_inst(Op::EXTRACT, addr, 31, 12);
-  Inst *lo_signbit = bb->build_extract_bit(addr, 11);
-  Inst *bias = bb->build_inst(Op::ZEXT, lo_signbit, res->bitsize);
-  res = bb->build_inst(Op::ADD, res, bias);
-  Inst *zero = bb->value_inst(0, 12);
-  return bb->build_inst(Op::CONCAT, res, zero);
+  auto [addr, offset] = get_hilo_addr(tokens[idx]);
+  assert(addr->op == Op::MEMORY);
+  if (offset)
+    {
+      uint64_t off = offset & ~0xfff;
+      if (offset & 0x800)
+	off += 0x1000;
+      addr = bb->build_inst(Op::ADD, addr, bb->value_inst(off, addr->bitsize));
+    }
+  return addr;
 }
 
 Inst *Parser::get_lo(unsigned idx)
@@ -637,7 +636,9 @@ Inst *Parser::get_lo(unsigned idx)
   if (tokens[idx].kind != Lexeme::lo)
     throw Parse_error("expected %lo instead of "
 		      + std::string(token_string(tokens[idx])), line_number);
-  return bb->build_trunc(get_hilo_addr(tokens[idx]), 12);
+  auto [addr, offset] = get_hilo_addr(tokens[idx]);
+  assert(addr->op == Op::MEMORY);
+  return bb->value_inst(offset, 12);
 }
 
 Inst *Parser::get_imm(unsigned idx)
@@ -3552,8 +3553,6 @@ void Parser::parse_function()
       Inst *res = get_hi(3);
       get_end_of_line(4);
 
-      if (reg_bitsize > 32)
-	res = bb->build_inst(Op::SEXT, res, reg_bitsize);
       bb->build_inst(Op::WRITE, dest, res);
     }
   else if (name == "call")
