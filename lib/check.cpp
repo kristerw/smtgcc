@@ -2312,16 +2312,16 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
       return {};
     }
 
+  if (config.verbose > 1)
+    module->print(stderr);
+
   Converter converter(module, run_simplify_inst);
   converter.convert_function(src, Function_role::src);
   converter.convert_function(tgt, Function_role::tgt);
   converter.finalize();
 
   if (config.verbose > 1)
-    {
-      module->print(stderr);
-      converter.module->print(stderr);
-    }
+    converter.module->print(stderr);
 
   if (!need_checking(converter.src, converter.tgt))
     {
