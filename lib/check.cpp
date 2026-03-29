@@ -474,6 +474,7 @@ Inst *Converter::canonicalize_and(Inst *inst)
   // Eliminate redundant comparison with a constant. For example:
   //   x > 3 && x > 4
   // is simplified to x > 4.
+  bool new_comparisons_added = false;
   {
     std::map<Inst*, std::vector<Inst*>> ult_comps;
     std::map<Inst*, std::vector<Inst*>> eq_comps;
@@ -531,6 +532,7 @@ Inst *Converter::canonicalize_and(Inst *inst)
 		assert(comp->args[0]->args[1] != comps[0]->args[1]);
 		elems.erase(comp);
 	      }
+	    not_eq_comps[x].clear();
 	  }
       }
 
@@ -583,6 +585,38 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	    if (lbnd && lower_bound && *lbnd < *lower_bound)
 	      elems.erase(comp);
 	  }
+
+	// Eliminate the not_eq_comps comparisons that are redundant with
+	// respect to upper_bound and lower_bound.
+	for (auto comp : not_eq_comps[x])
+	  {
+	    Inst *value_inst = comp->args[0]->args[1];
+	    unsigned __int128 value = value_inst->value();
+	    if (upper_bound && *upper_bound < value )
+	      elems.erase(comp);
+	    if (lower_bound && value < *lower_bound)
+	      elems.erase(comp);
+
+	    // Expressions such as
+	    //   x <= 4 && x != 4
+	    // can be simplified to x < 4.
+	    //
+	    // We do this by adding a new comparison x < 4 and running
+	    // canonicalize_and a second time to get rid of the now
+	    // redundant instructions.
+	    if (upper_bound && *upper_bound == value)
+	      {
+		elems.insert(build_inst(Op::ULT, x, value_inst));
+		elems.erase(comp);
+		new_comparisons_added = true;
+	      }
+	    if (lower_bound && value == *lower_bound)
+	      {
+		elems.insert(build_inst(Op::ULT, value_inst, x));
+		elems.erase(comp);
+		new_comparisons_added = true;
+	      }
+	  }
       }
   }
 
@@ -603,6 +637,9 @@ Inst *Converter::canonicalize_and(Inst *inst)
     }
   processing_canonicalization = false;
   run_simplify_inst = orig_run_simplify_inst;
+
+  if (new_comparisons_added && new_inst->op == Op::AND)
+    new_inst = canonicalize_and(new_inst);
 
   return new_inst;
 }
