@@ -3111,7 +3111,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       {
 	if ((arg1_prov || arg2_prov) && arg1_prov != arg2_prov)
 	  throw Not_implemented("two different provenance in MAX_EXPR");
-	Op op = is_unsigned ? Op::ULE : Op::SLE;
+	Op op = is_unsigned ? Op::ULT : Op::SLT;
 	Inst *cond = bb->build_inst(op, arg2, arg1);
 	Inst *res = bb->build_inst(Op::ITE, cond, arg1, arg2);
 	return {res, res_indef, arg1_prov};
