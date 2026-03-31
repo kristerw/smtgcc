@@ -445,6 +445,74 @@ std::optional<unsigned __int128> ult_lower_bound(std::vector<Inst*>& comps)
   return ret;
 }
 
+// If this is a signed comparison x < constant or x <= constant, return
+// the largest value of x where this is true.
+std::optional<__int128> slt_upper_bound(Inst *inst)
+{
+  if (inst->op == Op::SLT
+      && inst->args[1]->op == Op::VALUE
+      && !is_value_signed_min(inst->args[1]))
+    {
+      return inst->args[1]->signed_value() - 1;
+    }
+  if (inst->op == Op::NOT
+      && inst->args[0]->op == Op::SLT
+      && inst->args[0]->args[0]->op == Op::VALUE)
+    {
+      return inst->args[0]->args[0]->signed_value();
+    }
+  return {};
+}
+
+// If this is a signed comparison  constant < x or constant <= x, return
+// the smallest value of x where this is true.
+std::optional<__int128> slt_lower_bound(Inst *inst)
+{
+  if (inst->op == Op::SLT
+      && inst->args[0]->op == Op::VALUE
+      && !is_value_signed_max(inst->args[0]))
+    {
+      return inst->args[0]->signed_value() + 1;
+    }
+  if (inst->op == Op::NOT
+      && inst->args[0]->op == Op::SLT
+      && inst->args[0]->args[1]->op == Op::VALUE)
+    {
+      return inst->args[0]->args[1]->signed_value();
+    }
+  return {};
+}
+
+// Return the smallest upper bound of the comparisons in comps that have an
+// lt_upper_bound. This is the largest value for which Op::AND of those
+// comparisons is true.
+std::optional<__int128> slt_upper_bound(std::vector<Inst*>& comps)
+{
+  std::optional<__int128> ret;
+  for (auto comp : comps)
+    {
+      std::optional<__int128> bound = slt_upper_bound(comp);
+      if (bound && (!ret || (ret && *bound < *ret)))
+	ret = bound;
+    }
+  return ret;
+}
+
+// Return the largest lower bound of the comparisons in comps that have an
+// lt_lower_bound. This is the smallest value for which Op::AND of those
+// comparisons is true.
+std::optional<__int128> slt_lower_bound(std::vector<Inst*>& comps)
+{
+  std::optional<__int128> ret;
+  for (auto comp : comps)
+    {
+      std::optional<__int128> bound = slt_lower_bound(comp);
+      if (bound && (!ret || (ret && *ret < *bound)))
+	ret = bound;
+    }
+  return ret;
+}
+
 // Canonicalize chains of Op::AND to the form:
 //   (and (and (and (and e1, e2), e3), e4) ...
 Inst *Converter::canonicalize_and(Inst *inst)
@@ -477,6 +545,7 @@ Inst *Converter::canonicalize_and(Inst *inst)
   bool new_comparisons_added = false;
   {
     std::map<Inst*, std::vector<Inst*>> ult_comps;
+    std::map<Inst*, std::vector<Inst*>> slt_comps;
     std::map<Inst*, std::vector<Inst*>> eq_comps;
     std::map<Inst*, std::vector<Inst*>> not_eq_comps;
 
@@ -489,24 +558,38 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	    if (elem->args[1]->op == Op::VALUE)
 	      eq_comps[elem->args[0]].push_back(elem);
 	  }
-	if (elem->op == Op::NOT && elem->args[0]->op == Op::EQ)
+	else if (elem->op == Op::NOT && elem->args[0]->op == Op::EQ)
 	  {
 	    if (elem->args[0]->args[1]->op == Op::VALUE)
 	      not_eq_comps[elem->args[0]->args[0]].push_back(elem);
 	  }
-	if (elem->op == Op::ULT)
+	else if (elem->op == Op::ULT)
 	  {
 	    if (elem->args[0]->op == Op::VALUE)
 	      ult_comps[elem->args[1]].push_back(elem);
 	    if (elem->args[1]->op == Op::VALUE)
 	      ult_comps[elem->args[0]].push_back(elem);
 	  }
-	if (elem->op == Op::NOT && elem->args[0]->op == Op::ULT)
+	else if (elem->op == Op::NOT && elem->args[0]->op == Op::ULT)
 	  {
 	    if (elem->args[0]->args[0]->op == Op::VALUE)
 	      ult_comps[elem->args[0]->args[1]].push_back(elem);
 	    if (elem->args[0]->args[1]->op == Op::VALUE)
 	      ult_comps[elem->args[0]->args[0]].push_back(elem);
+	  }
+	else if (elem->op == Op::SLT)
+	  {
+	    if (elem->args[0]->op == Op::VALUE)
+	      slt_comps[elem->args[1]].push_back(elem);
+	    if (elem->args[1]->op == Op::VALUE)
+	      slt_comps[elem->args[0]].push_back(elem);
+	  }
+	else if (elem->op == Op::NOT && elem->args[0]->op == Op::SLT)
+	  {
+	    if (elem->args[0]->args[0]->op == Op::VALUE)
+	      slt_comps[elem->args[0]->args[1]].push_back(elem);
+	    if (elem->args[0]->args[1]->op == Op::VALUE)
+	      slt_comps[elem->args[0]->args[0]].push_back(elem);
 	  }
       }
 
@@ -536,7 +619,7 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	  }
       }
 
-    // Eliminate redundant comparisons.
+    // Eliminate redundant comparisons for Op::ULT.
     for (auto& [x, comps] : ult_comps)
       {
 	// Find the value of the equality comparison, if any.
@@ -613,6 +696,89 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	    if (lower_bound && value == *lower_bound)
 	      {
 		elems.insert(build_inst(Op::ULT, value_inst, x));
+		elems.erase(comp);
+		new_comparisons_added = true;
+	      }
+	  }
+      }
+
+    // Eliminate redundant comparisons for Op::SLT.
+    for (auto& [x, comps] : slt_comps)
+      {
+	// Find the value of the equality comparison, if any.
+	std::optional<__int128> eq_val;
+	if (eq_comps.contains(x))
+	  {
+	    assert(eq_comps[x].size() == 1);
+	    Inst *eq = eq_comps[x][0];
+	    eq_val = eq->args[1]->signed_value();
+	  }
+
+	// Find the largest and smallest values x may have for the
+	// expression to be true.
+	std::optional<__int128> upper_bound = slt_upper_bound(comps);
+	std::optional<__int128> lower_bound = slt_lower_bound(comps);
+
+	if (eq_val)
+	  {
+	    // The expression is false in cases such as
+	    //   x == 0 && x > 4
+	    // where an equality comparison is not consistent with the
+	    // comparisons for upper_bound and lower_bound.
+	    if (upper_bound && *upper_bound < *eq_val)
+	      return value_inst(0, 1);
+	    if (lower_bound && *eq_val < *lower_bound)
+	      return value_inst(0, 1);
+
+	    // The comparisons in slt_comps are consistent with the
+	    // equality comparison, but this means all of them are
+	    // redundant.
+	    for (auto comp : comps)
+	      {
+		elems.erase(comp);
+	      }
+	    continue;
+	  }
+
+	// Eliminate the slt_comps comparisons that are redundant with
+	// respect to upper_bound and lower_bound.
+	for (auto comp : comps)
+	  {
+	    std::optional<__int128> ubnd = slt_upper_bound(comp);
+	    if (ubnd && upper_bound && *upper_bound < *ubnd)
+	      elems.erase(comp);
+	    std::optional<__int128> lbnd = slt_lower_bound(comp);
+	    if (lbnd && lower_bound && *lbnd < *lower_bound)
+	      elems.erase(comp);
+	  }
+
+	// Eliminate the not_eq_comps comparisons that are redundant with
+	// respect to upper_bound and lower_bound.
+	for (auto comp : not_eq_comps[x])
+	  {
+	    Inst *value_inst = comp->args[0]->args[1];
+	    __int128 value = value_inst->signed_value();
+	    if (upper_bound && *upper_bound < value )
+	      elems.erase(comp);
+	    if (lower_bound && value < *lower_bound)
+	      elems.erase(comp);
+
+	    // Expressions such as
+	    //   x <= 4 && x != 4
+	    // can be simplified to x < 4.
+	    //
+	    // We do this by adding a new comparison x < 4 and running
+	    // canonicalize_and a second time to get rid of the now
+	    // redundant instructions.
+	    if (upper_bound && *upper_bound == value)
+	      {
+		elems.insert(build_inst(Op::SLT, x, value_inst));
+		elems.erase(comp);
+		new_comparisons_added = true;
+	      }
+	    if (lower_bound && value == *lower_bound)
+	      {
+		elems.insert(build_inst(Op::SLT, value_inst, x));
 		elems.erase(comp);
 		new_comparisons_added = true;
 	      }
