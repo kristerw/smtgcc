@@ -1,5 +1,8 @@
 #include "gcc-plugin.h"
 #include "tree.h"
+#include "gimple.h"
+#include "ssa.h"
+#include "attribs.h"
 
 #include <cassert>
 
@@ -476,6 +479,11 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 
   uint32_t reg_nbr = RiscvRegIdx::x10;
   uint32_t freg_nbr = RiscvRegIdx::f10;
+
+  tree attr = TYPE_ATTRIBUTES(TREE_TYPE(fun->decl));
+  if (lookup_attribute("vls_cc", attr)
+      || lookup_attribute ("riscv_vls_cc", attr))
+    throw Not_implemented("riscv: vls_cc attributes");
 
   build_return(&rstate, src_func, fun, &reg_nbr);
 
