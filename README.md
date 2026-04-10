@@ -71,8 +71,8 @@ The implementation is described in a series of blog posts. The first posts descr
 3. [Memory representation](https://kristerw.github.io/2023/07/17/memory-representation/)
 4. [Address calculations](https://kristerw.github.io/2023/07/18/address-calculations/)
 5. [Pointer alignment](https://kristerw.github.io/2023/07/20/pointer-alignment/)
-6. Problems with pointers
-7. Uninitialized memory
+6. [Uninitialized memory](https://kristerw.github.io/2026/04/10/uninitialized-memory/)
+7. Problems with pointers
 8. Control flow
 
 # Compiling smtgcc
