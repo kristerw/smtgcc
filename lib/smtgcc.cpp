@@ -800,6 +800,14 @@ void Inst::replace_all_uses_with(Inst *inst)
   used_by.clear();
 }
 
+void Inst::update_arg(uint32_t arg_idx, Inst *inst)
+{
+  assert(arg_idx < nof_args);
+  args[arg_idx]->used_by.erase(this);
+  args[arg_idx] = inst;
+  update_uses();
+}
+
 // Insert the instruction at the last valid place in the basic block.
 // Phi nodes are placed last in the list of phi nodes, even if there are
 // already other instructions in the BB.

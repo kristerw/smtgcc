@@ -253,11 +253,6 @@ class Converter : Simplify_config {
   void flatten_add(Inst *inst, std::vector<Inst *>& elems);
   Inst *canonicalize_and(Inst *inst);
   Inst *canonicalize_add(Inst *inst);
-  std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond);
-  std::optional<bool> specialize_cond_false(Inst *inst, Inst *cond);
-  Inst *specialize_cond(Inst *inst, Inst *cond, bool cond_value);
-  Inst *specialize_cond_arg(Inst *inst, Inst *cond, bool cond_value,
-			    int depth = 0);
   void reprocess_dest_func();
 
 public:
@@ -329,28 +324,6 @@ Inst *Converter::simplify(Inst *inst)
     inst = canonicalize_add(inst);
   else
     inst = simplify_inst(inst, this);
-
-  // Simplify a sequence of two Op::ITEs with identical conditions and an
-  // unrelated operation in the middle:
-  //
-  //   %1 = ite %a, %b, %c
-  //   %2 = op %1, %d
-  //   %3 = ite %a, %2, %e
-  //
-  // to
-  //
-  //   %2 = op %b, %d
-  //   %3 = ite %a, %2, %e
-  if (inst->op == Op::ITE)
-    {
-      Inst *const arg1 = inst->args[0];
-      Inst *const arg2 = inst->args[1];
-      Inst *const arg3 = inst->args[2];
-      Inst *new_arg2 = specialize_cond_arg(arg2, arg1, true);
-      Inst *new_arg3 = specialize_cond_arg(arg3, arg1, false);
-      if (new_arg2 != arg2 || new_arg3 != arg3)
-	return build_inst(Op::ITE, arg1, new_arg2, new_arg3);
-    }
 
   return inst;
 }
@@ -833,175 +806,6 @@ Inst *Converter::canonicalize_add(Inst *inst)
   processing_canonicalization = false;
 
   return new_inst;
-}
-
-std::optional<bool> Converter::specialize_cond_true(Inst *inst, Inst *cond)
-{
-  if (inst == cond)
-    return true;
-  if (inst->op == Op::NOT && inst->args[0] == cond)
-    return false;
-  if (cond->op == Op::NOT && cond->args[0] == inst)
-    return false;
-
-  if (cond->op == Op::ULT && cond->args[0]->op == Op::VALUE)
-    {
-      if (inst->op == Op::ULT
-	  && inst->args[0]->op == Op::VALUE
-	  && inst->args[1] == cond->args[1])
-	{
-	  if (inst->args[0]->value() <= cond->args[0]->value())
-	    return true;
-	}
-      if (inst->op == Op::EQ
-	  && inst->args[1]->op == Op::VALUE
-	  && inst->args[0] == cond->args[1])
-	{
-	  if (inst->args[1]->value() <= cond->args[0]->value())
-	    return false;
-	}
-    }
-  return {};
-}
-
-std::optional<bool> Converter::specialize_cond_false(Inst *inst, Inst *cond)
-{
-  if (inst == cond)
-    return false;
-  if (inst->op == Op::NOT && inst->args[0] == cond)
-    return true;
-  if (cond->op == Op::NOT && cond->args[0] == inst)
-    return true;
-
-  if (cond->op == Op::ULT && cond->args[0]->op == Op::VALUE)
-    {
-      if (inst->op == Op::ULT
-	  && inst->args[0]->op == Op::VALUE
-	  && inst->args[1] == cond->args[1])
-	{
-	  if (inst->args[0]->value() >= cond->args[0]->value())
-	    return false;
-	}
-      if (inst->op == Op::EQ
-	  && inst->args[0]->op == Op::VALUE
-	  && inst->args[1] == cond->args[1])
-	{
-	  if (inst->args[1]->value() > cond->args[0]->value())
-	    return false;
-	}
-    }
-
-  return {};
-}
-
-// Return the value of inst provided we know that the condition cond evaluates
-// to cond_value. The original inst is returned if we cannot determine its
-// value.
-//
-// For example, an inst representing x == 0 is false if we know that
-// cond x > 4 is true.
-Inst *Converter::specialize_cond(Inst *inst, Inst *cond, bool cond_value)
-{
-  if (inst->op == Op::ITE)
-    {
-      std::optional<bool> result;
-      if (cond_value)
-	result = specialize_cond_true(inst->args[0], cond);
-      else
-	result = specialize_cond_false(inst->args[0], cond);
-      if (result)
-	return *result ? inst->args[1] : inst->args[2];
-    }
-  else if (inst->bitsize == 1)
-    {
-      std::optional<bool> result;
-      if (cond_value)
-	result = specialize_cond_true(inst, cond);
-      else
-	result = specialize_cond_false(inst, cond);
-      if (result)
-	return value_inst(*result, 1);
-    }
-  return inst;
-}
-
-Inst *Converter::specialize_cond_arg(Inst *inst, Inst *cond, bool cond_value, int depth)
-{
-  switch (inst->iclass())
-    {
-    case Inst_class::iunary:
-    case Inst_class::funary:
-    case Inst_class::ibinary:
-    case Inst_class::fbinary:
-    case Inst_class::icomparison:
-    case Inst_class::fcomparison:
-    case Inst_class::conv:
-    case Inst_class::ternary:
-      break;
-    default:
-      return inst;
-    }
-
-  Inst *new_inst = specialize_cond(inst, cond, cond_value);
-  if (new_inst != inst)
-    return new_inst;
-
-  if (depth < 2)
-    {
-      Inst *args[3];
-      assert(inst->nof_args <= 3);
-      bool modified = false;
-      for (uint i = 0; i < inst->nof_args; i++)
-	{
-	  Inst *arg = inst->args[i];
-	  args[i] = inst->args[i];
-
-	  int next_depth = depth + 1;
-
-	  // The array store instructions are a bit special as they are
-	  // chained, so a store of a 32-bit value consists of four store
-	  // instructions where the value may be extracted from Op::ITE.
-	  // So we need to handle this as a special case to essentially
-	  // treat all stores as one instruction.
-	  if (inst->op == arg->op
-	      && (inst->op == Op::ARRAY_STORE
-		  || inst->op == Op::ARRAY_SET_INDEF
-		  || inst->op == Op::ARRAY_SET_FLAG))
-	    next_depth = depth;
-
-	  // We often have chains of Op::EXTRACT, Op::ZEXT, etc., between
-	  // the interesting instructions. Exclude them from the depth.
-	  if (arg->iclass() == Inst_class::iunary
-	      || arg->iclass() == Inst_class::funary
-	      || arg->iclass() == Inst_class::conv
-	      || arg->op == Op::EXTRACT)
-	    next_depth = depth;
-
-	  arg = specialize_cond_arg(args[i], cond, cond_value, next_depth);
-	  if (arg != args[i])
-	    {
-	      args[i] = arg;
-	      modified = true;
-	    }
-	}
-
-      if (modified)
-	{
-	  switch (inst->nof_args)
-	    {
-	    case 1:
-	      return build_inst(inst->op, args[0]);
-	    case 2:
-	      return build_inst(inst->op, args[0], args[1]);
-	    case 3:
-	      return build_inst(inst->op, args[0], args[1], args[2]);
-	    default:
-	      assert(0);
-	      break;
-	    }
-	}
-    }
-  return inst;
 }
 
 bool Cse::is_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
@@ -2362,6 +2166,7 @@ void Converter::reprocess_dest_func()
 
   Function *old_dest_func = dest_func;
 
+  ite_elim(old_dest_func);
   vrp(old_dest_func);
   reduce_bitsize(old_dest_func);
 

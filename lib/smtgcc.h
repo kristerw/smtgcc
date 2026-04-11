@@ -290,6 +290,7 @@ struct Inst {
   void move_before(Inst *inst);
   void replace_use_with(Inst *use, Inst *new_inst);
   void replace_all_uses_with(Inst *inst);
+  void update_arg(uint32_t arg_idx, Inst *inst);
   void update_uses();
   Inst *get_phi_arg(Basic_block *bb);
   void update_phi_arg(Inst *inst, Basic_block *bb);
@@ -535,6 +536,10 @@ void dead_code_elimination(Module *module);
 // eliminate_registers.cpp
 void eliminate_registers(Function *func, int64_t& symbolic_id);
 void eliminate_registers(Module *module);
+
+// ite_elim.cpp
+void ite_elim(Function *func);
+void ite_elim(Module *module);
 
 // loop_unroll.cpp
 bool loop_unroll(Function *func, int nof_unroll = unroll_limit);

@@ -23,6 +23,7 @@ Options:
   -simplify_mem         Run memory simplification optimization.
   -cse                  Run common subexpression elimination.
   -dce                  Run dead code elimination optimization.
+  -ite_elim             Run the ite elimination pass.
   -eliminate_registers  Run the register elimination pass.
   -vrp                  Run value range propagation optimization.
   -loop_unroll          Run loop unrolling optimization.
@@ -109,6 +110,7 @@ int main(int argc, char **argv)
 	       || !strcmp(arg, "-simplify_mem")
 	       || !strcmp(arg, "-cse")
 	       || !strcmp(arg, "-dce")
+	       || !strcmp(arg, "-ite_elim")
 	       || !strcmp(arg, "-eliminate_registers")
 	       || !strcmp(arg, "-vrp")
 	       || !strcmp(arg, "-loop_unroll")
@@ -152,6 +154,8 @@ int main(int argc, char **argv)
 	  simplify_mem(module);
 	else if (opt == "-dce")
 	  dead_code_elimination(module);
+	else if (opt == "-ite_elim")
+	  ite_elim(module);
 	else if (opt == "-eliminate_registers")
 	  eliminate_registers(module);
 	else if (opt == "-cse")

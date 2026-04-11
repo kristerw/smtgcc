@@ -1,0 +1,560 @@
+// This pass simplifies a sequence of two Op::ITEs with redundant conditions
+// and unrelated operations in between. For example:
+//
+//   %1 = ite %a, %b, %c
+//   %2 = add %1, %d
+//   %3 = ite %a, %2, %e
+//
+// is simplified to:
+//
+//   %2 = add %b, %d
+//   %3 = ite %a, %2, %e
+//
+#include <bitset>
+#include <cassert>
+#include <optional>
+
+#include "smtgcc.h"
+
+namespace smtgcc {
+
+namespace {
+
+// The maximum number of different Op::ITE conditions.
+const int nof_cond = 256;
+
+struct Ite_elim
+{
+  Ite_elim(Function *func)
+    : func{func}
+  {}
+  std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond);
+  std::optional<bool> specialize_cond_false(Inst *inst, Inst *cond);
+  std::optional<bool> specialize_cond_true(Inst *inst, std::bitset<nof_cond>& set);
+  std::optional<bool> specialize_cond_false(Inst *inst, std::bitset<nof_cond>& set);
+  bool handle_arg_ite(Inst *inst, size_t idx);
+  bool handle_arg_bool(Inst *inst, size_t idx);
+  void handle_arg(Inst *inst, size_t idx);
+  std::optional<std::bitset<nof_cond>> get_use(Inst *inst, std::map<Inst*, std::bitset<nof_cond>>& map, bool is_true_map);
+  void propagate_from_uses(Inst *inst);
+  void run();
+
+  Function *func;
+  std::map<Inst*, std::bitset<nof_cond>> used_true;
+  std::map<Inst*, std::bitset<nof_cond>> used_false;
+  std::map<Inst*, int> inst2bit_idx;
+  std::map<int, Inst*> bit_idx2inst;
+  int next_bit_idx = 0;
+};
+
+// Return the value of inst provided we know that cond evaluates
+// to true.
+//
+// For example, an inst representing x == 0 is false if we know that
+// cond x > 4 evaluates to true.
+std::optional<bool> Ite_elim::specialize_cond_true(Inst *inst, Inst *cond)
+{
+  if (inst == cond)
+    return true;
+  if (inst->op == Op::NOT)
+    {
+      std::optional<bool> value = specialize_cond_true(inst->args[0], cond);
+      if (value)
+	return !*value;
+    }
+  if (cond->op == Op::NOT)
+    {
+      std::optional<bool> value = specialize_cond_false(inst, cond->args[0]);
+      if (value)
+	return value;
+    }
+
+  if (cond->op == Op::ULT && cond->args[0]->op == Op::VALUE)
+    {
+      if (inst->op == Op::ULT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[1])
+	{
+	  if (inst->args[0]->value() <= cond->args[0]->value())
+	    return true;
+	}
+      if (inst->op == Op::ULT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1]
+	  && !is_value_zero(inst->args[1]))
+	{
+	  if (inst->args[1]->value() - 1 <= cond->args[0]->value())
+	    return false;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->value() <= cond->args[0]->value())
+	    return false;
+	}
+    }
+  if (cond->op == Op::ULT && cond->args[1]->op == Op::VALUE)
+    {
+      if (inst->op == Op::ULT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[0]
+	  && !is_value_zero(cond->args[1]))
+	{
+	  if (inst->args[0]->value() >= cond->args[1]->value() - 1)
+	    return false;
+	}
+      if (inst->op == Op::ULT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->value() >= cond->args[1]->value())
+	    return true;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->value() >= cond->args[1]->value())
+	    return false;
+	}
+    }
+
+  if (cond->op == Op::SLT && cond->args[0]->op == Op::VALUE)
+    {
+      if (inst->op == Op::SLT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[1])
+	{
+	  if (inst->args[0]->signed_value() <= cond->args[0]->signed_value())
+	    return true;
+	}
+      if (inst->op == Op::SLT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1]
+	  && !is_value_signed_min(inst->args[1]))
+	{
+	  if (inst->args[1]->signed_value() - 1 <= cond->args[0]->signed_value())
+	    return false;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->signed_value() <= cond->args[0]->signed_value())
+	    return false;
+	}
+    }
+  if (cond->op == Op::SLT && cond->args[1]->op == Op::VALUE)
+    {
+      if (inst->op == Op::SLT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[0]
+	  && !is_value_signed_min(cond->args[1]))
+	{
+	  if (inst->args[0]->signed_value() >= cond->args[1]->signed_value() - 1)
+	    return false;
+	}
+      if (inst->op == Op::SLT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->signed_value() >= cond->args[1]->signed_value())
+	    return true;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->signed_value() >= cond->args[1]->signed_value())
+	    return false;
+	}
+    }
+
+  if (cond->op == Op::EQ && cond->args[1]->op == Op::VALUE)
+    {
+      if (inst->op == Op::ULT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[0])
+	return inst->args[0]->value() < cond->args[1]->value();
+      if (inst->op == Op::ULT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	return inst->args[1]->value() > cond->args[1]->value();
+
+      if (inst->op == Op::SLT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[0])
+	return inst->args[0]->signed_value() < cond->args[1]->signed_value();
+      if (inst->op == Op::SLT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	return inst->args[1]->signed_value() > cond->args[1]->signed_value();
+
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	return inst->args[1]->value() == cond->args[1]->value();
+    }
+
+  return {};
+}
+
+// Return the value of inst provided we know that cond evaluates
+// to false.
+//
+// For example, an inst representing x < 7 is true if we know that
+// cond x > 4 evaluates to false.
+std::optional<bool> Ite_elim::specialize_cond_false(Inst *inst, Inst *cond)
+{
+  if (inst == cond)
+    return false;
+  if (inst->op == Op::NOT)
+    {
+      std::optional<bool> value = specialize_cond_false(inst->args[0], cond);
+      if (value)
+	return !*value;
+    }
+  if (cond->op == Op::NOT)
+    {
+      std::optional<bool> value = specialize_cond_true(inst, cond->args[0]);
+      if (value)
+	return value;
+    }
+
+  if (cond->op == Op::ULT && cond->args[0]->op == Op::VALUE)
+    {
+      if (inst->op == Op::ULT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[1])
+	{
+	  if (inst->args[0]->value() >= cond->args[0]->value())
+	    return false;
+	}
+      if (inst->op == Op::ULT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->value() > cond->args[0]->value())
+	    return true;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->value() > cond->args[0]->value())
+	    return false;
+	}
+    }
+  if (cond->op == Op::ULT && cond->args[1]->op == Op::VALUE)
+    {
+      if (inst->op == Op::ULT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[0])
+	{
+	  if (inst->args[0]->value() < cond->args[1]->value())
+	    return true;
+	}
+      if (inst->op == Op::ULT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->value() <= cond->args[1]->value())
+	    return false;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->value() < cond->args[1]->value())
+	    return false;
+	}
+    }
+
+  if (cond->op == Op::SLT && cond->args[0]->op == Op::VALUE)
+    {
+      if (inst->op == Op::SLT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[1])
+	{
+	  if (inst->args[0]->signed_value() >= cond->args[0]->signed_value())
+	    return false;
+	}
+      if (inst->op == Op::SLT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->signed_value() > cond->args[0]->signed_value())
+	    return true;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->signed_value() > cond->args[0]->signed_value())
+	    return false;
+	}
+    }
+  if (cond->op == Op::SLT && cond->args[1]->op == Op::VALUE)
+    {
+      if (inst->op == Op::SLT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[0])
+	{
+	  if (inst->args[0]->signed_value() < cond->args[1]->signed_value())
+	    return true;
+	}
+      if (inst->op == Op::SLT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->signed_value() <= cond->args[1]->signed_value())
+	    return false;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->signed_value() < cond->args[1]->signed_value())
+	    return false;
+	}
+    }
+
+  return {};
+}
+
+std::optional<bool> Ite_elim::specialize_cond_true(Inst *inst, std::bitset<nof_cond>& set)
+{
+  for (int i = 0; i < next_bit_idx; i++)
+    {
+      if (set[i])
+	{
+	  Inst *cond = bit_idx2inst.at(i);
+	  std::optional<bool> value = specialize_cond_true(inst, cond);
+	  if (value)
+	    return value;
+	}
+    }
+  return {};
+}
+
+std::optional<bool> Ite_elim::specialize_cond_false(Inst *inst, std::bitset<nof_cond>& set)
+{
+  for (int i = 0; i < next_bit_idx; i++)
+    {
+      if (set[i])
+	{
+	  Inst *cond = bit_idx2inst.at(i);
+	  std::optional<bool> value = specialize_cond_false(inst, cond);
+	  if (value)
+	    return value;
+	}
+    }
+  return {};
+}
+
+bool Ite_elim::handle_arg_ite(Inst *inst, size_t idx)
+{
+  Inst *arg = inst->args[idx];
+  Inst *cond = arg->args[0];
+  std::optional<bool> cond_value;
+  if (used_true.contains(inst))
+    cond_value = specialize_cond_true(cond, used_true[inst]);
+  if (!cond_value && used_false.contains(inst))
+    cond_value = specialize_cond_false(cond, used_false[inst]);
+  if (cond_value)
+    {
+      if (*cond_value)
+	inst->update_arg(idx, arg->args[1]);
+      else
+	inst->update_arg(idx, arg->args[2]);
+      return true;
+    }
+  return false;
+}
+
+bool Ite_elim::handle_arg_bool(Inst *inst, size_t idx)
+{
+  Inst *cond = inst->args[idx];
+  std::optional<bool> cond_value;
+  if (used_true.contains(inst))
+    cond_value = specialize_cond_true(cond, used_true[inst]);
+  if (!cond_value && used_false.contains(inst))
+    cond_value = specialize_cond_false(cond, used_false[inst]);
+  if (cond_value)
+    {
+      inst->update_arg(idx, inst->bb->value_inst(*cond_value, 1));
+      return true;
+    }
+  return false;
+}
+
+void Ite_elim::handle_arg(Inst *inst, size_t idx)
+{
+  bool modified;
+  do {
+    modified = false;
+    Inst *arg = inst->args[idx];
+    if (arg->op == Op::ITE)
+      modified = handle_arg_ite(inst, idx);
+    else if (arg->bitsize == 1)
+      modified = handle_arg_bool(inst, idx);
+  } while(modified);
+}
+
+std::optional<std::bitset<nof_cond>> Ite_elim::get_use(Inst *inst, std::map<Inst*, std::bitset<nof_cond>>& map, bool is_true_map)
+{
+  if (inst->used_by.empty())
+    return {};
+  std::bitset<nof_cond> set;
+  set = ~set;
+  for (auto use : inst->used_by)
+    {
+      if (use->op == Op::ITE)
+	{
+	  if (inst == use->args[0] || !inst2bit_idx.contains(use->args[0]))
+	    {
+	      // The use is in the Op::ITE condition, or the condition
+	      // is not in the set (this happens if we have reached the limit
+	      // on the number of conditions we can track).
+	      // Treat the Op::ITE as a normal instruction.
+	      if (!map.contains(use))
+		return {};
+	      set &= map[use];
+	    }
+	  else
+	    {
+	      // The condition should be in either the true or false
+	      // branch of the Op::ITE. Otherwise, the Op::ITE should have
+	      // been eliminated by simplify_inst.
+	      assert(inst == use->args[1] || inst == use->args[2]);
+	      assert(!(inst == use->args[1] && inst == use->args[2]));
+
+	      std::bitset<nof_cond> use_set;
+	      if (map.contains(use))
+		use_set = map[use];
+	      int bit_idx = inst2bit_idx.at(use->args[0]);
+	      if (inst == use->args[1])
+		{
+		  if (is_true_map)
+		    use_set.set(bit_idx);
+		  else
+		    use_set.reset(bit_idx);
+		}
+	      else
+		{
+		  if (is_true_map)
+		    use_set.reset(bit_idx);
+		  else
+		    use_set.set(bit_idx);
+		}
+	      set &= use_set;
+	    }
+	}
+      else
+	{
+	  if (!map.contains(use))
+	    return {};
+	  set &= map[use];
+	}
+    }
+  if (set.none())
+    return {};
+  return set;
+}
+
+void Ite_elim::propagate_from_uses(Inst *inst)
+{
+  std::optional<std::bitset<nof_cond>> use_true =
+    get_use(inst, used_true, true);
+  std::optional<std::bitset<nof_cond>> use_false =
+    get_use(inst, used_false, false);
+  if (use_true && use_false)
+    {
+      std::bitset<nof_cond> mask = ~(*use_true & *use_false);
+      use_true = *use_true & mask;
+      use_false = *use_false & mask;
+    }
+  if (use_true && (*use_true).any())
+    used_true.emplace(inst, *use_true); 
+  if (use_false && (*use_false).any())
+    used_false.emplace(inst, *use_false); 
+}
+
+void Ite_elim::run()
+{
+  assert(func->bbs.size() == 1);
+  Basic_block *bb = func->bbs[0];
+
+  for (Inst *inst = bb->last_inst; inst;)
+    {
+      if (inst->op == Op::VALUE)
+	break;
+
+      if (inst->has_lhs() && inst->used_by.empty())
+	{
+	  Inst *orig_inst = inst;
+	  inst = inst->prev;
+	  destroy_instruction(orig_inst);
+	  continue;
+	}
+
+      // Create the condition set for this instruction based on its uses.
+      propagate_from_uses(inst);
+
+      // Propagate the values from arguments based on the condition set.
+      for (size_t i = 0; i < inst->nof_args; i++)
+	{
+	  handle_arg(inst, i);
+	}
+
+      // Ensure Op::ITE instructions are in a canonical form after
+      // argument propagation.
+      if (inst->op == Op::ITE)
+	{
+	  if (is_value_zero(inst->args[0]))
+	    {
+	      inst->replace_all_uses_with(inst->args[2]);
+	      continue;
+	    }
+	  if (is_value_one(inst->args[0]))
+	    {
+	      inst->replace_all_uses_with(inst->args[1]);
+	      continue;
+	    }
+	  if (inst->args[1] == inst->args[2])
+	    {
+	      inst->replace_all_uses_with(inst->args[1]);
+	      continue;
+	    }
+	}
+
+      // Ensure Op::ITE conditions have a bit in the condition bit set.
+      if (inst->op == Op::ITE
+	  && next_bit_idx < nof_cond
+	  && !inst2bit_idx.contains(inst->args[0]))
+	{
+	  inst2bit_idx.emplace(inst->args[0], next_bit_idx);
+	  bit_idx2inst.emplace(next_bit_idx, inst->args[0]);
+	  next_bit_idx++;
+	}
+
+      inst = inst->prev;
+    }
+}
+
+} // end anonymous namespace
+
+void ite_elim(Function *func)
+{
+  Ite_elim pass(func);
+  pass.run();
+}
+
+void ite_elim(Module *module)
+{
+  for (auto func : module->functions)
+    ite_elim(func);
+}
+
+} // end namespace smtgcc
