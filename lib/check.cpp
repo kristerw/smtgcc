@@ -609,6 +609,11 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	std::optional<unsigned __int128> upper_bound = ult_upper_bound(comps);
 	std::optional<unsigned __int128> lower_bound = ult_lower_bound(comps);
 
+	// Handle inconsistent upper/lower bounds, such as
+	//   x < 5 && x > 5
+	if (lower_bound && upper_bound && *upper_bound < *lower_bound)
+	  return value_inst(0, 1);
+
 	if (eq_val)
 	  {
 	    // The expression is false in cases such as
@@ -691,6 +696,11 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	// expression to be true.
 	std::optional<__int128> upper_bound = slt_upper_bound(comps);
 	std::optional<__int128> lower_bound = slt_lower_bound(comps);
+
+	// Handle inconsistent upper/lower bounds, such as
+	//   x < 5 && x > 5
+	if (lower_bound && upper_bound && *upper_bound < *lower_bound)
+	  return value_inst(0, 1);
 
 	if (eq_val)
 	  {
