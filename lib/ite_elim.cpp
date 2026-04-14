@@ -491,7 +491,9 @@ std::optional<std::bitset<nof_cond>> Ite_elim::get_use(Inst *inst, std::map<Inst
     {
       if (use->op == Op::ITE)
 	{
-	  if (inst == use->args[0] || !inst2bit_idx.contains(use->args[0]))
+	  if (inst == use->args[0]
+	      || use->args[1] == use->args[2]
+	      || !inst2bit_idx.contains(use->args[0]))
 	    {
 	      // The use is in the Op::ITE condition, or the condition
 	      // is not in the set (this happens if we have reached the limit
@@ -503,12 +505,6 @@ std::optional<std::bitset<nof_cond>> Ite_elim::get_use(Inst *inst, std::map<Inst
 	    }
 	  else
 	    {
-	      // The condition should be in either the true or false
-	      // branch of the Op::ITE. Otherwise, the Op::ITE should have
-	      // been eliminated by simplify_inst.
-	      assert(inst == use->args[1] || inst == use->args[2]);
-	      assert(!(inst == use->args[1] && inst == use->args[2]));
-
 	      std::bitset<nof_cond> use_set;
 	      if (map.contains(use))
 		use_set = map[use];
@@ -522,6 +518,7 @@ std::optional<std::bitset<nof_cond>> Ite_elim::get_use(Inst *inst, std::map<Inst
 		}
 	      else
 		{
+		  assert(inst == use->args[2]);
 		  if (is_true_map)
 		    use_set.reset(bit_idx);
 		  else
