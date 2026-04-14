@@ -253,7 +253,7 @@ class Converter : Simplify_config {
   void flatten_add(Inst *inst, std::vector<Inst *>& elems);
   Inst *canonicalize_and(Inst *inst);
   Inst *canonicalize_add(Inst *inst);
-  void reprocess_dest_func();
+  bool reprocess_dest_func();
 
 public:
   Inst *build_inst(Op op) final;
@@ -2167,7 +2167,7 @@ void Converter::convert_function(Function *func, Function_role role)
   translate.clear();
 }
 
-void Converter::reprocess_dest_func()
+bool Converter::reprocess_dest_func()
 {
   assert(dest_func->bbs.size() == 1);
 
@@ -2176,7 +2176,7 @@ void Converter::reprocess_dest_func()
 
   Function *old_dest_func = dest_func;
 
-  ite_elim(old_dest_func);
+  bool modified = ite_elim(old_dest_func);
   vrp(old_dest_func);
   reduce_bitsize(old_dest_func);
 
@@ -2198,6 +2198,8 @@ void Converter::reprocess_dest_func()
 
   dead_code_elimination(dest_func);
   dest_func->canonicalize();
+
+  return modified;
 }
 
 void Converter::finalize()
@@ -2214,7 +2216,12 @@ void Converter::finalize()
   cse.clear();
 
   if (run_simplify_inst)
-    reprocess_dest_func();
+    {
+      bool modified;
+      do {
+	modified = reprocess_dest_func();
+      } while (modified);
+    }
 }
 
 bool identical(Inst *inst1, Inst *inst2)

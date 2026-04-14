@@ -37,7 +37,7 @@ struct Ite_elim
   void handle_arg(Inst *inst, size_t idx);
   std::optional<std::bitset<nof_cond>> get_use(Inst *inst, std::map<Inst*, std::bitset<nof_cond>>& map, bool is_true_map);
   void propagate_from_uses(Inst *inst);
-  void run();
+  bool run();
 
   Function *func;
   std::map<Inst*, std::bitset<nof_cond>> used_true;
@@ -45,6 +45,7 @@ struct Ite_elim
   std::map<Inst*, int> inst2bit_idx;
   std::map<int, Inst*> bit_idx2inst;
   int next_bit_idx = 0;
+  bool changed = false;
 };
 
 // Return the value of inst provided we know that cond evaluates
@@ -399,6 +400,7 @@ void Ite_elim::handle_arg(Inst *inst, size_t idx)
       modified = handle_arg_ite(inst, idx);
     else if (arg->bitsize == 1)
       modified = handle_arg_bool(inst, idx);
+    changed |= modified;
   } while(modified);
 }
 
@@ -481,7 +483,7 @@ void Ite_elim::propagate_from_uses(Inst *inst)
     used_false.emplace(inst, *use_false); 
 }
 
-void Ite_elim::run()
+bool Ite_elim::run()
 {
   assert(func->bbs.size() == 1);
   Basic_block *bb = func->bbs[0];
@@ -541,20 +543,24 @@ void Ite_elim::run()
 
       inst = inst->prev;
     }
+
+  return changed;
 }
 
 } // end anonymous namespace
 
-void ite_elim(Function *func)
+bool ite_elim(Function *func)
 {
   Ite_elim pass(func);
-  pass.run();
+  return pass.run();
 }
 
-void ite_elim(Module *module)
+bool ite_elim(Module *module)
 {
+  bool changed = false;
   for (auto func : module->functions)
-    ite_elim(func);
+    changed |= ite_elim(func);
+  return changed;
 }
 
 } // end namespace smtgcc

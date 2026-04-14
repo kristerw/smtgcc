@@ -538,8 +538,8 @@ void eliminate_registers(Function *func, int64_t& symbolic_id);
 void eliminate_registers(Module *module);
 
 // ite_elim.cpp
-void ite_elim(Function *func);
-void ite_elim(Module *module);
+bool ite_elim(Function *func);
+bool ite_elim(Module *module);
 
 // loop_unroll.cpp
 bool loop_unroll(Function *func, int nof_unroll = unroll_limit);
