@@ -23,13 +23,16 @@ namespace {
 // The maximum number of different Op::ITE conditions.
 const int nof_cond = 256;
 
+// Max recursion depth for specialize_cond.
+const int max_depth = 10;
+
 struct Ite_elim
 {
   Ite_elim(Function *func)
     : func{func}
   {}
-  std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond);
-  std::optional<bool> specialize_cond_false(Inst *inst, Inst *cond);
+  std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond, int depth = 0);
+  std::optional<bool> specialize_cond_false(Inst *inst, Inst *cond, int depth = 0);
   std::optional<bool> specialize_cond_true(Inst *inst, std::bitset<nof_cond>& set);
   std::optional<bool> specialize_cond_false(Inst *inst, std::bitset<nof_cond>& set);
   bool handle_arg_ite(Inst *inst, size_t idx);
@@ -48,26 +51,74 @@ struct Ite_elim
   bool changed = false;
 };
 
+void flatten_and(Inst *inst, std::vector<Inst *>& elems)
+{
+  if (inst->op == Op::AND)
+    {
+      flatten_and(inst->args[0], elems);
+      flatten_and(inst->args[1], elems);
+    }
+  else
+    elems.push_back(inst);
+}
+
 // Return the value of inst provided we know that cond evaluates
 // to true.
 //
 // For example, an inst representing x == 0 is false if we know that
 // cond x > 4 evaluates to true.
-std::optional<bool> Ite_elim::specialize_cond_true(Inst *inst, Inst *cond)
+std::optional<bool> Ite_elim::specialize_cond_true(Inst *inst, Inst *cond, int depth)
 {
+  if (depth > max_depth)
+    return {};
+
+  if (inst->op == Op::VALUE)
+    return inst->value();
+
   if (inst == cond)
     return true;
   if (inst->op == Op::NOT)
     {
-      std::optional<bool> value = specialize_cond_true(inst->args[0], cond);
+      std::optional<bool> value =
+	specialize_cond_true(inst->args[0], cond, depth + 1);
       if (value)
 	return !*value;
     }
   if (cond->op == Op::NOT)
     {
-      std::optional<bool> value = specialize_cond_false(inst, cond->args[0]);
+      std::optional<bool> value =
+	specialize_cond_false(inst, cond->args[0], depth + 1);
       if (value)
 	return value;
+    }
+
+  if (inst->op == Op::AND)
+    {
+      std::vector<Inst*> conds;
+      flatten_and(inst, conds);
+      for (auto cnd : conds)
+	{
+	  std::optional<bool> value =
+	    specialize_cond_true(cnd, cond, depth + 1);
+	  if (!value)
+	    return {};
+	  if (!*value)
+	    return false;
+	}
+      return true;
+    }
+
+  if (cond->op == Op::AND)
+    {
+      std::vector<Inst*> conds;
+      flatten_and(cond, conds);
+      for (auto cnd : conds)
+	{
+	  std::optional<bool> value =
+	    specialize_cond_true(inst, cnd, depth + 1);
+	  if (value)
+	    return value;
+	}
     }
 
   if (cond->op == Op::ULT && cond->args[0]->op == Op::VALUE)
@@ -206,21 +257,45 @@ std::optional<bool> Ite_elim::specialize_cond_true(Inst *inst, Inst *cond)
 //
 // For example, an inst representing x < 7 is true if we know that
 // cond x > 4 evaluates to false.
-std::optional<bool> Ite_elim::specialize_cond_false(Inst *inst, Inst *cond)
+std::optional<bool> Ite_elim::specialize_cond_false(Inst *inst, Inst *cond, int depth)
 {
+  if (depth > max_depth)
+    return {};
+
+  if (inst->op == Op::VALUE)
+    return inst->value();
+
   if (inst == cond)
     return false;
   if (inst->op == Op::NOT)
     {
-      std::optional<bool> value = specialize_cond_false(inst->args[0], cond);
+      std::optional<bool> value =
+	specialize_cond_false(inst->args[0], cond, depth + 1);
       if (value)
 	return !*value;
     }
   if (cond->op == Op::NOT)
     {
-      std::optional<bool> value = specialize_cond_true(inst, cond->args[0]);
+      std::optional<bool> value =
+	specialize_cond_true(inst, cond->args[0], depth + 1);
       if (value)
 	return value;
+    }
+
+  if (inst->op == Op::AND)
+    {
+      std::vector<Inst*> conds;
+      flatten_and(inst, conds);
+      for (auto cnd : conds)
+	{
+	  std::optional<bool> value =
+	    specialize_cond_false(cnd, cond, depth + 1);
+	  if (!value)
+	    return {};
+	  if (!*value)
+	    return false;
+	}
+      return true;
     }
 
   if (cond->op == Op::ULT && cond->args[0]->op == Op::VALUE)
@@ -377,6 +452,8 @@ bool Ite_elim::handle_arg_ite(Inst *inst, size_t idx)
 bool Ite_elim::handle_arg_bool(Inst *inst, size_t idx)
 {
   Inst *cond = inst->args[idx];
+  if (cond->op == Op::VALUE)
+    return false;
   std::optional<bool> cond_value;
   if (used_true.contains(inst))
     cond_value = specialize_cond_true(cond, used_true[inst]);
