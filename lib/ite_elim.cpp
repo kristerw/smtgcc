@@ -38,7 +38,6 @@ struct Ite_elim
   bool handle_arg_ite(Inst *inst, size_t idx);
   bool handle_arg_bool(Inst *inst, size_t idx);
   void handle_arg(Inst *inst, size_t idx);
-  std::optional<std::bitset<nof_cond>> get_use(Inst *inst, std::map<Inst*, std::bitset<nof_cond>>& map, bool is_true_map);
   void propagate_from_uses(Inst *inst);
   bool run();
 
@@ -481,80 +480,61 @@ void Ite_elim::handle_arg(Inst *inst, size_t idx)
   } while(modified);
 }
 
-std::optional<std::bitset<nof_cond>> Ite_elim::get_use(Inst *inst, std::map<Inst*, std::bitset<nof_cond>>& map, bool is_true_map)
+void Ite_elim::propagate_from_uses(Inst *inst)
 {
   if (inst->used_by.empty())
-    return {};
-  std::bitset<nof_cond> set;
-  set = ~set;
+    return;
+
+  std::bitset<nof_cond> true_conds;
+  true_conds.set();
+  std::bitset<nof_cond> false_conds;
+  false_conds.set();
   for (auto use : inst->used_by)
     {
-      if (use->op == Op::ITE)
+      // If the use is a value in a true/false branch of an Op::ITE, then
+      // we add the Op::ITE condition to the resulting condition bitset.
+      if (use->op == Op::ITE
+	  && inst != use->args[0]
+	  && use->args[1] != use->args[2]
+	  && inst2bit_idx.contains(use->args[0]))
 	{
-	  if (inst == use->args[0]
-	      || use->args[1] == use->args[2]
-	      || !inst2bit_idx.contains(use->args[0]))
+	  std::bitset<nof_cond> use_true;
+	  if (used_true.contains(use))
+	    use_true = used_true[use];
+	  std::bitset<nof_cond> use_false;
+	  if (used_false.contains(use))
+	    use_false = used_false[use];
+	  int bit_idx = inst2bit_idx.at(use->args[0]);
+	  if (inst == use->args[1])
 	    {
-	      // The use is in the Op::ITE condition, or the condition
-	      // is not in the set (this happens if we have reached the limit
-	      // on the number of conditions we can track).
-	      // Treat the Op::ITE as a normal instruction.
-	      if (!map.contains(use))
-		return {};
-	      set &= map[use];
+	      use_true.set(bit_idx);
+	      use_false.reset(bit_idx);
 	    }
 	  else
 	    {
-	      std::bitset<nof_cond> use_set;
-	      if (map.contains(use))
-		use_set = map[use];
-	      int bit_idx = inst2bit_idx.at(use->args[0]);
-	      if (inst == use->args[1])
-		{
-		  if (is_true_map)
-		    use_set.set(bit_idx);
-		  else
-		    use_set.reset(bit_idx);
-		}
-	      else
-		{
-		  assert(inst == use->args[2]);
-		  if (is_true_map)
-		    use_set.reset(bit_idx);
-		  else
-		    use_set.set(bit_idx);
-		}
-	      set &= use_set;
+	      use_true.reset(bit_idx);
+	      use_false.set(bit_idx);
 	    }
+	  true_conds &= use_true;
+	  false_conds &= use_false;
 	}
       else
 	{
-	  if (!map.contains(use))
-	    return {};
-	  set &= map[use];
+	  if (!used_true.contains(use))
+	    true_conds.reset();
+	  else
+	    true_conds &= used_true[use];
+	  if (!used_false.contains(use))
+	    false_conds.reset();
+	  else
+	    false_conds &= used_false[use];
 	}
     }
-  if (set.none())
-    return {};
-  return set;
-}
 
-void Ite_elim::propagate_from_uses(Inst *inst)
-{
-  std::optional<std::bitset<nof_cond>> use_true =
-    get_use(inst, used_true, true);
-  std::optional<std::bitset<nof_cond>> use_false =
-    get_use(inst, used_false, false);
-  if (use_true && use_false)
-    {
-      std::bitset<nof_cond> mask = ~(*use_true & *use_false);
-      use_true = *use_true & mask;
-      use_false = *use_false & mask;
-    }
-  if (use_true && (*use_true).any())
-    used_true.emplace(inst, *use_true); 
-  if (use_false && (*use_false).any())
-    used_false.emplace(inst, *use_false); 
+  if (true_conds.any())
+    used_true.emplace(inst, true_conds);
+  if (false_conds.any())
+    used_false.emplace(inst, false_conds);
 }
 
 bool Ite_elim::run()
