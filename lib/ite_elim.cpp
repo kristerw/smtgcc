@@ -38,6 +38,7 @@ struct Ite_elim
   bool handle_arg_ite(Inst *inst, size_t idx);
   bool handle_arg_bool(Inst *inst, size_t idx);
   void handle_arg(Inst *inst, size_t idx);
+  void combine_conds(std::bitset<nof_cond>& true_conds1, std::bitset<nof_cond>& false_conds1, const std::bitset<nof_cond>& true_conds2, const std::bitset<nof_cond>& false_conds2);
   void propagate_from_uses(Inst *inst);
   bool run();
 
@@ -480,6 +481,201 @@ void Ite_elim::handle_arg(Inst *inst, size_t idx)
   } while(modified);
 }
 
+// Merge the condition sets to only contain conditions that are true in both.
+// It is correct to just take the intersection between the sets, but that is
+// not optimal. We may have a case where, for example, the first set contains
+//   x < 1
+// and the second set contains
+//   x < 2
+// The first is true for both, but will not be in the result if we return the
+// intersection of the sets.
+void Ite_elim::combine_conds(std::bitset<nof_cond>& true_conds1, std::bitset<nof_cond>& false_conds1, const std::bitset<nof_cond>& true_conds2, const std::bitset<nof_cond>& false_conds2)
+{
+  std::bitset<nof_cond> tmp_true = true_conds1 & true_conds2;
+  std::bitset<nof_cond> tmp_false = false_conds1 & false_conds2;
+
+  // The bits that only are set in one of the input bitsets.
+  // The first iteration of propagate_from_uses sets all bits to 1,
+  // so ignore this to avoid unneccesary iteration over all bits.
+  std::bitset<nof_cond> extra_true1;
+  std::bitset<nof_cond> extra_true2;
+  std::bitset<nof_cond> extra_false1;
+  std::bitset<nof_cond> extra_false2;
+  if (!true_conds1.all())
+    {
+      extra_true1 = true_conds1 & ~tmp_true;
+      extra_true2 = true_conds2 & ~tmp_true;
+    }
+  if (!false_conds1.all())
+    {
+      extra_false1 = false_conds1 & ~tmp_false;
+      extra_false2 = false_conds2 & ~tmp_false;
+    }
+
+  if (extra_true1.any() && extra_true2.any())
+    {
+      for (int i = 0; i < next_bit_idx; i++)
+	{
+	  if (extra_true1[i])
+	    {
+	      Inst *inst1 = bit_idx2inst.at(i);
+	      for (int j = 0; j < next_bit_idx; j++)
+		if (extra_true2[j])
+		  {
+		    Inst *inst2 = bit_idx2inst.at(j);
+		    std::optional<bool> value =
+		      specialize_cond_true(inst1, inst2);
+		    if (value && *value)
+		      tmp_true.set(i);
+		  }
+	    }
+	}
+    }
+
+  if (extra_true1.any() && extra_false2.any())
+    {
+      for (int i = 0; i < next_bit_idx; i++)
+	{
+	  if (extra_true1[i])
+	    {
+	      Inst *inst1 = bit_idx2inst.at(i);
+	      for (int j = 0; j < next_bit_idx; j++)
+		if (extra_false2[j])
+		  {
+		    Inst *inst2 = bit_idx2inst.at(j);
+		    std::optional<bool> value =
+		      specialize_cond_false(inst1, inst2);
+		    if (value && *value)
+		      tmp_true.set(i);
+		  }
+	    }
+	}
+    }
+
+  if (extra_false1.any() && extra_true2.any())
+    {
+      for (int i = 0; i < next_bit_idx; i++)
+	{
+	  if (extra_false1[i])
+	    {
+	      Inst *inst1 = bit_idx2inst.at(i);
+	      for (int j = 0; j < next_bit_idx; j++)
+		if (extra_true2[j])
+		  {
+		    Inst *inst2 = bit_idx2inst.at(i);
+		    std::optional<bool> value =
+		      specialize_cond_true(inst1, inst2);
+		    if (value && !*value)
+		      tmp_false.set(i);
+		  }
+	    }
+	}
+    }
+
+  if (extra_false1.any() && extra_false2.any())
+    {
+      for (int i = 0; i < next_bit_idx; i++)
+	{
+	  if (extra_false1[i])
+	    {
+	      Inst *inst1 = bit_idx2inst.at(i);
+	      for (int j = 0; j < next_bit_idx; j++)
+		if (extra_false2[j])
+		  {
+		    Inst *inst2 = bit_idx2inst.at(j);
+		    std::optional<bool> value =
+		      specialize_cond_false(inst1, inst2);
+		    if (value && !*value)
+		      tmp_false.set(i);
+		  }
+	    }
+	}
+    }
+
+  if (extra_true2.any() && extra_true1.any())
+    {
+      for (int i = 0; i < next_bit_idx; i++)
+	{
+	  if (extra_true2[i])
+	    {
+	      Inst *inst1 = bit_idx2inst.at(i);
+	      for (int j = 0; j < next_bit_idx; j++)
+		if (extra_true1[j])
+		  {
+		    Inst *inst2 = bit_idx2inst.at(j);
+		    std::optional<bool> value =
+		      specialize_cond_true(inst1, inst2);
+		    if (value && *value)
+		      tmp_true.set(i);
+		  }
+	    }
+	}
+    }
+
+  if (extra_true2.any() && extra_false1.any())
+    {
+      for (int i = 0; i < next_bit_idx; i++)
+	{
+	  if (extra_true2[i])
+	    {
+	      Inst *inst1 = bit_idx2inst.at(i);
+	      for (int j = 0; j < next_bit_idx; j++)
+		if (extra_false1[j])
+		  {
+		    Inst *inst2 = bit_idx2inst.at(j);
+		    std::optional<bool> value =
+		      specialize_cond_false(inst1, inst2);
+		    if (value && *value)
+		      tmp_true.set(i);
+		  }
+	    }
+	}
+    }
+
+  if (extra_false2.any() && extra_true1.any())
+    {
+      for (int i = 0; i < next_bit_idx; i++)
+	{
+	  if (extra_false2[i])
+	    {
+	      Inst *inst1 = bit_idx2inst.at(i);
+	      for (int j = 0; j < next_bit_idx; j++)
+		if (extra_true1[j])
+		  {
+		    Inst *inst2 = bit_idx2inst.at(j);
+		    std::optional<bool> value =
+		      specialize_cond_true(inst1, inst2);
+		    if (value && !*value)
+		      tmp_false.set(i);
+		  }
+	    }
+	}
+    }
+
+  if (extra_false2.any() && extra_false1.any())
+    {
+      for (int i = 0; i < next_bit_idx; i++)
+	{
+	  if (extra_false2[i])
+	    {
+	      Inst *inst1 = bit_idx2inst.at(i);
+	      for (int j = 0; j < next_bit_idx; j++)
+		if (extra_false1[j])
+		  {
+		    Inst *inst2 = bit_idx2inst.at(j);
+		    std::optional<bool> value =
+		      specialize_cond_false(inst1, inst2);
+		    if (value && !*value)
+		      tmp_false.set(i);
+		  }
+	    }
+	}
+    }
+
+  true_conds1 = tmp_true;
+  false_conds1 = tmp_false;
+}
+
 void Ite_elim::propagate_from_uses(Inst *inst)
 {
   if (inst->used_by.empty())
@@ -491,6 +687,13 @@ void Ite_elim::propagate_from_uses(Inst *inst)
   false_conds.set();
   for (auto use : inst->used_by)
     {
+      std::bitset<nof_cond> use_true;
+      if (used_true.contains(use))
+	use_true = used_true[use];
+      std::bitset<nof_cond> use_false;
+      if (used_false.contains(use))
+	use_false = used_false[use];
+
       // If the use is a value in a true/false branch of an Op::ITE, then
       // we add the Op::ITE condition to the resulting condition bitset.
       if (use->op == Op::ITE
@@ -498,12 +701,6 @@ void Ite_elim::propagate_from_uses(Inst *inst)
 	  && use->args[1] != use->args[2]
 	  && inst2bit_idx.contains(use->args[0]))
 	{
-	  std::bitset<nof_cond> use_true;
-	  if (used_true.contains(use))
-	    use_true = used_true[use];
-	  std::bitset<nof_cond> use_false;
-	  if (used_false.contains(use))
-	    use_false = used_false[use];
 	  int bit_idx = inst2bit_idx.at(use->args[0]);
 	  if (inst == use->args[1])
 	    {
@@ -515,20 +712,8 @@ void Ite_elim::propagate_from_uses(Inst *inst)
 	      use_true.reset(bit_idx);
 	      use_false.set(bit_idx);
 	    }
-	  true_conds &= use_true;
-	  false_conds &= use_false;
 	}
-      else
-	{
-	  if (!used_true.contains(use))
-	    true_conds.reset();
-	  else
-	    true_conds &= used_true[use];
-	  if (!used_false.contains(use))
-	    false_conds.reset();
-	  else
-	    false_conds &= used_false[use];
-	}
+      combine_conds(true_conds, false_conds, use_true, use_false);
     }
 
   if (true_conds.any())
@@ -551,7 +736,8 @@ bool Ite_elim::run()
 	{
 	  Inst *orig_inst = inst;
 	  inst = inst->prev;
-	  destroy_instruction(orig_inst);
+	  if (!inst2bit_idx.contains(orig_inst))
+	    destroy_instruction(orig_inst);
 	  continue;
 	}
 
