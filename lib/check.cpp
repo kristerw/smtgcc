@@ -2011,6 +2011,18 @@ void Converter::convert2(Inst *inst)
       assert(inst->nof_args == 0);
       new_inst = build_inst(Op::RET);
     }
+  else if (inst->op == Op::ARRAY_GET_FLAG
+	   || inst->op == Op::ARRAY_GET_INDEF
+	   || inst->op == Op::ARRAY_GET_SIZE
+	   || inst->op == Op::ARRAY_LOAD)
+    {
+       std::map<Inst *, std::pair<Inst *, Inst *>> cache;
+       Inst *array = translate.at(inst->args[0]);
+       Inst *addr = translate.at(inst->args[1]);
+       std::tie(new_inst, array) = simplify_array_access(array, addr, cache);
+       if (!new_inst)
+	 new_inst = build_inst(inst->op, array, addr);
+    }
   else
     {
       Inst_class iclass = inst->iclass();
