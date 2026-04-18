@@ -923,6 +923,33 @@ Inst *Simplify::simplify_eq()
   if (arg1->op == Op::XOR && is_value_zero(arg2))
     return build_inst(Op::EQ, arg1->args[0], arg1->args[1]);
 
+  // eq (ite (ult x, c), x, c), x -> ult x, c+1
+  // eq x, (ite (ult x, c), x, c) -> ult x, c+1
+  if (arg1->op == Op::ITE
+      && arg1->args[0]->op == Op::ULT
+      && arg1->args[0]->args[0] == arg2
+      && arg1->args[0]->args[0] == arg1->args[1]
+      && arg1->args[0]->args[1] == arg1->args[2]
+      && arg1->args[0]->args[1]->op == Op::VALUE
+      && !is_value_m1(arg1->args[0]->args[1]))
+    {
+      Inst *c = arg1->args[0]->args[1];
+      Inst *new_c = value_inst(c->value() + 1, arg1->bitsize);
+      return build_inst(Op::ULT, arg2, new_c);
+    }
+  if (arg2->op == Op::ITE
+      && arg2->args[0]->op == Op::ULT
+      && arg2->args[0]->args[0] == arg1
+      && arg2->args[0]->args[0] == arg2->args[1]
+      && arg2->args[0]->args[1] == arg2->args[2]
+      && arg2->args[0]->args[1]->op == Op::VALUE
+      && !is_value_m1(arg2->args[0]->args[1]))
+    {
+      Inst *c = arg2->args[0]->args[1];
+      Inst *new_c = value_inst(c->value() + 1, arg2->bitsize);
+      return build_inst(Op::ULT, arg1, new_c);
+    }
+
   return inst;
 }
 
