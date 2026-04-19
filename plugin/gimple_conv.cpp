@@ -5909,8 +5909,6 @@ void Converter::mask_len_store_lanes(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov,
 	      if (mask_elem_indef)
 		build_ub_if_not_zero(mask_elem_indef);
 	    }
-	  if (ptr_indef)
-	    build_ub_if_not_zero(ptr_indef, cond);
 
 	  Basic_block *true_bb = func->build_bb();
 	  Basic_block *false_bb = func->build_bb();
@@ -5921,9 +5919,11 @@ void Converter::mask_len_store_lanes(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov,
 			     j * nof_elem + i);
 	  Inst *off = bb->value_inst(offset, ptr->bitsize);
 	  Inst *dst_ptr = bb->build_inst(Op::ADD, ptr, off);
+	  if (ptr_indef)
+	    build_ub_if_not_zero(ptr_indef);
 	  if (is_misaligned)
 	    bb->build_inst(Op::UB, is_misaligned);
-	  store_ub_check(dst_ptr, ptr_prov, elem_size, cond);
+	  store_ub_check(dst_ptr, ptr_prov, elem_size);
 	  store_value(dst_ptr, elem, elem_indef);
 	  bb->build_br_inst(false_bb);
 
@@ -5981,8 +5981,6 @@ void Converter::mask_len_store(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint6
 	  if (mask_elem_indef)
 	    build_ub_if_not_zero(mask_elem_indef);
 	}
-      if (ptr_indef)
-	build_ub_if_not_zero(ptr_indef, cond);
 
       Basic_block *true_bb = func->build_bb();
       Basic_block *false_bb = func->build_bb();
@@ -5994,9 +5992,11 @@ void Converter::mask_len_store(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint6
       Inst *dst_ptr = bb->build_inst(Op::ADD, ptr, offset);
       if (!VECTOR_TYPE_P(value_type))
 	std::tie(elem, elem_indef) = to_mem_repr(elem, elem_indef, elem_type);
+      if (ptr_indef)
+	build_ub_if_not_zero(ptr_indef);
       if (is_misaligned)
 	bb->build_inst(Op::UB, is_misaligned);
-      store_ub_check(dst_ptr, ptr_prov, elem_size, cond);
+      store_ub_check(dst_ptr, ptr_prov, elem_size);
       store_value(dst_ptr, elem, elem_indef);
       bb->build_br_inst(false_bb);
 
