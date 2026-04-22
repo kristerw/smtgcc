@@ -63,7 +63,9 @@ This plugin checks the GCC IR (Intermediate Representation) before and after eac
 [124525](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=124525),
 [124526](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=124526),
 [124527](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=124527),
-[124528](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=124528).
+[124528](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=124528),
+[124946](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=124946),
+[124947](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=124947).
 
 The implementation is described in a series of blog posts. The first posts describe a previous version of this tool ([pysmtgcc](https://github.com/kristerw/pysmtgcc)), but the general ideas are the same for both tools:
 1. [Writing a GCC plugin in Python](https://kristerw.github.io/2022/10/20/gcc-python-plugin/)
