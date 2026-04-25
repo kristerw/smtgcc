@@ -462,8 +462,24 @@ Inst *Simplify::simplify_and()
   if (is_value_zero(arg2))
     return arg2;
 
+  // For Boolean constant 0:
+  //  * and x, (zext 0) -> 0
+  //  * and (zext 0), x -> 0
+  if (is_boolean_zext(arg1) && is_value_zero(arg1->args[0]))
+    return arg1;
+  if (is_boolean_zext(arg2) && is_value_zero(arg2->args[0]))
+    return arg2;
+
   // and x, -1 -> x
   if (is_value_m1(arg2))
+    return arg1;
+
+  // For Boolean constant 1:
+  //  * and x, (sext 1) -> x
+  //  * and (sext 1), x -> x
+  if (is_boolean_sext(arg1) && is_value_m1(arg1->args[0]))
+    return arg2;
+  if (is_boolean_sext(arg2) && is_value_m1(arg2->args[0]))
     return arg1;
 
   // and x, x -> x
@@ -1047,8 +1063,24 @@ Inst *Simplify::simplify_or()
   if (is_value_zero(arg2))
     return arg1;
 
+  // For Boolean constant 0:
+  //  * or x, (zext 0) -> x
+  //  * or (zext 0), x -> x
+  if (is_boolean_zext(arg1) && is_value_zero(arg1->args[0]))
+    return arg2;
+  if (is_boolean_zext(arg2) && is_value_zero(arg2->args[0]))
+    return arg1;
+
   // or x, -1 -> -1
   if (is_value_m1(arg2))
+    return arg2;
+
+  // For Boolean constant 1:
+  //  * or x, (sext 1) -> x
+  //  * or (sext 1), x -> x
+  if (is_boolean_sext(arg1) && is_value_m1(arg1->args[0]))
+    return arg1;
+  if (is_boolean_sext(arg2) && is_value_m1(arg2->args[0]))
     return arg2;
 
   // or x, x -> x
@@ -1375,6 +1407,10 @@ Inst *Simplify::simplify_not()
       Inst *new_inst = build_inst(Op::NOT, arg1->args[0]);
       return build_inst(Op::SEXT, new_inst, arg1->args[1]);
     }
+
+  // For Boolean constant 0: not (zext 0) -> sext 1
+  if (is_boolean_zext(arg1) && is_value_zero(arg1->args[0]))
+    return build_inst(Op::SEXT, value_inst(1, 1), arg1->args[1]);
 
   return inst;
 }
