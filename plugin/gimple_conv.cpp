@@ -274,26 +274,21 @@ Inst *build_min_int(Basic_block *bb, uint64_t bitsize)
   return bb->build_inst(Op::CONCAT, top_bit, zero);
 }
 
-unsigned __int128 get_widest_int_val(widest_int v)
+Inst *get_widest_int_inst(Basic_block *bb, const widest_int& v, uint32_t bitsize)
 {
   unsigned int len = v.get_len();
   const HOST_WIDE_INT *p = v.get_val();
-  if (len != 1 && len != 2)
-    throw Not_implemented("get_widest_int_val: precision > 128");
-  assert(len == 1 || len == 2);
-  unsigned __int128 value = 0;
-  if (len == 2)
-    value = ((unsigned __int128)p[1]) << 64;
-  else
-    {
-      int64_t t = p[0] >> 63;
-      value = ((unsigned __int128)t) << 64;
-    }
-  value |= (uint64_t)p[0];
+  Inst *value = bb->value_inst(p[0], bitsize);
+  for (unsigned int i = 1; i < len; i++)
+    value = bb->build_inst(Op::CONCAT, bb->value_inst(p[i], bitsize), value);
+  if (value->bitsize < bitsize)
+    value = bb->build_inst(Op::SEXT, value, bitsize);
+  else if (value->bitsize > bitsize)
+    value = bb->build_trunc(value, bitsize);
   return value;
 }
 
-unsigned __int128 get_wide_int_val(wide_int v)
+unsigned __int128 get_wide_int_val(const wide_int& v)
 {
   unsigned int len = v.get_len();
   const HOST_WIDE_INT *p = v.get_val();
@@ -8306,16 +8301,14 @@ void Converter::process_func_args()
 	  // we get value == 0xf0fe and mask == 0xf01
 	  tree value;
 	  widest_int mask;
-	  if (param_inst->bitsize <= 128  // TODO: Implement wide types.
-	      && ipcp_get_parm_bits(decl, &value, &mask))
+	  if (ipcp_get_parm_bits(decl, &value, &mask))
 	    {
-	      unsigned __int128 m = get_widest_int_val(mask);
-	      unsigned __int128 v = get_int_cst_val(value);
-	      assert((m & v) == 0);
-
-	      Inst *m_inst = entry_bb->value_inst(~m, param_inst->bitsize);
-	      Inst *v_inst = entry_bb->value_inst(v, param_inst->bitsize);
-	      Inst *and_inst = entry_bb->build_inst(Op::AND, param_inst, m_inst);
+	      Inst *m_inst =
+		get_widest_int_inst(entry_bb, mask, param_inst->bitsize);
+	      m_inst = entry_bb->build_inst(Op::NOT, m_inst);
+	      Inst *v_inst = tree2inst(value);
+	      Inst *and_inst =
+		entry_bb->build_inst(Op::AND, param_inst, m_inst);
 	      Inst *cond = entry_bb->build_inst(Op::NE, v_inst, and_inst);
 	      entry_bb->build_inst(Op::UB, cond);
 	    }
