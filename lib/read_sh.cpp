@@ -1554,7 +1554,7 @@ void Parser::parse_function()
       if (tokens.size() > 1)
 	{
 	  if (get_name(1) == "__patchable_function_entries")
-	    throw Not_implemented("attribue patchable_function_entry");
+	    throw Not_implemented("attribute patchable_function_entry");
 	}
       throw Parse_error(".section in the middle of a function", line_number);
     }
