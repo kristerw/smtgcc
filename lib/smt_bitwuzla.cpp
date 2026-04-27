@@ -17,13 +17,20 @@ namespace {
 class Converter {
   std::map<const Inst *, Term> inst2array;
   std::map<const Inst *, Term> inst2bv;
+  std::map<const Inst *, Term> inst2fp;
   std::map<const Inst *, Term> inst2bool;
 
+  Sort fp_sort(uint32_t bitsize);
+  Term bv_canonical_nan(uint32_t bitsize);
+  Term bv_is_nan(Term bv, uint32_t bitsize);
   Term ite(Term c, Term a, Term b);
   void build_bv_comparison_smt(const Inst *inst);
+  void build_fp_comparison_smt(const Inst *inst);
   void build_memory_state_smt(const Inst *inst);
   void build_bv_unary_smt(const Inst *inst);
+  void build_fp_unary_smt(const Inst *inst);
   void build_bv_binary_smt(const Inst *inst);
+  void build_fp_binary_smt(const Inst *inst);
   void build_ternary_smt(const Inst *inst);
   void build_conversion_smt(const Inst *inst);
   void build_solver_smt(const Inst *inst);
@@ -41,10 +48,13 @@ public:
     , solver{solver}
     , func{func}
   {
+    rm_rne = tm.mk_rm_value(RoundingMode::RNE);
+    rm_rtz = tm.mk_rm_value(RoundingMode::RTZ);
     convert_function();
   }
   Term inst_as_array(const Inst *inst);
   Term inst_as_bv(const Inst *inst);
+  Term inst_as_fp(const Inst *inst);
   Term inst_as_bool(const Inst *inst);
 
   std::vector<std::pair<Term, Term>> print;
@@ -53,7 +63,79 @@ public:
   Result_state tgt;
 
   std::vector<Term> input;
+  std::vector<Term> fp_constraints;
+
+  // Floating-point instructions we know are not non-canonical NaN.
+  std::set<const Inst*> fp_canonical;
+
+  Term rm_rne;
+  Term rm_rtz;
 };
+
+std::pair<long unsigned int, long unsigned int> fp_exp_sig_size(uint32_t bitsize)
+{
+  switch (bitsize)
+    {
+    case 16:
+      return {5, 11};
+    case 32:
+      return {8, 24};
+    case 64:
+      return {11, 53};
+    case 128:
+      return {15, 113};
+    default:
+      throw Not_implemented("fp_sort: f" + std::to_string(bitsize));
+    }
+}
+
+Sort Converter::fp_sort(uint32_t bitsize)
+{
+  auto [exp_size, sig_size] = fp_exp_sig_size(bitsize);
+  return tm.mk_fp_sort(exp_size, sig_size);
+}
+
+// Returns a Term representing the canonical NaN as a bitvector.
+Term Converter::bv_canonical_nan(uint32_t bitsize)
+{
+  assert(bitsize <= 128);
+  auto [exp_size, sig_size] = fp_exp_sig_size(bitsize);
+  unsigned __int128 value = -1;
+  value = value << (128 - bitsize + 1);
+  value = value >> (128 - bitsize + 1 + sig_size - 2);
+  value = value << (sig_size - 2);
+  uint64_t low = value;
+  uint64_t high = value >> 64;
+  if (bitsize > 64)
+    {
+      Sort lo_sort = tm.mk_bv_sort(64);
+      Term lo = tm.mk_bv_value_uint64(lo_sort, low);
+      Sort hi_sort = tm.mk_bv_sort(bitsize - 64);
+      Term hi = tm.mk_bv_value_uint64(hi_sort, high);
+      return  tm.mk_term(Kind::BV_CONCAT, {hi, lo});
+    }
+  else
+    {
+      Sort lo_sort = tm.mk_bv_sort(bitsize);
+      return tm.mk_bv_value_uint64(lo_sort, low);
+    }
+}
+
+Term Converter::bv_is_nan(Term bv, uint32_t bitsize)
+{
+  auto [exp_size, sig_size] = fp_exp_sig_size(bitsize);
+  uint32_t exp_hi = bitsize - 2;
+  uint32_t exp_lo = sig_size - 1;
+  Term exp = tm.mk_term(Kind::BV_EXTRACT, {bv}, {exp_hi, exp_lo});
+  Term sig = tm.mk_term(Kind::BV_EXTRACT, {bv}, {sig_size - 2, 0});
+  Sort exp_sort = tm.mk_bv_sort(exp_size);
+  Sort sig_sort = tm.mk_bv_sort(sig_size - 1);
+  Term m1 = tm.mk_bv_ones(exp_sort);
+  Term zero = tm.mk_bv_zero(sig_sort);
+  Term exp_is_m1 = tm.mk_term(Kind::EQUAL, {exp, m1});
+  Term sig_is_nonzero = tm.mk_term(Kind::DISTINCT, {sig, zero});
+  return tm.mk_term(Kind::AND, {exp_is_m1, sig_is_nonzero});
+}
 
 Term Converter::ite(Term c, Term a, Term b)
 {
@@ -73,13 +155,42 @@ Term Converter::inst_as_bv(const Inst *inst)
   if (I != inst2bv.end())
     return I->second;
 
-  // We do not have a bitvector value for inst. This means there must
-  // be a Boolean value for this instruction. Convert it to a bitvector.
-  assert(inst->bitsize == 1);
-  Sort bv1 = tm.mk_bv_sort(1);
-  Term term = ite(inst2bool.at(inst), tm.mk_bv_one(bv1), tm.mk_bv_zero(bv1));
-  inst2bv.emplace(inst, term);
-  return term;
+  if (inst->bitsize == 1)
+    {
+      // We do not have a bitvector value for inst. This means there must
+      // be a Boolean value for this instruction. Convert it to a bitvector.
+      Sort bv1 = tm.mk_bv_sort(1);
+      Term term =
+	ite(inst2bool.at(inst), tm.mk_bv_one(bv1), tm.mk_bv_zero(bv1));
+      inst2bv.emplace(inst, term);
+      return term;
+    }
+  else
+    {
+      // We do not have a bitvector value for inst. This means there must
+      // be a floating-point value for this instruction. Convert it to a
+      // bitvector.
+      Term fp = inst2fp.at(inst);
+      char sign_name[100];
+      sprintf(sign_name, ".sign%" PRIu32, inst->id);
+      char exp_name[100];
+      sprintf(exp_name, ".exp%" PRIu32, inst->id);
+      char sig_name[100];
+      sprintf(sig_name, ".sig%" PRIu32, inst->id);
+      auto [exp_size, sig_size] = fp_exp_sig_size(inst->bitsize);
+      Term sign_bits = tm.mk_const(tm.mk_bv_sort(1), sign_name);
+      Term exp_bits  = tm.mk_const(tm.mk_bv_sort(exp_size), exp_name);
+      Term sig_bits  = tm.mk_const(tm.mk_bv_sort(sig_size - 1), sig_name);
+      Term fp2 = tm.mk_term(Kind::FP_FP, {sign_bits, exp_bits, sig_bits});
+      Term bv = tm.mk_term(Kind::BV_CONCAT, {sign_bits, exp_bits, sig_bits});
+      fp_constraints.emplace_back(tm.mk_term(Kind::EQUAL, {fp, fp2}));
+      Term is_nan = bv_is_nan(bv, inst->bitsize);
+      Term bv_nan = bv_canonical_nan(inst->bitsize);
+      Term res = ite(is_nan, bv_nan, bv);
+      fp_canonical.insert(inst);
+      inst2bv.emplace(inst, res);
+      return res;
+    }
 }
 
 Term Converter::inst_as_bool(const Inst *inst)
@@ -98,6 +209,24 @@ Term Converter::inst_as_bool(const Inst *inst)
     term = solver.simplify(term);
   inst2bool.emplace(inst, term);
   return term;
+}
+
+Term Converter::inst_as_fp(const Inst *inst)
+{
+  auto I = inst2fp.find(inst);
+  if (I != inst2fp.end())
+    return I->second;
+
+  // We do not have a floating-point value for inst. This means there must
+  // be a bitvector value for this instruction. Convert it to floating
+  // point.
+  Term bv = inst2bv.at(inst);
+  auto [exp_size, sig_size] = fp_exp_sig_size(inst->bitsize);
+  Term fp = tm.mk_term(Kind::FP_TO_FP_FROM_BV, {bv}, {exp_size, sig_size});
+  if (bv.is_value())
+    fp = solver.simplify(fp);
+  inst2fp.emplace(inst, fp);
+  return fp;
 }
 
 void Converter::build_bv_comparison_smt(const Inst *inst)
@@ -140,6 +269,34 @@ void Converter::build_bv_comparison_smt(const Inst *inst)
       break;
     case Op::ULT:
       inst2bool.emplace(inst, tm.mk_term(Kind::BV_ULT, {arg1, arg2}));
+      break;
+    default:
+      throw Not_implemented("build_comparison_smt: "s + inst->name());
+    }
+}
+
+void Converter::build_fp_comparison_smt(const Inst *inst)
+{
+  assert(inst->nof_args == 2);
+
+  Term arg1 = inst_as_fp(inst->args[0]);
+  Term arg2 = inst_as_fp(inst->args[1]);
+  switch (inst->op)
+    {
+    case Op::FEQ:
+      inst2bool.emplace(inst, tm.mk_term(Kind::FP_EQUAL, {arg1, arg2}));
+      break;
+    case Op::FNE:
+      {
+	Term eq = tm.mk_term(Kind::FP_EQUAL, {arg1, arg2});
+	inst2bool.emplace(inst, tm.mk_term(Kind::NOT, {eq}));
+      }
+      break;
+    case Op::FLE:
+      inst2bool.emplace(inst, tm.mk_term(Kind::FP_LEQ, {arg1, arg2}));
+      break;
+    case Op::FLT:
+      inst2bool.emplace(inst, tm.mk_term(Kind::FP_LT, {arg1, arg2}));
       break;
     default:
       throw Not_implemented("build_comparison_smt: "s + inst->name());
@@ -212,13 +369,42 @@ void Converter::build_bv_unary_smt(const Inst *inst)
       return;
     }
 
-  Term arg1 = inst_as_bv(inst->args[0]);
   switch (inst->op)
     {
     case Op::IS_INF:
+      {
+	Term arg1 = inst_as_fp(inst->args[0]);
+	inst2bool.emplace(inst, tm.mk_term(Kind::FP_IS_INF, {arg1}));
+	return;
+      }
     case Op::IS_NAN:
+      {
+	Term arg1 = inst_as_fp(inst->args[0]);
+	inst2bool.emplace(inst, tm.mk_term(Kind::FP_IS_NAN, {arg1}));
+	return;
+      }
     case Op::IS_NONCANONICAL_NAN:
-      throw Not_implemented("floating-point support in smt_bitwuzla");
+      {
+	Term bv = inst_as_bv(inst->args[0]);
+	if (fp_canonical.contains(inst))
+	  {
+	    inst2bool.emplace(inst, tm.mk_false());
+	    return;
+	  }
+	Term is_nan = bv_is_nan(bv, inst->args[0]->bitsize);
+	Term bv_nan = bv_canonical_nan(inst->args[0]->bitsize);
+	Term is_noncanonical = tm.mk_term(Kind::DISTINCT, {bv, bv_nan});
+	Term res = tm.mk_term(Kind::AND, {is_nan, is_noncanonical});
+	inst2bool.emplace(inst, res);
+	return;
+      }
+    default:
+      break;
+    }
+
+  Term arg1 = inst_as_bv(inst->args[0]);
+  switch (inst->op)
+    {
     case Op::MOV:
       inst2bv.emplace(inst, arg1);
       break;
@@ -230,6 +416,28 @@ void Converter::build_bv_unary_smt(const Inst *inst)
       break;
     default:
       throw Not_implemented("build_bv_unary_smt: "s + inst->name());
+    }
+}
+
+void Converter::build_fp_unary_smt(const Inst *inst)
+{
+  Term arg1 = inst_as_fp(inst->args[0]);
+  switch (inst->op)
+    {
+    case Op::FABS:
+      inst2fp.emplace(inst, tm.mk_term(Kind::FP_ABS, {arg1}));
+      break;
+    case Op::FNEG:
+      inst2fp.emplace(inst, tm.mk_term(Kind::FP_NEG, {arg1}));
+      break;
+    case Op::NAN:
+      {
+	Sort sort = fp_sort(inst->args[0]->value());
+	inst2fp.emplace(inst, tm.mk_fp_nan(sort));
+      }
+      break;
+    default:
+      throw Not_implemented("build_fp_unary_smt: "s + inst->name());
     }
 }
 
@@ -337,6 +545,30 @@ void Converter::build_bv_binary_smt(const Inst *inst)
 	  concat = solver.simplify(concat);
 	inst2bv.emplace(inst, concat);
       }
+      break;
+    default:
+      throw Not_implemented("build_binary_smt: "s + inst->name());
+    }
+}
+
+void Converter::build_fp_binary_smt(const Inst *inst)
+{
+  assert(inst->nof_args == 2);
+  Term arg1 = inst_as_fp(inst->args[0]);
+  Term arg2 = inst_as_fp(inst->args[1]);
+  switch (inst->op)
+    {
+    case Op::FADD:
+      inst2fp.emplace(inst, tm.mk_term(Kind::FP_ADD, {rm_rne, arg1, arg2}));
+      break;
+    case Op::FSUB:
+      inst2fp.emplace(inst, tm.mk_term(Kind::FP_SUB, {rm_rne, arg1, arg2}));
+      break;
+    case Op::FMUL:
+      inst2fp.emplace(inst, tm.mk_term(Kind::FP_MUL, {rm_rne, arg1, arg2}));
+      break;
+    case Op::FDIV:
+      inst2fp.emplace(inst, tm.mk_term(Kind::FP_DIV, {rm_rne, arg1, arg2}));
       break;
     default:
       throw Not_implemented("build_binary_smt: "s + inst->name());
@@ -452,11 +684,46 @@ void Converter::build_conversion_smt(const Inst *inst)
       }
       break;
     case Op::F2U:
+      {
+	Term arg = inst_as_fp(inst->args[0]);
+	Term res = tm.mk_term(Kind::FP_TO_UBV, {rm_rtz, arg}, {inst->bitsize});
+	inst2bv.emplace(inst, res);
+      }
+      break;
     case Op::F2S:
+      {
+	Term arg = inst_as_fp(inst->args[0]);
+	Term res = tm.mk_term(Kind::FP_TO_SBV, {rm_rtz, arg}, {inst->bitsize});
+	inst2bv.emplace(inst, res);
+      }
+      break;
     case Op::S2F:
+      {
+	Term arg = inst_as_bv(inst->args[0]);
+	auto [exp_size, sig_size] = fp_exp_sig_size(inst->bitsize);
+	Term res = tm.mk_term(Kind::FP_TO_FP_FROM_SBV, {rm_rne, arg},
+			      {exp_size, sig_size});
+	inst2fp.emplace(inst, res);
+      }
+      break;
     case Op::U2F:
+      {
+	Term arg = inst_as_bv(inst->args[0]);
+	auto [exp_size, sig_size] = fp_exp_sig_size(inst->bitsize);
+	Term res = tm.mk_term(Kind::FP_TO_FP_FROM_UBV, {rm_rne, arg},
+			      {exp_size, sig_size});
+	inst2fp.emplace(inst, res);
+      }
+      break;
     case Op::FCHPREC:
-      throw Not_implemented("floating-point support in smt_bitwuzla");
+      {
+	Term arg = inst_as_fp(inst->args[0]);
+	auto [exp_size, sig_size] = fp_exp_sig_size(inst->bitsize);
+	Term res = tm.mk_term(Kind::FP_TO_FP_FROM_FP, {rm_rne, arg},
+			      {exp_size, sig_size});
+	inst2fp.emplace(inst, res);
+      }
+      break;
     default:
       throw Not_implemented("build_conversion_smt: "s + inst->name());
     }
@@ -618,14 +885,23 @@ void Converter::build_smt(const Inst *inst)
     case Inst_class::icomparison:
       build_bv_comparison_smt(inst);
       break;
+    case Inst_class::fcomparison:
+      build_fp_comparison_smt(inst);
+      break;
     case Inst_class::mem_nullary:
       build_memory_state_smt(inst);
       break;
     case Inst_class::iunary:
       build_bv_unary_smt(inst);
       break;
+    case Inst_class::funary:
+      build_fp_unary_smt(inst);
+      break;
     case Inst_class::ibinary:
       build_bv_binary_smt(inst);
+      break;
+    case Inst_class::fbinary:
+      build_fp_binary_smt(inst);
       break;
     case Inst_class::ternary:
       build_ternary_smt(inst);
@@ -641,10 +917,6 @@ void Converter::build_smt(const Inst *inst)
     case Inst_class::special:
       build_special_smt(inst);
       break;
-    case Inst_class::fcomparison:
-    case Inst_class::funary:
-    case Inst_class::fbinary:
-      throw Not_implemented("floating-point support in smt_bitwuzla");
     default:
       throw Not_implemented("build_smt: "s + inst->name());
     }
@@ -788,8 +1060,19 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
   Term not_src_unique_ub_term = tm.mk_term(Kind::NOT, {src_unique_ub_term});
   Term tgt_unique_ub_term = conv.inst_as_bool(conv.tgt.unique_ub);
 
+  // Ensure the returned value exists as a bit vector. We must do this
+  // before adding the assert_formula so that it gets all the floating-point
+  // constraints if the return value is floating-point.
+  if (conv.src.retval)
+    {
+      conv.inst_as_bv(conv.src.retval);
+      conv.inst_as_bv(conv.tgt.retval);
+    }
+
   solver.assert_formula(not_src_common_ub_term);
   solver.assert_formula(not_src_unique_ub_term);
+  for (auto& fp_constraint : conv.fp_constraints)
+    solver.assert_formula(fp_constraint);
 
   std::string warning;
 
