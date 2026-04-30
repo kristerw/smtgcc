@@ -5445,10 +5445,8 @@ std::tuple<Inst*, Inst*> Converter::mask_len_load(Inst *ptr, Inst *ptr_indef, In
 	std::tie(elem, elem_indef) = from_mem_repr(elem, elem_indef, elem_type);
       auto [orig_elem, orig_elem_indef] =
 	extract_vec_elem(bb, orig, orig_indef, elem_bitsize, i);
-      // TODO: We should call constrain_src_value in order to constrain
-      // non-canonical NaN etc. But this should only be done when not masked.
-      // constrain_src_value(elem, elem_type, elem_flags);
       elem = bb->build_inst(Op::ITE, cond, elem, orig_elem);
+      constrain_src_value(elem, elem_type);
       if (!orig_elem_indef)
 	orig_elem_indef = bb->value_inst(0, elem_indef->bitsize);
       elem_indef = bb->build_inst(Op::ITE, cond, elem_indef, orig_elem_indef);
@@ -5545,13 +5543,8 @@ std::tuple<Inst*, Inst*> Converter::load_lanes(Inst *ptr, Inst *ptr_indef, Inst 
 	  Inst *off = bb->value_inst(offset, ptr->bitsize);
 	  Inst *src_ptr = bb->build_inst(Op::ADD, ptr, off);
 	  auto [elem, elem_indef, elem_flags] = load_value(src_ptr, elem_size);
+	  constrain_src_value(elem, elem_type);
 	  offset += elem_size;
-
-	  // TODO: We should call constrain_src_value in order to constrain
-	  // non-canonical NaN etc. But this should only be done when not
-	  // masked.
-	  // constrain_src_value(elem, elem_type, elem_flags);
-
 	  if (inst)
 	    inst = bb->build_inst(Op::CONCAT, elem, inst);
 	  else
