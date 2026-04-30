@@ -27,7 +27,7 @@ enum class Predication_mode {
 // elements may be masked (non-masked operations use the first element
 // as the initial value).
 enum class Value {
-  umin, umax, smin, smax, fmin, fmax
+  umin, umax, smin, smax, nan
 };
 
 struct Parser : public ParserBase {
@@ -1384,26 +1384,8 @@ Inst *Parser::get_value(Value value_enum, uint32_t bitsize)
       case Value::smax:
 	value = (1ull << (bitsize - 1)) - 1;
 	break;
-      case Value::fmin:
-	if (bitsize == 16)
-	  value = 0xfc00;
-	else if (bitsize == 32)
-	  value = 0xff800000;
-	else if (bitsize == 64)
-	  value = 0xfff0000000000000ul;
-	else
-	  throw Parse_error("get_value: Invalid bitsize", line_number);
-	break;
-      case Value::fmax:
-	if (bitsize == 16)
-	  value = 0x7c00;
-	else if (bitsize == 32)
-	  value = 0x7f800000;
-	else if (bitsize == 64)
-	  value = 0x7ff0000000000000ul;
-	else
-	  throw Parse_error("get_value: Invalid bitsize", line_number);
-	break;
+      case Value::nan:
+	return bb->build_inst(Op::NAN, bitsize);
     }
   return bb->value_inst(value, bitsize);
 }
@@ -7817,9 +7799,9 @@ void Parser::parse_function()
   else if (name == "addv")
     process_vec_reduc(gen_add, Value::umin);
   else if (name == "fmaxnmv")
-    process_vec_reduc(gen_fmax, Value::fmin);
+    process_vec_reduc(gen_fmax, Value::nan);
   else if (name == "fminnmv")
-    process_vec_reduc(gen_fmin, Value::fmax);
+    process_vec_reduc(gen_fmin, Value::nan);
   else if (name == "saddlv")
     process_vec_reducl(gen_add, Op::SEXT);
   else if (name == "smaxv")
