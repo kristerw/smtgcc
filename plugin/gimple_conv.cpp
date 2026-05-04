@@ -7705,6 +7705,21 @@ void Converter::process_gimple_call(gimple *stmt)
 	  else
 	    throw Not_implemented("gimple_call: " + name);
 	}
+      else if (name == "__assert_fail")
+	{
+	  // Generate this as abort() for now.
+	  //
+	  // We may fail to treat this as an abort if there is UB after the
+	  // call in this basic block. We therefore ensure that we branch to
+	  // the exit block and create a new dead block for the remaining
+	  // instructions, if any.
+	  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
+	  Basic_block *exit_bb = gccbb_top2bb.at(gcc_exit_block);
+	  Basic_block *dead_bb = func->build_bb();
+	  bb->build_br_inst(bb->value_inst(1, 1), exit_bb, dead_bb);
+	  bb_abort.insert(bb);
+	  bb = dead_bb;
+	}
       else
 	throw Not_implemented("gimple_call");
     }
