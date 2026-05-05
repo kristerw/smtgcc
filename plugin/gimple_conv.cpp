@@ -230,6 +230,7 @@ struct Converter {
   void process_cfn_reduc_fminmax(gimple *stmt);
   void process_cfn_trap(gimple *stmt);
   void process_cfn_uaddc(gimple *stmt);
+  void process_cfn_ubsan_check_op(gimple *stmt, Op op, Op overflow_op);
   void process_cfn_unreachable(gimple *stmt);
   void process_cfn_usubc(gimple *stmt);
   void process_cfn_vcond_mask(gimple *stmt);
@@ -7179,6 +7180,76 @@ void Converter::process_cfn_uaddc(gimple *stmt)
     tree2indef.insert({lhs, res_indef});
 }
 
+void Converter::process_cfn_ubsan_check_op(gimple *stmt, Op op, Op overflow_op)
+{
+  assert(gimple_call_num_args(stmt) == 2);
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
+
+  uint32_t nof_elem;
+  uint32_t elem_bitsize;
+  tree elem_type;
+  if (VECTOR_TYPE_P(arg1_type))
+    {
+      elem_type = TREE_TYPE(arg1_type);
+      elem_bitsize = bitsize_for_type(elem_type);
+      nof_elem = arg1->bitsize / elem_bitsize;
+    }
+  else
+    {
+      elem_type = arg1_type;
+      elem_bitsize = arg1->bitsize;
+      nof_elem = 1;
+    }
+
+  Inst *res = nullptr;
+  Inst *res_indef = nullptr;
+  for (uint32_t i = 0; i < nof_elem; i++)
+    {
+      Inst *elem1 = extract_vec_elem(bb, arg1, elem_bitsize, i);
+      Inst *elem2 = extract_vec_elem(bb, arg2, elem_bitsize, i);
+      Inst *elem1_indef = nullptr;
+      if (arg1_indef)
+	elem1_indef = extract_vec_elem(bb, arg1_indef, elem_bitsize, i);
+      Inst *elem2_indef = nullptr;
+      if (arg2_indef)
+	elem2_indef = extract_vec_elem(bb, arg2_indef, elem_bitsize, i);
+
+      Inst *inst = bb->build_inst(op, elem1, elem2);
+      Inst *indef = get_res_indef(elem1_indef, elem2_indef, elem_type);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+      if (indef)
+	{
+	  if (res_indef)
+	    res_indef = bb->build_inst(Op::CONCAT, indef, res_indef);
+	  else
+	    res_indef = indef;
+	}
+
+      Inst *overflowed = bb->build_inst(overflow_op, elem1, elem2);
+      basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
+      Basic_block *exit_bb = gccbb_top2bb.at(gcc_exit_block);
+      Basic_block *next_bb = func->build_bb();
+      bb->build_br_inst(overflowed, exit_bb, next_bb);
+      bb_abort.insert(bb);
+      bb = next_bb;
+    }
+
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+  constrain_range(bb, lhs, res);
+  tree2instruction.insert({lhs, res});
+  if (res_indef)
+    tree2indef.insert({lhs, res_indef});
+}
+
 void Converter::process_cfn_unreachable(gimple *stmt ATTRIBUTE_UNUSED)
 {
   assert(gimple_call_num_args(stmt) == 0);
@@ -7617,6 +7688,15 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_UADDC:
       process_cfn_uaddc(stmt);
+      break;
+    case CFN_UBSAN_CHECK_ADD:
+      process_cfn_ubsan_check_op(stmt, Op::ADD, Op::SADD_OVERFLOW);
+      break;
+    case CFN_UBSAN_CHECK_MUL:
+      process_cfn_ubsan_check_op(stmt, Op::MUL, Op::SMUL_OVERFLOW);
+      break;
+    case CFN_UBSAN_CHECK_SUB:
+      process_cfn_ubsan_check_op(stmt, Op::SUB, Op::SSUB_OVERFLOW);
       break;
     case CFN_USUBC:
       process_cfn_usubc(stmt);
