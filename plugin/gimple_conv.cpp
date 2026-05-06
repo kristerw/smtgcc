@@ -230,6 +230,7 @@ struct Converter {
   void process_cfn_reduc_fminmax(gimple *stmt);
   void process_cfn_trap(gimple *stmt);
   void process_cfn_uaddc(gimple *stmt);
+  void process_cfn_ubsan_handle_ub();
   void process_cfn_ubsan_check_op(gimple *stmt, Op op, Op overflow_op);
   void process_cfn_unreachable(gimple *stmt);
   void process_cfn_usubc(gimple *stmt);
@@ -7180,6 +7181,22 @@ void Converter::process_cfn_uaddc(gimple *stmt)
     tree2indef.insert({lhs, res_indef});
 }
 
+void Converter::process_cfn_ubsan_handle_ub()
+{
+  // Generate this as abort() for now.
+  //
+  // We may fail to treat this as an abort if there is UB after the
+  // call in this basic block. We therefore ensure that we branch to
+  // the exit block and create a new dead block for the remaining
+  // instructions, if any.
+  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
+  Basic_block *exit_bb = gccbb_top2bb.at(gcc_exit_block);
+  Basic_block *dead_bb = func->build_bb();
+  bb->build_br_inst(bb->value_inst(1, 1), exit_bb, dead_bb);
+  bb_abort.insert(bb);
+  bb = dead_bb;
+}
+
 void Converter::process_cfn_ubsan_check_op(gimple *stmt, Op op, Op overflow_op)
 {
   assert(gimple_call_num_args(stmt) == 2);
@@ -7689,6 +7706,42 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_UADDC:
       process_cfn_uaddc(stmt);
       break;
+    case CFN_BUILT_IN_UBSAN_HANDLE_DIVREM_OVERFLOW:
+    case CFN_BUILT_IN_UBSAN_HANDLE_SHIFT_OUT_OF_BOUNDS:
+    case CFN_BUILT_IN_UBSAN_HANDLE_BUILTIN_UNREACHABLE:
+    case CFN_BUILT_IN_UBSAN_HANDLE_MISSING_RETURN:
+    case CFN_BUILT_IN_UBSAN_HANDLE_VLA_BOUND_NOT_POSITIVE:
+    case CFN_BUILT_IN_UBSAN_HANDLE_TYPE_MISMATCH_V1:
+    case CFN_BUILT_IN_UBSAN_HANDLE_ADD_OVERFLOW:
+    case CFN_BUILT_IN_UBSAN_HANDLE_SUB_OVERFLOW:
+    case CFN_BUILT_IN_UBSAN_HANDLE_MUL_OVERFLOW:
+    case CFN_BUILT_IN_UBSAN_HANDLE_NEGATE_OVERFLOW:
+    case CFN_BUILT_IN_UBSAN_HANDLE_LOAD_INVALID_VALUE:
+    case CFN_BUILT_IN_UBSAN_HANDLE_POINTER_OVERFLOW:
+    case CFN_BUILT_IN_UBSAN_HANDLE_DIVREM_OVERFLOW_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_SHIFT_OUT_OF_BOUNDS_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_VLA_BOUND_NOT_POSITIVE_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_TYPE_MISMATCH_V1_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_ADD_OVERFLOW_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_SUB_OVERFLOW_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_MUL_OVERFLOW_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_NEGATE_OVERFLOW_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_LOAD_INVALID_VALUE_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_POINTER_OVERFLOW_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_FLOAT_CAST_OVERFLOW:
+    case CFN_BUILT_IN_UBSAN_HANDLE_FLOAT_CAST_OVERFLOW_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_OUT_OF_BOUNDS:
+    case CFN_BUILT_IN_UBSAN_HANDLE_OUT_OF_BOUNDS_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_NONNULL_ARG:
+    case CFN_BUILT_IN_UBSAN_HANDLE_NONNULL_ARG_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_NONNULL_RETURN_V1:
+    case CFN_BUILT_IN_UBSAN_HANDLE_NONNULL_RETURN_V1_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_INVALID_BUILTIN:
+    case CFN_BUILT_IN_UBSAN_HANDLE_INVALID_BUILTIN_ABORT:
+    case CFN_BUILT_IN_UBSAN_HANDLE_DYNAMIC_TYPE_CACHE_MISS:
+    case CFN_BUILT_IN_UBSAN_HANDLE_DYNAMIC_TYPE_CACHE_MISS_ABORT:
+      process_cfn_ubsan_handle_ub();
+      break;
     case CFN_UBSAN_CHECK_ADD:
       process_cfn_ubsan_check_op(stmt, Op::ADD, Op::SADD_OVERFLOW);
       break;
@@ -7799,6 +7852,49 @@ void Converter::process_gimple_call(gimple *stmt)
 	  bb->build_br_inst(bb->value_inst(1, 1), exit_bb, dead_bb);
 	  bb_abort.insert(bb);
 	  bb = dead_bb;
+	}
+      else if (name.starts_with("__builtin_")
+	       || name.starts_with("__sync_")
+	       || name.starts_with("__atomic_"))
+	{
+	  // Builtins can in some cases be generated as a normal call.
+	  if (name == "__builtin___ubsan_handle_divrem_overflow"
+	      || name == "__builtin___ubsan_handle_shift_out_of_bounds"
+	      || name == "__builtin___ubsan_handle_builtin_unreachable"
+	      || name == "__builtin___ubsan_handle_missing_return"
+	      || name == "__builtin___ubsan_handle_vla_bound_not_positive"
+	      || name == "__builtin___ubsan_handle_type_mismatch_v1"
+	      || name == "__builtin___ubsan_handle_add_overflow"
+	      || name == "__builtin___ubsan_handle_sub_overflow"
+	      || name == "__builtin___ubsan_handle_mul_overflow"
+	      || name == "__builtin___ubsan_handle_negate_overflow"
+	      || name == "__builtin___ubsan_handle_load_invalid_value"
+	      || name == "__builtin___ubsan_handle_pointer_overflow"
+	      || name == "__builtin___ubsan_handle_divrem_overflow_abort"
+	      || name == "__builtin___ubsan_handle_shift_out_of_bounds_abort"
+	      || name == "__builtin___ubsan_handle_vla_bound_not_positive_abort"
+	      || name == "__builtin___ubsan_handle_type_mismatch_v1_abort"
+	      || name == "__builtin___ubsan_handle_add_overflow_abort"
+	      || name == "__builtin___ubsan_handle_sub_overflow_abort"
+	      || name == "__builtin___ubsan_handle_mul_overflow_abort"
+	      || name == "__builtin___ubsan_handle_negate_overflow_abort"
+	      || name == "__builtin___ubsan_handle_load_invalid_value_abort"
+	      || name == "__builtin___ubsan_handle_pointer_overflow_abort"
+	      || name == "__builtin___ubsan_handle_float_cast_overflow"
+	      || name == "__builtin___ubsan_handle_float_cast_overflow_abort"
+	      || name == "__builtin___ubsan_handle_out_of_bounds"
+	      || name == "__builtin___ubsan_handle_out_of_bounds_abort"
+	      || name == "__builtin___ubsan_handle_nonnull_arg"
+	      || name == "__builtin___ubsan_handle_nonnull_arg_abort"
+	      || name == "__builtin___ubsan_handle_nonnull_return_v1"
+	      || name == "__builtin___ubsan_handle_nonnull_return_v1_abort"
+	      || name == "__builtin___ubsan_handle_invalid_builtin"
+	      || name == "__builtin___ubsan_handle_invalid_builtin_abort"
+	      || name == "__builtin___ubsan_handle_dynamic_type_cache_miss"
+	      || name == "__builtin___ubsan_handle_dynamic_type_cache_miss_abort")
+	    process_cfn_ubsan_handle_ub();
+	  else
+	    throw Not_implemented("gimple_call " + name);
 	}
       else
 	throw Not_implemented("gimple_call");
