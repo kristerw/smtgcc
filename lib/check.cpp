@@ -82,10 +82,6 @@ struct Cse_key_hash {
   }
 };
 
-enum class Function_role {
-  src, tgt
-};
-
 // Comparison function for instructions.
 //
 // This is mostly used for sets etc. where we need a consistent order.
@@ -199,6 +195,7 @@ class Converter : Simplify_config {
 
   // Maps basic blocks to the expressions determining if it contain UB.
   std::map<Basic_block *, std::set<Inst *, Inst_comp>> bb2ub;
+  std::map<Basic_block *, std::set<Inst *, Inst_comp>> bb2ub_assume;
 
   // Maps basic blocks to the memory state at the end of the basic block.
   std::map<Basic_block *, Inst *> bb2memory;
@@ -218,6 +215,8 @@ class Converter : Simplify_config {
 
   Cse cse;
 
+  std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> ver_bbcond2ub;
+  std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> ver_bbcond2ub_assume;
   std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> src_bbcond2ub;
   std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> tgt_bbcond2ub;
   bool has_tgt = false;
@@ -232,10 +231,13 @@ class Converter : Simplify_config {
   Basic_block *dest_bb;
 
   void add_ub(Basic_block *bb, Inst *cond);
+  void add_assume_ub(Basic_block *bb, Inst *cond);
   void move_ub_earlier(Function *func);
   void remove_redundant_ub(Function *func);
   std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> prepare_ub(Function *func);
+  std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> prepare_ub_assume(Function *func);
   void generate_ub();
+  void verify_generate_ub();
   Inst *get_full_edge_cond(Basic_block *src, Basic_block *dest);
   Inst *build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic_block *)>& pred2inst);
   void build_mem_state(Basic_block *bb, std::map<Basic_block*, Inst *>& map);
@@ -263,6 +265,7 @@ public:
 
   Result_state src;
   Result_state tgt;
+  Result_state_verify ver;
 
   Converter(Module *m, bool run_simplify_inst = true);
   ~Converter()
@@ -273,6 +276,7 @@ public:
 
   void convert_function(Function *func, Function_role role);
   void finalize();
+  void verify_finalize();
 
   Module *module = nullptr;
   Function *dest_func = nullptr;
@@ -1066,6 +1070,14 @@ void Converter::add_ub(Basic_block *bb, Inst *cond)
     bb2ub[bb].insert(cond);
 }
 
+void Converter::add_assume_ub(Basic_block *bb, Inst *cond)
+{
+  if (cond->op == Op::VALUE && cond->value() == 1)
+    return;
+
+  bb2ub_assume[bb].insert(build_inst(Op::NOT, cond));
+}
+
 // Duplicate UB checks on dominating BBs when they are checked on all paths.
 void Converter::move_ub_earlier(Function *func)
 {
@@ -1216,6 +1228,23 @@ std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> Converter::prepare_ub(F
   return bbcond2ub;
 }
 
+std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> Converter::prepare_ub_assume(Function *func)
+{
+  // Merge the UB from the basic blocks with the same path condition.
+  std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> bbcond2ub_assume;
+  for (auto bb : func->bbs)
+    {
+      if (!bb2ub_assume.contains(bb))
+	continue;
+
+      const std::set<Inst *, Inst_comp>& bb_ub = bb2ub_assume[bb];
+      std::set<Inst *, Inst_comp>& cond_ub = bbcond2ub_assume[bb2cond.at(bb)];
+      cond_ub.insert(bb_ub.begin(), bb_ub.end());
+    }
+
+  return bbcond2ub_assume;
+}
+
 // Generate the UB expression for the function.
 //
 // For basic blocks with a common condition in src and tgt, we split
@@ -1234,11 +1263,11 @@ void Converter::generate_ub()
   std::vector<Inst *> src_cond;
   std::vector<Inst *> tgt_cond;
 
-  for (auto [cond, _] : src_bbcond2ub)
+  for (auto& [cond, _] : src_bbcond2ub)
     {
       src_cond.push_back(cond);
     }
-  for (auto [cond, _] : tgt_bbcond2ub)
+  for (auto& [cond, _] : tgt_bbcond2ub)
     {
       tgt_cond.push_back(cond);
     }
@@ -1330,6 +1359,36 @@ void Converter::generate_ub()
       tgt.unique_ub = tgt_ub;
       tgt.common_ub = common_ub;
     }
+}
+
+void Converter::verify_generate_ub()
+{
+  Inst *ub = value_inst(0, 1);
+  for (auto& [cond, insts] : ver_bbcond2ub)
+    {
+      Inst *bb_ub = value_inst(0, 1);
+      for (auto inst : insts)
+	{
+	  bb_ub = build_inst(Op::OR, bb_ub, inst);
+	}
+      ub = build_inst(Op::OR, ub, build_inst(Op::AND, cond, bb_ub));
+    }
+
+  Inst *ub_assume = value_inst(0, 1);
+  for (auto& [cond, insts] : ver_bbcond2ub_assume)
+    {
+      Inst *bb_ub = value_inst(0, 1);
+      for (auto inst : insts)
+	{
+	  bb_ub = build_inst(Op::OR, bb_ub, inst);
+	}
+      ub_assume =
+	build_inst(Op::OR, ub_assume, build_inst(Op::AND, cond, bb_ub));
+    }
+
+  build_inst(Op::VER_UB, ub_assume, ub);
+  ver.ub = ub;
+  ver.ub_assume = ub_assume;
 }
 
 Inst *Converter::get_full_edge_cond(Basic_block *src, Basic_block *dest)
@@ -1691,6 +1750,12 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       add_ub(bb, translate.at(inst->args[0]));
       return;
     }
+  else if (inst->op == Op::ASSUME)
+    {
+      assert(role == Function_role::ver);
+      add_assume_ub(bb, translate.at(inst->args[0]));
+      return;
+    }
   else if (inst->op == Op::SET_MEM_FLAG)
     {
       Inst *array = bb2memory_flag.at(bb);
@@ -1818,7 +1883,8 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
     }
   else if (inst->op == Op::RET)
     {
-      if (inst->nof_args > 0)
+      if (inst->nof_args > 0 &&
+	  (role == Function_role::src || role == Function_role::tgt))
 	{
 	  Inst *arg1 = translate.at(inst->args[0]);
 	  Inst *arg2;
@@ -1841,34 +1907,60 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
 	}
       return;
     }
-  else if (inst->op == Op::EXIT)
+  else if (inst->op == Op::ABORT)
     {
       Inst *arg1 = translate.at(inst->args[0]);
       Inst *arg2 = translate.at(inst->args[1]);
-      Inst *arg3 = translate.at(inst->args[2]);
-      if (!is_value_zero(arg1)
-	  || !is_value_zero(arg2)
-	  || !is_value_zero(arg3))
+      if (!is_value_zero(arg1) || !is_value_zero(arg2))
 	{
 	  if (role == Function_role::src)
 	    {
 	      assert(!src.abort);
-	      assert(!src.exit);
-	      assert(!src.exit_val);
+	      assert(!src.abort_san);
 	      src.abort = arg1;
-	      src.exit = arg2;
-	      src.exit_val = arg3;
-	      build_inst(Op::SRC_EXIT, arg1, arg2, arg3);
+	      src.abort_san = arg2;
+	      build_inst(Op::SRC_ABORT, arg1, arg2);
 	    }
-	  else
+	  else if (role == Function_role::tgt)
 	    {
 	      assert(!tgt.abort);
+	      assert(!tgt.abort_san);
+	      tgt.abort = arg1;
+	      tgt.abort_san = arg2;
+	      build_inst(Op::TGT_ABORT, arg1, arg2);
+	    }
+	  else if (role == Function_role::ver)
+	    {
+	      assert(!tgt.abort);
+	      assert(!tgt.abort_san);
+	      tgt.abort = arg1;
+	      tgt.abort_san = arg2;
+	      build_inst(Op::VER_ABORT, arg1, arg2);
+	    }
+	}
+      return;
+    }
+  else if (inst->op == Op::EXIT)
+    {
+      Inst *arg1 = translate.at(inst->args[0]);
+      Inst *arg2 = translate.at(inst->args[1]);
+      if (!is_value_zero(arg1))
+	{
+	  if (role == Function_role::src)
+	    {
+	      assert(!src.exit);
+	      assert(!src.exit_val);
+	      src.exit = arg1;
+	      src.exit_val = arg2;
+	      build_inst(Op::SRC_EXIT, arg1, arg2);
+	    }
+	  else if (role == Function_role::tgt)
+	    {
 	      assert(!tgt.exit);
 	      assert(!tgt.exit_val);
-	      tgt.abort = arg1;
-	      tgt.exit = arg2;
-	      tgt.exit_val = arg3;
-	      build_inst(Op::TGT_EXIT, arg1, arg2, arg3);
+	      tgt.exit = arg1;
+	      tgt.exit_val = arg2;
+	      build_inst(Op::TGT_EXIT, arg1, arg2);
 	    }
 	}
       return;
@@ -1970,23 +2062,43 @@ void Converter::convert2(Inst *inst)
       tgt.memory_size = memory_size;
       tgt.memory_indef = memory_indef;
     }
-  else if (inst->op == Op::SRC_EXIT)
+  else if (inst->op == Op::SRC_ABORT)
     {
       Inst *abort = translate.at(inst->args[0]);
-      Inst *exit = translate.at(inst->args[1]);
-      Inst *exit_val = translate.at(inst->args[2]);
-      new_inst = build_inst(Op::SRC_EXIT, abort, exit, exit_val);
+      Inst *abort_san = translate.at(inst->args[1]);
+      new_inst = build_inst(Op::SRC_ABORT, abort, abort_san);
       src.abort = abort;
+      src.abort_san = abort_san;
+    }
+  else if (inst->op == Op::TGT_ABORT)
+    {
+      Inst *abort = translate.at(inst->args[0]);
+      Inst *abort_san = translate.at(inst->args[1]);
+      new_inst = build_inst(Op::TGT_ABORT, abort, abort_san);
+      tgt.abort = abort;
+      tgt.abort_san = abort_san;
+    }
+  else if (inst->op == Op::VER_ABORT)
+    {
+      Inst *abort = translate.at(inst->args[0]);
+      Inst *abort_san = translate.at(inst->args[1]);
+      new_inst = build_inst(Op::VER_ABORT, abort, abort_san);
+      ver.abort = abort;
+      ver.abort_san = abort_san;
+    }
+  else if (inst->op == Op::SRC_EXIT)
+    {
+      Inst *exit = translate.at(inst->args[0]);
+      Inst *exit_val = translate.at(inst->args[1]);
+      new_inst = build_inst(Op::SRC_EXIT, exit, exit_val);
       src.exit = exit;
       src.exit_val = exit_val;
     }
   else if (inst->op == Op::TGT_EXIT)
     {
-      Inst *abort = translate.at(inst->args[0]);
-      Inst *exit = translate.at(inst->args[1]);
-      Inst *exit_val = translate.at(inst->args[2]);
-      new_inst = build_inst(Op::TGT_EXIT, abort, exit, exit_val);
-      tgt.abort = abort;
+      Inst *exit = translate.at(inst->args[0]);
+      Inst *exit_val = translate.at(inst->args[1]);
+      new_inst = build_inst(Op::TGT_EXIT, exit, exit_val);
       tgt.exit = exit;
       tgt.exit_val = exit_val;
     }
@@ -2006,10 +2118,19 @@ void Converter::convert2(Inst *inst)
       tgt.common_ub = common_ub;
       tgt.unique_ub = unique_ub;
     }
+  else if (inst->op == Op::VER_UB)
+    {
+      Inst *ub_assume = translate.at(inst->args[0]);
+      Inst *ub = translate.at(inst->args[1]);
+      new_inst = build_inst(Op::VER_UB, ub_assume, ub);
+      ver.ub_assume = ub_assume;
+      ver.ub = ub;
+    }
   else if (inst->op == Op::RET)
     {
       assert(inst->nof_args == 0);
-      new_inst = build_inst(Op::RET);
+      dest_bb->build_ret_inst();
+      return;
     }
   else if (inst->op == Op::ARRAY_GET_FLAG
 	   || inst->op == Op::ARRAY_GET_INDEF
@@ -2122,14 +2243,18 @@ void Converter::convert_function(Function *func, Function_role role)
 
   if (role == Function_role::src)
     src_bbcond2ub = prepare_ub(func);
-  else
+  else if (role == Function_role::tgt)
     {
       tgt_bbcond2ub = prepare_ub(func);
       has_tgt = true;
     }
+  else if (role == Function_role::ver)
+    {
+      ver_bbcond2ub = prepare_ub(func);
+      ver_bbcond2ub_assume = prepare_ub_assume(func);
+    }
 
   Basic_block *exit_block = func->bbs.back();
-  Op mem_op = role == Function_role::src ? Op::SRC_MEM : Op::TGT_MEM;
   Inst *memory = bb2memory.at(exit_block);
   Inst *memory_size = bb2memory_size.at(exit_block);
   Inst *memory_indef = bb2memory_indef.at(exit_block);
@@ -2145,18 +2270,23 @@ void Converter::convert_function(Function *func, Function_role role)
     std::map<Inst *, Inst *> cache;
     memory_indef = strip_local_mem(memory_indef, cache);
   }
-  build_inst(mem_op, memory, memory_size, memory_indef);
-  if (role == Function_role::src)
+
+  if (role == Function_role::src || role == Function_role::tgt)
     {
-      src.memory = memory;
-      src.memory_size = memory_size;
-      src.memory_indef = memory_indef;
-    }
-  else
-    {
-      tgt.memory = memory;
-      tgt.memory_size = memory_size;
-      tgt.memory_indef = memory_indef;
+      Op mem_op = role == Function_role::src ? Op::SRC_MEM : Op::TGT_MEM;
+      build_inst(mem_op, memory, memory_size, memory_indef);
+      if (role == Function_role::src)
+	{
+	  src.memory = memory;
+	  src.memory_size = memory_size;
+	  src.memory_indef = memory_indef;
+	}
+      else
+	{
+	  tgt.memory = memory;
+	  tgt.memory_size = memory_size;
+	  tgt.memory_indef = memory_indef;
+	}
     }
 
   // Dominance information can be extensive for large functions, and it is
@@ -2218,7 +2348,29 @@ void Converter::finalize()
 {
   generate_ub();
 
-  build_inst(Op::RET);
+  dest_bb->build_ret_inst();
+
+  dead_code_elimination(dest_func);
+  dest_func->canonicalize();
+
+  src_bbcond2ub.clear();
+  tgt_bbcond2ub.clear();
+  cse.clear();
+
+  if (run_simplify_inst)
+    {
+      bool modified;
+      do {
+	modified = reprocess_dest_func();
+      } while (modified);
+    }
+}
+
+void Converter::verify_finalize()
+{
+  verify_generate_ub();
+
+  dest_bb->build_ret_inst();
 
   dead_code_elimination(dest_func);
   dest_func->canonicalize();
@@ -2399,6 +2551,61 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
     std::tie(stats, result) = check_refine_bitwuzla(converter.dest_func);
   else
     std::tie(stats, result) = check_refine_cvc5(converter.dest_func);
+
+  cache.set(result);
+
+  if (config.verbose > 0)
+    {
+      if (!stats.skipped)
+	{
+	  fprintf(stderr, "SMTGCC: time: ");
+	  for (int i = 0; i < 4; i++)
+	    {
+	      fprintf(stderr, "%s%" PRIu64, i ? "," : "", stats.time[i]);
+	    }
+	  fprintf(stderr, "\n");
+	}
+    }
+
+  return result;
+}
+
+Solver_result verify(Function *func, bool run_simplify_inst)
+{
+  func->canonicalize();
+  if (config.verbose > 1)
+    func->print(stderr);
+
+  Converter converter(func->module, run_simplify_inst);
+  converter.convert_function(func, Function_role::ver);
+  converter.verify_finalize();
+
+  if (config.verbose > 1)
+    converter.module->print(stderr);
+
+  if (!need_verifying(converter.ver))
+    {
+      if (config.verbose > 0)
+	fprintf(stderr, "SMTGCC: No verifying is needed\n");
+      return {};
+    }
+
+  Cache cache(converter.dest_func);
+  if (std::optional<Solver_result> result_cache = cache.get())
+    {
+      if (config.verbose > 0)
+	fprintf(stderr, "SMTGCC: Using cached result\n");
+      return *result_cache;
+    }
+
+  Solver_result result = {Result_status::correct, {}};
+  struct SStats stats;
+  if (config.smt_solver == SmtSolver::z3)
+    throw Not_implemented("verify for Z3");
+  else if (config.smt_solver == SmtSolver::bitwuzla)
+    std::tie(stats, result) = verify_bitwuzla(converter.dest_func);
+  else
+    throw Not_implemented("verify for cvc5");
 
   cache.set(result);
 

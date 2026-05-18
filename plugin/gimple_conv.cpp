@@ -51,11 +51,11 @@ struct Addr {
 };
 
 struct Converter {
-  Converter(Module *module, CommonState *state, function *fun, bool is_tgt_func)
+  Converter(Module *module, CommonState *state, function *fun, Function_role role)
     : module{module}
     , state{state}
     , fun{fun}
-    , is_tgt_func{is_tgt_func}
+    , role{role}
   {}
   ~Converter()
   {
@@ -85,7 +85,7 @@ struct Converter {
   std::vector<Inst *> constrain_ptr_id;
   Inst *retval = nullptr;
 
-  bool is_tgt_func;
+  Function_role role;
 
   Inst *extract_id(Inst *inst);
   uint64_t bytesize_for_type(tree type);
@@ -252,11 +252,13 @@ struct Converter {
 				Basic_block *bb);
   void process_gimple_switch(gimple *stmt, Basic_block *bb);
   Basic_block *get_phi_arg_bb(gphi *phi, int i);
+  void generate_abort_inst();
   void generate_exit_inst();
   void generate_return_inst();
   void init_var_values(tree initial, Inst *mem_inst);
   void init_var(tree decl, Inst *mem_inst);
   void make_uninit(Inst *ptr, uint64_t size);
+  void build_ub_assume(Basic_block *bb, Inst *cond);
   void constrain_src_value(Inst *inst, tree type, Inst *mem_flags = nullptr);
   void process_variables();
   void process_func_args();
@@ -468,6 +470,16 @@ bool is_bit_field(tree expr)
   return false;
 }
 
+// Build an Op::UB or Op::ASSUME instruction for the condition depending
+// on if the function will be used for verification or not.
+void Converter::build_ub_assume(Basic_block *bb, Inst *cond)
+{
+  if (role == Function_role::ver)
+    bb->build_inst(Op::ASSUME, bb->build_inst(Op::NOT, cond));
+  else
+    bb->build_inst(Op::UB, cond);
+}
+
 // Add checks in the src function to ensure that the value is a valid value
 // for the type. The main use is to make sure the initial state is valid
 // (for example, global pointers can't point to local memory).
@@ -489,7 +501,7 @@ bool is_bit_field(tree expr)
 // * BOOLEAN_TYPE - ensure the value is 0 or 1.
 void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
 {
-  if (is_tgt_func)
+  if (role == Function_role::tgt)
     return;
 
   // TODO: We should invert the meaning of mem_flags.
@@ -507,14 +519,14 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
       Inst *cond = bb->build_inst(Op::SLT, id, zero);
       if (not_written)
 	cond = bb->build_inst(Op::AND, cond, not_written);
-      bb->build_inst(Op::UB, cond);
+      build_ub_assume(bb, cond);
 
       for (auto restrict_id : state->restrict_ids)
 	{
 	  Inst *cond = bb->build_inst(Op::EQ, id, restrict_id);
 	  if (not_written)
 	    cond = bb->build_inst(Op::AND, cond, not_written);
-	  bb->build_inst(Op::UB, cond);
+	  build_ub_assume(bb, cond);
 	}
 
       // A pointer cannot point to a static variable that has not had
@@ -528,7 +540,7 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
     }
   if (SCALAR_FLOAT_TYPE_P(type))
     {
-      bb->build_inst(Op::UB, bb->build_inst(Op::IS_NONCANONICAL_NAN, inst));
+      build_ub_assume(bb, bb->build_inst(Op::IS_NONCANONICAL_NAN, inst));
       return;
     }
   if (INTEGRAL_TYPE_P(type) && inst->bitsize != bitsize_for_type(type))
@@ -536,7 +548,7 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
       Inst *tmp = bb->build_trunc(inst, bitsize_for_type(type));
       Op op = TYPE_UNSIGNED(type) ? Op::ZEXT : Op::SEXT;
       tmp = bb->build_inst(op, tmp, inst->bitsize);
-      bb->build_inst(Op::UB, bb->build_inst(Op::NE, inst, tmp));
+      build_ub_assume(bb, bb->build_inst(Op::NE, inst, tmp));
       return;
     }
 
@@ -2043,7 +2055,7 @@ void Converter::process_store(tree addr_expr, tree value_expr)
   //
   // TODO: Find a better way of handling this.
   if (state->arch != Arch::gimple
-      && !is_tgt_func && POINTER_TYPE_P(value_type))
+      && role == Function_role::src && POINTER_TYPE_P(value_type))
     {
       Inst *value_mem_id = extract_id(value);
       Inst *zero = bb->value_inst(0, module->ptr_id_bits);
@@ -2164,7 +2176,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
   //
   // TODO: Find a better way of handling this.
   if (state->arch != Arch::gimple
-      && !is_tgt_func
+      && role == Function_role::src
       && POINTER_TYPE_P(src_type)
       && !POINTER_TYPE_P(dest_type))
     {
@@ -8031,19 +8043,30 @@ void Converter::process_gimple_return(gimple *stmt)
   // miscompile otherwise...
 }
 
-void Converter::generate_exit_inst()
+void Converter::generate_abort_inst()
 {
-  if (bb_abort.empty() && bb2exit.empty())
+  if (bb_abort.empty())
     return;
 
   Inst *abort_called = bb->build_phi_inst(1);
-  Inst *exit_called = bb->build_phi_inst(1);
-  Inst *exit_val = bb->build_phi_inst(bitsize_for_type(integer_type_node));
   for (Basic_block *pred_bb : bb->preds)
     {
       Inst *a = bb->value_inst(bb_abort.contains(pred_bb), 1);
       abort_called->add_phi_arg(a, pred_bb);
+    }
+  Inst *abort_san_called = bb->value_inst(0, 1);
+  bb->build_inst(Op::ABORT, abort_called, abort_san_called);
+}
 
+void Converter::generate_exit_inst()
+{
+  if (bb2exit.empty())
+    return;
+
+  Inst *exit_called = bb->build_phi_inst(1);
+  Inst *exit_val = bb->build_phi_inst(bitsize_for_type(integer_type_node));
+  for (Basic_block *pred_bb : bb->preds)
+    {
       Inst *e = bb->value_inst(bb2exit.contains(pred_bb), 1);
       exit_called->add_phi_arg(e, pred_bb);
 
@@ -8054,7 +8077,7 @@ void Converter::generate_exit_inst()
 	v = bb->value_inst(0, exit_val->bitsize);
       exit_val->add_phi_arg(v, pred_bb);
     }
-  bb->build_inst(Op::EXIT, abort_called, exit_called, exit_val);
+  bb->build_inst(Op::EXIT, exit_called, exit_val);
 }
 
 void Converter::generate_return_inst()
@@ -8432,7 +8455,7 @@ void Converter::process_func_args()
 	    {
 	      if (TYPE_RESTRICT(TREE_TYPE(decl)))
 		{
-		  if (!is_tgt_func)
+		  if (role == Function_role::src || role == Function_role::ver)
 		    {
 		      // Create a new memory object that is only used for this
 		      // restrict pointer.
@@ -8449,8 +8472,8 @@ void Converter::process_func_args()
 		      Inst *id1 = extract_id(param_inst);
 		      Inst *id2 =
 			entry_bb->value_inst(restrict_id, module->ptr_id_bits);
-		      entry_bb->build_inst(Op::UB,
-					   entry_bb->build_inst(Op::NE, id1, id2));
+		      build_ub_assume(entry_bb,
+				      entry_bb->build_inst(Op::NE, id1, id2));
 		      state->restrict_ids.push_back(id2);
 		    }
 		}
@@ -8472,7 +8495,7 @@ void Converter::process_func_args()
 	    {
 	      Inst *zero = entry_bb->value_inst(0, param_inst->bitsize);
 	      Inst *cond = entry_bb->build_inst(Op::EQ, param_inst, zero);
-	      entry_bb->build_inst(Op::UB, cond);
+	      build_ub_assume(entry_bb, cond);
 	    }
 
 	  // VRP
@@ -8494,7 +8517,7 @@ void Converter::process_func_args()
 	      Inst *and_inst =
 		entry_bb->build_inst(Op::AND, param_inst, m_inst);
 	      Inst *cond = entry_bb->build_inst(Op::NE, v_inst, and_inst);
-	      entry_bb->build_inst(Op::UB, cond);
+	      build_ub_assume(entry_bb, cond);
 	    }
 	}
 
@@ -8515,7 +8538,7 @@ void Converter::process_func_args()
       // TODO: This should move into constrain_src_value.
       Inst *id = extract_id(param_inst);
       Inst *one = entry_bb->value_inst(1, module->ptr_id_bits);
-      entry_bb->build_inst(Op::UB, entry_bb->build_inst(Op::EQ, id, one));
+      build_ub_assume(entry_bb, entry_bb->build_inst(Op::EQ, id, one));
     }
 
   BITMAP_FREE(nonnullargs);
@@ -8637,6 +8660,7 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	    }
 	  else
 	    {
+	      generate_abort_inst();
 	      generate_exit_inst();
 	      generate_return_inst();
 	    }
@@ -8810,9 +8834,9 @@ Function *Converter::process_function()
 
 } // end anonymous namespace
 
-Function *process_function(Module *module, CommonState *state, function *fun, bool is_tgt_func)
+Function *process_function(Module *module, CommonState *state, function *fun, Function_role role)
 {
-  Converter func(module, state, fun, is_tgt_func);
+  Converter func(module, state, fun, role);
   return func.process_function();
 }
 

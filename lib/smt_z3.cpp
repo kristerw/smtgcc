@@ -678,6 +678,18 @@ void Converter::build_solver_smt(const Inst *inst)
 	case Op::PRINT:
 	  print.push_back(inst);
 	  break;
+	case Op::SRC_ABORT:
+	  assert(!src.abort);
+	  assert(!src.abort_san);
+	  src.abort = inst->args[0];
+	  src.abort_san = inst->args[1];
+	  return;
+	case Op::SRC_EXIT:
+	  assert(!src.exit);
+	  assert(!src.exit_val);
+	  src.exit = inst->args[0];
+	  src.exit_val = inst->args[1];
+	  return;
 	case Op::SRC_RETVAL:
 	  assert(!src.retval);
 	  assert(!src.retval_indef);
@@ -698,6 +710,18 @@ void Converter::build_solver_smt(const Inst *inst)
 	    inst2bv.emplace(inst, symbolic);
 	  }
 	  break;
+	case Op::TGT_ABORT:
+	  assert(!tgt.abort);
+	  assert(!tgt.abort_san);
+	  tgt.abort = inst->args[0];
+	  tgt.abort_san = inst->args[1];
+	  return;
+	case Op::TGT_EXIT:
+	  assert(!tgt.exit);
+	  assert(!tgt.exit_val);
+	  tgt.exit = inst->args[0];
+	  tgt.exit_val = inst->args[1];
+	  return;
 	case Op::TGT_RETVAL:
 	  assert(!tgt.retval);
 	  assert(!tgt.retval_indef);
@@ -730,22 +754,6 @@ void Converter::build_solver_smt(const Inst *inst)
 	  tgt.memory = inst->args[0];
 	  tgt.memory_size = inst->args[1];
 	  tgt.memory_indef = inst->args[2];
-	  return;
-	case Op::SRC_EXIT:
-	  assert(!src.abort);
-	  assert(!src.exit);
-	  assert(!src.exit_val);
-	  src.abort = inst->args[0];
-	  src.exit = inst->args[1];
-	  src.exit_val = inst->args[2];
-	  return;
-	case Op::TGT_EXIT:
-	  assert(!tgt.abort);
-	  assert(!tgt.exit);
-	  assert(!tgt.exit_val);
-	  tgt.abort = inst->args[0];
-	  tgt.exit = inst->args[1];
-	  tgt.exit_val = inst->args[2];
 	  return;
 	default:
 	  throw Not_implemented("build_solver_smt: "s + inst->name());
@@ -837,17 +845,18 @@ void Converter::convert_function()
       tgt.retval_indef = nullptr;
     }
 
+  Basic_block *bb = func->bbs[0];
   if (!src.abort && tgt.abort)
+    src.abort = bb->value_inst(0, 1);
+  if (!tgt.abort && src.abort)
+    tgt.abort = bb->value_inst(0, 1);
+  if (!src.exit && tgt.exit)
     {
-      Basic_block *bb = func->bbs[0];
-      src.abort = bb->value_inst(0, 1);
       src.exit = bb->value_inst(0, 1);
       src.exit_val = bb->value_inst(0, tgt.exit_val->bitsize);
     }
-  if (!tgt.abort && src.abort)
+  if (!tgt.exit && src.exit)
     {
-      Basic_block *bb = func->bbs[0];
-      tgt.abort = bb->value_inst(0, 1);
       tgt.exit = bb->value_inst(0, 1);
       tgt.exit_val = bb->value_inst(0, src.exit_val->bitsize);
     }
@@ -931,6 +940,22 @@ void add_print(std::string& msg, Converter& conv, z3::solver& solver)
     }
 }
 
+z3::expr bool_or_default(Converter& conv, Inst *inst, z3::expr default_expr)
+{
+  if (inst)
+    return conv.inst_as_bool(inst);
+  else
+    return default_expr;
+}
+
+z3::expr bv_or_default(Converter& conv, Inst *inst, z3::expr default_expr)
+{
+  if (inst)
+    return conv.inst_as_bv(inst);
+  else
+    return default_expr;
+}
+
 std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
 {
   assert(func->bbs.size() == 1);
@@ -983,13 +1008,18 @@ std::pair<SStats, Solver_result> check_refine_z3_helper(Function *func)
   if (need_checking_abort(conv.src, conv.tgt))
     {
       z3::expr_vector assumptions(ctx);
-      z3::expr src_abort_expr = conv.inst_as_bool(conv.src.abort);
-      z3::expr tgt_abort_expr = conv.inst_as_bool(conv.tgt.abort);
-      z3::expr src_exit_expr = conv.inst_as_bool(conv.src.exit);
-      z3::expr tgt_exit_expr = conv.inst_as_bool(conv.tgt.exit);
-      z3::expr src_exit_val_expr = conv.inst_as_bv(conv.src.exit_val);
-      z3::expr tgt_exit_val_expr = conv.inst_as_bv(conv.tgt.exit_val);
-
+      z3::expr src_abort_expr =
+	bool_or_default(conv, conv.src.abort, false_expr);
+      z3::expr tgt_abort_expr =
+	bool_or_default(conv, conv.tgt.abort, false_expr);
+      z3::expr src_exit_expr =
+	bool_or_default(conv, conv.src.exit, false_expr);
+      z3::expr tgt_exit_expr =
+	bool_or_default(conv, conv.tgt.exit, false_expr);
+      z3::expr src_exit_val_expr =
+	bv_or_default(conv, conv.src.exit_val, false_expr);
+      z3::expr tgt_exit_val_expr =
+	bv_or_default(conv, conv.tgt.exit_val, false_expr);
       assumptions.push_back(src_abort_expr != tgt_abort_expr
 			    || src_exit_expr != tgt_exit_expr
 			    || (src_exit_expr

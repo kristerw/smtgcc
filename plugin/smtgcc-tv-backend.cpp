@@ -66,7 +66,7 @@ unsigned int tv_pass::execute(function *fun)
       CommonState state(Arch::sh);
       Module *module = create_module(Arch::sh);
 #endif
-      Function *src = process_function(module, &state, fun, false);
+      Function *src = process_function(module, &state, fun, Function_role::src);
       src->name = "src";
       unroll_and_optimize(src, state.symbolic_id);
 

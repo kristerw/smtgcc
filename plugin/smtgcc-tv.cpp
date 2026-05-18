@@ -58,12 +58,12 @@ void tv_function::delete_ir()
   prev_pass_name = "";
 }
 
-static Function *convert_function(Module *module, CommonState *state, std::set<std::string>& errors, bool is_tgt_func = false)
+static Function *convert_function(Module *module, CommonState *state, std::set<std::string>& errors, Function_role role)
 {
   try
     {
-      Function *func = process_function(module, state, cfun, is_tgt_func);
-      func->rename(is_tgt_func ? "tgt" : "src");
+      Function *func = process_function(module, state, cfun, role);
+      func->rename(role == Function_role::tgt ? "tgt" : "src");
       return func;
     }
   catch (Not_implemented& error)
@@ -137,7 +137,8 @@ static void check(opt_pass *pass, my_plugin *plugin_data, tv_function *tv_fun)
   Module *next_module = create_module();
   CommonState *next_state = new CommonState();
   Function *next_func =
-    convert_function(next_module, next_state, tv_fun->errors);
+    convert_function(next_module, next_state, tv_fun->errors,
+		     Function_role::src);
   if (!next_func)
     {
       destroy_module(next_module);
@@ -159,7 +160,7 @@ static void check(opt_pass *pass, my_plugin *plugin_data, tv_function *tv_fun)
 		    function_name(cfun));
 
 	  Function *func = convert_function(tv_fun->module, tv_fun->state,
-					    tv_fun->errors, true);
+					    tv_fun->errors, Function_role::tgt);
 	  if (!func)
 	    {
 	      destroy_module(next_module);

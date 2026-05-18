@@ -14,7 +14,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 120> inst_info{{
+const std::array<Inst_info, 126> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -141,19 +141,25 @@ const std::array<Inst_info, 120> inst_info{{
   {"write", Op::WRITE, Inst_class::reg_binary, false, false},
 
   // Solver
-  {"exit", Op::EXIT, Inst_class::solver_ternary, false, false},
+  {"abort", Op::ABORT, Inst_class::solver_binary, false, false},
+  {"assume", Op::ASSUME, Inst_class::solver_unary, false, false},
+  {"exit", Op::EXIT, Inst_class::solver_binary, false, false},
   {"param", Op::PARAM, Inst_class::solver_binary, true, false},
   {"print", Op::PRINT, Inst_class::solver_binary, false, false},
-  {"src_exit", Op::SRC_EXIT, Inst_class::solver_ternary, false, false},
+  {"src_abort", Op::SRC_ABORT, Inst_class::solver_binary, false, false},
+  {"src_exit", Op::SRC_EXIT, Inst_class::solver_binary, false, false},
   {"src_mem", Op::SRC_MEM, Inst_class::solver_ternary, false, false},
   {"src_retval", Op::SRC_RETVAL, Inst_class::solver_binary, false, false},
   {"src_ub", Op::SRC_UB, Inst_class::solver_binary, false, false},
   {"symbolic", Op::SYMBOLIC, Inst_class::solver_binary, true, false},
-  {"tgt_exit", Op::TGT_EXIT, Inst_class::solver_ternary, false, false},
+  {"tgt_abort", Op::TGT_ABORT, Inst_class::solver_binary, false, false},
+  {"tgt_exit", Op::TGT_EXIT, Inst_class::solver_binary, false, false},
   {"tgt_mem", Op::TGT_MEM, Inst_class::solver_ternary, false, false},
   {"tgt_retval", Op::TGT_RETVAL, Inst_class::solver_binary, false, false},
   {"tgt_ub", Op::TGT_UB, Inst_class::solver_binary, false, false},
   {"ub", Op::UB, Inst_class::solver_unary, false, false},
+  {"ver_abort", Op::VER_ABORT, Inst_class::solver_binary, false, false},
+  {"ver_ub", Op::VER_UB, Inst_class::solver_binary, false, false},
 
   // Special
   {"br", Op::BR, Inst_class::special, false, false},
@@ -190,6 +196,14 @@ void Result_state::clear()
   memory = nullptr;
   memory_size = nullptr;
   memory_indef = nullptr;
+}
+
+void Result_state_verify::clear()
+{
+  ub_assume = nullptr;
+  ub = nullptr;
+  abort = nullptr;
+  abort_san = nullptr;
 }
 
 Config::Config()
@@ -237,6 +251,7 @@ Config config;
 
 Inst *create_inst(Op op)
 {
+  assert(inst_info[(int)op].iclass == Inst_class::mem_nullary);
   Inst *inst = new Inst;
   inst->op = op;
   inst->nof_args = 0;
@@ -246,6 +261,11 @@ Inst *create_inst(Op op)
 
 Inst *create_inst(Op op, Inst *arg)
 {
+  assert(inst_info[(int)op].iclass == Inst_class::iunary
+	 || inst_info[(int)op].iclass == Inst_class::funary
+	 || inst_info[(int)op].iclass == Inst_class::ls_unary
+	 || inst_info[(int)op].iclass == Inst_class::reg_unary
+	 || inst_info[(int)op].iclass == Inst_class::solver_unary);
   Inst *inst = new Inst;
   inst->op = op;
   inst->nof_args = 1;
@@ -291,6 +311,14 @@ Inst::Inst()
 
 Inst *create_inst(Op op, Inst *arg1, Inst *arg2)
 {
+  assert(inst_info[(int)op].iclass == Inst_class::ibinary
+	 || inst_info[(int)op].iclass == Inst_class::fbinary
+	 || inst_info[(int)op].iclass == Inst_class::icomparison
+	 || inst_info[(int)op].iclass == Inst_class::fcomparison
+	 || inst_info[(int)op].iclass == Inst_class::conv
+	 || inst_info[(int)op].iclass == Inst_class::ls_binary
+	 || inst_info[(int)op].iclass == Inst_class::reg_binary
+	 || inst_info[(int)op].iclass == Inst_class::solver_binary);
   if (inst_info[(int)op].is_commutative
       && arg2->op != Op::VALUE && arg1->op == Op::VALUE)
     std::swap(arg1, arg2);
@@ -402,6 +430,10 @@ Inst *create_inst(Op op, Inst *arg1, uint32_t arg2_val)
 
 Inst *create_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
 {
+  assert(inst_info[(int)op].iclass == Inst_class::ternary
+	 || inst_info[(int)op].iclass == Inst_class::mem_ternary
+	 || inst_info[(int)op].iclass == Inst_class::ls_ternary
+	 || inst_info[(int)op].iclass == Inst_class::solver_ternary);
   Inst *inst = new Inst;
   inst->op = op;
   inst->nof_args = 3;
@@ -1650,6 +1682,27 @@ bool need_checking(const Result_state& src, const Result_state& tgt)
     || need_checking_abort(src, tgt)
     || need_checking_retval(src, tgt)
     || need_checking_memory(src, tgt);
+}
+
+bool need_verifying_ub(const Result_state_verify& ver)
+{
+  if (is_zero(ver.ub))
+    return false;
+
+  return true;
+}
+
+bool need_verifying_abort(const Result_state_verify& ver)
+{
+  if (!ver.abort)
+    return false;
+
+  return true;
+}
+
+bool need_verifying(const Result_state_verify& ver)
+{
+  return need_verifying_ub(ver) || need_verifying_abort(ver);
 }
 
 } // end namespace smtgcc

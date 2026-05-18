@@ -453,6 +453,7 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
   // Pseudo registers tracking abort/exit
   rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
   rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
+  rstate.registers.push_back(bb->build_inst(Op::REGISTER, 1));
   rstate.registers.push_back(bb->build_inst(Op::REGISTER, 32));
 
   // Create MEMORY instructions for the global variables we saw in the
@@ -621,19 +622,25 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
     Inst *b0 = bb->value_inst(0, 1);
     Inst *zero = bb->value_inst(0, 32);
     bb->build_inst(Op::WRITE, rstate.registers[RiscvRegIdx::abort], b0);
+    bb->build_inst(Op::WRITE, rstate.registers[RiscvRegIdx::abort_san], b0);
     bb->build_inst(Op::WRITE, rstate.registers[RiscvRegIdx::exit], b0);
     bb->build_inst(Op::WRITE, rstate.registers[RiscvRegIdx::exit_val], zero);
 
     Inst *abort_cond =
       rstate.exit_bb->build_inst(Op::READ,
 				 rstate.registers[RiscvRegIdx::abort]);
+    Inst *abort_san_cond =
+      rstate.exit_bb->build_inst(Op::READ,
+				 rstate.registers[RiscvRegIdx::abort_san]);
+    rstate.exit_bb->build_inst(Op::ABORT, abort_cond, abort_san_cond);
+
     Inst *exit_cond =
       rstate.exit_bb->build_inst(Op::READ,
 				 rstate.registers[RiscvRegIdx::exit]);
     Inst *exit_val =
       rstate.exit_bb->build_inst(Op::READ,
 				 rstate.registers[RiscvRegIdx::exit_val]);
-    rstate.exit_bb->build_inst(Op::EXIT, abort_cond, exit_cond, exit_val);
+    rstate.exit_bb->build_inst(Op::EXIT, exit_cond, exit_val);
   }
 
   return rstate;

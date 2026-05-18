@@ -34,7 +34,7 @@ struct CommonState {
   std::vector<smtgcc::MemoryObject> memory_objects;
 };
 
-smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun, bool is_tgt_func);
+smtgcc::Function *process_function(smtgcc::Module *module, CommonState *, function *fun, smtgcc::Function_role role);
 void unroll_and_optimize(smtgcc::Function *func, int64_t& symbolic_id);
 void unroll_and_optimize(smtgcc::Module *module);
 smtgcc::Module *create_module(Arch arch = Arch::gimple);

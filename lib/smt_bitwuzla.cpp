@@ -61,6 +61,7 @@ public:
 
   Result_state src;
   Result_state tgt;
+  Result_state_verify ver;
 
   std::vector<Term> input;
   std::vector<Term> fp_constraints;
@@ -761,6 +762,18 @@ void Converter::build_solver_smt(const Inst *inst)
 	    print.emplace_back(arg1, arg2);
 	  }
 	  break;
+	case Op::SRC_ABORT:
+	  assert(!src.abort);
+	  assert(!src.abort_san);
+	  src.abort = inst->args[0];
+	  src.abort_san = inst->args[1];
+	  return;
+	case Op::SRC_EXIT:
+	  assert(!src.exit);
+	  assert(!src.exit_val);
+	  src.exit = inst->args[0];
+	  src.exit_val = inst->args[1];
+	  return;
 	case Op::SRC_RETVAL:
 	  assert(!src.retval);
 	  assert(!src.retval_indef);
@@ -782,6 +795,18 @@ void Converter::build_solver_smt(const Inst *inst)
 	    inst2bv.emplace(inst, symbolic);
 	  }
 	  break;
+	case Op::TGT_ABORT:
+	  assert(!tgt.abort);
+	  assert(!tgt.abort_san);
+	  tgt.abort = inst->args[0];
+	  tgt.abort_san = inst->args[1];
+	  return;
+	case Op::TGT_EXIT:
+	  assert(!tgt.exit);
+	  assert(!tgt.exit_val);
+	  tgt.exit = inst->args[0];
+	  tgt.exit_val = inst->args[1];
+	  return;
 	case Op::TGT_RETVAL:
 	  assert(!tgt.retval);
 	  assert(!tgt.retval_indef);
@@ -792,6 +817,17 @@ void Converter::build_solver_smt(const Inst *inst)
 	  assert(!tgt.unique_ub && !tgt.common_ub);
 	  tgt.common_ub = inst->args[0];
 	  tgt.unique_ub = inst->args[1];
+	  return;
+	case Op::VER_ABORT:
+	  assert(!ver.abort);
+	  assert(!ver.abort_san);
+	  ver.abort = inst->args[0];
+	  ver.abort_san = inst->args[1];
+	  return;
+	case Op::VER_UB:
+	  assert(!ver.ub_assume && !ver.ub);
+	  ver.ub_assume = inst->args[0];
+	  ver.ub = inst->args[1];
 	  return;
 	default:
 	  throw Not_implemented("build_solver_smt: "s + inst->name());
@@ -814,22 +850,6 @@ void Converter::build_solver_smt(const Inst *inst)
 	  tgt.memory = inst->args[0];
 	  tgt.memory_size = inst->args[1];
 	  tgt.memory_indef = inst->args[2];
-	  return;
-	case Op::SRC_EXIT:
-	  assert(!src.abort);
-	  assert(!src.exit);
-	  assert(!src.exit_val);
-	  src.abort = inst->args[0];
-	  src.exit = inst->args[1];
-	  src.exit_val = inst->args[2];
-	  return;
-	case Op::TGT_EXIT:
-	  assert(!tgt.abort);
-	  assert(!tgt.exit);
-	  assert(!tgt.exit_val);
-	  tgt.abort = inst->args[0];
-	  tgt.exit = inst->args[1];
-	  tgt.exit_val = inst->args[2];
 	  return;
 	default:
 	  throw Not_implemented("build_solver_smt: "s + inst->name());
@@ -943,17 +963,18 @@ void Converter::convert_function()
       tgt.retval_indef = nullptr;
     }
 
+  Basic_block *bb = func->bbs[0];
   if (!src.abort && tgt.abort)
+    src.abort = bb->value_inst(0, 1);
+  if (!tgt.abort && src.abort)
+    tgt.abort = bb->value_inst(0, 1);
+  if (!src.exit && tgt.exit)
     {
-      Basic_block *bb = func->bbs[0];
-      src.abort = bb->value_inst(0, 1);
       src.exit = bb->value_inst(0, 1);
       src.exit_val = bb->value_inst(0, tgt.exit_val->bitsize);
     }
-  if (!tgt.abort && src.abort)
+  if (!tgt.exit && src.exit)
     {
-      Basic_block *bb = func->bbs[0];
-      tgt.abort = bb->value_inst(0, 1);
       tgt.exit = bb->value_inst(0, 1);
       tgt.exit_val = bb->value_inst(0, src.exit_val->bitsize);
     }
@@ -1039,6 +1060,38 @@ void set_solver_limits(Options& options)
   options.set(Option::MEMORY_LIMIT, config.memory_limit);
 }
 
+Term abort_differ(TermManager& tm, Converter& conv)
+{
+  if (!conv.src.abort)
+    {
+      assert(!conv.tgt.abort);
+      return tm.mk_false();
+    }
+
+  Term src_abort_term = conv.inst_as_bool(conv.src.abort);
+  Term tgt_abort_term = conv.inst_as_bool(conv.tgt.abort);
+  return tm.mk_term(Kind::XOR, {src_abort_term, tgt_abort_term});
+}
+
+Term exit_differ(TermManager& tm, Converter& conv)
+{
+  if (!conv.src.exit)
+    {
+      assert(!conv.tgt.exit);
+      return tm.mk_false();
+    }
+
+  Term src_exit_term = conv.inst_as_bool(conv.src.exit);
+  Term tgt_exit_term = conv.inst_as_bool(conv.tgt.exit);
+  Term exit_differ = tm.mk_term(Kind::XOR, {src_exit_term, tgt_exit_term});
+  Term src_exit_val_term = conv.inst_as_bv(conv.src.exit_val);
+  Term tgt_exit_val_term = conv.inst_as_bv(conv.tgt.exit_val);
+  Term exit_val_differ =
+    tm.mk_term(Kind::DISTINCT, {src_exit_val_term, tgt_exit_val_term});
+  exit_val_differ = tm.mk_term(Kind::AND, {src_exit_term, exit_val_differ});
+  return tm.mk_term(Kind::OR, {exit_differ, exit_val_differ});
+}
+
 } // end anonymous namespace
 
 std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
@@ -1097,21 +1150,8 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
   if (need_checking_abort(conv.src, conv.tgt))
     {
       std::vector<Term> assumptions;
-      Term src_abort_term = conv.inst_as_bool(conv.src.abort);
-      Term tgt_abort_term = conv.inst_as_bool(conv.tgt.abort);
-      Term abort_differ =
-	tm.mk_term(Kind::XOR, {src_abort_term, tgt_abort_term});
-      Term src_exit_term = conv.inst_as_bool(conv.src.exit);
-      Term tgt_exit_term = conv.inst_as_bool(conv.tgt.exit);
-      Term exit_differ =
-	tm.mk_term(Kind::XOR, {src_exit_term, tgt_exit_term});
-      Term src_exit_val_term = conv.inst_as_bv(conv.src.exit_val);
-      Term tgt_exit_val_term = conv.inst_as_bv(conv.tgt.exit_val);
-      Term exit_val_differ =
-	tm.mk_term(Kind::DISTINCT, {src_exit_val_term, tgt_exit_val_term});
-      exit_val_differ = tm.mk_term(Kind::AND, {src_exit_term, exit_val_differ});
-      Term differ = tm.mk_term(Kind::OR, {abort_differ, exit_differ});
-      differ = tm.mk_term(Kind::OR, {differ, exit_val_differ});
+      Term differ =
+	tm.mk_term(Kind::OR, {abort_differ(tm, conv), exit_differ(tm, conv)});
       assumptions.push_back(differ);
       uint64_t start_time = get_time();
       Solver_result solver_result =
@@ -1303,6 +1343,75 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       uint64_t start_time = get_time();
       Solver_result solver_result = run_solver(solver, assumptions, "UB", conv);
       stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
+      if (solver_result.status == Result_status::incorrect)
+	return std::pair<SStats, Solver_result>(stats, solver_result);
+      if (solver_result.status == Result_status::unknown)
+	{
+	  assert(solver_result.message);
+	  warning = warning + *solver_result.message;
+	}
+    }
+
+  if (!warning.empty())
+    {
+      Solver_result result = {Result_status::unknown, warning};
+      return std::pair<SStats, Solver_result>(stats, result);
+    }
+  return std::pair<SStats, Solver_result>(stats, {Result_status::correct, {}});
+}
+
+std::pair<SStats, Solver_result> verify_bitwuzla(Function *func)
+{
+  assert(func->bbs.size() == 1);
+
+  TermManager tm;
+  Options options;
+  set_solver_limits(options);
+  Bitwuzla solver(tm, options);
+
+  SStats stats;
+  stats.skipped = false;
+
+  Converter conv(tm, solver, func);
+  Term ub_assume_term = conv.inst_as_bool(conv.ver.ub_assume);
+  Term ub_term = conv.inst_as_bool(conv.ver.ub);
+  Term not_ub_assume_term = tm.mk_term(Kind::NOT, {ub_assume_term});
+
+  solver.assert_formula(not_ub_assume_term);
+  for (auto& fp_constraint : conv.fp_constraints)
+    solver.assert_formula(fp_constraint);
+
+  std::string warning;
+
+  // Check if the function may invoke undefined behavior.
+  if (need_verifying_ub(conv.ver))
+    {
+      std::vector<Term> assumptions;
+      assumptions.push_back(ub_term);
+      uint64_t start_time = get_time();
+      Solver_result solver_result =
+	run_solver(solver, assumptions, "Function invokes undefined behavior",
+		   conv);
+      stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
+      if (solver_result.status == Result_status::incorrect)
+	return std::pair<SStats, Solver_result>(stats, solver_result);
+      if (solver_result.status == Result_status::unknown)
+	{
+	  assert(solver_result.message);
+	  warning = warning + *solver_result.message;
+	}
+    }
+
+  // Check if the function may call abort.
+  if (need_verifying_abort(conv.ver))
+    {
+      std::vector<Term> assumptions;
+      assumptions.push_back(conv.inst_as_bool(conv.ver.abort));
+      uint64_t start_time = get_time();
+      Solver_result solver_result =
+	run_solver(solver, assumptions, "Function calls abort",
+		   conv, conv.tgt.unique_ub);
+      stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	return std::pair<SStats, Solver_result>(stats, solver_result);
       if (solver_result.status == Result_status::unknown)

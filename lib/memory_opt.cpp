@@ -626,6 +626,61 @@ void local_mem_address_space(Inst *mem)
 
 } // end anonymous namespace
 
+void canonicalize_memory(Function *func)
+{
+  // Expand Op::MEMMOVE and Op::MEMSET into loads and stores.
+  expand_memmove_memset(func);
+
+  // Substitute load from constant memory with the actual value. This is
+  // also done by later load-to-store forwarding, but doing it here may
+  // remove the need to set up the constant memory and therefore make
+  // more code CSE and leave less memory for the SMT solver to track.
+  if (config.optimize_ub)
+    forward_const(func);
+
+  // Dead instructions using Op::MEMORY may make the code below treat the
+  // memory as used. Run DCE first to ensure we get the intended result.
+  dead_code_elimination(func);
+
+  std::vector<Inst *> func_mem = collect_mem(func);
+
+  for (auto mem : func_mem)
+    local_mem_address_space(mem);
+
+  // Remove unused global memory.
+  std::vector<Inst *> remove;
+  for (size_t i = 0; i < func_mem.size(); i++)
+    {
+      if (is_local_memory(func_mem[i]))
+	break;
+      __int128 arg3 = func_mem[i]->args[2]->value();
+      if (!(arg3 & MEM_KEEP) && is_unused_memory(func_mem[i]))
+	remove.push_back(func_mem[i]);
+    }
+
+  // Remove unused local memory.
+  for (auto inst : func_mem)
+    {
+      if (!(inst->args[2]->value() & MEM_KEEP)
+	  && is_local_memory(inst)
+	  && is_unused_memory(inst))
+	remove.push_back(inst);
+    }
+
+  if (!remove.empty())
+    {
+      for (auto inst : remove)
+	remove_unused_memory(inst);
+
+      // Removing memory may open up new opportunities. For example, consider:
+      //   int b;
+      //   int *p = &b;
+      // b may become dead after we remove p. Therefore, we need to rerun the
+      // pass.
+      canonicalize_memory(func);
+    }
+}
+
 // This function makes the memory instructions consistent between src and tgt:
 //  * src and tgt have the same global memory instructions
 //  * global memory that is unused in both src and tgt is removed

@@ -19,11 +19,13 @@ LIBS:=@LIBS@
 
 tools = \
 	smtgcc-check-refine \
-	smtgcc-opt
+	smtgcc-opt \
+	smtgcc-verify
 
 plugins = \
 	smtgcc-check-refine.so \
-	smtgcc-tv.so
+	smtgcc-tv.so \
+	smtgcc-verify.so
 ifeq ($(findstring aarch64, $(ARCH)), aarch64)
 	plugins += smtgcc-tv-backend.so
 else ifeq ($(findstring bpf, $(ARCH)), bpf)
@@ -64,14 +66,16 @@ lib_objects = $(lib_sources:.cpp=.o)
 
 tools_sources = \
 	tools/smtgcc-check-refine.cpp \
-	tools/smtgcc-opt.cpp
+	tools/smtgcc-opt.cpp \
+	tools/smtgcc-verify.cpp
 tools_objects = $(tools_sources:.cpp=.o)
 
 plugin_sources = \
 	plugin/gimple_conv.cpp \
 	plugin/smtgcc-check-refine.cpp \
 	plugin/smtgcc-tv-backend.cpp \
-	plugin/smtgcc-tv.cpp
+	plugin/smtgcc-tv.cpp \
+	plugin/smtgcc-verify.cpp
 ifeq ($(findstring aarch64, $(ARCH)), aarch64)
 	plugin_sources += plugin/aarch64.cpp
 	backend_objs = plugin/aarch64.o
@@ -115,6 +119,9 @@ smtgcc-check-refine: tools/smtgcc-check-refine.o $(lib_objects)
 smtgcc-opt: tools/smtgcc-opt.o $(lib_objects)
 	$(CXX) $(CXXFLAGS) tools/smtgcc-opt.o -o $@ $(lib_objects) $(LIBS)
 
+smtgcc-verify: tools/smtgcc-verify.o $(lib_objects)
+	$(CXX) $(CXXFLAGS) tools/smtgcc-verify.o -o $@ $(lib_objects) $(LIBS)
+
 smtgcc-check-refine.so: plugin/smtgcc-check-refine.o plugin/gimple_conv.o $(lib_objects)
 	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-check-refine.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)
 
@@ -123,3 +130,6 @@ smtgcc-tv-backend.so: plugin/smtgcc-tv-backend.o plugin/gimple_conv.o $(backend_
 
 smtgcc-tv.so: plugin/smtgcc-tv.o plugin/gimple_conv.o $(lib_objects)
 	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-tv.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)
+
+smtgcc-verify.so: plugin/smtgcc-verify.o plugin/gimple_conv.o $(lib_objects)
+	$(CXX) $(CXXFLAGS) -shared plugin/smtgcc-verify.o plugin/gimple_conv.o $(lib_objects) -o $@ $(LIBS)

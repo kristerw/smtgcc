@@ -55,9 +55,9 @@ unsigned int tv_pass::execute(function *fun)
 	  error_has_been_reported = true;
 	  return 0;
 	}
-      bool is_tgt_func = !strcmp(name, "tgt");
-
-      Function *func = process_function(module, &state, fun, is_tgt_func);
+      Function_role role =
+	!strcmp(name, "tgt") ? Function_role::tgt : Function_role::src;
+      Function *func = process_function(module, &state, fun, role);
       unroll_and_optimize(func, state.symbolic_id);
       if (module->functions.size() == 2)
 	{

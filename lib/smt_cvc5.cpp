@@ -453,6 +453,18 @@ void Converter::build_solver_smt(const Inst *inst)
 	case Op::PRINT:
 	  print.push_back(inst);
 	  break;
+	case Op::SRC_ABORT:
+	  assert(!src.abort);
+	  assert(!src.abort_san);
+	  src.abort = inst->args[0];
+	  src.abort_san = inst->args[1];
+	  return;
+	case Op::SRC_EXIT:
+	  assert(!src.exit);
+	  assert(!src.exit_val);
+	  src.exit = inst->args[0];
+	  src.exit_val = inst->args[1];
+	  return;
 	case Op::SRC_RETVAL:
 	  assert(!src.retval);
 	  assert(!src.retval_indef);
@@ -474,6 +486,18 @@ void Converter::build_solver_smt(const Inst *inst)
 	    inst2bv.emplace(inst, symbolic);
 	  }
 	  break;
+	case Op::TGT_ABORT:
+	  assert(!tgt.abort);
+	  assert(!tgt.abort_san);
+	  tgt.abort = inst->args[0];
+	  tgt.abort_san = inst->args[1];
+	  return;
+	case Op::TGT_EXIT:
+	  assert(!tgt.exit);
+	  assert(!tgt.exit_val);
+	  tgt.exit = inst->args[0];
+	  tgt.exit_val = inst->args[1];
+	  return;
 	case Op::TGT_RETVAL:
 	  assert(!tgt.retval);
 	  assert(!tgt.retval_indef);
@@ -506,22 +530,6 @@ void Converter::build_solver_smt(const Inst *inst)
 	  tgt.memory = inst->args[0];
 	  tgt.memory_size = inst->args[1];
 	  tgt.memory_indef = inst->args[2];
-	  return;
-	case Op::SRC_EXIT:
-	  assert(!src.abort);
-	  assert(!src.exit);
-	  assert(!src.exit_val);
-	  src.abort = inst->args[0];
-	  src.exit = inst->args[1];
-	  src.exit_val = inst->args[2];
-	  return;
-	case Op::TGT_EXIT:
-	  assert(!tgt.abort);
-	  assert(!tgt.exit);
-	  assert(!tgt.exit_val);
-	  tgt.abort = inst->args[0];
-	  tgt.exit = inst->args[1];
-	  tgt.exit_val = inst->args[2];
 	  return;
 	default:
 	  throw Not_implemented("build_solver_smt: "s + inst->name());
@@ -620,17 +628,18 @@ void Converter::convert_function()
       tgt.retval_indef = nullptr;
     }
 
+  Basic_block *bb = func->bbs[0];
   if (!src.abort && tgt.abort)
+    src.abort = bb->value_inst(0, 1);
+  if (!tgt.abort && src.abort)
+    tgt.abort = bb->value_inst(0, 1);
+  if (!src.exit && tgt.exit)
     {
-      Basic_block *bb = func->bbs[0];
-      src.abort = bb->value_inst(0, 1);
       src.exit = bb->value_inst(0, 1);
       src.exit_val = bb->value_inst(0, tgt.exit_val->bitsize);
     }
-  if (!tgt.abort && src.abort)
+  if (!tgt.exit && src.exit)
     {
-      Basic_block *bb = func->bbs[0];
-      tgt.abort = bb->value_inst(0, 1);
       tgt.exit = bb->value_inst(0, 1);
       tgt.exit_val = bb->value_inst(0, src.exit_val->bitsize);
     }
@@ -665,6 +674,39 @@ void set_solver_limits(cvc5::Solver& solver)
   char buf[32];
   sprintf(buf, "%d", config.timeout);
   solver.setOption("tlimit-per", buf);
+}
+
+cvc5::Term abort_differ(cvc5::Solver& solver, Converter& conv)
+{
+  if (!conv.src.abort)
+    {
+      assert(!conv.tgt.abort);
+      return solver.mkBoolean(false);
+    }
+
+  cvc5::Term src_abort_term = conv.inst_as_bool(conv.src.abort);
+  cvc5::Term tgt_abort_term = conv.inst_as_bool(conv.tgt.abort);
+  return solver.mkTerm(cvc5::Kind::XOR, {src_abort_term, tgt_abort_term});
+}
+
+cvc5::Term exit_differ(cvc5::Solver& solver, Converter& conv)
+{
+  if (!conv.src.exit)
+    {
+      assert(!conv.tgt.exit);
+      return solver.mkBoolean(false);
+    }
+
+  cvc5::Term src_exit_term = conv.inst_as_bool(conv.src.exit);
+  cvc5::Term tgt_exit_term = conv.inst_as_bool(conv.tgt.exit);
+  cvc5::Term exit_differ =
+    solver.mkTerm(cvc5::Kind::XOR, {src_exit_term, tgt_exit_term});
+  cvc5::Term src_exit_val_term = conv.inst_as_bv(conv.src.exit_val);
+  cvc5::Term tgt_exit_val_term = conv.inst_as_bv(conv.tgt.exit_val);
+  cvc5::Term exit_val_differ =
+    solver.mkTerm(cvc5::Kind::DISTINCT,
+		  {src_exit_val_term, tgt_exit_val_term});
+  return solver.mkTerm(cvc5::Kind::OR, {exit_differ, exit_val_differ});
 }
 
 } // end anonymous namespace
@@ -714,24 +756,9 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
   if (need_checking_abort(conv.src, conv.tgt))
     {
       std::vector<cvc5::Term> assumptions;
-      cvc5::Term src_abort_term = conv.inst_as_bool(conv.src.abort);
-      cvc5::Term tgt_abort_term = conv.inst_as_bool(conv.tgt.abort);
-      cvc5::Term abort_differ =
-	solver.mkTerm(cvc5::Kind::XOR, {src_abort_term, tgt_abort_term});
-      cvc5::Term src_exit_term = conv.inst_as_bool(conv.src.exit);
-      cvc5::Term tgt_exit_term = conv.inst_as_bool(conv.tgt.exit);
-      cvc5::Term exit_differ =
-	solver.mkTerm(cvc5::Kind::XOR, {src_exit_term, tgt_exit_term});
-      cvc5::Term src_exit_val_term = conv.inst_as_bv(conv.src.exit_val);
-      cvc5::Term tgt_exit_val_term = conv.inst_as_bv(conv.tgt.exit_val);
-      cvc5::Term exit_val_differ =
-	solver.mkTerm(cvc5::Kind::DISTINCT,
-		      {src_exit_val_term, tgt_exit_val_term});
-      exit_val_differ =
-	solver.mkTerm(cvc5::Kind::AND, {src_exit_term, exit_val_differ});
       cvc5::Term differ =
-	solver.mkTerm(cvc5::Kind::OR, {abort_differ, exit_differ});
-      differ = solver.mkTerm(cvc5::Kind::OR, {differ, exit_val_differ});
+	solver.mkTerm(cvc5::Kind::OR,
+		      {abort_differ(solver, conv), exit_differ(solver, conv)});
       assumptions.push_back(differ);
       uint64_t start_time = get_time();
       Solver_result solver_result =

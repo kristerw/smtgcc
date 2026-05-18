@@ -168,19 +168,25 @@ enum class Op : uint8_t {
   WRITE,
 
   // Solver
+  ABORT,
+  ASSUME,
   EXIT,
   PARAM,
   PRINT,
+  SRC_ABORT,
   SRC_EXIT,
   SRC_MEM,
   SRC_RETVAL,
   SRC_UB,
   SYMBOLIC,
+  TGT_ABORT,
   TGT_EXIT,
   TGT_MEM,
   TGT_RETVAL,
   TGT_UB,
   UB,
+  VER_ABORT,
+  VER_UB,
 
   // Special
   BR,
@@ -229,7 +235,11 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 120> inst_info;
+extern const std::array<Inst_info, 126> inst_info;
+
+enum class Function_role {
+  src, tgt, ver
+};
 
 struct Module;
 struct Function;
@@ -426,6 +436,7 @@ struct Result_state
   Inst *retval = nullptr;
   Inst *retval_indef = nullptr;
   Inst *abort = nullptr;
+  Inst *abort_san = nullptr;
   Inst *exit = nullptr;
   Inst *exit_val = nullptr;
   Inst *memory = nullptr;
@@ -435,11 +446,24 @@ struct Result_state
   void clear();
 };
 
+struct Result_state_verify
+{
+  Inst *ub_assume = nullptr;
+  Inst *ub = nullptr;
+  Inst *abort = nullptr;
+  Inst *abort_san = nullptr;
+
+  void clear();
+};
+
 bool need_checking_ub(const Result_state& src, const Result_state& tgt);
 bool need_checking_abort(const Result_state& src, const Result_state& tgt);
 bool need_checking_retval(const Result_state& src, const Result_state& tgt);
 bool need_checking_memory(const Result_state& src, const Result_state& tgt);
 bool need_checking(const Result_state& src, const Result_state& tgt);
+bool need_verifying_ub(const Result_state_verify& ver);
+bool need_verifying_abort(const Result_state_verify& ver);
+bool need_verifying(const Result_state_verify& ver);
 
 Module *create_module(uint32_t ptr_bits, uint32_t id_bits, uint32_t offset_bits);
 void destroy_module(Module *);
@@ -523,6 +547,7 @@ bool postdominates(const Basic_block *bb1, const Basic_block *bb2);
 // check.cpp
 bool identical(Function *func1, Function *func2);
 Solver_result check_refine(Module *module, bool run_simplify_inst = true);
+Solver_result verify(Function *func, bool run_simplify_inst = true);
 void convert(Module *module);
 
 // cse.cpp
@@ -546,6 +571,7 @@ bool loop_unroll(Function *func, int nof_unroll = unroll_limit);
 bool loop_unroll(Module *module);
 
 // memory_opt.cpp
+void canonicalize_memory(Function *func);
 void canonicalize_memory(Module *module);
 void sort_stores(Function *func);
 void sort_stores(Module *module);
@@ -664,8 +690,9 @@ struct Aarch64RegIdx {
 
   // Pseudo registers tracking abort/exit
   static constexpr uint64_t abort = 88;
-  static constexpr uint64_t exit = 89;
-  static constexpr uint64_t exit_val = 90;
+  static constexpr uint64_t abort_san = 89;
+  static constexpr uint64_t exit = 90;
+  static constexpr uint64_t exit_val = 91;
 };
 
 struct aarch64_state {
@@ -704,8 +731,9 @@ struct BpfRegIdx {
 
   // Pseudo registers tracking abort/exit
   static constexpr uint64_t abort = 11;
-  static constexpr uint64_t exit = 12;
-  static constexpr uint64_t exit_val = 13;
+  static constexpr uint64_t abort_san = 12;
+  static constexpr uint64_t exit = 13;
+  static constexpr uint64_t exit_val = 14;
 };
 
 struct bpf_state {
@@ -831,8 +859,9 @@ struct RiscvRegIdx {
 
   // Pseudo registers tracking abort/exit
   static constexpr uint64_t abort = 98;
-  static constexpr uint64_t exit = 99;
-  static constexpr uint64_t exit_val = 100;
+  static constexpr uint64_t abort_san = 99;
+  static constexpr uint64_t exit = 100;
+  static constexpr uint64_t exit_val = 101;
 };
 
 struct riscv_state {
@@ -907,8 +936,9 @@ struct ShRegIdx {
 
   // Pseudo registers tracking abort/exit
   static constexpr uint64_t abort = 40;
-  static constexpr uint64_t exit = 41;
-  static constexpr uint64_t exit_val = 42;
+  static constexpr uint64_t abort_san = 41;
+  static constexpr uint64_t exit = 42;
+  static constexpr uint64_t exit_val = 43;
 };
 
 struct sh_state {
@@ -945,6 +975,7 @@ void simplify_mem(Module *module);
 
 // smt_bitwuzla.cpp
 std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func);
+std::pair<SStats, Solver_result> verify_bitwuzla(Function *func);
 
 // smt_cvc5.cpp
 std::pair<SStats, Solver_result> check_refine_cvc5(Function *func);
