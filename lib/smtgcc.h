@@ -411,7 +411,7 @@ struct Config
   //
   // This implies that check_refine must perform the UB check before checking
   // abort/exit, retval, or memory.
-  bool optimize_ub = true;
+  bool optimize_ub = false;
 
   bool redis_cache = false;
 
