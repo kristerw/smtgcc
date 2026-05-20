@@ -521,10 +521,10 @@ Inst *Converter::canonicalize_and(Inst *inst)
   // is simplified to x > 4.
   bool new_comparisons_added = false;
   {
-    std::map<Inst*, std::vector<Inst*>> ult_comps;
-    std::map<Inst*, std::vector<Inst*>> slt_comps;
-    std::map<Inst*, std::vector<Inst*>> eq_comps;
-    std::map<Inst*, std::vector<Inst*>> not_eq_comps;
+    std::map<Inst*, std::vector<Inst*>, Inst_comp> ult_comps;
+    std::map<Inst*, std::vector<Inst*>, Inst_comp> slt_comps;
+    std::map<Inst*, std::vector<Inst*>, Inst_comp> eq_comps;
+    std::map<Inst*, std::vector<Inst*>, Inst_comp> not_eq_comps;
 
     // Collect Op::ULT, Op::ULE, and Op::EQ between an instruction and
     // a constant.
