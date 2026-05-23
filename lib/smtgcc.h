@@ -406,13 +406,6 @@ struct Config
   // SMT solver memory limit in megabytes.
   int memory_limit = 5 * 1024;
 
-  // Optimize based on UB, such as removing instructions if all uses are in
-  // UB paths.
-  //
-  // This implies that check_refine must perform the UB check before checking
-  // abort/exit, retval, or memory.
-  bool optimize_ub = false;
-
   bool redis_cache = false;
 
   SmtSolver smt_solver;

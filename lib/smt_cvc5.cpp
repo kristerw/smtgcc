@@ -735,23 +735,6 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
 
   std::string warning;
 
-  // Check that tgt does not have UB that is not in src.
-  if (config.optimize_ub && need_checking_ub(conv.src, conv.tgt))
-    {
-      std::vector<cvc5::Term> assumptions;
-      assumptions.push_back(tgt_unique_ub_term);
-      uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, assumptions, "UB");
-      stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
-      if (solver_result.status == Result_status::incorrect)
-	return std::pair<SStats, Solver_result>(stats, solver_result);
-      if (solver_result.status == Result_status::unknown)
-	{
-	  assert(solver_result.message);
-	  warning = warning + *solver_result.message;
-	}
-    }
-
   // Check that the function calls abort/exit identically for src and tgt.
   if (need_checking_abort(conv.src, conv.tgt))
     {
@@ -942,7 +925,7 @@ std::pair<SStats, Solver_result> check_refine_cvc5(Function *func)
     }
 
   // Check that tgt does not have UB that is not in src.
-  if (!config.optimize_ub && need_checking_ub(conv.src, conv.tgt))
+  if (need_checking_ub(conv.src, conv.tgt))
     {
       std::vector<cvc5::Term> assumptions;
       assumptions.push_back(tgt_unique_ub_term);

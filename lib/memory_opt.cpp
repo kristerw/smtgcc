@@ -635,8 +635,7 @@ void canonicalize_memory(Function *func)
   // also done by later load-to-store forwarding, but doing it here may
   // remove the need to set up the constant memory and therefore make
   // more code CSE and leave less memory for the SMT solver to track.
-  if (config.optimize_ub)
-    forward_const(func);
+  forward_const(func);
 
   // Dead instructions using Op::MEMORY may make the code below treat the
   // memory as used. Run DCE first to ensure we get the intended result.
@@ -708,11 +707,8 @@ void canonicalize_memory(Module *module)
   // also done by later load-to-store forwarding, but doing it here may
   // remove the need to set up the constant memory and therefore make
   // more code CSE and leave less memory for the SMT solver to track.
-  if (config.optimize_ub)
-    {
-      forward_const(src);
-      forward_const(tgt);
-    }
+  forward_const(src);
+  forward_const(tgt);
 
   // Dead instructions using Op::MEMORY may make the code below treat the
   // memory as used. Run DCE first to ensure we get the intended result.

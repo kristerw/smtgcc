@@ -985,7 +985,7 @@ std::string value_string(const Term& val)
   return "0x" + val.value<std::string>(16);
 }
 
-Solver_result run_solver(Bitwuzla& solver, const std::vector<Term>& assumptions, const char *str, Converter& conv, Inst *ub_cond = nullptr)
+Solver_result run_solver(Bitwuzla& solver, const std::vector<Term>& assumptions, const char *str, Converter& conv)
 {
   if (config.verbose > 2)
     {
@@ -1011,18 +1011,6 @@ Solver_result run_solver(Bitwuzla& solver, const std::vector<Term>& assumptions,
     }
   else if (result == Result::SAT)
     {
-      if (config.optimize_ub && ub_cond)
-	{
-	  // We perform the UB check first in order to prevent false alarms
-	  // for retval/memory/etc. when tgt is more UB than src and we
-	  // enable smtgcc optimizations that may change the result
-	  // for cases that are UB. But it is possible that the UB check
-	  // times out, but later checks manage to find a case where
-	  // retval/memory/etc. differ for a case where tgt is more UB
-	  // than src. Report this as a failure found by the UB check.
-	  if (solver.get_value(conv.inst_as_bool(ub_cond)).is_true())
-	    str = "UB";
-	}
       std::string msg = "Transformation is not correct ("s + str + ")\n";
       for (auto& term : conv.input)
 	{
@@ -1129,23 +1117,6 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 
   std::string warning;
 
-  // Check that tgt does not have UB that is not in src.
-  if (config.optimize_ub && need_checking_ub(conv.src, conv.tgt))
-    {
-      std::vector<Term> assumptions;
-      assumptions.push_back(tgt_unique_ub_term);
-      uint64_t start_time = get_time();
-      Solver_result solver_result = run_solver(solver, assumptions, "UB", conv);
-      stats.time[3] = std::max(get_time() - start_time, (uint64_t)1);
-      if (solver_result.status == Result_status::incorrect)
-	return std::pair<SStats, Solver_result>(stats, solver_result);
-      if (solver_result.status == Result_status::unknown)
-	{
-	  assert(solver_result.message);
-	  warning = warning + *solver_result.message;
-	}
-    }
-
   // Check that the function calls abort/exit identically for src and tgt.
   if (need_checking_abort(conv.src, conv.tgt))
     {
@@ -1155,7 +1126,7 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       assumptions.push_back(differ);
       uint64_t start_time = get_time();
       Solver_result solver_result =
-	run_solver(solver, assumptions, "abort/exit", conv, conv.tgt.unique_ub);
+	run_solver(solver, assumptions, "abort/exit", conv);
       stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	return std::pair<SStats, Solver_result>(stats, solver_result);
@@ -1212,7 +1183,7 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       assumptions.push_back(res2);
       uint64_t start_time = get_time();
       Solver_result solver_result =
-	run_solver(solver, assumptions, "retval", conv, conv.tgt.unique_ub);
+	run_solver(solver, assumptions, "retval", conv);
       stats.time[1] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
@@ -1309,7 +1280,7 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 
       uint64_t start_time = get_time();
       Solver_result solver_result =
-	run_solver(solver, assumptions, "Memory", conv, conv.tgt.unique_ub);
+	run_solver(solver, assumptions, "Memory", conv);
       stats.time[2] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	{
@@ -1336,7 +1307,7 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
     }
 
   // Check that tgt does not have UB that is not in src.
-  if (!config.optimize_ub && need_checking_ub(conv.src, conv.tgt))
+  if (need_checking_ub(conv.src, conv.tgt))
     {
       std::vector<Term> assumptions;
       assumptions.push_back(tgt_unique_ub_term);
@@ -1409,8 +1380,7 @@ std::pair<SStats, Solver_result> verify_bitwuzla(Function *func)
       assumptions.push_back(conv.inst_as_bool(conv.ver.abort));
       uint64_t start_time = get_time();
       Solver_result solver_result =
-	run_solver(solver, assumptions, "Function calls abort",
-		   conv, conv.tgt.unique_ub);
+	run_solver(solver, assumptions, "Function calls abort", conv);
       stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
 	return std::pair<SStats, Solver_result>(stats, solver_result);
