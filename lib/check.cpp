@@ -2361,6 +2361,8 @@ void Converter::finalize()
     {
       bool modified;
       do {
+	if (!need_checking(src, tgt))
+	  break;
 	modified = reprocess_dest_func();
       } while (modified);
     }
