@@ -167,6 +167,7 @@ struct Converter {
   void process_cfn_bit_andn(gimple *stmt);
   void process_cfn_bit_iorn(gimple *stmt);
   void process_cfn_assume_aligned(gimple *stmt);
+  void process_cfn_bitreverse(gimple *stmt);
   void process_cfn_bswap(gimple *stmt);
   void process_cfn_check_war_ptrs(gimple *stmt);
   void process_cfn_check_raw_ptrs(gimple *stmt);
@@ -4485,6 +4486,22 @@ void Converter::process_cfn_assume_aligned(gimple *stmt)
     }
 }
 
+void Converter::process_cfn_bitreverse(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 1);
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, tree)
+    -> std::pair<Inst *, Inst *>
+    {
+      Inst *inst = gen_bitreverse(bb, elem1);
+      Inst *indef = nullptr;
+      if (elem1_indef)
+	indef = gen_bitreverse(bb, elem1_indef);
+      return {inst, indef};
+    };
+  process_cfn_unary(stmt, gen_elem);
+}
+
 void Converter::process_cfn_bswap(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 1);
@@ -7407,6 +7424,12 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_BUILT_IN_ASSUME_ALIGNED:
       process_cfn_assume_aligned(stmt);
+      break;
+    case CFN_BUILT_IN_BITREVERSE16:
+    case CFN_BUILT_IN_BITREVERSE32:
+    case CFN_BUILT_IN_BITREVERSE64:
+    case CFN_BUILT_IN_BITREVERSE128:
+      process_cfn_bitreverse(stmt);
       break;
     case CFN_BUILT_IN_BSWAP16:
     case CFN_BUILT_IN_BSWAP32:
