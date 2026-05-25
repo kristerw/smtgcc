@@ -24,7 +24,9 @@ void build_return(bpf_state *rstate, Function *src_func, function *fun)
   tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
   uint64_t ret_bitsize = src_last_bb->last_inst->args[0]->bitsize;
 
-  if ((INTEGRAL_TYPE_P(ret_type) || POINTER_TYPE_P(ret_type))
+  if ((INTEGRAL_TYPE_P(ret_type)
+       || POINTER_TYPE_P(ret_type)
+       || SCALAR_FLOAT_TYPE_P(ret_type))
       && ret_bitsize <= 64)
     {
       Inst *retval =
