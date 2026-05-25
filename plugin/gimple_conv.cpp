@@ -161,6 +161,7 @@ struct Converter {
   void process_gimple_asm(gimple *stmt);
   void process_cfn_unary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, tree)>& gen_elem);
   void process_cfn_binary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem, bool adjust_types = false);
+  void process_cfn_ternary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem);
   void process_cfn_abd(gimple *stmt);
   void process_cfn_abort(gimple *stmt);
   void process_cfn_add_overflow(gimple *stmt);
@@ -190,6 +191,8 @@ struct Converter {
   void process_cfn_expect(gimple *stmt);
   void process_cfn_fabs(gimple *stmt);
   void process_cfn_ffs(gimple *stmt);
+  void process_cfn_fma(gimple *stmt);
+  void process_cfn_fnma(gimple *stmt);
   void process_cfn_fmax(gimple *stmt);
   void process_cfn_fmin(gimple *stmt);
   void process_cfn_isfinite(gimple *stmt);
@@ -4269,6 +4272,79 @@ void Converter::process_cfn_binary(gimple *stmt, const std::function<std::pair<I
     tree2indef.insert({lhs, res_indef});
 }
 
+void Converter::process_cfn_ternary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem)
+{
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  tree arg1_type = TREE_TYPE(arg1_expr);
+  tree arg2_expr = gimple_call_arg(stmt, 1);
+  tree arg3_expr = gimple_call_arg(stmt, 2);
+  assert(VECTOR_TYPE_P(TREE_TYPE(arg2_expr)) == VECTOR_TYPE_P(arg1_type));
+  assert(VECTOR_TYPE_P(TREE_TYPE(arg3_expr)) == VECTOR_TYPE_P(arg1_type));
+  auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
+  auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
+  auto [arg3, arg3_indef] = tree2inst_indef(arg3_expr);
+
+  uint32_t nof_elem;
+  uint32_t elem_bitsize;
+  tree elem_type;
+  if (VECTOR_TYPE_P(arg1_type))
+    {
+      elem_type = TREE_TYPE(arg1_type);
+      elem_bitsize = bitsize_for_type(elem_type);
+      nof_elem = bitsize_for_type(arg1_type) / elem_bitsize;
+    }
+  else
+    {
+      elem_type = arg1_type;
+      elem_bitsize = arg1->bitsize;
+      nof_elem = 1;
+    }
+
+  tree lhs = gimple_call_lhs(stmt);
+  if (!lhs)
+    return;
+  tree lhs_type = TREE_TYPE(lhs);
+  assert(VECTOR_TYPE_P(lhs_type) == VECTOR_TYPE_P(arg1_type));
+
+  Inst *res = nullptr;
+  Inst *res_indef = nullptr;
+  for (uint32_t j = 0; j < nof_elem; j++)
+    {
+      Inst *elem1 = extract_vec_elem(bb, arg1, elem_bitsize, j);
+      Inst *elem2 = extract_vec_elem(bb, arg2, elem_bitsize, j);
+      Inst *elem3 = extract_vec_elem(bb, arg3, elem_bitsize, j);
+
+      Inst *elem1_indef = nullptr;
+      if (arg1_indef)
+	elem1_indef = extract_vec_elem(bb, arg1_indef, elem_bitsize, j);
+      Inst *elem2_indef = nullptr;
+      if (arg2_indef)
+	elem2_indef = extract_vec_elem(bb, arg2_indef, elem_bitsize, j);
+      Inst *elem3_indef = nullptr;
+      if (arg3_indef)
+	elem3_indef = extract_vec_elem(bb, arg3_indef, elem_bitsize, j);
+
+      auto [inst, indef] =
+	gen_elem(elem1, elem1_indef, elem2, elem2_indef, elem3, elem3_indef,
+		 elem_type);
+      if (res)
+	res = bb->build_inst(Op::CONCAT, inst, res);
+      else
+	res = inst;
+      if (indef)
+	{
+	  if (res_indef)
+	    res_indef = bb->build_inst(Op::CONCAT, indef, res_indef);
+	  else
+	    res_indef = indef;
+	}
+    }
+  constrain_range(bb, lhs, res);
+  tree2instruction.insert({lhs, res});
+  if (res_indef)
+    tree2indef.insert({lhs, res_indef});
+}
+
 void Converter::process_cfn_unary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, tree)>& gen_elem)
 {
   tree arg1_expr = gimple_call_arg(stmt, 0);
@@ -5319,6 +5395,43 @@ void Converter::process_cfn_ffs(gimple *stmt)
     }
   constrain_range(bb, lhs, inst);
   tree2instruction.insert({lhs, inst});
+}
+
+void Converter::process_cfn_fma(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 3);
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   Inst *elem3, Inst *elem3_indef, tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      if (!INTEGRAL_TYPE_P(elem_type))
+	throw Not_implemented("process_cfn_fma: unhandled type");
+      Inst *mul = bb->build_inst(Op::MUL, elem1, elem2);
+      Inst *res = bb->build_inst(Op::ADD, mul, elem3);
+      Inst *res_indef =
+	get_res_indef(elem1_indef, elem2_indef, elem3_indef, elem_type);
+      return {res, res_indef};
+    };
+  process_cfn_ternary(stmt, gen_elem);
+}
+
+void Converter::process_cfn_fnma(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 3);
+  auto gen_elem =
+    [this](Inst *elem1, Inst *elem1_indef, Inst *elem2, Inst *elem2_indef,
+	   Inst *elem3, Inst *elem3_indef, tree elem_type) -> std::pair<Inst *, Inst *>
+    {
+      if (!INTEGRAL_TYPE_P(elem_type))
+	throw Not_implemented("process_cfn_fma: unhandled type");
+      Inst *mul = bb->build_inst(Op::MUL, elem1, elem2);
+      Inst *neg_mul = bb->build_inst(Op::NEG, mul);
+      Inst *res = bb->build_inst(Op::ADD, neg_mul, elem3);
+      Inst *res_indef =
+	get_res_indef(elem1_indef, elem2_indef, elem3_indef, elem_type);
+      return {res, res_indef};
+    };
+  process_cfn_ternary(stmt, gen_elem);
 }
 
 void Converter::process_cfn_fmax(gimple *stmt)
@@ -7776,6 +7889,12 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BUILT_IN_UBSAN_HANDLE_DYNAMIC_TYPE_CACHE_MISS:
     case CFN_BUILT_IN_UBSAN_HANDLE_DYNAMIC_TYPE_CACHE_MISS_ABORT:
       process_cfn_ubsan_handle_ub();
+      break;
+    case CFN_FMA:
+      process_cfn_fma(stmt);
+      break;
+    case CFN_FNMA:
+      process_cfn_fnma(stmt);
       break;
     case CFN_UBSAN_CHECK_ADD:
       process_cfn_ubsan_check_op(stmt, Op::ADD, Op::SADD_OVERFLOW);
