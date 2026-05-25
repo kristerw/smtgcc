@@ -106,7 +106,10 @@ bpf_state setup_bpf_function(CommonState *state, Function *src_func, function *f
 	throw Not_implemented("setup_bpf_function: too many params");
       uint32_t bitsize = bitsize_for_type(TREE_TYPE(decl));
       tree type = TREE_TYPE(decl);
-      if ((!INTEGRAL_TYPE_P(type) && !POINTER_TYPE_P(type)) || bitsize > 64)
+      if ((!INTEGRAL_TYPE_P(type)
+	   && !POINTER_TYPE_P(type)
+	   && !SCALAR_FLOAT_TYPE_P(type))
+	  || bitsize > 64)
 	throw Not_implemented("setup_bpf_function: param type not handled");
       if (bitsize <= 0)
 	throw Not_implemented("Parameter size == 0");
