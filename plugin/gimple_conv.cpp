@@ -1506,7 +1506,10 @@ Addr Converter::process_array_ref(tree expr, bool is_mem_access)
       bb->build_inst(Op::UB, bb->build_inst(Op::SLT, idx, zero));
     }
   if (idx->bitsize < addr.ptr->bitsize)
-    idx = bb->build_inst(Op::ZEXT, idx, addr.ptr->bitsize);
+    {
+      Op op = TYPE_UNSIGNED(TREE_TYPE(index)) ? Op::ZEXT : Op::SEXT;
+      idx = bb->build_inst(op, idx, addr.ptr->bitsize);
+    }
   else if (idx->bitsize > addr.ptr->bitsize)
     {
       Inst *high = bb->value_inst(idx->bitsize - 1, 32);
