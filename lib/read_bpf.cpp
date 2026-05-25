@@ -763,6 +763,25 @@ void Parser::process_call()
       bb->build_inst(Op::WRITE, rstate->registers[BpfRegIdx::r0], res);
       return;
     }
+  if (name == "__muldf3")
+    {
+      Inst *arg1 = bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r1]);
+      Inst *arg2 = bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r2]);
+      Inst *res = bb->build_inst(Op::FMUL, arg1, arg2);
+      bb->build_inst(Op::WRITE, rstate->registers[BpfRegIdx::r0], res);
+      return;
+    }
+  if (name == "__mulsf3")
+    {
+      Inst *arg1 = bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r1]);
+      arg1 = bb->build_trunc(arg1, 32);
+      Inst *arg2 = bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r2]);
+      arg2 = bb->build_trunc(arg2, 32);
+      Inst *res = bb->build_inst(Op::FMUL, arg1, arg2);
+      res = bb->build_inst(Op::ZEXT, res, 64);
+      bb->build_inst(Op::WRITE, rstate->registers[BpfRegIdx::r0], res);
+      return;
+    }
   if (name == "__subdf3")
     {
       Inst *arg1 = bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r1]);
