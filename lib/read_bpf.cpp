@@ -745,6 +745,13 @@ void Parser::process_call()
       return;
     }
 
+  if (name == "__clrsbdi2")
+    {
+      Inst *arg1 = bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r1]);
+      Inst *res = gen_clrsb(bb, arg1);
+      bb->build_inst(Op::WRITE, rstate->registers[BpfRegIdx::r0], res);
+      return;
+    }
   if (name == "__popcountdi2")
     {
       Inst *arg1 = bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r1]);
