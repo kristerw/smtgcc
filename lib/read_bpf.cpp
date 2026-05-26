@@ -752,6 +752,13 @@ void Parser::process_call()
       bb->build_inst(Op::WRITE, rstate->registers[BpfRegIdx::r0], res);
       return;
     }
+  if (name == "__clzdi2")
+    {
+      Inst *arg1 = bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r1]);
+      Inst *res = gen_clz(bb, arg1);
+      bb->build_inst(Op::WRITE, rstate->registers[BpfRegIdx::r0], res);
+      return;
+    }
   if (name == "__ctzdi2")
     {
       Inst *arg1 = bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r1]);
