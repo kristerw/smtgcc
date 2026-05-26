@@ -752,6 +752,13 @@ void Parser::process_call()
       bb->build_inst(Op::WRITE, rstate->registers[BpfRegIdx::r0], res);
       return;
     }
+  if (name == "__ctzdi2")
+    {
+      Inst *arg1 = bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r1]);
+      Inst *res = gen_ctz(bb, arg1);
+      bb->build_inst(Op::WRITE, rstate->registers[BpfRegIdx::r0], res);
+      return;
+    }
   if (name == "__popcountdi2")
     {
       Inst *arg1 = bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r1]);
