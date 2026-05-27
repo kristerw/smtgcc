@@ -125,7 +125,7 @@ struct Converter {
   void process_store(tree addr_expr, tree value_expr);
   void process_store(tree addr_expr, Inst *value, Inst *value_indef);
   std::tuple<Inst *, Inst *, Inst *> load_value(Inst *ptr, uint64_t size);
-  void store_value(Inst *ptr, Inst *value, Inst *indef = nullptr);
+  void store_value(Inst *ptr, Inst *value, Inst *indef = nullptr, Inst *flag = nullptr);
   std::tuple<Inst *, Inst *, Inst *> type_convert(Inst *inst, Inst *indef, Inst *prov, tree src_type, tree dest_type);
   Inst *type_convert(Inst *inst, tree src_type, tree dest_type);
   std::pair<Inst *, Inst *> process_unary_bool(enum tree_code code, Inst *arg1, Inst *arg1_indef, tree lhs_type, tree arg1_type);
@@ -168,6 +168,7 @@ struct Converter {
   void process_cfn_bit_andn(gimple *stmt);
   void process_cfn_bit_iorn(gimple *stmt);
   void process_cfn_assume_aligned(gimple *stmt);
+  void process_cfn_atomic_load(gimple *stmt);
   void process_cfn_bitreverse(gimple *stmt);
   void process_cfn_bswap(gimple *stmt);
   void process_cfn_check_war_ptrs(gimple *stmt);
@@ -1914,13 +1915,15 @@ std::tuple<Inst *, Inst *, Inst *> Converter::load_value(Inst *ptr, uint64_t siz
 
 // Write value to memory. No UB checks etc. are done, and memory flags
 // are not updated.
-void Converter::store_value(Inst *ptr, Inst *value, Inst *value_indef)
+void Converter::store_value(Inst *ptr, Inst *value, Inst *value_indef, Inst *value_flag)
 {
   if ((value->bitsize & 7) != 0)
     throw Not_implemented("store_value: not byte aligned");
   bb->build_inst(Op::STORE_LE, ptr, value);
   if (value_indef)
     bb->build_inst(Op::SET_MEM_INDEF_LE, ptr, value_indef);
+  if (value_flag)
+    bb->build_inst(Op::SET_MEM_FLAG_LE, ptr, value_indef);
 }
 
 bool Converter::is_load(tree expr)
@@ -4563,6 +4566,20 @@ void Converter::process_cfn_assume_aligned(gimple *stmt)
       tree2instruction.insert({lhs, arg1});
       tree2prov.insert({lhs, arg1_prov});
     }
+}
+
+void Converter::process_cfn_atomic_load(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 4);
+  int64_t size = get_int_cst_val(gimple_call_arg(stmt, 0));
+  auto [src, src_prov] = tree2inst_prov(gimple_call_arg(stmt, 1));
+  auto [dest, dest_prov] = tree2inst_prov(gimple_call_arg(stmt, 2));
+
+  load_ub_check(src, src_prov, size);
+  store_ub_check(dest, dest_prov, size);
+
+  auto [value, value_indef, value_flag] = load_value(src, size);
+  store_value(dest, value, value_indef, value_flag);
 }
 
 void Converter::process_cfn_bitreverse(gimple *stmt)
@@ -7540,6 +7557,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_BUILT_IN_ASSUME_ALIGNED:
       process_cfn_assume_aligned(stmt);
+      break;
+    case CFN_BUILT_IN_ATOMIC_LOAD:
+      process_cfn_atomic_load(stmt);
       break;
     case CFN_BUILT_IN_BITREVERSE16:
     case CFN_BUILT_IN_BITREVERSE32:
