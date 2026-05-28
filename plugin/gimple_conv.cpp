@@ -141,7 +141,7 @@ struct Converter {
   Inst *process_binary_complex(enum tree_code code, Inst *arg1, Inst *arg2, tree lhs_type);
   Inst *process_binary_complex_cmp(enum tree_code code, Inst *arg1, Inst *arg2, tree lhs_type, tree arg1_type);
   std::pair<Inst *, Inst *> process_binary_bool(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type);
-  std::tuple<Inst *, Inst *, Inst *> process_binary_int(enum tree_code code, bool is_unsigned, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, Inst *arg2, Inst *arg2_indef, Inst *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
+  std::tuple<Inst *, Inst *, Inst *> process_binary_int(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, Inst *arg2, Inst *arg2_indef, Inst *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
   Inst *process_binary_scalar(enum tree_code code, Inst *arg1, Inst *arg2, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
   std::tuple<Inst *, Inst *, Inst *> process_binary_scalar(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, Inst *arg2, Inst *arg2_indef, Inst *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
   std::pair<Inst *, Inst *> process_binary_vec(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow = false);
@@ -2823,8 +2823,8 @@ std::pair<Inst *, Inst *> Converter::process_binary_bool(enum tree_code code, In
     {
       Inst *lhs_prov;
       std::tie(lhs, lhs_indef, lhs_prov) =
-	process_binary_int(code, TYPE_UNSIGNED(arg1_type), arg1, arg1_indef,
-			   nullptr, arg2, arg2_indef, nullptr, lhs_type,
+	process_binary_int(code, arg1, arg1_indef, nullptr,
+			   arg2, arg2_indef, nullptr, lhs_type,
 			   arg1_type, arg2_type);
     }
 
@@ -2851,7 +2851,7 @@ std::pair<Inst *, Inst *> Converter::process_binary_bool(enum tree_code code, In
   return {lhs, lhs_indef};
 }
 
-std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code code, bool is_unsigned, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, Inst *arg2, Inst *arg2_indef, Inst *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow)
+std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code code, Inst *arg1, Inst *arg1_indef, Inst *arg1_prov, Inst *arg2, Inst *arg2_indef, Inst *arg2_prov, tree lhs_type, tree arg1_type, tree arg2_type, bool ignore_overflow)
 {
   // Handle instructions that have special requirements for the propagation
   // of indef bits.
@@ -3026,7 +3026,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	  build_ub_if_not_zero(arg2_indef);
 	Inst *bitsize = bb->value_inst(arg1->bitsize, arg2->bitsize);
 	bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
-	Op op = is_unsigned ? Op::LSHR : Op::ASHR;
+	Op op = TYPE_UNSIGNED(arg1_type) ? Op::LSHR : Op::ASHR;
 
 	// The assembly instructions for most ISAs truncate the shift
 	// amount. Do the same truncation here to make it more likely
@@ -3088,13 +3088,13 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	    bb->build_inst(Op::UB, bb->build_inst(Op::AND, cond1, cond2));
 	  }
 	Inst *zero = bb->value_inst(0, arg1->bitsize);
-	Op rem_op = is_unsigned ? Op::UREM : Op::SREM;
+	Op rem_op = TYPE_UNSIGNED(arg1_type) ? Op::UREM : Op::SREM;
 	Inst *rem = bb->build_inst(rem_op, arg1, arg2);
 	Inst *ub_cond = bb->build_inst(Op::NE, rem, zero);
 	bb->build_inst(Op::UB, ub_cond);
 	Inst *ub_cond2 = bb->build_inst(Op::EQ, arg2, zero);
 	bb->build_inst(Op::UB, ub_cond2);
-	Op div_op = is_unsigned ? Op::UDIV : Op::SDIV;
+	Op div_op = TYPE_UNSIGNED(arg1_type) ? Op::UDIV : Op::SDIV;
 	return {bb->build_inst(div_op, arg1, arg2), res_indef, nullptr};
       }
     case TRUNC_DIV_EXPR:
@@ -3110,7 +3110,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	Inst *zero_inst = bb->value_inst(0, arg1->bitsize);
 	Inst *cond = bb->build_inst(Op::EQ, arg2, zero_inst);
 	bb->build_inst(Op::UB, cond);
-	Op op = is_unsigned ? Op::UDIV : Op::SDIV;
+	Op op = TYPE_UNSIGNED(arg1_type) ? Op::UDIV : Op::SDIV;
 	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
       }
     case TRUNC_MOD_EXPR:
@@ -3126,14 +3126,14 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
 	Inst *zero_inst = bb->value_inst(0, arg1->bitsize);
 	Inst *cond = bb->build_inst(Op::EQ, arg2, zero_inst);
 	bb->build_inst(Op::UB, cond);
-	Op op = is_unsigned ? Op::UREM : Op::SREM;
+	Op op = TYPE_UNSIGNED(arg1_type) ? Op::UREM : Op::SREM;
 	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
       }
     case MAX_EXPR:
       {
 	if ((arg1_prov || arg2_prov) && arg1_prov != arg2_prov)
 	  throw Not_implemented("two different provenance in MAX_EXPR");
-	Op op = is_unsigned ? Op::ULT : Op::SLT;
+	Op op = TYPE_UNSIGNED(arg1_type) ? Op::ULT : Op::SLT;
 	Inst *cond = bb->build_inst(op, arg2, arg1);
 	Inst *res = bb->build_inst(Op::ITE, cond, arg1, arg2);
 	return {res, res_indef, arg1_prov};
@@ -3142,7 +3142,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       {
 	if ((arg1_prov || arg2_prov) && arg1_prov != arg2_prov)
 	  throw Not_implemented("two different provenance in MIN_EXPR");
-	Op op = is_unsigned ? Op::ULT : Op::SLT;
+	Op op = TYPE_UNSIGNED(arg1_type) ? Op::ULT : Op::SLT;
 	Inst *cond = bb->build_inst(op, arg1, arg2);
 	Inst *res = bb->build_inst(Op::ITE, cond, arg1, arg2);
 	return {res, res_indef, arg1_prov};
@@ -3208,22 +3208,22 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       }
     case GE_EXPR:
       {
-	Op op = is_unsigned ? Op::ULE : Op::SLE;
+	Op op = TYPE_UNSIGNED(arg1_type) ? Op::ULE : Op::SLE;
 	return {bb->build_inst(op, arg2, arg1), res_indef, nullptr};
       }
     case GT_EXPR:
       {
-	Op op = is_unsigned ? Op::ULT : Op::SLT;
+	Op op = TYPE_UNSIGNED(arg1_type) ? Op::ULT : Op::SLT;
 	return {bb->build_inst(op, arg2, arg1), res_indef, nullptr};
       }
     case LE_EXPR:
       {
-	Op op = is_unsigned ? Op::ULE : Op::SLE;
+	Op op = TYPE_UNSIGNED(arg1_type) ? Op::ULE : Op::SLE;
 	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
       }
     case LT_EXPR:
       {
-	Op op = is_unsigned ? Op::ULT : Op::SLT;
+	Op op = TYPE_UNSIGNED(arg1_type) ? Op::ULT : Op::SLT;
 	return {bb->build_inst(op, arg1, arg2), res_indef, nullptr};
       }
     case POINTER_DIFF_EXPR:
@@ -3269,7 +3269,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       {
 	assert(arg1->bitsize == arg2->bitsize);
 	assert(TYPE_UNSIGNED(arg1_type) == TYPE_UNSIGNED(arg2_type));
-	Op op = is_unsigned ? Op::ZEXT : Op::SEXT;
+	Op op = TYPE_UNSIGNED(arg1_type) ? Op::ZEXT : Op::SEXT;
 	arg1 = bb->build_inst(op, arg1, 2 * arg1->bitsize);
 	arg2 = bb->build_inst(op, arg2, 2 * arg2->bitsize);
 	Inst *mul = bb->build_inst(Op::MUL, arg1, arg2);
@@ -3311,9 +3311,9 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_scalar(enum tree_co
       return {inst, indef, nullptr};
     }
   else
-    return process_binary_int(code, TYPE_UNSIGNED(arg1_type),
-			      arg1, arg1_indef, arg1_prov, arg2, arg2_indef,
-			      arg2_prov, lhs_type, arg1_type, arg2_type,
+    return process_binary_int(code, arg1, arg1_indef, arg1_prov,
+			      arg2, arg2_indef, arg2_prov,
+			      lhs_type, arg1_type, arg2_type,
 			      ignore_overflow);
 }
 
@@ -4521,7 +4521,7 @@ void Converter::process_cfn_bit_andn(gimple *stmt)
     {
       elem2 = bb->build_inst(Op::NOT, elem2);
       auto [res, res_indef, _] =
-      process_binary_int(BIT_AND_EXPR, false,
+      process_binary_int(BIT_AND_EXPR,
 			 elem1, elem1_indef, nullptr,
 			 elem2, elem2_indef, nullptr,
 			 elem_type, elem_type, elem_type);
@@ -4539,7 +4539,7 @@ void Converter::process_cfn_bit_iorn(gimple *stmt)
     {
       elem2 = bb->build_inst(Op::NOT, elem2);
       auto [res, res_indef, _] =
-      process_binary_int(BIT_IOR_EXPR, false,
+      process_binary_int(BIT_IOR_EXPR,
 			 elem1, elem1_indef, nullptr,
 			 elem2, elem2_indef, nullptr,
 			 elem_type, elem_type, elem_type);
