@@ -170,6 +170,8 @@ struct Converter {
   void process_cfn_assume_aligned(gimple *stmt);
   void process_cfn_atomic_fetch_op(gimple *stmt, uint64_t size,
 				   enum tree_code code, bool invert = false);
+  void process_cfn_atomic_op_fetch(gimple *stmt, uint64_t size,
+				   enum tree_code code, bool invert = false);
   void process_cfn_atomic_load(gimple *stmt);
   void process_cfn_atomic_load(gimple *stmt, uint64_t size);
   void process_cfn_atomic_store(gimple *stmt);
@@ -4603,6 +4605,36 @@ void Converter::process_cfn_atomic_fetch_op(gimple *stmt, uint64_t size, enum tr
     }
 }
 
+void Converter::process_cfn_atomic_op_fetch(gimple *stmt, uint64_t size, enum tree_code code, bool invert)
+{
+  assert(gimple_call_num_args(stmt) == 3);
+  auto [dest, dest_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
+  tree arg_expr = gimple_call_arg(stmt, 1);
+  tree arg_type = TREE_TYPE(arg_expr);
+  auto [arg, arg_indef] = tree2inst_indef(arg_expr);
+  assert(arg->bitsize == size * 8);
+
+  store_ub_check(dest, dest_prov, size);
+
+  auto [res, res_indef, _] = load_value(dest, size);
+  std::tie(res, res_indef, std::ignore) =
+    process_binary_int(code, res, res_indef, nullptr,
+		       arg, arg_indef, nullptr,
+		       arg_type, arg_type, arg_type, true);
+  if (invert)
+    res = bb->build_inst(Op::NOT, res);
+  store_value(dest, res, res_indef);
+
+  tree lhs = gimple_call_lhs(stmt);
+  if (lhs)
+    {
+      constrain_range(bb, lhs, res);
+      tree2instruction.insert({lhs, res});
+      if (res_indef)
+	tree2indef.insert({lhs, res_indef});
+    }
+}
+
 void Converter::process_cfn_atomic_load(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 4);
@@ -7636,6 +7668,96 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_BUILT_IN_ASSUME_ALIGNED:
       process_cfn_assume_aligned(stmt);
+      break;
+    case CFN_BUILT_IN_ATOMIC_ADD_FETCH_1:
+      process_cfn_atomic_op_fetch(stmt, 1, PLUS_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_SUB_FETCH_1:
+      process_cfn_atomic_op_fetch(stmt, 1, MINUS_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_AND_FETCH_1:
+      process_cfn_atomic_op_fetch(stmt, 1, BIT_AND_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_XOR_FETCH_1:
+      process_cfn_atomic_op_fetch(stmt, 1, BIT_XOR_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_OR_FETCH_1:
+      process_cfn_atomic_op_fetch(stmt, 1, BIT_IOR_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_NAND_FETCH_1:
+      process_cfn_atomic_op_fetch(stmt, 1, BIT_AND_EXPR, true);
+      break;
+    case CFN_BUILT_IN_ATOMIC_ADD_FETCH_2:
+      process_cfn_atomic_op_fetch(stmt, 2, PLUS_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_SUB_FETCH_2:
+      process_cfn_atomic_op_fetch(stmt, 2, MINUS_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_AND_FETCH_2:
+      process_cfn_atomic_op_fetch(stmt, 2, BIT_AND_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_XOR_FETCH_2:
+      process_cfn_atomic_op_fetch(stmt, 2, BIT_XOR_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_OR_FETCH_2:
+      process_cfn_atomic_op_fetch(stmt, 2, BIT_IOR_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_NAND_FETCH_2:
+      process_cfn_atomic_op_fetch(stmt, 2, BIT_AND_EXPR, true);
+      break;
+    case CFN_BUILT_IN_ATOMIC_ADD_FETCH_4:
+      process_cfn_atomic_op_fetch(stmt, 4, PLUS_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_SUB_FETCH_4:
+      process_cfn_atomic_op_fetch(stmt, 4, MINUS_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_AND_FETCH_4:
+      process_cfn_atomic_op_fetch(stmt, 4, BIT_AND_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_XOR_FETCH_4:
+      process_cfn_atomic_op_fetch(stmt, 4, BIT_XOR_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_OR_FETCH_4:
+      process_cfn_atomic_op_fetch(stmt, 4, BIT_IOR_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_NAND_FETCH_4:
+      process_cfn_atomic_op_fetch(stmt, 4, BIT_AND_EXPR, true);
+      break;
+    case CFN_BUILT_IN_ATOMIC_ADD_FETCH_8:
+      process_cfn_atomic_op_fetch(stmt, 8, PLUS_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_SUB_FETCH_8:
+      process_cfn_atomic_op_fetch(stmt, 8, MINUS_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_AND_FETCH_8:
+      process_cfn_atomic_op_fetch(stmt, 8, BIT_AND_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_XOR_FETCH_8:
+      process_cfn_atomic_op_fetch(stmt, 8, BIT_XOR_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_OR_FETCH_8:
+      process_cfn_atomic_op_fetch(stmt, 8, BIT_IOR_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_NAND_FETCH_8:
+      process_cfn_atomic_op_fetch(stmt, 8, BIT_AND_EXPR, true);
+      break;
+    case CFN_BUILT_IN_ATOMIC_ADD_FETCH_16:
+      process_cfn_atomic_op_fetch(stmt, 16, PLUS_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_SUB_FETCH_16:
+      process_cfn_atomic_op_fetch(stmt, 16, MINUS_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_AND_FETCH_16:
+      process_cfn_atomic_op_fetch(stmt, 16, BIT_AND_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_XOR_FETCH_16:
+      process_cfn_atomic_op_fetch(stmt, 16, BIT_XOR_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_OR_FETCH_16:
+      process_cfn_atomic_op_fetch(stmt, 16, BIT_IOR_EXPR);
+      break;
+    case CFN_BUILT_IN_ATOMIC_NAND_FETCH_16:
+      process_cfn_atomic_op_fetch(stmt, 16, BIT_AND_EXPR, true);
       break;
     case CFN_BUILT_IN_ATOMIC_FETCH_ADD_1:
       process_cfn_atomic_fetch_op(stmt, 1, PLUS_EXPR);
