@@ -180,6 +180,7 @@ struct Converter {
   void process_cfn_atomic_exchange(gimple *stmt, uint64_t size);
   void process_cfn_atomic_compare_exchange(gimple *stmt);
   void process_cfn_atomic_compare_exchange(gimple *stmt, uint64_t size);
+  void process_cfn_atomic_test_and_set(gimple *stmt);
   void process_cfn_bitreverse(gimple *stmt);
   void process_cfn_bswap(gimple *stmt);
   void process_cfn_check_war_ptrs(gimple *stmt);
@@ -4755,7 +4756,7 @@ void Converter::process_cfn_atomic_compare_exchange(gimple *stmt)
   auto [expected, expected_indef, expected_flag] =
     load_value(expected_ptr, size);
   auto [desired, desired_indef, desired_flag] = load_value(desired_ptr, size);
-  // We ignore indef in the calculation. I.e. the values are the same iff
+  // We ignore indef in the comparison. I.e. the values are the same iff
   // all bits (including padding) are the same.
   Inst *res = bb->build_inst(Op::EQ, orig, expected);
   Basic_block *true_bb = func->build_bb();
@@ -4794,7 +4795,7 @@ void Converter::process_cfn_atomic_compare_exchange(gimple *stmt, uint64_t size)
   auto [orig, orig_indef, orig_flag] = load_value(ptr, size);
   auto [expected, expected_indef, expected_flag] =
     load_value(expected_ptr, size);
-  // We ignore indef in the calculation. I.e. the values are the same iff
+  // We ignore indef in the comparison. I.e. the values are the same iff
   // all bits (including padding) are the same.
   Inst *res = bb->build_inst(Op::EQ, orig, expected);
   Basic_block *true_bb = func->build_bb();
@@ -4811,6 +4812,28 @@ void Converter::process_cfn_atomic_compare_exchange(gimple *stmt, uint64_t size)
   bb->build_br_inst(next_bb);
 
   bb = next_bb;
+  tree lhs = gimple_call_lhs(stmt);
+  if (lhs)
+    {
+      constrain_range(bb, lhs, res);
+      tree2instruction.insert({lhs, res});
+    }
+}
+
+void Converter::process_cfn_atomic_test_and_set(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 2);
+  auto [ptr, ptr_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
+
+  store_ub_check(ptr, ptr_prov, 1);
+
+  auto [orig, orig_indef, _] = load_value(ptr, 1);
+  Inst *set_value = bb->value_inst(1, 8);
+  store_value(ptr, set_value);
+  // We ignore indef in the comparison. I.e. the values are the same iff
+  // all bits (including padding) are the same.
+  Inst *res = bb->build_inst(Op::EQ, orig, set_value);
+
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
     {
@@ -8046,6 +8069,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_BUILT_IN_ATOMIC_COMPARE_EXCHANGE_16:
       process_cfn_atomic_compare_exchange(stmt, 16);
+      break;
+    case CFN_BUILT_IN_ATOMIC_TEST_AND_SET:
+      process_cfn_atomic_test_and_set(stmt);
       break;
     case CFN_BUILT_IN_BITREVERSE16:
     case CFN_BUILT_IN_BITREVERSE32:
