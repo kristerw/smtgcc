@@ -176,6 +176,7 @@ struct Converter {
   void process_cfn_atomic_load(gimple *stmt, uint64_t size);
   void process_cfn_atomic_store(gimple *stmt);
   void process_cfn_atomic_store(gimple *stmt, uint64_t size);
+  void process_cfn_atomic_exchange(gimple *stmt);
   void process_cfn_bitreverse(gimple *stmt);
   void process_cfn_bswap(gimple *stmt);
   void process_cfn_check_war_ptrs(gimple *stmt);
@@ -4693,6 +4694,24 @@ void Converter::process_cfn_atomic_store(gimple *stmt, uint64_t size)
   store_value(dest, value, value_indef);
 }
 
+void Converter::process_cfn_atomic_exchange(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 5);
+  int64_t size = get_int_cst_val(gimple_call_arg(stmt, 0));
+  auto [ptr, ptr_prov] = tree2inst_prov(gimple_call_arg(stmt, 1));
+  auto [val_ptr, val_ptr_prov] = tree2inst_prov(gimple_call_arg(stmt, 2));
+  auto [ret_ptr, ret_ptr_prov] = tree2inst_prov(gimple_call_arg(stmt, 3));
+
+  load_ub_check(val_ptr, val_ptr_prov, size);
+  store_ub_check(ptr, ptr_prov, size);
+  store_ub_check(ret_ptr, ret_ptr_prov, size);
+
+  auto [orig, orig_indef, orig_flag] = load_value(ptr, size);
+  auto [value, value_indef, value_flag] = load_value(val_ptr, size);
+  store_value(ptr, value, value_indef, value_flag);
+  store_value(ret_ptr, orig, orig_indef, orig_flag);
+}
+
 void Converter::process_cfn_bitreverse(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 1);
@@ -7884,6 +7903,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_BUILT_IN_ATOMIC_STORE_16:
       process_cfn_atomic_store(stmt, 16);
+      break;
+    case CFN_BUILT_IN_ATOMIC_EXCHANGE:
+      process_cfn_atomic_exchange(stmt);
       break;
     case CFN_BUILT_IN_BITREVERSE16:
     case CFN_BUILT_IN_BITREVERSE32:
