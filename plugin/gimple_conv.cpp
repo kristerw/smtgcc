@@ -177,6 +177,7 @@ struct Converter {
   void process_cfn_atomic_store(gimple *stmt);
   void process_cfn_atomic_store(gimple *stmt, uint64_t size);
   void process_cfn_atomic_exchange(gimple *stmt);
+  void process_cfn_atomic_exchange(gimple *stmt, uint64_t size);
   void process_cfn_bitreverse(gimple *stmt);
   void process_cfn_bswap(gimple *stmt);
   void process_cfn_check_war_ptrs(gimple *stmt);
@@ -4712,6 +4713,28 @@ void Converter::process_cfn_atomic_exchange(gimple *stmt)
   store_value(ret_ptr, orig, orig_indef, orig_flag);
 }
 
+void Converter::process_cfn_atomic_exchange(gimple *stmt, uint64_t size)
+{
+  assert(gimple_call_num_args(stmt) == 3);
+  auto [ptr, ptr_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
+  auto [value, value_indef] = tree2inst_indef(gimple_call_arg(stmt, 1));
+  assert(value->bitsize == size * 8);
+
+  store_ub_check(ptr, ptr_prov, size);
+
+  auto [res, res_indef, _] = load_value(ptr, size);
+  store_value(ptr, value, value_indef);
+
+  tree lhs = gimple_call_lhs(stmt);
+  if (lhs)
+    {
+      constrain_range(bb, lhs, res);
+      tree2instruction.insert({lhs, res});
+      if (res_indef)
+	tree2indef.insert({lhs, res_indef});
+    }
+}
+
 void Converter::process_cfn_bitreverse(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 1);
@@ -7906,6 +7929,21 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_BUILT_IN_ATOMIC_EXCHANGE:
       process_cfn_atomic_exchange(stmt);
+      break;
+    case CFN_BUILT_IN_ATOMIC_EXCHANGE_1:
+      process_cfn_atomic_exchange(stmt, 1);
+      break;
+    case CFN_BUILT_IN_ATOMIC_EXCHANGE_2:
+      process_cfn_atomic_exchange(stmt, 2);
+      break;
+    case CFN_BUILT_IN_ATOMIC_EXCHANGE_4:
+      process_cfn_atomic_exchange(stmt, 4);
+      break;
+    case CFN_BUILT_IN_ATOMIC_EXCHANGE_8:
+      process_cfn_atomic_exchange(stmt, 8);
+      break;
+    case CFN_BUILT_IN_ATOMIC_EXCHANGE_16:
+      process_cfn_atomic_exchange(stmt, 16);
       break;
     case CFN_BUILT_IN_BITREVERSE16:
     case CFN_BUILT_IN_BITREVERSE32:
