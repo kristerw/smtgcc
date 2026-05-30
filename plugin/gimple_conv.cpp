@@ -179,6 +179,7 @@ struct Converter {
   void process_cfn_atomic_exchange(gimple *stmt);
   void process_cfn_atomic_exchange(gimple *stmt, uint64_t size);
   void process_cfn_atomic_compare_exchange(gimple *stmt);
+  void process_cfn_atomic_compare_exchange(gimple *stmt, uint64_t size);
   void process_cfn_bitreverse(gimple *stmt);
   void process_cfn_bswap(gimple *stmt);
   void process_cfn_check_war_ptrs(gimple *stmt);
@@ -4779,6 +4780,45 @@ void Converter::process_cfn_atomic_compare_exchange(gimple *stmt)
     }
 }
 
+void Converter::process_cfn_atomic_compare_exchange(gimple *stmt, uint64_t size)
+{
+  assert(gimple_call_num_args(stmt) == 6);
+  auto [ptr, ptr_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
+  auto [expected_ptr, expected_ptr_prov] =
+    tree2inst_prov(gimple_call_arg(stmt, 1));
+  auto [desired, desired_indef] = tree2inst_indef(gimple_call_arg(stmt, 2));
+
+  store_ub_check(ptr, ptr_prov, size);
+  store_ub_check(expected_ptr, expected_ptr_prov, size);
+
+  auto [orig, orig_indef, orig_flag] = load_value(ptr, size);
+  auto [expected, expected_indef, expected_flag] =
+    load_value(expected_ptr, size);
+  // We ignore indef in the calculation. I.e. the values are the same iff
+  // all bits (including padding) are the same.
+  Inst *res = bb->build_inst(Op::EQ, orig, expected);
+  Basic_block *true_bb = func->build_bb();
+  Basic_block *false_bb = func->build_bb();
+  Basic_block *next_bb = func->build_bb();
+  bb->build_br_inst(res, true_bb, false_bb);
+
+  bb = true_bb;
+  store_value(ptr, desired, desired_indef);
+  bb->build_br_inst(next_bb);
+
+  bb = false_bb;
+  store_value(expected_ptr, orig, orig_indef, orig_flag);
+  bb->build_br_inst(next_bb);
+
+  bb = next_bb;
+  tree lhs = gimple_call_lhs(stmt);
+  if (lhs)
+    {
+      constrain_range(bb, lhs, res);
+      tree2instruction.insert({lhs, res});
+    }
+}
+
 void Converter::process_cfn_bitreverse(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 1);
@@ -7991,6 +8031,21 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_BUILT_IN_ATOMIC_COMPARE_EXCHANGE:
       process_cfn_atomic_compare_exchange(stmt);
+      break;
+    case CFN_BUILT_IN_ATOMIC_COMPARE_EXCHANGE_1:
+      process_cfn_atomic_compare_exchange(stmt, 1);
+      break;
+    case CFN_BUILT_IN_ATOMIC_COMPARE_EXCHANGE_2:
+      process_cfn_atomic_compare_exchange(stmt, 2);
+      break;
+    case CFN_BUILT_IN_ATOMIC_COMPARE_EXCHANGE_4:
+      process_cfn_atomic_compare_exchange(stmt, 4);
+      break;
+    case CFN_BUILT_IN_ATOMIC_COMPARE_EXCHANGE_8:
+      process_cfn_atomic_compare_exchange(stmt, 8);
+      break;
+    case CFN_BUILT_IN_ATOMIC_COMPARE_EXCHANGE_16:
+      process_cfn_atomic_compare_exchange(stmt, 16);
       break;
     case CFN_BUILT_IN_BITREVERSE16:
     case CFN_BUILT_IN_BITREVERSE32:
