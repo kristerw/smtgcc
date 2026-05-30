@@ -181,6 +181,7 @@ struct Converter {
   void process_cfn_atomic_compare_exchange(gimple *stmt);
   void process_cfn_atomic_compare_exchange(gimple *stmt, uint64_t size);
   void process_cfn_atomic_test_and_set(gimple *stmt);
+  void process_cfn_atomic_clear(gimple *stmt);
   void process_cfn_bitreverse(gimple *stmt);
   void process_cfn_bswap(gimple *stmt);
   void process_cfn_check_war_ptrs(gimple *stmt);
@@ -4842,6 +4843,16 @@ void Converter::process_cfn_atomic_test_and_set(gimple *stmt)
     }
 }
 
+void Converter::process_cfn_atomic_clear(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 2);
+  auto [ptr, ptr_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
+
+  store_ub_check(ptr, ptr_prov, 1);
+
+  store_value(ptr, bb->value_inst(0, 8));
+}
+
 void Converter::process_cfn_bitreverse(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 1);
@@ -8072,6 +8083,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_BUILT_IN_ATOMIC_TEST_AND_SET:
       process_cfn_atomic_test_and_set(stmt);
+      break;
+    case CFN_BUILT_IN_ATOMIC_CLEAR:
+      process_cfn_atomic_clear(stmt);
       break;
     case CFN_BUILT_IN_BITREVERSE16:
     case CFN_BUILT_IN_BITREVERSE32:
