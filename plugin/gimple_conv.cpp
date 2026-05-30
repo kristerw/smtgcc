@@ -8087,6 +8087,10 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BUILT_IN_ATOMIC_CLEAR:
       process_cfn_atomic_clear(stmt);
       break;
+    case CFN_BUILT_IN_ATOMIC_THREAD_FENCE:
+    case CFN_BUILT_IN_ATOMIC_SIGNAL_FENCE:
+      // Nothing to do here.
+      break;
     case CFN_BUILT_IN_BITREVERSE16:
     case CFN_BUILT_IN_BITREVERSE32:
     case CFN_BUILT_IN_BITREVERSE64:
