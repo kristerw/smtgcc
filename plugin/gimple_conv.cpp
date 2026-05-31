@@ -1290,8 +1290,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	tree src_type = TREE_TYPE(TREE_OPERAND(expr, 0));
 	tree dest_type = TREE_TYPE(expr);
 	std::tie(arg, indef) = to_mem_repr(arg, indef, src_type);
-	std::tie(arg, indef) = from_mem_repr(arg, indef, dest_type);
 	constrain_src_value(arg, dest_type);
+	std::tie(arg, indef) = from_mem_repr(arg, indef, dest_type);
 	if (POINTER_TYPE_P(dest_type))
 	  {
 	    assert(!POINTER_TYPE_P(src_type) || prov);
