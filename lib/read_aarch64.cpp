@@ -8007,6 +8007,9 @@ void Parser::parse_function()
   else if (name == "ldseth" || name == "ldsetah" || name == "ldsetalh"
 	   || name == "ldsetlh")
     process_ldset(16);
+  else if (name == "ldsetb" || name == "ldsetab" || name == "ldsetalb"
+	   || name == "ldsetlb")
+    process_ldset(8);
 
   // Misc scalar versions of SIMD and SVE instructions
   else if (name == "andv")
