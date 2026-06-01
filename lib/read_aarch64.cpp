@@ -173,6 +173,7 @@ private:
   void process_ldp();
   void process_ldpsw();
   void process_ldadd();
+  void process_ldadd(uint32_t bitsize);
   void process_ldclr();
   void process_ldeor();
   void process_ldset();
@@ -2474,6 +2475,23 @@ void Parser::process_ldpsw()
 void Parser::process_ldadd()
 {
   Inst *arg = get_reg_value(1);
+  get_comma(2);
+  Inst *dest = get_reg(3);
+  get_comma(4);
+  Inst *ptr = process_address(5);
+
+  uint32_t size = arg->bitsize / 8;
+  store_ub_check(ptr, size);
+  Inst *res = bb->build_inst(Op::LOAD_LE, ptr, size);
+  Inst *op_res = bb->build_inst(Op::ADD, arg, res);
+  bb->build_inst(Op::STORE_LE, ptr, op_res);
+  write_reg(dest, res);
+}
+
+void Parser::process_ldadd(uint32_t bitsize)
+{
+  Inst *arg = get_reg_value(1);
+  arg = bb->build_trunc(arg, bitsize);
   get_comma(2);
   Inst *dest = get_reg(3);
   get_comma(4);
@@ -7904,6 +7922,10 @@ void Parser::parse_function()
   else if (name == "ldadd" || name == "ldadda" || name == "ldaddal"
 	   || name == "ldaddl")
     process_ldadd();
+  else if (name == "ldaddh" || name == "ldaddah" || name == "ldaddalh"
+	   || name == "ldaddlh")
+    process_ldadd(16);
+
   else if (name == "ldclr" || name == "ldclra" || name == "ldclral"
 	   || name == "ldclrl")
     process_ldclr();
