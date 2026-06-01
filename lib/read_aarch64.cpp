@@ -175,6 +175,7 @@ private:
   void process_ldadd();
   void process_ldclr();
   void process_ldeor();
+  void process_ldset();
   void process_store(uint32_t trunc_size = 0);
   void process_stp();
   void process_st1();
@@ -2515,6 +2516,22 @@ void Parser::process_ldeor()
   store_ub_check(ptr, size);
   Inst *res = bb->build_inst(Op::LOAD_LE, ptr, size);
   Inst *op_res = bb->build_inst(Op::XOR, arg, res);
+  bb->build_inst(Op::STORE_LE, ptr, op_res);
+  write_reg(dest, res);
+}
+
+void Parser::process_ldset()
+{
+  Inst *arg = get_reg_value(1);
+  get_comma(2);
+  Inst *dest = get_reg(3);
+  get_comma(4);
+  Inst *ptr = process_address(5);
+
+  uint32_t size = arg->bitsize / 8;
+  store_ub_check(ptr, size);
+  Inst *res = bb->build_inst(Op::LOAD_LE, ptr, size);
+  Inst *op_res = bb->build_inst(Op::OR, arg, res);
   bb->build_inst(Op::STORE_LE, ptr, op_res);
   write_reg(dest, res);
 }
@@ -7893,6 +7910,9 @@ void Parser::parse_function()
   else if (name == "ldeor" || name == "ldeora" || name == "ldeoral"
 	   || name == "ldeorl")
     process_ldeor();
+  else if (name == "ldset" || name == "ldseta" || name == "ldsetal"
+	   || name == "ldsetl")
+    process_ldset();
 
   // Misc scalar versions of SIMD and SVE instructions
   else if (name == "andv")
