@@ -7980,6 +7980,9 @@ void Parser::parse_function()
   else if (name == "ldeorh" || name == "ldeorah" || name == "ldeoralh"
 	   || name == "ldeorlh")
     process_ldeor(16);
+  else if (name == "ldeorb" || name == "ldeorab" || name == "ldeoralb"
+	   || name == "ldeorlb")
+    process_ldeor(8);
   else if (name == "ldset" || name == "ldseta" || name == "ldsetal"
 	   || name == "ldsetl")
     process_ldset();
