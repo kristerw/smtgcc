@@ -7925,7 +7925,9 @@ void Parser::parse_function()
   else if (name == "ldaddh" || name == "ldaddah" || name == "ldaddalh"
 	   || name == "ldaddlh")
     process_ldadd(16);
-
+  else if (name == "ldaddb" || name == "ldaddab" || name == "ldaddalb"
+	   || name == "ldaddlb")
+    process_ldadd(8);
   else if (name == "ldclr" || name == "ldclra" || name == "ldclral"
 	   || name == "ldclrl")
     process_ldclr();
