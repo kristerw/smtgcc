@@ -7953,6 +7953,9 @@ void Parser::parse_function()
   else if (name == "ldclrh" || name == "ldclrah" || name == "ldclralh"
 	   || name == "ldclrlh")
     process_ldclr(16);
+  else if (name == "ldclrb" || name == "ldclrab" || name == "ldclralb"
+	   || name == "ldclrlb")
+    process_ldclr(8);
   else if (name == "ldeor" || name == "ldeora" || name == "ldeoral"
 	   || name == "ldeorl")
     process_ldeor();
