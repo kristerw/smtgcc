@@ -173,6 +173,7 @@ private:
   void process_ldp();
   void process_ldpsw();
   void process_ldadd();
+  void process_ldclr();
   void process_store(uint32_t trunc_size = 0);
   void process_stp();
   void process_st1();
@@ -2480,6 +2481,23 @@ void Parser::process_ldadd()
   store_ub_check(ptr, size);
   Inst *res = bb->build_inst(Op::LOAD_LE, ptr, size);
   Inst *op_res = bb->build_inst(Op::ADD, arg, res);
+  bb->build_inst(Op::STORE_LE, ptr, op_res);
+  write_reg(dest, res);
+}
+
+void Parser::process_ldclr()
+{
+  Inst *arg = get_reg_value(1);
+  get_comma(2);
+  Inst *dest = get_reg(3);
+  get_comma(4);
+  Inst *ptr = process_address(5);
+
+  uint32_t size = arg->bitsize / 8;
+  store_ub_check(ptr, size);
+  Inst *res = bb->build_inst(Op::LOAD_LE, ptr, size);
+  Inst *not_arg = bb->build_inst(Op::NOT, arg);
+  Inst *op_res = bb->build_inst(Op::AND, not_arg, res);
   bb->build_inst(Op::STORE_LE, ptr, op_res);
   write_reg(dest, res);
 }
@@ -7852,6 +7870,9 @@ void Parser::parse_function()
   else if (name == "ldadd" || name == "ldadda" || name == "ldaddal"
 	   || name == "ldaddl")
     process_ldadd();
+  else if (name == "ldclr" || name == "ldclra" || name == "ldclral"
+	   || name == "ldclrl")
+    process_ldclr();
 
   // Misc scalar versions of SIMD and SVE instructions
   else if (name == "andv")
