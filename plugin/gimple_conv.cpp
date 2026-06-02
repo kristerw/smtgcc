@@ -1087,6 +1087,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::extract_component_ref(tree expr)
       if (indef)
 	indef = bb->build_trunc(indef, bitsize_for_type(type));
     }
+  if (POINTER_TYPE_P(type) && TYPE_RESTRICT(type))
+    throw Not_implemented("extract_component_ref: extracting restrict pointer");
   if (!prov && POINTER_TYPE_P(type))
     prov = extract_id(inst);
   return {inst, indef, prov};
@@ -1153,6 +1155,10 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	    Inst *inst = bb->value_inst(0, bitsize);
 	    Inst *indef = bb->value_m1_inst(bitsize);
 	    Inst *prov = nullptr;
+	    if (POINTER_TYPE_P(TREE_TYPE(expr))
+		&& TYPE_RESTRICT(TREE_TYPE(expr)))
+	      throw Not_implemented("tree2inst_indef_prov: "
+				    "loading restrict pointer");
 	    if (POINTER_TYPE_P(TREE_TYPE(expr)))
 	      prov = extract_id(inst);
 	    return {inst, indef, prov};
@@ -1337,6 +1343,9 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	if (indef)
 	  indef = bb->build_inst(Op::EXTRACT, indef, high, low);
 	std::tie(value, indef) = from_mem_repr(value, indef, TREE_TYPE(expr));
+	if (POINTER_TYPE_P(TREE_TYPE(expr)) && TYPE_RESTRICT(TREE_TYPE(expr)))
+	  throw Not_implemented("tree2inst_indef_prov: "
+				"extracting restrict pointer");
 	if (POINTER_TYPE_P(TREE_TYPE(expr)) && !prov)
 	  prov = extract_id(value);
 	return {value, indef, prov};
@@ -1914,6 +1923,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
     }
 
   Inst *prov = nullptr;
+  if (POINTER_TYPE_P(type) && TYPE_RESTRICT(type))
+    throw Not_implemented("process_load: loading restrict pointer");
   if (POINTER_TYPE_P(type))
     prov = extract_id(value);
 
