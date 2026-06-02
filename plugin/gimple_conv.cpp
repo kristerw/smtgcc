@@ -56,7 +56,10 @@ struct Converter {
     , state{state}
     , fun{fun}
     , role{role}
-  {}
+  {
+    cgraph_node *node = cgraph_node::get(fun->decl);
+    ipcp_ts = ipcp_get_transformation_summary(node);
+  }
   ~Converter()
   {
     if (func)
@@ -65,6 +68,7 @@ struct Converter {
   Module *module;
   CommonState *state;
   function *fun;
+  ipcp_transformation *ipcp_ts;
   Function *func = nullptr;
   Basic_block *bb = nullptr;
   Inst *loop_vect_sym = nullptr;
@@ -87,6 +91,7 @@ struct Converter {
 
   Function_role role;
 
+  void handle_ipcp_ts(tree parm);
   Inst *extract_id(Inst *inst);
   uint64_t bytesize_for_type(tree type);
   std::pair<Inst *, Inst *> to_mem_repr(Inst *inst, Inst *indef, tree type);
@@ -371,6 +376,19 @@ void check_type(tree type)
       if (TYPE_PRECISION(type) > 64 * unroll_limit)
 	throw Not_implemented("check_type: too wide BITINT");
     }
+}
+
+void Converter::handle_ipcp_ts(tree parm)
+{
+  if (!ipcp_ts)
+    return;
+  if (!ipcp_ts->m_agg_values)
+    return;
+  int index = ipcp_ts->get_param_index(fun->decl, parm);
+  if (index < 0)
+    return;
+
+  throw Not_implemented("ipcp transformation summary for param");
 }
 
 Inst *Converter::extract_id(Inst *inst)
@@ -1129,6 +1147,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	  {
 	    if (tree2instruction.contains(var))
 	      {
+		handle_ipcp_ts(var);
+
 		Inst *inst = tree2instruction.at(var);
 
 		// Place the range check in the entry block as it is
