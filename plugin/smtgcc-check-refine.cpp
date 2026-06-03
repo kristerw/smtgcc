@@ -36,6 +36,7 @@ struct tv_pass : gimple_opt_pass
     module = create_module();
   }
   unsigned int execute(function *fun) final override;
+  CommonState state;
   Module *module;
   bool error_has_been_reported = false;
 };
@@ -47,7 +48,6 @@ unsigned int tv_pass::execute(function *fun)
 
   try
     {
-      CommonState state;
       const char *name = function_name(fun);
       if (strcmp(name, "src") && strcmp(name, "tgt"))
 	{
