@@ -1761,6 +1761,8 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       Inst *array = bb2memory_flag.at(bb);
       Inst *addr = translate.at(inst->args[0]);
       Inst *value = translate.at(inst->args[1]);
+      if (array->op == Op::MEM_FLAG_ARRAY && is_value_zero(value))
+	return;
       array = build_inst(Op::ARRAY_SET_FLAG, array, addr, value);
       bb2memory_flag[bb] = array;
       return;
@@ -1770,6 +1772,8 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       Inst *array = bb2memory_flag_as1.at(bb);
       Inst *addr = translate.at(inst->args[0]);
       Inst *value = translate.at(inst->args[1]);
+      if (array->op == Op::MEM_FLAG_ARRAY && is_value_zero(value))
+	return;
       array = build_inst(Op::ARRAY_SET_FLAG, array, addr, value);
       bb2memory_flag_as1[bb] = array;
       return;
@@ -1779,6 +1783,8 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       Inst *array = bb2memory_indef.at(bb);
       Inst *addr = translate.at(inst->args[0]);
       Inst *value = translate.at(inst->args[1]);
+      if (array->op == Op::MEM_INDEF_ARRAY && is_value_zero(value))
+	return;
       array = build_inst(Op::ARRAY_SET_INDEF, array, addr, value);
       bb2memory_indef[bb] = array;
       return;
@@ -1788,6 +1794,8 @@ void Converter::convert(Basic_block *bb, Inst *inst, Function_role role)
       Inst *array = bb2memory_indef_as1.at(bb);
       Inst *addr = translate.at(inst->args[0]);
       Inst *value = translate.at(inst->args[1]);
+      if (array->op == Op::MEM_INDEF_ARRAY && is_value_zero(value))
+	return;
       array = build_inst(Op::ARRAY_SET_INDEF, array, addr, value);
       bb2memory_indef_as1[bb] = array;
       return;
