@@ -181,6 +181,7 @@ private:
   void process_ldset();
   void process_ldset(uint32_t bitsize);
   void process_cas();
+  void process_cas(uint32_t bitsize);
   void process_store(uint32_t trunc_size = 0);
   void process_stp();
   void process_st1();
@@ -2616,6 +2617,35 @@ void Parser::process_cas()
   Inst *expected = get_reg_value(1);
   get_comma(2);
   Inst *desired = get_reg_value(3);
+  get_comma(4);
+  Inst *ptr = process_address(5);
+
+  uint32_t size = expected->bitsize / 8;
+  load_ub_check(ptr, size);
+  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size);
+  Inst *eq = bb->build_inst(Op::EQ, value, expected);
+
+  Basic_block *true_bb = func->build_bb();
+  Basic_block *false_bb = func->build_bb();
+  bb->build_br_inst(eq, true_bb, false_bb);
+
+  bb = true_bb;
+  store_ub_check(ptr, size);
+  bb->build_inst(Op::STORE_LE, ptr, desired);
+  bb->build_br_inst(false_bb);
+
+  bb = false_bb;
+  write_reg(dest, value);
+}
+
+void Parser::process_cas(uint32_t bitsize)
+{
+  Inst *dest = get_reg(1);
+  Inst *expected = get_reg_value(1);
+  expected = bb->build_trunc(expected, bitsize);
+  get_comma(2);
+  Inst *desired = get_reg_value(3);
+  desired = bb->build_trunc(desired, bitsize);
   get_comma(4);
   Inst *ptr = process_address(5);
 
@@ -8043,6 +8073,9 @@ void Parser::parse_function()
   else if (name == "cas" || name == "casa" || name == "casal"
 	   || name == "casl")
     process_cas();
+  else if (name == "cash" || name == "casah" || name == "casalh"
+	   || name == "caslh")
+    process_cas(16);
 
   // Misc scalar versions of SIMD and SVE instructions
   else if (name == "andv")
