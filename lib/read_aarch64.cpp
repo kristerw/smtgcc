@@ -8109,6 +8109,9 @@ void Parser::parse_function()
   else if (name == "swph" || name == "swpah" || name == "swpalh"
 	   || name == "swplh")
     process_swp(16);
+  else if (name == "swpb" || name == "swpab" || name == "swpalb"
+	   || name == "swplb")
+    process_swp(8);
 
   // Compare and swap
   else if (name == "cas" || name == "casa" || name == "casal"
