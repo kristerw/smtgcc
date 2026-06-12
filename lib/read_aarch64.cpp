@@ -180,6 +180,7 @@ private:
   void process_ldeor(uint32_t bitsize);
   void process_ldset();
   void process_ldset(uint32_t bitsize);
+  void process_swp();
   void process_cas();
   void process_cas(uint32_t bitsize);
   void process_store(uint32_t trunc_size = 0);
@@ -2608,6 +2609,21 @@ void Parser::process_ldset(uint32_t bitsize)
   Inst *res = bb->build_inst(Op::LOAD_LE, ptr, size);
   Inst *op_res = bb->build_inst(Op::OR, arg, res);
   bb->build_inst(Op::STORE_LE, ptr, op_res);
+  write_reg(dest, res);
+}
+
+void Parser::process_swp()
+{
+  Inst *arg = get_reg_value(1);
+  get_comma(2);
+  Inst *dest = get_reg(3);
+  get_comma(4);
+  Inst *ptr = process_address(5);
+
+  uint32_t size = arg->bitsize / 8;
+  store_ub_check(ptr, size);
+  Inst *res = bb->build_inst(Op::LOAD_LE, ptr, size);
+  bb->build_inst(Op::STORE_LE, ptr, arg);
   write_reg(dest, res);
 }
 
@@ -8068,6 +8084,11 @@ void Parser::parse_function()
   else if (name == "ldsetb" || name == "ldsetab" || name == "ldsetalb"
 	   || name == "ldsetlb")
     process_ldset(8);
+
+  // Swap
+  else if (name == "swp" || name == "swpa" || name == "swpal"
+	   || name == "swpl")
+    process_swp();
 
   // Compare and swap
   else if (name == "cas" || name == "casa" || name == "casal"
