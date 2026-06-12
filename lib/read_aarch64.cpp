@@ -8076,6 +8076,9 @@ void Parser::parse_function()
   else if (name == "cash" || name == "casah" || name == "casalh"
 	   || name == "caslh")
     process_cas(16);
+  else if (name == "casb" || name == "casab" || name == "casalb"
+	   || name == "caslb")
+    process_cas(8);
 
   // Misc scalar versions of SIMD and SVE instructions
   else if (name == "andv")
