@@ -181,6 +181,7 @@ private:
   void process_ldset();
   void process_ldset(uint32_t bitsize);
   void process_swp();
+  void process_swp(uint32_t bitsize);
   void process_cas();
   void process_cas(uint32_t bitsize);
   void process_store(uint32_t trunc_size = 0);
@@ -2615,6 +2616,22 @@ void Parser::process_ldset(uint32_t bitsize)
 void Parser::process_swp()
 {
   Inst *arg = get_reg_value(1);
+  get_comma(2);
+  Inst *dest = get_reg(3);
+  get_comma(4);
+  Inst *ptr = process_address(5);
+
+  uint32_t size = arg->bitsize / 8;
+  store_ub_check(ptr, size);
+  Inst *res = bb->build_inst(Op::LOAD_LE, ptr, size);
+  bb->build_inst(Op::STORE_LE, ptr, arg);
+  write_reg(dest, res);
+}
+
+void Parser::process_swp(uint32_t bitsize)
+{
+  Inst *arg = get_reg_value(1);
+  arg = bb->build_trunc(arg, bitsize);
   get_comma(2);
   Inst *dest = get_reg(3);
   get_comma(4);
@@ -8089,6 +8106,9 @@ void Parser::parse_function()
   else if (name == "swp" || name == "swpa" || name == "swpal"
 	   || name == "swpl")
     process_swp();
+  else if (name == "swph" || name == "swpah" || name == "swpalh"
+	   || name == "swplh")
+    process_swp(16);
 
   // Compare and swap
   else if (name == "cas" || name == "casa" || name == "casal"
