@@ -178,8 +178,13 @@ bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data)
 				  + " unknown symbol expression",
 				  line_number);
 
+#if defined(SMTGCC_M68K)
+	      for (int i = 0; i < size; i++)
+		data.push_back(extract_vec_elem(bb, ptr, 8, size - 1 - i));
+#else
 	      for (int i = 0; i < size; i++)
 		data.push_back(extract_vec_elem(bb, ptr, 8, i));
+#endif
 
 	      skip_line();
 	    }
@@ -203,11 +208,19 @@ bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data)
 	      if (negate)
 		value = -value;
 
+#if defined(SMTGCC_M68K)
+	      for (int i = 0; i < size; i++)
+		{
+		  uint8_t val = value >> (8 * (size - 1 - i));
+		  data.push_back(bb->value_inst(val, 8));
+		}
+#else
 	      for (int i = 0; i < size; i++)
 		{
 		  data.push_back(bb->value_inst(value & 0xff, 8));
 		  value = value >> 8;
 		}
+#endif
 
 	      assert(buf[pos] == '\n');
 

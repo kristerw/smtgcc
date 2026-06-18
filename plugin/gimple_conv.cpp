@@ -342,6 +342,14 @@ void check_type(tree type)
   if (AGGREGATE_TYPE_P(type) && TYPE_REVERSE_STORAGE_ORDER(type))
     throw Not_implemented("reverse storage order");
 
+  if (BYTES_BIG_ENDIAN)
+    {
+      if (VECTOR_TYPE_P(type))
+	throw Not_implemented("check_type: big endian vector type");
+      if (TREE_CODE(type) == COMPLEX_TYPE)
+	throw Not_implemented("check_type: big endian complex type");
+    }
+
   // Note: We do not check that all elements in structures/arrays have
   // valid type -- they will be checked when the fields are accessed.
   // This makes us able to analyze progams having invalid elements in
@@ -1083,10 +1091,12 @@ std::tuple<Inst *, Inst *, Inst *> Converter::extract_component_ref(tree expr)
   //         struct A {int c[k]; int x[n];};
   //       from gcc.dg/pr51628-18.c.
   if (TREE_CODE(DECL_FIELD_OFFSET(field)) != INTEGER_CST)
-    throw Not_implemented("process_component_ref: non-constant field offset");
+    throw Not_implemented("extract_component_ref: non-constant field offset");
   uint64_t offset = get_int_cst_val(DECL_FIELD_OFFSET(field));
   uint64_t bit_offset = get_int_cst_val(DECL_FIELD_BIT_OFFSET(field));
   uint64_t low_val = 8 * offset + bit_offset;
+  if (BYTES_BIG_ENDIAN && is_bit_field(expr))
+    throw Not_implemented("extract_component_ref: big endian bit field");
   if (is_bit_field(expr))
     {
       uint64_t high_val = low_val + bitsize_for_type(type) - 1;
@@ -1096,10 +1106,21 @@ std::tuple<Inst *, Inst *, Inst *> Converter::extract_component_ref(tree expr)
     }
   else
     {
-      uint64_t high_val = low_val + bytesize_for_type(type) * 8 - 1;
-      inst = bb->build_inst(Op::EXTRACT, inst, high_val, low_val);
+      uint64_t high_val = low_val + bytesize_for_type(type) * 8;
+      uint64_t hi, lo;
+      if (BYTES_BIG_ENDIAN)
+	{
+	  hi = inst->bitsize - low_val - 1;
+	  lo = inst->bitsize - high_val;
+	}
+      else
+	{
+	  hi = high_val - 1;
+	  lo = low_val;
+	}
+      inst = bb->build_inst(Op::EXTRACT, inst, hi, lo);
       if (indef)
-	indef = bb->build_inst(Op::EXTRACT, indef, high_val, low_val);
+	indef = bb->build_inst(Op::EXTRACT, indef, hi, lo);
       constrain_src_value(inst, type);
       inst = bb->build_trunc(inst, bitsize_for_type(type));
       if (indef)
@@ -1254,9 +1275,18 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	    } u;
 	    // real_to_target saves 32 bits in each long, so we copy the
 	    // values to a uint32_t array to get rid of the extra bits.
-	    // TODO: Big endian.
 	    for (int i = 0; i < 4; i++)
 	      u.buf[i] = buf[i];
+	    if (BYTES_BIG_ENDIAN)
+	      {
+		if (TYPE_PRECISION(type) == 64)
+		  std::swap(u.buf[0], u.buf[1]);
+		else if (TYPE_PRECISION(type) == 128)
+		  {
+		    std::swap(u.buf[0], u.buf[3]);
+		    std::swap(u.buf[1], u.buf[2]);
+		  }
+	      }
 	    res = bb->value_inst(u.i, TYPE_PRECISION(type));
 	  }
 	return {res, nullptr, nullptr};
@@ -1267,14 +1297,30 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	tree elem_type = TREE_TYPE(TREE_TYPE(expr));
 	uint32_t elem_bitsize = bitsize_for_type(elem_type);
 	uint32_t nof_elem = bitsize / elem_bitsize;
-	tree elem = VECTOR_CST_ELT(expr, 0);
-	Inst *ret = type_convert(tree2inst(elem), TREE_TYPE(elem), elem_type);
-	for (uint32_t i = 1; i < nof_elem; i++)
+	Inst *ret;
+	if (BYTES_BIG_ENDIAN)
 	  {
-	    elem = VECTOR_CST_ELT(expr, i);
-	    Inst *elem_inst =
-	      type_convert(tree2inst(elem), TREE_TYPE(elem), elem_type);
-	    ret = bb->build_inst(Op::CONCAT, elem_inst, ret);
+	    tree elem = VECTOR_CST_ELT(expr, nof_elem - 1);
+	    ret = type_convert(tree2inst(elem), TREE_TYPE(elem), elem_type);
+	    for (uint32_t i = 1; i < nof_elem; i++)
+	      {
+		elem = VECTOR_CST_ELT(expr, nof_elem - 1 - i);
+		Inst *elem_inst =
+		  type_convert(tree2inst(elem), TREE_TYPE(elem), elem_type);
+		ret = bb->build_inst(Op::CONCAT, elem_inst, ret);
+	      }
+	  }
+	else
+	  {
+	    tree elem = VECTOR_CST_ELT(expr, 0);
+	    ret = type_convert(tree2inst(elem), TREE_TYPE(elem), elem_type);
+	    for (uint32_t i = 1; i < nof_elem; i++)
+	      {
+		elem = VECTOR_CST_ELT(expr, i);
+		Inst *elem_inst =
+		  type_convert(tree2inst(elem), TREE_TYPE(elem), elem_type);
+		ret = bb->build_inst(Op::CONCAT, elem_inst, ret);
+	      }
 	  }
 	return {ret, nullptr, nullptr};
       }
@@ -1334,6 +1380,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
       }
     case BIT_FIELD_REF:
       {
+	if (BYTES_BIG_ENDIAN)
+	  throw Not_implemented("tree2inst_indef_prov: big endian BIT_FIELD_REF");
 	Inst *value, *indef, *prov;
 	tree arg = TREE_OPERAND(expr, 0);
 	if (TREE_CODE(arg) != SSA_NAME)
@@ -1891,6 +1939,8 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
     throw Not_implemented("process_load: load size too big");
   Addr addr = process_address(expr, true);
   bool is_bitfield = is_bit_field(expr);
+  if (BYTES_BIG_ENDIAN && is_bitfield)
+    throw Not_implemented("process_load: big endian bit field");
   assert(is_bitfield || !addr.bitoffset);
   if (is_bitfield)
     size = (bitsize + addr.bitoffset + 7) / 8;
@@ -1898,27 +1948,55 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
     load_vec_ub_check(addr.ptr, addr.prov, size, expr);
   else
     load_ub_check(addr.ptr, addr.prov, size);
-  Inst *value = bb->build_inst(Op::LOAD_LE, addr.ptr, size);
+  Inst *value;
   Inst *indef = nullptr;
-  Inst *mem_flags2 = bb->build_inst(Op::GET_MEM_FLAG_LE, addr.ptr, size);
-  for (uint64_t i = 0; i < size; i++)
+  Inst *mem_flags2;
+  if (BYTES_BIG_ENDIAN)
     {
-      Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
-      Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
-
-      Inst *indef_byte;
-      uint8_t padding = padding_at_offset(type, i);
-      indef_byte = bb->build_inst(Op::GET_MEM_INDEF, ptr);
-      if (padding != 0)
+      value = bb->build_inst(Op::LOAD_BE, addr.ptr, size);
+      mem_flags2 = bb->build_inst(Op::GET_MEM_FLAG_BE, addr.ptr, size);
+      for (uint64_t i = 0; i < size; i++)
 	{
-	  Inst *padding_inst = bb->value_inst(padding, 8);
-	  indef_byte = bb->build_inst(Op::OR, indef_byte, padding_inst);
-	}
+	  Inst *offset = bb->value_inst(size - 1 - i, addr.ptr->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
 
-      if (indef)
-	indef = bb->build_inst(Op::CONCAT, indef_byte, indef);
-      else
-	indef = indef_byte;
+	  uint8_t padding = padding_at_offset(type, size - 1 - i);
+	  Inst *indef_byte = bb->build_inst(Op::GET_MEM_INDEF, ptr);
+	  if (padding != 0)
+	    {
+	      Inst *padding_inst = bb->value_inst(padding, 8);
+	      indef_byte = bb->build_inst(Op::OR, indef_byte, padding_inst);
+	    }
+
+	  if (indef)
+	    indef = bb->build_inst(Op::CONCAT, indef_byte, indef);
+	  else
+	    indef = indef_byte;
+	}
+    }
+  else
+    {
+      value = bb->build_inst(Op::LOAD_LE, addr.ptr, size);
+      indef = nullptr;
+      mem_flags2 = bb->build_inst(Op::GET_MEM_FLAG_LE, addr.ptr, size);
+      for (uint64_t i = 0; i < size; i++)
+	{
+	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
+
+	  uint8_t padding = padding_at_offset(type, i);
+	  Inst *indef_byte = bb->build_inst(Op::GET_MEM_INDEF, ptr);
+	  if (padding != 0)
+	    {
+	      Inst *padding_inst = bb->value_inst(padding, 8);
+	      indef_byte = bb->build_inst(Op::OR, indef_byte, padding_inst);
+	    }
+
+	  if (indef)
+	    indef = bb->build_inst(Op::CONCAT, indef_byte, indef);
+	  else
+	    indef = indef_byte;
+	}
     }
   if (is_bitfield)
     {
@@ -1954,10 +2032,20 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
 // Read value/indef from memory. No UB checks etc. are done.
 std::tuple<Inst *, Inst *, Inst *> Converter::load_value(Inst *ptr, uint64_t size)
 {
-  Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size);
-  Inst *indef = bb->build_inst(Op::GET_MEM_INDEF_LE, ptr, size);
-  Inst *mem_flags = bb->build_inst(Op::GET_MEM_FLAG_LE, ptr, size);
-  return {value, indef, mem_flags};
+  if (BYTES_BIG_ENDIAN)
+    {
+      Inst *value = bb->build_inst(Op::LOAD_BE, ptr, size);
+      Inst *indef = bb->build_inst(Op::GET_MEM_INDEF_BE, ptr, size);
+      Inst *mem_flags = bb->build_inst(Op::GET_MEM_FLAG_BE, ptr, size);
+      return {value, indef, mem_flags};
+    }
+  else
+    {
+      Inst *value = bb->build_inst(Op::LOAD_LE, ptr, size);
+      Inst *indef = bb->build_inst(Op::GET_MEM_INDEF_LE, ptr, size);
+      Inst *mem_flags = bb->build_inst(Op::GET_MEM_FLAG_LE, ptr, size);
+      return {value, indef, mem_flags};
+    }
 }
 
 // Write value to memory. No UB checks etc. are done, and memory flags
@@ -1966,11 +2054,22 @@ void Converter::store_value(Inst *ptr, Inst *value, Inst *value_indef, Inst *val
 {
   if ((value->bitsize & 7) != 0)
     throw Not_implemented("store_value: not byte aligned");
-  bb->build_inst(Op::STORE_LE, ptr, value);
-  if (value_indef)
-    bb->build_inst(Op::SET_MEM_INDEF_LE, ptr, value_indef);
-  if (value_flag)
-    bb->build_inst(Op::SET_MEM_FLAG_LE, ptr, value_indef);
+  if (BYTES_BIG_ENDIAN)
+    {
+      bb->build_inst(Op::STORE_BE, ptr, value);
+      if (value_indef)
+	bb->build_inst(Op::SET_MEM_INDEF_BE, ptr, value_indef);
+      if (value_flag)
+	bb->build_inst(Op::SET_MEM_FLAG_BE, ptr, value_indef);
+    }
+  else
+    {
+      bb->build_inst(Op::STORE_LE, ptr, value);
+      if (value_indef)
+	bb->build_inst(Op::SET_MEM_INDEF_LE, ptr, value_indef);
+      if (value_flag)
+	bb->build_inst(Op::SET_MEM_FLAG_LE, ptr, value_indef);
+    }
 }
 
 bool Converter::is_load(tree expr)
@@ -2059,6 +2158,8 @@ void Converter::process_store(tree addr_expr, tree value_expr)
 
   tree value_type = TREE_TYPE(value_expr);
   bool is_bitfield = is_bit_field(addr_expr);
+  if (BYTES_BIG_ENDIAN && is_bitfield)
+    throw Not_implemented("process_store: big endian bit field");
   Addr addr = process_address(addr_expr, true);
   assert(is_bitfield || !addr.bitoffset);
   assert(addr.bitoffset < 8);
@@ -2169,31 +2270,63 @@ void Converter::process_store(tree addr_expr, tree value_expr)
   if (inst2memory_flagsx.contains(value))
     memory_flagsx = inst2memory_flagsx.at(value);
 
-  bb->build_inst(Op::STORE_LE, addr.ptr, value);
-  for (uint64_t i = 0; i < size; i++)
+  if (BYTES_BIG_ENDIAN)
     {
-      Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
-      Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
-
-      Inst *high = bb->value_inst(i * 8 + 7, 32);
-      Inst *low = bb->value_inst(i * 8, 32);
-
-      uint8_t padding = padding_at_offset(value_type, i);
-
-      Inst *byte = bb->build_inst(Op::EXTRACT, indef, high, low);
-      if (padding != 0)
+      bb->build_inst(Op::STORE_BE, addr.ptr, value);
+      for (uint64_t i = 0; i < size; i++)
 	{
-	  Inst *padding_inst = bb->value_inst(padding, 8);
-	  byte = bb->build_inst(Op::OR, byte, padding_inst);
+	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
+
+	  Inst *high = bb->value_inst((size - i - 1) * 8 + 7, 32);
+	  Inst *low = bb->value_inst((size - i - 1) * 8, 32);
+
+	  uint8_t padding = padding_at_offset(value_type, (size - i - 1));
+
+	  Inst *byte = bb->build_inst(Op::EXTRACT, indef, high, low);
+	  if (padding != 0)
+	    {
+	      Inst *padding_inst = bb->value_inst(padding, 8);
+	      byte = bb->build_inst(Op::OR, byte, padding_inst);
+	    }
+	  bb->build_inst(Op::SET_MEM_INDEF, ptr, byte);
 	}
-      bb->build_inst(Op::SET_MEM_INDEF, ptr, byte);
+      if (memory_flagsx)
+	bb->build_inst(Op::SET_MEM_FLAG_BE, addr.ptr, memory_flagsx);
+      else
+	{
+	  Inst *memory_flag = bb->value_inst(1, 1);
+	  bb->build_inst(Op::MEMSET_MEM_FLAG, addr.ptr, memory_flag, size);
+	}
     }
-  if (memory_flagsx)
-    bb->build_inst(Op::SET_MEM_FLAG_LE, addr.ptr, memory_flagsx);
   else
     {
-      Inst *memory_flag = bb->value_inst(1, 1);
-      bb->build_inst(Op::MEMSET_MEM_FLAG, addr.ptr, memory_flag, size);
+      bb->build_inst(Op::STORE_LE, addr.ptr, value);
+      for (uint64_t i = 0; i < size; i++)
+	{
+	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
+	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
+
+	  Inst *high = bb->value_inst(i * 8 + 7, 32);
+	  Inst *low = bb->value_inst(i * 8, 32);
+
+	  uint8_t padding = padding_at_offset(value_type, i);
+
+	  Inst *byte = bb->build_inst(Op::EXTRACT, indef, high, low);
+	  if (padding != 0)
+	    {
+	      Inst *padding_inst = bb->value_inst(padding, 8);
+	      byte = bb->build_inst(Op::OR, byte, padding_inst);
+	    }
+	  bb->build_inst(Op::SET_MEM_INDEF, ptr, byte);
+	}
+      if (memory_flagsx)
+	bb->build_inst(Op::SET_MEM_FLAG_LE, addr.ptr, memory_flagsx);
+      else
+	{
+	  Inst *memory_flag = bb->value_inst(1, 1);
+	  bb->build_inst(Op::MEMSET_MEM_FLAG, addr.ptr, memory_flag, size);
+	}
     }
 }
 
@@ -2207,8 +2340,16 @@ void Converter::process_store(tree addr_expr, Inst *value, Inst *value_indef)
   assert(!addr.bitoffset);
   store_ub_check(addr.ptr, addr.prov, size);
   Inst *memory_flag = bb->value_inst(0, 1);
-  bb->build_inst(Op::STORE_LE, addr.ptr, value);
-  bb->build_inst(Op::SET_MEM_INDEF_LE, addr.ptr, value_indef);
+  if (BYTES_BIG_ENDIAN)
+    {
+      bb->build_inst(Op::STORE_BE, addr.ptr, value);
+      bb->build_inst(Op::SET_MEM_INDEF_BE, addr.ptr, value_indef);
+    }
+  else
+    {
+      bb->build_inst(Op::STORE_LE, addr.ptr, value);
+      bb->build_inst(Op::SET_MEM_INDEF_LE, addr.ptr, value_indef);
+    }
   bb->build_inst(Op::MEMSET_MEM_FLAG, addr.ptr, memory_flag, size);
 }
 
@@ -9015,6 +9156,8 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
 	      size = (bitsize + bit_offset + 7) / 8;
 	      if (DECL_BIT_FIELD_TYPE(index))
 		{
+		  if (BYTES_BIG_ENDIAN)
+		    throw Not_implemented("init_var_values: big endian bit field");
 		  if (bit_offset)
 		    {
 		      Inst *first_byte = bb->build_inst(Op::LOAD, ptr);

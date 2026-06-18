@@ -7,6 +7,8 @@ ifeq ($(findstring aarch64, $(ARCH)), aarch64)
 CXXFLAGS += -DSMTGCC_AARCH64
 else ifeq ($(findstring bpf, $(ARCH)), bpf)
 CXXFLAGS += -DSMTGCC_BPF
+else ifeq ($(findstring m68k, $(ARCH)), m68k)
+CXXFLAGS += -DSMTGCC_M68K
 else ifeq ($(findstring riscv, $(ARCH)), riscv)
 CXXFLAGS += -DSMTGCC_RISCV
 else ifeq ($(findstring sh, $(ARCH)), sh)
@@ -30,6 +32,8 @@ ifeq ($(findstring aarch64, $(ARCH)), aarch64)
 	plugins += smtgcc-tv-backend.so
 else ifeq ($(findstring bpf, $(ARCH)), bpf)
 	plugins += smtgcc-tv-backend.so
+else ifeq ($(findstring m68k, $(ARCH)), m68k)
+	plugins += smtgcc-tv-backend.so
 else ifeq ($(findstring riscv, $(ARCH)), riscv)
 	plugins += smtgcc-tv-backend.so
 else ifeq ($(findstring sh, $(ARCH)), sh)
@@ -50,6 +54,7 @@ lib_sources = \
 	lib/read_aarch64.cpp \
 	lib/read_bpf.cpp \
 	lib/read_ir.cpp \
+	lib/read_m68k.cpp \
 	lib/read_riscv.cpp \
 	lib/read_sh.cpp \
 	lib/reduce_bitsize.cpp \
@@ -82,6 +87,9 @@ ifeq ($(findstring aarch64, $(ARCH)), aarch64)
 else ifeq ($(findstring bpf, $(ARCH)), bpf)
 	plugin_sources += plugin/bpf.cpp
 	backend_objs = plugin/bpf.o
+else ifeq ($(findstring m68k, $(ARCH)), m68k)
+	plugin_sources += plugin/m68k.cpp
+	backend_objs = plugin/m68k.o
 else ifeq ($(findstring riscv, $(ARCH)), riscv)
 	plugin_sources += plugin/riscv.cpp
 	backend_objs = plugin/riscv.o

@@ -746,6 +746,77 @@ struct bpf_state {
 };
 Function *parse_bpf(std::string const& file_name, bpf_state *state);
 
+// read_m68k.cpp
+struct M68kRegIdx {
+  static constexpr uint64_t a0 = 0;
+  static constexpr uint64_t a1 = 1;
+  static constexpr uint64_t a2 = 2;
+  static constexpr uint64_t a3 = 3;
+  static constexpr uint64_t a4 = 4;
+  static constexpr uint64_t a5 = 5;
+  static constexpr uint64_t a6 = 6;
+  static constexpr uint64_t a7 = 7;
+
+  static constexpr uint64_t d0 = 8;
+  static constexpr uint64_t d1 = 9;
+  static constexpr uint64_t d2 = 10;
+  static constexpr uint64_t d3 = 11;
+  static constexpr uint64_t d4 = 12;
+  static constexpr uint64_t d5 = 13;
+  static constexpr uint64_t d6 = 14;
+  static constexpr uint64_t d7 = 15;
+
+  // The hardware registers always contain extended precision numbers,
+  // which are converted to lower precision when used. This is bad for the
+  // SMT solver, so we instead let the registers contain both an f32 and f64
+  // value, and let the IR simplifications eliminate the dead instructions.
+  static constexpr uint64_t fp0_64 = 16;
+  static constexpr uint64_t fp1_64 = 17;
+  static constexpr uint64_t fp2_64 = 18;
+  static constexpr uint64_t fp3_64 = 19;
+  static constexpr uint64_t fp4_64 = 20;
+  static constexpr uint64_t fp5_64 = 21;
+  static constexpr uint64_t fp6_64 = 22;
+  static constexpr uint64_t fp7_64 = 23;
+  static constexpr uint64_t fp0_32 = 24;
+  static constexpr uint64_t fp1_32 = 25;
+  static constexpr uint64_t fp2_32 = 26;
+  static constexpr uint64_t fp3_32 = 27;
+  static constexpr uint64_t fp4_32 = 28;
+  static constexpr uint64_t fp5_32 = 29;
+  static constexpr uint64_t fp6_32 = 30;
+  static constexpr uint64_t fp7_32 = 31;
+
+  static constexpr uint64_t x = 32;
+  static constexpr uint64_t n = 33;
+  static constexpr uint64_t z = 34;
+  static constexpr uint64_t v = 35;
+  static constexpr uint64_t c = 36;
+
+  // Pseudo registers tracking abort/exit
+  static constexpr uint64_t abort = 37;
+  static constexpr uint64_t abort_san = 38;
+  static constexpr uint64_t exit = 39;
+  static constexpr uint64_t exit_val = 40;
+};
+
+struct m68k_state {
+  std::vector<Inst *> registers;
+
+  // The memory instruction corresponding to each symbol.
+  std::map<std::string, Inst *, std::less<>> sym_name2mem;
+
+  std::string file_name;
+  std::string func_name;
+  Module *module;
+  Basic_block *entry_bb;
+  Basic_block *exit_bb;
+  std::vector<MemoryObject> memory_objects;
+  int next_local_id;
+  int64_t symbolic_id;
+};
+Function *parse_m68k(std::string const& file_name, m68k_state *state);
+
 // read_riscv.cpp
 struct RiscvRegIdx {
   static constexpr uint64_t x0 = 0;

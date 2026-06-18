@@ -41,6 +41,9 @@ struct tv_pass : gimple_opt_pass
 #ifdef SMTGCC_BPF
   std::vector<bpf_state> functions;
 #endif
+#ifdef SMTGCC_M68K
+  std::vector<m68k_state> functions;
+#endif
 #ifdef SMTGCC_RISCV
   std::vector<riscv_state> functions;
 #endif
@@ -59,6 +62,9 @@ unsigned int tv_pass::execute(function *fun)
 #elif defined(SMTGCC_BPF)
       CommonState state(Arch::bpf);
       Module *module = create_module(Arch::bpf);
+#elif defined(SMTGCC_M68K)
+      CommonState state(Arch::m68k);
+      Module *module = create_module(Arch::m68k);
 #elif defined(SMTGCC_RISCV)
       CommonState state(Arch::riscv);
       Module *module = create_module(Arch::riscv);
@@ -74,6 +80,8 @@ unsigned int tv_pass::execute(function *fun)
       aarch64_state rstate = setup_aarch64_function(&state, src, fun);
 #elif defined(SMTGCC_BPF)
       bpf_state rstate = setup_bpf_function(&state, src, fun);
+#elif defined(SMTGCC_M68K)
+      m68k_state rstate = setup_m68k_function(&state, src, fun);
 #elif defined(SMTGCC_RISCV)
       riscv_state rstate = setup_riscv_function(&state, src, fun);
 #elif defined(SMTGCC_SH)
@@ -110,6 +118,8 @@ static void finish(void *, void *data)
 	  Function *func = parse_aarch64(file_name, &state);
 #elif defined(SMTGCC_BPF)
 	  Function *func = parse_bpf(file_name, &state);
+#elif defined(SMTGCC_M68K)
+	  Function *func = parse_m68k(file_name, &state);
 #elif defined(SMTGCC_RISCV)
 	  Function *func = parse_riscv(file_name, &state);
 #elif defined(SMTGCC_SH)
