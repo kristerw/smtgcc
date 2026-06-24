@@ -123,6 +123,7 @@ private:
   void process_move(uint32_t bitsize);
   void process_moveq();
   void process_neg(uint32_t bitsize);
+  void process_not(uint32_t bitsize);
   void process_scc(Cond_code cc);
   void process_tst(uint32_t bitsize);
   void process_call();
@@ -1295,6 +1296,26 @@ void Parser::process_neg(uint32_t bitsize)
     store_arg(1, res);
 }
 
+void Parser::process_not(uint32_t bitsize)
+{
+  Inst *arg;
+  unsigned idx = 1;
+  if (is_kind(idx, Lexeme::dreg))
+    arg = get_dreg_value(idx++, bitsize);
+  else
+    std::tie(arg, idx) = load_arg(idx, bitsize);
+  get_end_of_line(idx);
+
+  Inst *res = bb->build_inst(Op::NOT, arg);
+
+  set_nz00(res);
+
+  if (is_kind(1, Lexeme::dreg))
+    write_dreg(get_dreg(1), res);
+  else
+    store_arg(1, res);
+}
+
 void Parser::process_scc(Cond_code cc)
 {
   Inst *res = bb->build_inst(Op::SEXT, build_cond(cc), 8);
@@ -1503,6 +1524,12 @@ void Parser::parse_function()
     process_neg(16);
   else if (name == "neg.b")
     process_neg(8);
+  else if (name == "not.l")
+    process_not(32);
+  else if (name == "not.w")
+    process_not(16);
+  else if (name == "not.b")
+    process_not(8);
   else if (name == "or.l")
     process_binary_bitwise(Op::OR, 32);
   else if (name == "or.w")
