@@ -113,6 +113,8 @@ private:
   void process_sub(uint32_t bitsize, bool is_subx = false);
   void process_fbinary(Op op, uint32_t bitsize);
   void process_shift(Op op, uint32_t bitsize);
+  void process_rol(uint32_t bitsize);
+  void process_ror(uint32_t bitsize);
   void process_clr(uint32_t bitsize);
   void process_cmp(uint32_t bitsize);
   void process_ext(uint32_t src_bitsize, uint32_t dest_bitsize);
@@ -1092,6 +1094,90 @@ void Parser::process_shift(Op op, uint32_t bitsize)
   write_dreg(get_dreg(idx++), res);
 }
 
+void Parser::process_rol(uint32_t bitsize)
+{
+  Inst *arg1;
+  unsigned idx = 1;
+  if (is_kind(idx, Lexeme::dreg))
+    arg1 = get_dreg_value(idx++, bitsize);
+  else
+    {
+      get_hash(idx++);
+      if (is_kind(idx, Lexeme::name))
+	std::tie(arg1, idx) = get_addr(idx, bitsize);
+      else
+	arg1 = get_hex_or_integer(idx++, bitsize);
+    }
+  get_comma(idx++);
+
+  Inst *arg2;
+  unsigned dest_idx = idx;
+  arg2 = get_dreg_value(idx++, bitsize);
+  get_end_of_line(idx);
+
+  arg1 = bb->build_trunc(arg1, std::bit_width(bitsize - 1));
+  Inst *shift = bb->build_inst(Op::ZEXT, arg1, 2 * bitsize);
+  arg2 = bb->build_inst(Op::CONCAT, arg2, arg2);
+  Inst *res = bb->build_inst(Op::SHL, arg2, shift);
+  res = bb->build_inst(Op::EXTRACT, res, 2 * bitsize - 1, bitsize);
+
+  Inst *b0 = bb->value_inst(0, 1);
+  Inst *is_shift_zero =
+    bb->build_inst(Op::EQ, arg1, bb->value_inst(0, arg1->bitsize));
+  Inst *c = bb->build_extract_bit(res, 0);
+  c = bb->build_inst(Op::ITE, is_shift_zero, b0, c);
+  Inst *zero = bb->value_inst(0, bitsize);
+  Inst *n = bb->build_extract_bit(res, bitsize - 1);
+  Inst *z = bb->build_inst(Op::EQ, res, zero);
+  Inst *v = bb->value_inst(0, 1);
+  set_xnzvc(nullptr, n, z, v, c);
+
+  idx = dest_idx;
+  write_dreg(get_dreg(idx++), res);
+}
+
+void Parser::process_ror(uint32_t bitsize)
+{
+  Inst *arg1;
+  unsigned idx = 1;
+  if (is_kind(idx, Lexeme::dreg))
+    arg1 = get_dreg_value(idx++, bitsize);
+  else
+    {
+      get_hash(idx++);
+      if (is_kind(idx, Lexeme::name))
+	std::tie(arg1, idx) = get_addr(idx, bitsize);
+      else
+	arg1 = get_hex_or_integer(idx++, bitsize);
+    }
+  get_comma(idx++);
+
+  Inst *arg2;
+  unsigned dest_idx = idx;
+  arg2 = get_dreg_value(idx++, bitsize);
+  get_end_of_line(idx);
+
+  arg1 = bb->build_trunc(arg1, std::bit_width(bitsize - 1));
+  Inst *shift = bb->build_inst(Op::ZEXT, arg1, 2 * bitsize);
+  arg2 = bb->build_inst(Op::CONCAT, arg2, arg2);
+  Inst *res = bb->build_inst(Op::LSHR, arg2, shift);
+  res = bb->build_inst(Op::EXTRACT, res, bitsize - 1, 0);
+
+  Inst *b0 = bb->value_inst(0, 1);
+  Inst *is_shift_zero =
+    bb->build_inst(Op::EQ, arg1, bb->value_inst(0, arg1->bitsize));
+  Inst *c = bb->build_extract_bit(res, bitsize - 1);
+  c = bb->build_inst(Op::ITE, is_shift_zero, b0, c);
+  Inst *zero = bb->value_inst(0, bitsize);
+  Inst *n = bb->build_extract_bit(res, bitsize - 1);
+  Inst *z = bb->build_inst(Op::EQ, res, zero);
+  Inst *v = bb->value_inst(0, 1);
+  set_xnzvc(nullptr, n, z, v, c);
+
+  idx = dest_idx;
+  write_dreg(get_dreg(idx++), res);
+}
+
 void Parser::process_clr(uint32_t bitsize)
 {
   Inst *zero = bb->value_inst(0, bitsize);
@@ -1597,6 +1683,18 @@ void Parser::parse_function()
       bb->build_br_inst(rstate->exit_bb);
       bb = nullptr;
     }
+  else if (name == "rol.l")
+    process_rol(32);
+  else if (name == "rol.w")
+    process_rol(16);
+  else if (name == "rol.b")
+    process_rol(8);
+  else if (name == "ror.l")
+    process_ror(32);
+  else if (name == "ror.w")
+    process_ror(16);
+  else if (name == "ror.b")
+    process_ror(8);
   else if (name == "scc")
     process_scc(Cond_code::CC);
   else if (name == "scs")
