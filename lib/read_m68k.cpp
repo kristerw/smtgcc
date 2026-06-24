@@ -109,8 +109,8 @@ private:
   void get_end_of_line(unsigned idx);
   Inst *build_cond(Cond_code cc);
   void process_binary_bitwise(Op op, uint32_t bitsize);
-  void process_add(uint32_t bitsize);
-  void process_sub(uint32_t bitsize);
+  void process_add(uint32_t bitsize, bool is_addx = false);
+  void process_sub(uint32_t bitsize, bool is_subx = false);
   void process_fbinary(Op op, uint32_t bitsize);
   void process_shift(Op op, uint32_t bitsize);
   void process_clr(uint32_t bitsize);
@@ -122,7 +122,7 @@ private:
   void process_lea();
   void process_move(uint32_t bitsize);
   void process_moveq();
-  void process_neg(uint32_t bitsize);
+  void process_neg(uint32_t bitsize, bool is_negx = false);
   void process_not(uint32_t bitsize);
   void process_scc(Cond_code cc);
   void process_tst(uint32_t bitsize);
@@ -806,7 +806,7 @@ void Parser::process_binary_bitwise(Op op, uint32_t bitsize)
     store_arg(idx, res);
 }
 
-void Parser::process_add(uint32_t bitsize)
+void Parser::process_add(uint32_t bitsize, bool is_addx)
 {
   Inst *arg1;
   unsigned idx = 1;
@@ -846,6 +846,12 @@ void Parser::process_add(uint32_t bitsize)
   get_end_of_line(idx);
 
   Inst *res = bb->build_inst(Op::ADD, arg2, arg1);
+  if (is_addx)
+    {
+      Inst *x = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::x]);
+      x = bb->build_inst(Op::ZEXT, x, res->bitsize);
+      res = bb->build_inst(Op::ADD, res, x);
+    }
 
   if (update_cc)
     {
@@ -860,7 +866,15 @@ void Parser::process_add(uint32_t bitsize)
 
       Inst *zero = bb->value_inst(0, bitsize);
       Inst *n = rm;
-      Inst *z = bb->build_inst(Op::EQ, res, zero);
+      Inst *z;
+      if (is_addx)
+	{
+	  Inst *eq = bb->build_inst(Op::EQ, res, zero);
+	  z = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::z]);
+	  z = bb->build_inst(Op::AND, z, eq);
+	}
+      else
+	z = bb->build_inst(Op::EQ, res, zero);
 
       // V = (Sm & Dm & !Rm) | (!Sm & !Dm & Rm)
       Inst *v1 =
@@ -888,7 +902,7 @@ void Parser::process_add(uint32_t bitsize)
     store_arg(idx, res);
 }
 
-void Parser::process_sub(uint32_t bitsize)
+void Parser::process_sub(uint32_t bitsize, bool is_subx)
 {
   Inst *arg1;
   unsigned idx = 1;
@@ -928,6 +942,12 @@ void Parser::process_sub(uint32_t bitsize)
   get_end_of_line(idx);
 
   Inst *res = bb->build_inst(Op::SUB, arg2, arg1);
+  if (is_subx)
+    {
+      Inst *x = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::x]);
+      x = bb->build_inst(Op::ZEXT, x, res->bitsize);
+      res = bb->build_inst(Op::SUB, res, x);
+    }
 
   if (update_cc)
     {
@@ -942,7 +962,15 @@ void Parser::process_sub(uint32_t bitsize)
 
       Inst *zero = bb->value_inst(0, bitsize);
       Inst *n = rm;
-      Inst *z = bb->build_inst(Op::EQ, res, zero);
+      Inst *z;
+      if (is_subx)
+	{
+	  Inst *eq = bb->build_inst(Op::EQ, res, zero);
+	  z = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::z]);
+	  z = bb->build_inst(Op::AND, z, eq);
+	}
+      else
+	z = bb->build_inst(Op::EQ, res, zero);
 
       // V = (!Sm & Dm & !Rm) | (Sm & !Dm & Rm)
       Inst *v1 =
@@ -1266,7 +1294,7 @@ void Parser::process_moveq()
   write_dreg(dest, bb->build_inst(Op::SEXT, value, 32));
 }
 
-void Parser::process_neg(uint32_t bitsize)
+void Parser::process_neg(uint32_t bitsize, bool is_negx)
 {
   Inst *arg;
   unsigned idx = 1;
@@ -1277,6 +1305,12 @@ void Parser::process_neg(uint32_t bitsize)
   get_end_of_line(idx);
 
   Inst *res = bb->build_inst(Op::NEG, arg);
+  if (is_negx)
+    {
+      Inst *x = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::x]);
+      x = bb->build_inst(Op::ZEXT, x, res->bitsize);
+      res = bb->build_inst(Op::SUB, res, x);
+    }
 
   // Extract the sign bits for the values.
   Inst *dm = bb->build_extract_bit(arg, bitsize - 1);
@@ -1284,7 +1318,15 @@ void Parser::process_neg(uint32_t bitsize)
 
   Inst *zero = bb->value_inst(0, bitsize);
   Inst *n = rm;
-  Inst *z = bb->build_inst(Op::EQ, arg, zero);
+  Inst *z;
+  if (is_negx)
+    {
+      Inst *eq = bb->build_inst(Op::EQ, res, zero);
+      z = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::z]);
+      z = bb->build_inst(Op::AND, z, eq);
+    }
+  else
+    z = bb->build_inst(Op::EQ, arg, zero);
   Inst *v = bb->build_inst(Op::AND, dm, rm);
   Inst *c = bb->build_inst(Op::OR, dm, rm);
   Inst *x = c;
@@ -1408,6 +1450,12 @@ void Parser::parse_function()
     process_add(16);
   else if (name == "add.b" || name == "addq.b")
     process_add(8);
+  else if (name == "addx.l")
+    process_add(32, true);
+  else if (name == "addx.w")
+    process_add(16, true);
+  else if (name == "addx.b")
+    process_add(8, true);
   else if (name == "and.l")
     process_binary_bitwise(Op::AND, 32);
   else if (name == "and.w")
@@ -1524,6 +1572,12 @@ void Parser::parse_function()
     process_neg(16);
   else if (name == "neg.b")
     process_neg(8);
+  else if (name == "negx.l")
+    process_neg(32, true);
+  else if (name == "negx.w")
+    process_neg(16, true);
+  else if (name == "negx.b")
+    process_neg(8, true);
   else if (name == "not.l")
     process_not(32);
   else if (name == "not.w")
@@ -1581,6 +1635,12 @@ void Parser::parse_function()
     process_sub(16);
   else if (name == "sub.b" || name == "subq.b")
     process_sub(8);
+  else if (name == "subx.l")
+    process_sub(32, true);
+  else if (name == "subx.w")
+    process_sub(16, true);
+  else if (name == "subx.b")
+    process_sub(8, true);
   else if (name == "trap")
     {
       get_hash(1);
