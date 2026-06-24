@@ -118,6 +118,7 @@ private:
   void process_ext(uint32_t src_bitsize, uint32_t dest_bitsize);
   void process_fmove(uint32_t bitsize);
   void process_jcc(Cond_code cc);
+  void process_jra();
   void process_lea();
   void process_move(uint32_t bitsize);
   void process_moveq();
@@ -1186,6 +1187,15 @@ void Parser::process_jcc(Cond_code cc)
   bb = false_bb;
 }
 
+void Parser::process_jra()
+{
+  Basic_block *dest_bb = get_bb(1);
+  get_end_of_line(2);
+
+  bb->build_br_inst(dest_bb);
+  bb = nullptr;
+}
+
 void Parser::process_lea()
 {
   auto [ptr, idx] = get_addr(1, 32);
@@ -1461,6 +1471,8 @@ void Parser::parse_function()
     process_jcc(Cond_code::VC);
   else if (name == "jvs")
     process_jcc(Cond_code::VS);
+  else if (name == "jra")
+    process_jra();
   else if (name == "jsr")
     process_call();
   else if (name == "lea")
