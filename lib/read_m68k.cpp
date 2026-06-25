@@ -1613,6 +1613,33 @@ void Parser::process_call()
       bb = func->build_bb();
       return;
     }
+  if (name == "memcpy" || name == "memmove")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *dest_ptr = bb->build_inst(Op::LOAD_BE, sp, 4);
+      Inst *src_ptr =
+	bb->build_inst(Op::LOAD_BE,
+		       bb->build_inst(Op::ADD, sp, bb->value_inst(4, 32)), 4);
+      Inst *size =
+	bb->build_inst(Op::LOAD_BE,
+		       bb->build_inst(Op::ADD, sp, bb->value_inst(8, 32)), 8);
+      bb->build_inst(Op::MEMMOVE, dest_ptr, src_ptr, size);
+      return;
+    }
+  if (name == "memset")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *dest_ptr = bb->build_inst(Op::LOAD_BE, sp, 4);
+      Inst *value =
+	bb->build_inst(Op::LOAD_BE,
+		       bb->build_inst(Op::ADD, sp, bb->value_inst(4, 32)), 4);
+      Inst *size =
+	bb->build_inst(Op::LOAD_BE,
+		       bb->build_inst(Op::ADD, sp, bb->value_inst(8, 32)), 8);
+      value = bb->build_trunc(value, 8);
+      bb->build_inst(Op::MEMSET, dest_ptr, value, size);
+      return;
+    }
 
   throw Not_implemented("call " + std::string(name));
 }
