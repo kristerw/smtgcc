@@ -1762,11 +1762,11 @@ void Parser::parse_function()
     process_clr(16);
   else if (name == "clr.b")
     process_clr(8);
-  else if (name == "cmp.l")
+  else if (name == "cmp.l" || name == "cmpm.l")
     process_cmp(32);
-  else if (name == "cmp.w")
+  else if (name == "cmp.w" || name == "cmpm.w")
     process_cmp(16);
-  else if (name == "cmp.b")
+  else if (name == "cmp.b" || name == "cmpm.b")
     process_cmp(8);
   else if (name == "eor.l")
     process_binary_bitwise(Op::XOR, 32);
