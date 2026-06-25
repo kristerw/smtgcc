@@ -103,6 +103,7 @@ private:
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
   void get_comma(unsigned idx);
+  void get_colon(unsigned idx);
   void get_hash(unsigned idx);
   void get_left_paren(unsigned idx);
   void get_right_paren(unsigned idx);
@@ -111,6 +112,7 @@ private:
   void process_binary_bitwise(Op op, uint32_t bitsize);
   void process_add(uint32_t bitsize, bool is_addx = false);
   void process_sub(uint32_t bitsize, bool is_subx = false);
+  void process_mul(uint32_t bitsize, bool is_signed = false);
   void process_fbinary(Op op, uint32_t bitsize);
   void process_shift(Op op, uint32_t bitsize);
   void process_rol(uint32_t bitsize);
@@ -650,6 +652,15 @@ void Parser::get_comma(unsigned idx)
 		      line_number);
 }
 
+void Parser::get_colon(unsigned idx)
+{
+  assert(idx > 0);
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::colon)
+    throw Parse_error("expected a ':' after "
+		      + std::string(token_string(tokens[idx - 1])),
+		      line_number);
+}
+
 void Parser::get_hash(unsigned idx)
 {
   assert(idx > 0);
@@ -994,6 +1005,91 @@ void Parser::process_sub(uint32_t bitsize, bool is_subx)
   idx = dest_idx;
   if (is_kind(idx, Lexeme::dreg))
     write_dreg(get_dreg(idx++), res);
+  else if (is_kind(idx, Lexeme::areg))
+    write_dreg(get_areg(idx++), res);
+  else
+    store_arg(idx, res);
+}
+
+void Parser::process_mul(uint32_t bitsize, bool is_signed)
+{
+  Inst *arg1;
+  unsigned idx = 1;
+  if (is_kind(idx, Lexeme::dreg))
+    arg1 = get_dreg_value(idx++, bitsize);
+  else if (is_kind(idx, Lexeme::hash))
+    {
+      idx++;
+      if (is_kind(idx, Lexeme::name))
+	std::tie(arg1, idx) = get_addr(idx, bitsize);
+      else
+	arg1 = get_hex_or_integer(idx++, bitsize);
+    }
+  else
+    std::tie(arg1, idx) = load_arg(idx, bitsize);
+  get_comma(idx++);
+
+  Inst *arg2;
+  bool returns_64_bits = false;
+  unsigned dest_idx = idx;
+  if (is_kind(idx, Lexeme::dreg))
+    {
+      arg2 = get_dreg_value(idx++, bitsize);
+      if (bitsize == 32 && is_kind(idx, Lexeme::colon))
+	{
+	  idx++;
+	  returns_64_bits = true;
+	  arg2 = get_dreg_value(idx++, bitsize);
+	}
+    }
+  else
+    std::tie(arg2, idx) = load_arg(idx, bitsize);
+  get_end_of_line(idx);
+
+  Inst *warg1;
+  Inst *warg2;
+  if (is_signed)
+    {
+      warg1 = bb->build_inst(Op::SEXT, arg1, 2 * bitsize);
+      warg2 = bb->build_inst(Op::SEXT, arg2, 2 * bitsize);
+    }
+  else
+    {
+      warg1 = bb->build_inst(Op::ZEXT, arg1, 2 * bitsize);
+      warg2 = bb->build_inst(Op::ZEXT, arg2, 2 * bitsize);
+    }
+
+  Inst *res = bb->build_inst(Op::MUL, warg2, warg1);
+  Inst *res_hi = bb->build_inst(Op::EXTRACT, res, 2 * bitsize - 1, bitsize);
+  Inst *res_lo = bb->build_inst(Op::EXTRACT, res, bitsize - 1, 0);
+  if (bitsize == 32 && !returns_64_bits)
+    res = bb->build_trunc(res, 32);
+
+  Inst *zero = bb->value_inst(0, res->bitsize);
+  Inst *n = bb->build_inst(Op::SLT, res, zero);
+  Inst *z = bb->build_inst(Op::EQ, res, zero);
+  Inst *v;
+  if (bitsize == 16 || returns_64_bits)
+    v = bb->value_inst(0, 1);
+  else if (is_signed)
+    v = bb->build_inst(Op::SMUL_OVERFLOW, arg1, arg2);
+  else
+    v = bb->build_inst(Op::NE, res_hi, bb->value_inst(0, bitsize));
+  Inst *c = bb->value_inst(0, 1);
+  set_xnzvc(nullptr, n, z, v, c);
+
+  idx = dest_idx;
+  if (is_kind(idx, Lexeme::dreg))
+    {
+      if (returns_64_bits)
+	{
+	  write_dreg(get_dreg(idx++), res_hi);
+	  get_colon(idx++);
+	  write_dreg(get_dreg(idx++), res_lo);
+	}
+      else
+	write_dreg(get_dreg(idx++), res);
+    }
   else if (is_kind(idx, Lexeme::areg))
     write_dreg(get_areg(idx++), res);
   else
@@ -1652,6 +1748,14 @@ void Parser::parse_function()
     process_move(8);
   else if (name == "moveq")
     process_moveq();
+  else if (name == "muls.l")
+    process_mul(32, true);
+  else if (name == "muls.w")
+    process_mul(16, true);
+  else if (name == "mulu.l")
+    process_mul(32);
+  else if (name == "mulu.w")
+    process_mul(16);
   else if (name == "neg.l")
     process_neg(32);
   else if (name == "neg.w")
