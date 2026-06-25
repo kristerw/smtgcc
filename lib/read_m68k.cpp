@@ -100,6 +100,7 @@ private:
   void build_mem(const std::string& sym_name);
   std::pair<Inst *, unsigned> get_addr_name(unsigned idx);
   std::pair<Inst *, unsigned> get_addr_basic_indirect(unsigned idx, uint32_t access_bitsize);
+  std::pair<Inst *, unsigned> get_addr_other(unsigned idx);
   std::pair<Inst *, unsigned> get_addr(unsigned idx, uint32_t access_bitsize);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
@@ -579,6 +580,67 @@ std::pair<Inst *, unsigned> Parser::get_addr_basic_indirect(unsigned idx, uint32
   return {inst, idx};
 }
 
+// Handle addresses of the form:
+//  * 0
+//  * 0.w
+//  * 4(a0)
+//  * -4(a0)
+//  * (4,%a0)
+//  * (-4,%a0)
+std::pair<Inst *, unsigned> Parser::get_addr_other(unsigned idx)
+{
+  bool minus = false;
+  if (is_kind(idx, Lexeme::minus))
+    {
+      minus = true;
+      idx++;
+    }
+  Inst *value = nullptr;
+  if (minus || is_kind(idx, Lexeme::hex) || is_kind(idx, Lexeme::integer))
+    {
+      value = get_hex_or_integer(idx++, 32);
+      if (minus)
+	{
+	  value = bb->build_inst(Op::NEG, value);
+	  minus = false;
+	}
+      if (is_kind(idx, Lexeme::name) && get_name(idx) == ".w")
+	{
+	  // Integer addresses may have a ".w" prefix if it fits in 16
+	  // bits. Skip it, if present.
+	  idx++;
+	}
+      if (!is_kind(idx, Lexeme::left_paren))
+	return {value, idx};
+    }
+  get_left_paren(idx++);
+  if (!value && !minus)
+    {
+      if (is_kind(idx, Lexeme::minus))
+	{
+	  minus = true;
+	  idx++;
+	}
+      if (minus || is_kind(idx, Lexeme::hex) || is_kind(idx, Lexeme::integer))
+	{
+	  value = get_hex_or_integer(idx++, 32);
+	  if (minus)
+	    {
+	      value = bb->build_inst(Op::NEG, value);
+	      minus = false;
+	    }
+	  get_comma(idx++);
+	}
+    }
+  Inst *inst = get_areg_value(idx++);
+  if (is_kind(idx, Lexeme::comma))
+    throw Parse_error("Register indirect with index not implemented",
+		      line_number);
+  get_right_paren(idx++);
+  inst = bb->build_inst(Op::ADD, inst, value);
+  return {inst, idx};
+}
+
 std::pair<Inst *, unsigned> Parser::get_addr(unsigned idx, uint32_t access_bitsize)
 {
   if (is_kind(idx, Lexeme::name)
@@ -591,47 +653,13 @@ std::pair<Inst *, unsigned> Parser::get_addr(unsigned idx, uint32_t access_bitsi
       || (is_kind(idx, Lexeme::minus) && is_kind(idx + 1, Lexeme::left_paren)))
     return get_addr_basic_indirect(idx, access_bitsize);
 
-  bool minus = false;
-  if (is_kind(idx, Lexeme::minus))
-    {
-      minus = true;
-      idx++;
-    }
-  Inst *value = nullptr;
-  if (is_kind(idx, Lexeme::integer))
-    {
-      value = get_hex_or_integer(idx++, 32);
-      if (minus)
-	{
-	  value = bb->build_inst(Op::NEG, value);
-	  minus = false;
-	}
-      if (is_kind(idx, Lexeme::name))
-	{
-	  // Integer addresses may have a ".w" prefix if it fits in 16
-	  // bits. Skip it, if present.
-	  std::string_view name = get_name(idx);
-	  if (name == ".w")
-	    idx++;
-	}
-    }
-  Inst *inst = nullptr;
-  if (is_kind(idx, Lexeme::left_paren))
-    {
-      get_left_paren(idx++);
-      inst = get_areg_value(idx++);
-      if (is_kind(idx, Lexeme::comma))
-	throw Parse_error("Register indirect with index not implemented",
-			  line_number);
-      get_right_paren(idx++);
-    }
-  if (!inst && !value)
-    throw Parse_error("expected an address", line_number);
-  if (!inst)
-    return {value, idx};
-  if (value)
-    inst = bb->build_inst(Op::ADD, inst, value);
-  return {inst, idx};
+  if (is_kind(idx, Lexeme::minus)
+      || is_kind(idx, Lexeme::integer)
+      || is_kind(idx, Lexeme::hex)
+      || is_kind(idx, Lexeme::left_paren))
+    return get_addr_other(idx);
+
+  throw Parse_error("expected an address", line_number);
 }
 
 Basic_block *Parser::get_bb(unsigned idx)
