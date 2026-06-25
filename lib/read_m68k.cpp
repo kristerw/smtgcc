@@ -124,6 +124,7 @@ private:
   void process_jcc(Cond_code cc);
   void process_jra();
   void process_lea();
+  void process_pea();
   void process_move(uint32_t bitsize);
   void process_moveq();
   void process_neg(uint32_t bitsize, bool is_negx = false);
@@ -1417,6 +1418,18 @@ void Parser::process_lea()
   write_dreg(dest, ptr);
 }
 
+void Parser::process_pea()
+{
+  Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+  sp = bb->build_inst(Op::SUB, sp, bb->value_inst(4, 32));
+  bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::a7], sp);
+
+  auto [ptr, idx] = get_addr(1, 32);
+  get_end_of_line(idx);
+
+  bb->build_inst(Op::STORE_BE, sp, ptr);
+}
+
 void Parser::process_move(uint32_t bitsize)
 {
   Inst *value;
@@ -1780,6 +1793,8 @@ void Parser::parse_function()
     process_binary_bitwise(Op::OR, 16);
   else if (name == "or.b")
     process_binary_bitwise(Op::OR, 8);
+  else if (name == "pea")
+    process_pea();
   else if (name == "rts")
     {
       get_end_of_line(1);
