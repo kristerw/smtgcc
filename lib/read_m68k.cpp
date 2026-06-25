@@ -597,7 +597,31 @@ std::pair<Inst *, unsigned> Parser::get_addr_other(unsigned idx)
       idx++;
     }
   Inst *value = nullptr;
-  if (minus || is_kind(idx, Lexeme::hex) || is_kind(idx, Lexeme::integer))
+  if (!minus && is_kind(idx, Lexeme::name))
+    {
+      std::string name = std::string(get_name(idx++));
+      uint64_t offset = 0;
+      if (sym_alias.contains(name))
+	std::tie(name, offset) = sym_alias[name];
+      if (!rstate->sym_name2mem.contains(name))
+	build_mem(name);
+      Inst *value = rstate->sym_name2mem[name];
+      if (offset)
+	value = bb->build_inst(Op::ADD, value, bb->value_inst(offset, 32));
+      if (is_kind(idx, Lexeme::plus))
+	{
+	  idx++;
+	  value = bb->build_inst(Op::ADD, value, get_hex_or_integer(idx++, 32));
+	}
+      else if (is_kind(idx, Lexeme::minus))
+	{
+	  idx++;
+	  value = bb->build_inst(Op::SUB, value, get_hex_or_integer(idx++, 32));
+	}
+      if (!is_kind(idx, Lexeme::left_paren))
+	return {value, idx};
+    }
+  else if (minus || is_kind(idx, Lexeme::hex) || is_kind(idx, Lexeme::integer))
     {
       value = get_hex_or_integer(idx++, 32);
       if (minus)
@@ -691,8 +715,7 @@ std::pair<Inst *, unsigned> Parser::get_addr_other(unsigned idx)
 
 std::pair<Inst *, unsigned> Parser::get_addr(unsigned idx, uint32_t access_bitsize)
 {
-  if (is_kind(idx, Lexeme::name)
-      || (is_kind(idx, Lexeme::left_paren) && is_kind(idx + 1, Lexeme::name)))
+  if (is_kind(idx, Lexeme::left_paren) && is_kind(idx + 1, Lexeme::name))
     return get_addr_name(idx);
 
   if ((is_kind(idx, Lexeme::left_paren)
@@ -701,7 +724,8 @@ std::pair<Inst *, unsigned> Parser::get_addr(unsigned idx, uint32_t access_bitsi
       || (is_kind(idx, Lexeme::minus) && is_kind(idx + 1, Lexeme::left_paren)))
     return get_addr_basic_indirect(idx, access_bitsize);
 
-  if (is_kind(idx, Lexeme::minus)
+  if (is_kind(idx, Lexeme::name)
+      || is_kind(idx, Lexeme::minus)
       || is_kind(idx, Lexeme::integer)
       || is_kind(idx, Lexeme::hex)
       || is_kind(idx, Lexeme::left_paren))
