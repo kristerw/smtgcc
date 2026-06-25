@@ -580,13 +580,14 @@ std::pair<Inst *, unsigned> Parser::get_addr_basic_indirect(unsigned idx, uint32
   return {inst, idx};
 }
 
-// Handle addresses of the form:
+// Handle addresses such as:
 //  * 0
 //  * 0.w
 //  * 4(a0)
-//  * -4(a0)
-//  * (4,%a0)
 //  * (-4,%a0)
+//  * 1(%a1,%a0.l)
+//  * (%a0,%d0.l)
+//  * (%a0,%d0.l*4)
 std::pair<Inst *, unsigned> Parser::get_addr_other(unsigned idx)
 {
   bool minus = false;
@@ -633,11 +634,58 @@ std::pair<Inst *, unsigned> Parser::get_addr_other(unsigned idx)
 	}
     }
   Inst *inst = get_areg_value(idx++);
+  if (value)
+    inst = bb->build_inst(Op::ADD, inst, value);
+
   if (is_kind(idx, Lexeme::comma))
-    throw Parse_error("Register indirect with index not implemented",
-		      line_number);
+    {
+      get_comma(idx++);
+      if (is_kind(idx, Lexeme::areg))
+	{
+	  get_areg(idx++);
+	  std::string suff = std::string(get_name(idx++));
+	  uint32_t bitsize;
+	  if (suff == ".l")
+	    bitsize = 32;
+	  else if (suff == ".w")
+	    bitsize = 16;
+	  else
+	    throw Parse_error("Expected a .l or .w suffix", line_number);
+	  Inst *val = get_areg_value(idx - 2, bitsize);
+	  if (bitsize < 32)
+	    val = bb->build_inst(Op::SEXT, val, 32);
+	  if (is_kind(idx, Lexeme::asterisk))
+	    {
+	      idx++;
+	      Inst *scale = get_integer(idx++, 32);
+	      val = bb->build_inst(Op::MUL, val, scale);
+	    }
+	  inst = bb->build_inst(Op::ADD, inst, val);
+	}
+      else
+	{
+	  get_dreg(idx++);
+	  std::string suff = std::string(get_name(idx++));
+	  uint32_t bitsize;
+	  if (suff == ".l")
+	    bitsize = 32;
+	  else if (suff == ".w")
+	    bitsize = 16;
+	  else
+	    throw Parse_error("Expected a .l or .w suffix", line_number);
+	  Inst *val = get_dreg_value(idx - 2, bitsize);
+	  if (bitsize < 32)
+	    val = bb->build_inst(Op::SEXT, val, 32);
+	  if (is_kind(idx, Lexeme::asterisk))
+	    {
+	      idx++;
+	      Inst *scale = get_integer(idx++, 32);
+	      val = bb->build_inst(Op::MUL, val, scale);
+	    }
+	  inst = bb->build_inst(Op::ADD, inst, val);
+	}
+    }
   get_right_paren(idx++);
-  inst = bb->build_inst(Op::ADD, inst, value);
   return {inst, idx};
 }
 
