@@ -1512,6 +1512,8 @@ void Parser::process_fmove(uint32_t bitsize)
   unsigned idx = 1;
   if (is_kind(idx, Lexeme::freg))
     value = get_freg_value(idx++, bitsize);
+  else if (is_kind(idx, Lexeme::dreg))
+    value = get_dreg_value(idx++, bitsize);
   else if (is_kind(idx, Lexeme::hash))
     {
       idx++;
@@ -1530,6 +1532,13 @@ void Parser::process_fmove(uint32_t bitsize)
       get_end_of_line(idx);
 
       write_freg(dest, value);
+    }
+  else if (is_kind(idx, Lexeme::dreg))
+    {
+      Inst *dest = get_dreg(idx++);
+      get_end_of_line(idx);
+
+      write_dreg(dest, value);
     }
   else
     {
