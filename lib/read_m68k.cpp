@@ -239,18 +239,23 @@ void Parser::lex_reg()
       pos += 2;
       tokens.emplace_back(Lexeme::areg, start_pos, pos - start_pos);
     }
-  else if (buf[pos] == 'f'
-	   && buf[pos + 1] == 'p'
-	   && ('0' <= buf[pos + 2] && buf[pos + 2] <= '7'))
+  else if (buf[pos] == 'f' && buf[pos + 1] == 'p')
     {
-      pos += 3;
-      tokens.emplace_back(Lexeme::freg, start_pos, pos - start_pos);
+      if ('0' <= buf[pos + 2] && buf[pos + 2] <= '7')
+	{
+	  pos += 3;
+	  tokens.emplace_back(Lexeme::freg, start_pos, pos - start_pos);
+	}
+      else
+	throw Parse_error("register %fp not implemented", line_number);
     }
   else if (buf[pos] == 's' && buf[pos + 1] == 'p')
     {
       pos += 2;
       tokens.emplace_back(Lexeme::areg, start_pos, pos - start_pos);
     }
+  else if (buf[pos] == 'p' && buf[pos + 1] == 'c')
+    throw Parse_error("register %pc not implemented", line_number);
   else
     throw Parse_error("invalid register", line_number);
 }
