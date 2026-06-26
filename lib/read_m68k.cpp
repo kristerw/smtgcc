@@ -1512,6 +1512,14 @@ void Parser::process_fmove(uint32_t bitsize)
   unsigned idx = 1;
   if (is_kind(idx, Lexeme::freg))
     value = get_freg_value(idx++, bitsize);
+  else if (is_kind(idx, Lexeme::hash))
+    {
+      idx++;
+      if (is_kind(idx, Lexeme::name))
+	std::tie(value, idx) = get_addr(idx, bitsize);
+      else
+	value = get_hex_or_integer(idx++, bitsize);
+    }
   else
     std::tie(value, idx) = load_arg(idx, bitsize);
   get_comma(idx++);
