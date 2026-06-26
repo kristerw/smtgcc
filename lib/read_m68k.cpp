@@ -1245,6 +1245,8 @@ void Parser::process_fbinary(Op op, uint32_t bitsize)
   unsigned idx = 1;
   if (is_kind(idx, Lexeme::freg))
     arg1 = get_freg_value(idx++, bitsize);
+  else if (is_kind(idx, Lexeme::dreg))
+    arg1 = get_dreg_value(idx++, bitsize);
   else if (is_kind(idx, Lexeme::hash))
     {
       idx++;
