@@ -126,6 +126,10 @@ private:
   void process_fmove(uint32_t bitsize);
   void process_jcc(Cond_code cc);
   void process_jra();
+  void process_bchg();
+  void process_bclr();
+  void process_bset();
+  void process_btst();
   void process_lea();
   void process_pea();
   void process_move(uint32_t bitsize);
@@ -1546,6 +1550,151 @@ void Parser::process_jra()
   bb = nullptr;
 }
 
+void Parser::process_bchg()
+{
+  Inst *arg1;
+  unsigned idx = 1;
+  if (is_kind(idx, Lexeme::dreg))
+    arg1 = get_dreg_value(idx++, 32);
+  else
+    std::tie(arg1, idx) = get_imm(idx, 32);
+  get_comma(idx++);
+  Inst *ptr = nullptr;
+  Inst *arg2;
+  unsigned dest_idx = idx;
+  if (is_kind(idx, Lexeme::dreg))
+    {
+      arg2 = get_dreg_value(idx++, 32);
+      arg1 = bb->build_inst(Op::ZEXT, bb->build_trunc(arg1, 5), 32);
+    }
+  else
+    {
+      std::tie(ptr, idx) = get_addr(idx, 8);
+      arg2 = bb->build_inst(Op::LOAD_BE, ptr, 1);
+      arg1 = bb->build_inst(Op::ZEXT, bb->build_trunc(arg1, 3), 8);
+    }
+
+  Inst *z = bb->build_trunc(bb->build_inst(Op::LSHR, arg2, arg1), 1);
+  z = bb->build_inst(Op::NOT, z);
+  bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::z], z);
+
+  Inst *res = bb->value_inst(1, arg1->bitsize);
+  res = bb->build_inst(Op::SHL, res, arg1);
+  res = bb->build_inst(Op::XOR, arg2, res);
+
+  idx = dest_idx;
+  if (is_kind(idx, Lexeme::dreg))
+    write_dreg(get_dreg(idx++), res);
+  else
+    bb->build_inst(Op::STORE_BE, ptr, res);
+}
+
+void Parser::process_bclr()
+{
+  Inst *arg1;
+  unsigned idx = 1;
+  if (is_kind(idx, Lexeme::dreg))
+    arg1 = get_dreg_value(idx++, 32);
+  else
+    std::tie(arg1, idx) = get_imm(idx, 32);
+  get_comma(idx++);
+  Inst *ptr = nullptr;
+  Inst *arg2;
+  unsigned dest_idx = idx;
+  if (is_kind(idx, Lexeme::dreg))
+    {
+      arg2 = get_dreg_value(idx++, 32);
+      arg1 = bb->build_inst(Op::ZEXT, bb->build_trunc(arg1, 5), 32);
+    }
+  else
+    {
+      std::tie(ptr, idx) = get_addr(idx, 8);
+      arg2 = bb->build_inst(Op::LOAD_BE, ptr, 1);
+      arg1 = bb->build_inst(Op::ZEXT, bb->build_trunc(arg1, 3), 8);
+    }
+
+  Inst *z = bb->build_trunc(bb->build_inst(Op::LSHR, arg2, arg1), 1);
+  z = bb->build_inst(Op::NOT, z);
+  bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::z], z);
+
+  Inst *res = bb->value_inst(1, arg1->bitsize);
+  res = bb->build_inst(Op::SHL, res, arg1);
+  res = bb->build_inst(Op::AND, arg2, bb->build_inst(Op::NOT, res));
+
+  idx = dest_idx;
+  if (is_kind(idx, Lexeme::dreg))
+    write_dreg(get_dreg(idx++), res);
+  else
+    bb->build_inst(Op::STORE_BE, ptr, res);
+}
+
+void Parser::process_bset()
+{
+  Inst *arg1;
+  unsigned idx = 1;
+  if (is_kind(idx, Lexeme::dreg))
+    arg1 = get_dreg_value(idx++, 32);
+  else
+    std::tie(arg1, idx) = get_imm(idx, 32);
+  get_comma(idx++);
+  Inst *ptr = nullptr;
+  Inst *arg2;
+  unsigned dest_idx = idx;
+  if (is_kind(idx, Lexeme::dreg))
+    {
+      arg2 = get_dreg_value(idx++, 32);
+      arg1 = bb->build_inst(Op::ZEXT, bb->build_trunc(arg1, 5), 32);
+    }
+  else
+    {
+      std::tie(ptr, idx) = get_addr(idx, 8);
+      arg2 = bb->build_inst(Op::LOAD_BE, ptr, 1);
+      arg1 = bb->build_inst(Op::ZEXT, bb->build_trunc(arg1, 3), 8);
+    }
+
+  Inst *z = bb->build_trunc(bb->build_inst(Op::LSHR, arg2, arg1), 1);
+  z = bb->build_inst(Op::NOT, z);
+  bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::z], z);
+
+  Inst *res = bb->value_inst(1, arg1->bitsize);
+  res = bb->build_inst(Op::SHL, res, arg1);
+  res = bb->build_inst(Op::OR, arg2, res);
+
+  idx = dest_idx;
+  if (is_kind(idx, Lexeme::dreg))
+    write_dreg(get_dreg(idx++), res);
+  else
+    bb->build_inst(Op::STORE_BE, ptr, res);
+}
+
+void Parser::process_btst()
+{
+  Inst *arg1;
+  unsigned idx = 1;
+  if (is_kind(idx, Lexeme::dreg))
+    arg1 = get_dreg_value(idx++, 32);
+  else
+    std::tie(arg1, idx) = get_imm(idx, 32);
+  get_comma(idx++);
+  Inst *ptr = nullptr;
+  Inst *arg2;
+  if (is_kind(idx, Lexeme::dreg))
+    {
+      arg2 = get_dreg_value(idx++, 32);
+      arg1 = bb->build_inst(Op::ZEXT, bb->build_trunc(arg1, 5), 32);
+    }
+  else
+    {
+      std::tie(ptr, idx) = get_addr(idx, 8);
+      arg2 = bb->build_inst(Op::LOAD_BE, ptr, 1);
+      arg1 = bb->build_inst(Op::ZEXT, bb->build_trunc(arg1, 3), 8);
+    }
+
+  Inst *z = bb->build_trunc(bb->build_inst(Op::LSHR, arg2, arg1), 1);
+  z = bb->build_inst(Op::NOT, z);
+  bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::z], z);
+}
+
 void Parser::process_lea()
 {
   auto [ptr, idx] = get_addr(1, 32);
@@ -1836,6 +1985,14 @@ void Parser::parse_function()
     process_shift(Op::ASHR, 16);
   else if (name == "asr.b")
     process_shift(Op::ASHR, 8);
+  else if (name == "bchg")
+    process_bchg();
+  else if (name == "bclr")
+    process_bclr();
+  else if (name == "bset")
+    process_bset();
+  else if (name == "btst")
+    process_btst();
   else if (name == "clr.l")
     process_clr(32);
   else if (name == "clr.w")
