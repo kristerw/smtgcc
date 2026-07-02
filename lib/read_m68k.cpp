@@ -102,6 +102,7 @@ private:
 						      uint32_t access_bitsize);
   std::pair<Inst *, unsigned> get_addr_other(unsigned idx);
   std::pair<Inst *, unsigned> get_addr(unsigned idx, uint32_t access_bitsize);
+  std::pair<Inst *, unsigned> get_imm(unsigned idx, uint32_t bitsize = 32);
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
   void get_comma(unsigned idx);
@@ -757,6 +758,19 @@ std::pair<Inst *, unsigned> Parser::get_addr(unsigned idx, uint32_t access_bitsi
   throw Parse_error("expected an address", line_number);
 }
 
+std::pair<Inst *, unsigned> Parser::get_imm(unsigned idx, uint32_t bitsize)
+{
+  get_hash(idx++);
+  Inst *arg;
+  if (is_kind(idx, Lexeme::name))
+    std::tie(arg, idx) = get_addr_other(idx);
+  else
+    arg = get_hex_or_integer(idx++, bitsize);
+  if (arg->bitsize > bitsize)
+    arg = bb->build_trunc(arg, bitsize);
+  return {arg, idx};
+}
+
 Basic_block *Parser::get_bb(unsigned idx)
 {
   if (tokens.size() <= idx)
@@ -937,13 +951,7 @@ void Parser::process_binary_bitwise(Op op, uint32_t bitsize)
   if (is_kind(idx, Lexeme::dreg))
     arg1 = get_dreg_value(idx++, bitsize);
   else if (is_kind(idx, Lexeme::hash))
-    {
-      idx++;
-      if (is_kind(idx, Lexeme::name))
-	std::tie(arg1, idx) = get_addr(idx, bitsize);
-      else
-	arg1 = get_hex_or_integer(idx++, bitsize);
-    }
+    std::tie(arg1, idx) = get_imm(idx, bitsize);
   else
     std::tie(arg1, idx) = load_arg(idx, bitsize);
   get_comma(idx++);
@@ -976,13 +984,7 @@ void Parser::process_add(uint32_t bitsize, bool is_addx)
   else if (is_kind(idx, Lexeme::areg))
     arg1 = get_areg_value(idx++, bitsize);
   else if (is_kind(idx, Lexeme::hash))
-    {
-      idx++;
-      if (is_kind(idx, Lexeme::name))
-	std::tie(arg1, idx) = get_addr(idx, bitsize);
-      else
-	arg1 = get_hex_or_integer(idx++, bitsize);
-    }
+    std::tie(arg1, idx) = get_imm(idx, bitsize);
   else
     std::tie(arg1, idx) = load_arg(idx, bitsize);
   get_comma(idx++);
@@ -1072,13 +1074,7 @@ void Parser::process_sub(uint32_t bitsize, bool is_subx)
   else if (is_kind(idx, Lexeme::areg))
     arg1 = get_areg_value(idx++, bitsize);
   else if (is_kind(idx, Lexeme::hash))
-    {
-      idx++;
-      if (is_kind(idx, Lexeme::name))
-	std::tie(arg1, idx) = get_addr(idx, bitsize);
-      else
-	arg1 = get_hex_or_integer(idx++, bitsize);
-    }
+    std::tie(arg1, idx) = get_imm(idx, bitsize);
   else
     std::tie(arg1, idx) = load_arg(idx, bitsize);
   get_comma(idx++);
@@ -1166,13 +1162,7 @@ void Parser::process_mul(uint32_t bitsize, bool is_signed)
   if (is_kind(idx, Lexeme::dreg))
     arg1 = get_dreg_value(idx++, bitsize);
   else if (is_kind(idx, Lexeme::hash))
-    {
-      idx++;
-      if (is_kind(idx, Lexeme::name))
-	std::tie(arg1, idx) = get_addr(idx, bitsize);
-      else
-	arg1 = get_hex_or_integer(idx++, bitsize);
-    }
+    std::tie(arg1, idx) = get_imm(idx, bitsize);
   else
     std::tie(arg1, idx) = load_arg(idx, bitsize);
   get_comma(idx++);
@@ -1253,13 +1243,7 @@ void Parser::process_fbinary(Op op, uint32_t bitsize)
   else if (is_kind(idx, Lexeme::dreg))
     arg1 = get_dreg_value(idx++, bitsize);
   else if (is_kind(idx, Lexeme::hash))
-    {
-      idx++;
-      if (is_kind(idx, Lexeme::name))
-	std::tie(arg1, idx) = get_addr(idx, bitsize);
-      else
-	arg1 = get_hex_or_integer(idx++, bitsize);
-    }
+    std::tie(arg1, idx) = get_imm(idx, bitsize);
   else
     std::tie(arg1, idx) = load_arg(idx, bitsize);
   get_comma(idx++);
@@ -1456,13 +1440,7 @@ void Parser::process_cmp(uint32_t bitsize)
   else if (is_kind(idx, Lexeme::areg))
     arg1 = get_areg_value(idx++, bitsize);
   else if (is_kind(idx, Lexeme::hash))
-    {
-      idx++;
-      if (is_kind(idx, Lexeme::name))
-	std::tie(arg1, idx) = get_addr(idx, bitsize);
-      else
-	arg1 = get_hex_or_integer(idx++, bitsize);
-    }
+    std::tie(arg1, idx) = get_imm(idx, bitsize);
   else
     std::tie(arg1, idx) = load_arg(idx, bitsize);
   get_comma(idx++);
@@ -1522,13 +1500,7 @@ void Parser::process_fmove(uint32_t bitsize)
   else if (is_kind(idx, Lexeme::dreg))
     value = get_dreg_value(idx++, bitsize);
   else if (is_kind(idx, Lexeme::hash))
-    {
-      idx++;
-      if (is_kind(idx, Lexeme::name))
-	std::tie(value, idx) = get_addr(idx, bitsize);
-      else
-	value = get_hex_or_integer(idx++, bitsize);
-    }
+    std::tie(value, idx) = get_imm(idx, bitsize);
   else
     std::tie(value, idx) = load_arg(idx, bitsize);
   get_comma(idx++);
@@ -1605,13 +1577,7 @@ void Parser::process_move(uint32_t bitsize)
   else if (is_kind(idx, Lexeme::areg))
     value = get_areg_value(idx++, bitsize);
   else if (is_kind(idx, Lexeme::hash))
-    {
-      idx++;
-      if (is_kind(idx, Lexeme::name))
-	std::tie(value, idx) = get_addr(idx, bitsize);
-      else
-	value = get_hex_or_integer(idx++, bitsize);
-    }
+    std::tie(value, idx) = get_imm(idx, bitsize);
   else
     std::tie(value, idx) = load_arg(idx, bitsize);
   get_comma(idx++);
