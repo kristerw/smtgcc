@@ -1453,7 +1453,14 @@ void Parser::process_cmp(uint32_t bitsize)
   if (is_kind(idx, Lexeme::dreg))
     arg2 = get_dreg_value(idx++, bitsize);
   else if (is_kind(idx, Lexeme::areg))
-    arg2 = get_areg_value(idx++, bitsize);
+    {
+      arg2 = get_areg_value(idx++, 32);
+      if (bitsize < 32)
+	{
+	  arg1 = bb->build_inst(Op::SEXT, arg1, 32);
+	  bitsize = 32;
+	}
+    }
   else
     std::tie(arg2, idx) = load_arg(idx, bitsize);
   get_end_of_line(idx);
