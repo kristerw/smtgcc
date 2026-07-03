@@ -124,6 +124,19 @@ bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data)
 	  || cmd == ".byte")
 	{
 	  int size;
+#if defined(SMTGCC_M68K)
+	  if (cmd == ".byte")
+	    size = 1;
+	  else if (cmd == ".word"
+		   || cmd == ".short"
+		   || cmd == ".hword"
+		   || cmd == ".2byte")
+	    size = 2;
+	  else if (cmd == ".long")
+	    size = 4;
+	  else
+	    throw Parse_error("Unhandled " + std::string(cmd), line_number);
+#else
 	  if (cmd == ".byte")
 	    size = 1;
 	  else if (cmd == ".half"
@@ -135,6 +148,7 @@ bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data)
 	    size = 4;
 	  else
 	    size = 8;
+#endif
 
 	  skip_whitespace();
 
