@@ -106,6 +106,7 @@ private:
   Basic_block *get_bb(unsigned idx);
   Basic_block *get_bb_def(unsigned idx);
   void get_comma(unsigned idx);
+  void get_plus(unsigned idx);
   void get_colon(unsigned idx);
   void get_hash(unsigned idx);
   void get_left_paren(unsigned idx);
@@ -133,6 +134,7 @@ private:
   void process_lea();
   void process_pea();
   void process_move(uint32_t bitsize);
+  void process_movem(uint32_t bitsize);
   void process_moveq();
   void process_neg(uint32_t bitsize, bool is_negx = false);
   void process_not(uint32_t bitsize);
@@ -814,6 +816,15 @@ void Parser::get_comma(unsigned idx)
   assert(idx > 0);
   if (tokens.size() <= idx || tokens[idx].kind != Lexeme::comma)
     throw Parse_error("expected a ',' after "
+		      + std::string(token_string(tokens[idx - 1])),
+		      line_number);
+}
+
+void Parser::get_plus(unsigned idx)
+{
+  assert(idx > 0);
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::plus)
+    throw Parse_error("expected a '+' after "
 		      + std::string(token_string(tokens[idx - 1])),
 		      line_number);
 }
@@ -1764,6 +1775,70 @@ void Parser::process_move(uint32_t bitsize)
     }
 }
 
+void Parser::process_movem(uint32_t bitsize)
+{
+  if (is_kind(1, Lexeme::hash))
+    {
+      auto [inst, idx] = get_imm(1);
+      assert(inst->value() < 0x10000);
+      get_comma(idx++);
+      if (!is_kind(idx, Lexeme::minus))
+	throw Parse_error("unhandled movem", line_number);
+      unsigned next_idx = idx;
+      for (int i = 0; i < 8; i++)
+	{
+	  if (inst->value() & (1 << i))
+	    {
+	      Inst *reg = rstate->registers[M68kRegIdx::a0 + 7 - i];
+	      Inst *value = bb->build_inst(Op::READ, reg);
+	      next_idx = store_arg(idx, bb->build_trunc(value, bitsize));
+	    }
+	}
+      for (int i = 0; i < 8; i++)
+	{
+	  if (inst->value() & (0x100 << i))
+	    {
+	      Inst *reg = rstate->registers[M68kRegIdx::d0 + 7 - i];
+	      Inst *value = bb->build_inst(Op::READ, reg);
+	      next_idx = store_arg(idx, bb->build_trunc(value, bitsize));
+	    }
+	}
+      get_end_of_line(next_idx);
+    }
+  else
+    {
+      get_left_paren(1);
+      get_areg(2);
+      get_right_paren(3);
+      get_plus(4);
+      get_comma(5);
+      auto [inst, idx] = get_imm(6);
+      get_end_of_line(idx);
+      for (int i = 0; i < 8; i++)
+	{
+	  if (inst->value() & (1 << i))
+	    {
+	      auto [value, _] = load_arg(1, bitsize);
+	      Inst *reg = rstate->registers[M68kRegIdx::d0 + i];
+	      if (bitsize < 32)
+		value = bb->build_inst(Op::SEXT, value, 32);
+	      bb->build_inst(Op::WRITE, reg, value);
+	    }
+	}
+      for (int i = 0; i < 8; i++)
+	{
+	  if (inst->value() & (0x100 << i))
+	    {
+	      auto [value, _] = load_arg(1, bitsize);
+	      Inst *reg = rstate->registers[M68kRegIdx::a0 + i];
+	      if (bitsize < 32)
+		value = bb->build_inst(Op::SEXT, value, 32);
+	      bb->build_inst(Op::WRITE, reg, value);
+	    }
+	}
+    }
+}
+
 void Parser::process_moveq()
 {
   get_hash(1);
@@ -2096,6 +2171,10 @@ void Parser::parse_function()
     process_move(16);
   else if (name == "move.b")
     process_move(8);
+  else if (name == "movem.l")
+    process_movem(32);
+  else if (name == "movem.w")
+    process_movem(16);
   else if (name == "moveq")
     process_moveq();
   else if (name == "muls.l")
