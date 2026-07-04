@@ -87,6 +87,7 @@ private:
   Inst *get_dreg_value(unsigned idx, uint32_t bitsize = 32);
   std::pair<Inst *, Inst *> get_freg(unsigned idx);
   Inst *get_freg_value(unsigned idx, uint32_t bitsize);
+  std::pair<Inst *, unsigned> get_bitfield_value(unsigned idx);
   std::pair<Inst*, unsigned> load_arg(unsigned idx, uint32_t bitsize);
   unsigned store_arg(unsigned idx, Inst *value);
   void write_areg(Inst *reg, Inst *value);
@@ -109,6 +110,8 @@ private:
   void get_plus(unsigned idx);
   void get_colon(unsigned idx);
   void get_hash(unsigned idx);
+  void get_left_brace(unsigned idx);
+  void get_right_brace(unsigned idx);
   void get_left_paren(unsigned idx);
   void get_right_paren(unsigned idx);
   void get_end_of_line(unsigned idx);
@@ -127,6 +130,7 @@ private:
   void process_fmove(uint32_t bitsize);
   void process_jcc(Cond_code cc);
   void process_jra();
+  void process_bfext(Op op);
   void process_bchg();
   void process_bclr();
   void process_bset();
@@ -401,6 +405,28 @@ Inst *Parser::get_freg_value(unsigned idx, uint32_t bitsize)
   assert(bitsize == 64 || bitsize == 32);
   auto [reg64, reg32] = get_freg(idx);
   return bb->build_inst(Op::READ, bitsize == 64 ? reg64 : reg32);
+}
+
+std::pair<Inst *, unsigned> Parser::get_bitfield_value(unsigned idx)
+{
+  Inst *inst;
+  if (is_kind(idx, Lexeme::dreg))
+    inst = get_dreg_value(idx++);
+  else
+    std::tie(inst, idx) = load_arg(idx, 8);
+  get_left_brace(idx++);
+  get_hash(idx++);
+  Inst *offset = get_integer(idx++, 32);
+  get_colon(idx++);
+  get_hash(idx++);
+  Inst *width = get_integer(idx++, 32);
+  get_right_brace(idx++);
+  assert(offset->value() < inst->bitsize);
+  assert(width->value() < inst->bitsize);
+  uint32_t hi = inst->bitsize - offset->value() - 1;
+  uint32_t lo = hi - (width->value() - 1);
+  inst = bb->build_inst(Op::EXTRACT, inst, hi, lo);
+  return {inst, idx};
 }
 
 std::pair<Inst*, unsigned> Parser::load_arg(unsigned idx, uint32_t bitsize)
@@ -843,6 +869,24 @@ void Parser::get_hash(unsigned idx)
   assert(idx > 0);
   if (tokens.size() <= idx || tokens[idx].kind != Lexeme::hash)
     throw Parse_error("expected a '#' after "
+		      + std::string(token_string(tokens[idx - 1])),
+		      line_number);
+}
+
+void Parser::get_left_brace(unsigned idx)
+{
+  assert(idx > 0);
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::left_brace)
+    throw Parse_error("expected a '{' after "
+		      + std::string(token_string(tokens[idx - 1])),
+		      line_number);
+}
+
+void Parser::get_right_brace(unsigned idx)
+{
+  assert(idx > 0);
+  if (tokens.size() <= idx || tokens[idx].kind != Lexeme::right_brace)
+    throw Parse_error("expected a '}' after "
 		      + std::string(token_string(tokens[idx - 1])),
 		      line_number);
 }
@@ -1568,6 +1612,15 @@ void Parser::process_jra()
   bb = nullptr;
 }
 
+void Parser::process_bfext(Op op)
+{
+  auto [arg1, idx] = get_bitfield_value(1);
+  get_comma(idx++);
+  set_nz00(arg1);
+  write_dreg(get_dreg(idx++), bb->build_inst(op, arg1, 32));
+  get_end_of_line(idx++);
+}
+
 void Parser::process_bchg()
 {
   Inst *arg1;
@@ -2071,6 +2124,10 @@ void Parser::parse_function()
     process_bchg();
   else if (name == "bclr")
     process_bclr();
+  else if (name == "bfexts")
+    process_bfext(Op::SEXT);
+  else if (name == "bfextu")
+    process_bfext(Op::ZEXT);
   else if (name == "bset")
     process_bset();
   else if (name == "btst")
