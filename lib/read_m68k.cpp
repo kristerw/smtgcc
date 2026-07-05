@@ -131,6 +131,7 @@ private:
   void process_jcc(Cond_code cc);
   void process_jra();
   void process_bfext(Op op);
+  void process_bftst();
   void process_bchg();
   void process_bclr();
   void process_bset();
@@ -1621,6 +1622,13 @@ void Parser::process_bfext(Op op)
   get_end_of_line(idx++);
 }
 
+void Parser::process_bftst()
+{
+  auto [arg1, idx] = get_bitfield_value(1);
+  set_nz00(arg1);
+  get_end_of_line(idx++);
+}
+
 void Parser::process_bchg()
 {
   Inst *arg1;
@@ -2128,6 +2136,8 @@ void Parser::parse_function()
     process_bfext(Op::SEXT);
   else if (name == "bfextu")
     process_bfext(Op::ZEXT);
+  else if (name == "bftst")
+    process_bftst();
   else if (name == "bset")
     process_bset();
   else if (name == "btst")
