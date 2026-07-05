@@ -2064,6 +2064,22 @@ void Parser::process_call()
       bb->build_inst(Op::MEMSET, dest_ptr, value, size);
       return;
     }
+  if (name == "__popcountdi2")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg = bb->build_inst(Op::LOAD_BE, sp, 8);
+      Inst *res = bb->build_trunc(gen_popcount(bb, arg), 32);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
+      return;
+    }
+  if (name == "__popcountsi2")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg = bb->build_inst(Op::LOAD_BE, sp, 4);
+      Inst *res = gen_popcount(bb, arg);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
+      return;
+    }
 
   throw Not_implemented("call " + std::string(name));
 }
