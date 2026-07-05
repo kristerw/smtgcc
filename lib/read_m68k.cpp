@@ -115,6 +115,7 @@ private:
   void get_left_paren(unsigned idx);
   void get_right_paren(unsigned idx);
   void get_end_of_line(unsigned idx);
+  Inst *gen_parity(Inst *arg);
   Inst *build_cond(Cond_code cc);
   void process_binary_bitwise(Op op, uint32_t bitsize);
   void process_add(uint32_t bitsize, bool is_addx = false);
@@ -917,6 +918,19 @@ void Parser::get_end_of_line(unsigned idx)
     throw Parse_error("expected end of line after "
 		      + std::string(token_string(tokens[idx - 1])),
 				    line_number);
+}
+
+Inst *Parser::gen_parity(Inst *arg)
+{
+  Inst *inst = bb->build_extract_bit(arg, 0);
+  for (uint32_t i = 1; i < arg->bitsize; i++)
+    {
+      Inst *bit = bb->build_extract_bit(arg, i);
+      inst = bb->build_inst(Op::XOR, inst, bit);
+    }
+  inst = bb->build_inst(Op::ZEXT, inst, 32);
+
+  return inst;
 }
 
 Inst *Parser::build_cond(Cond_code cc)
@@ -2062,6 +2076,23 @@ void Parser::process_call()
 		       bb->build_inst(Op::ADD, sp, bb->value_inst(8, 32)), 8);
       value = bb->build_trunc(value, 8);
       bb->build_inst(Op::MEMSET, dest_ptr, value, size);
+      return;
+    }
+
+  if (name == "__paritydi2")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg = bb->build_inst(Op::LOAD_BE, sp, 8);
+      Inst *res = gen_parity(arg);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
+      return;
+    }
+  if (name == "__paritysi2")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg = bb->build_inst(Op::LOAD_BE, sp, 4);
+      Inst *res = gen_parity(arg);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
       return;
     }
   if (name == "__popcountdi2")
