@@ -415,7 +415,7 @@ std::pair<Inst *, unsigned> Parser::get_bitfield_value(unsigned idx)
   if (is_kind(idx, Lexeme::dreg))
     inst = get_dreg_value(idx++);
   else
-    std::tie(inst, idx) = load_arg(idx, 8);
+    std::tie(inst, idx) = load_arg(idx, 32);
   get_left_brace(idx++);
   get_hash(idx++);
   Inst *offset = get_integer(idx++, 32);
@@ -425,8 +425,11 @@ std::pair<Inst *, unsigned> Parser::get_bitfield_value(unsigned idx)
   get_right_brace(idx++);
   assert(offset->value() < inst->bitsize);
   assert(width->value() < inst->bitsize);
+  uint32_t with_value = width->value();
+  if (with_value == 0)
+    with_value = 32;
   uint32_t hi = inst->bitsize - offset->value() - 1;
-  uint32_t lo = hi - (width->value() - 1);
+  uint32_t lo = hi - (with_value - 1);
   inst = bb->build_inst(Op::EXTRACT, inst, hi, lo);
   return {inst, idx};
 }
