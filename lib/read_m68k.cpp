@@ -131,6 +131,7 @@ private:
   void process_fmove(uint32_t bitsize);
   void process_jcc(Cond_code cc);
   void process_jra();
+  void process_dbra();
   void process_swap();
   void process_bfext(Op op);
   void process_bfffo();
@@ -1634,6 +1635,23 @@ void Parser::process_jra()
   bb = nullptr;
 }
 
+void Parser::process_dbra()
+{
+  Inst *arg = get_dreg_value(1, 16);
+  get_comma(2);
+  Basic_block *true_bb = get_bb(3);
+  get_end_of_line(4);
+
+  Inst *zero = bb->value_inst(0, 16);
+  Inst *one = bb->value_inst(1, 16);
+  Inst *cond = bb->build_inst(Op::NE, arg, zero);
+  Inst *res = bb->build_inst(Op::SUB, arg, one);
+  write_dreg(get_dreg(1), res);
+  Basic_block *false_bb = func->build_bb();
+  bb->build_br_inst(cond, true_bb, false_bb);
+  bb = false_bb;
+}
+
 void Parser::process_swap()
 {
   Inst *arg = get_dreg_value(1);
@@ -2302,6 +2320,8 @@ void Parser::parse_function()
     process_cmp(16);
   else if (name == "cmp.b" || name == "cmpm.b")
     process_cmp(8);
+  else if (name == "dbra")
+    process_dbra();
   else if (name == "eor.l")
     process_binary_bitwise(Op::XOR, 32);
   else if (name == "eor.w")
