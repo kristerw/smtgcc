@@ -87,7 +87,7 @@ private:
   Inst *get_dreg_value(unsigned idx, uint32_t bitsize = 32);
   std::pair<Inst *, Inst *> get_freg(unsigned idx);
   Inst *get_freg_value(unsigned idx, uint32_t bitsize);
-  std::pair<Inst *, unsigned> get_bitfield_value(unsigned idx);
+  std::pair<Inst *, unsigned> get_bitfield_value(unsigned idx, Inst **offwidth = nullptr);
   std::pair<Inst*, unsigned> load_arg(unsigned idx, uint32_t bitsize);
   unsigned store_arg(unsigned idx, Inst *value);
   void write_areg(Inst *reg, Inst *value);
@@ -132,6 +132,7 @@ private:
   void process_jcc(Cond_code cc);
   void process_jra();
   void process_bfext(Op op);
+  void process_bfffo();
   void process_bftst();
   void process_bchg();
   void process_bclr();
@@ -409,7 +410,7 @@ Inst *Parser::get_freg_value(unsigned idx, uint32_t bitsize)
   return bb->build_inst(Op::READ, bitsize == 64 ? reg64 : reg32);
 }
 
-std::pair<Inst *, unsigned> Parser::get_bitfield_value(unsigned idx)
+std::pair<Inst *, unsigned> Parser::get_bitfield_value(unsigned idx, Inst **offwidth)
 {
   Inst *inst;
   if (is_kind(idx, Lexeme::dreg))
@@ -431,6 +432,8 @@ std::pair<Inst *, unsigned> Parser::get_bitfield_value(unsigned idx)
   uint32_t hi = inst->bitsize - offset->value() - 1;
   uint32_t lo = hi - (with_value - 1);
   inst = bb->build_inst(Op::EXTRACT, inst, hi, lo);
+  if (offwidth)
+    *offwidth = bb->value_inst(offset->value() + with_value, 32);
   return {inst, idx};
 }
 
@@ -1639,6 +1642,21 @@ void Parser::process_bfext(Op op)
   get_end_of_line(idx++);
 }
 
+void Parser::process_bfffo()
+{
+  Inst *offwidth;
+  auto [arg1, idx] = get_bitfield_value(1, &offwidth);
+  get_comma(idx++);
+  Inst *dest = get_dreg(idx++);
+  get_end_of_line(idx++);
+
+  set_nz00(arg1);
+  Inst *z = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::z]);
+  Inst *res = gen_clz(bb, arg1);
+  res = bb->build_inst(Op::ITE, z, offwidth, res);
+  write_dreg(dest, res);
+}
+
 void Parser::process_bftst()
 {
   auto [arg1, idx] = get_bitfield_value(1);
@@ -2249,6 +2267,8 @@ void Parser::parse_function()
     process_bfext(Op::SEXT);
   else if (name == "bfextu")
     process_bfext(Op::ZEXT);
+  else if (name == "bfffo")
+    process_bfffo();
   else if (name == "bftst")
     process_bftst();
   else if (name == "bset")
