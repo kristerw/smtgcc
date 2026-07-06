@@ -2380,11 +2380,11 @@ void Parser::parse_function()
     process_shift(Op::LSHR, 16);
   else if (name == "lsr.b")
     process_shift(Op::LSHR, 8);
-  else if (name == "move.l")
+  else if (name == "move.l" || name == "mov.l")
     process_move(32);
-  else if (name == "move.w")
+  else if (name == "move.w" || name == "mov.w")
     process_move(16);
-  else if (name == "move.b")
+  else if (name == "move.b" || name == "mov.b")
     process_move(8);
   else if (name == "movem.l")
     process_movem(32);
