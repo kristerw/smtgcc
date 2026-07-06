@@ -131,6 +131,7 @@ private:
   void process_fmove(uint32_t bitsize);
   void process_jcc(Cond_code cc);
   void process_jra();
+  void process_swap();
   void process_bfext(Op op);
   void process_bfffo();
   void process_bftst();
@@ -1633,6 +1634,20 @@ void Parser::process_jra()
   bb = nullptr;
 }
 
+void Parser::process_swap()
+{
+  Inst *arg = get_dreg_value(1);
+  get_end_of_line(2);
+
+  Inst *arg_hi = bb->build_inst(Op::EXTRACT, arg, 31, 16);
+  Inst *arg_lo = bb->build_trunc(arg, 16);
+  Inst *res = bb->build_inst(Op::CONCAT, arg_lo, arg_hi);
+
+  set_nz00(res);
+
+  write_dreg(get_dreg(1), res);
+}
+
 void Parser::process_bfext(Op op)
 {
   auto [arg1, idx] = get_bitfield_value(1);
@@ -2474,6 +2489,8 @@ void Parser::parse_function()
     process_sub(16, true);
   else if (name == "subx.b")
     process_sub(8, true);
+  else if (name == "swap")
+    process_swap();
   else if (name == "trap")
     {
       get_hash(1);
