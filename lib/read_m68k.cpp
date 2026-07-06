@@ -2094,7 +2094,22 @@ void Parser::process_call()
       bb->build_inst(Op::MEMSET, dest_ptr, value, size);
       return;
     }
-
+  if (name == "__moddi3")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg1 = bb->build_inst(Op::LOAD_BE, sp, 8);
+      Inst *eight = bb->value_inst(8, 32);
+      Inst *ptr = bb->build_inst(Op::ADD, sp, eight);
+      Inst *arg2 = bb->build_inst(Op::LOAD_BE, ptr, 8);
+      Inst *zero = bb->value_inst(0, 64);
+      bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg2, zero));
+      Inst *res = bb->build_inst(Op::SREM, arg1, arg2);
+      Inst *res_d0 = bb->build_inst(Op::EXTRACT, res, 63, 32);
+      Inst *res_d1 = bb->build_trunc(res, 32);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res_d0);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d1], res_d1);
+      return;
+    }
   if (name == "__paritydi2")
     {
       Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
@@ -2137,6 +2152,22 @@ void Parser::process_call()
       Inst *zero = bb->value_inst(0, 64);
       bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg2, zero));
       Inst *res = bb->build_inst(Op::UDIV, arg1, arg2);
+      Inst *res_d0 = bb->build_inst(Op::EXTRACT, res, 63, 32);
+      Inst *res_d1 = bb->build_trunc(res, 32);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res_d0);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d1], res_d1);
+      return;
+    }
+  if (name == "__umoddi3")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg1 = bb->build_inst(Op::LOAD_BE, sp, 8);
+      Inst *eight = bb->value_inst(8, 32);
+      Inst *ptr = bb->build_inst(Op::ADD, sp, eight);
+      Inst *arg2 = bb->build_inst(Op::LOAD_BE, ptr, 8);
+      Inst *zero = bb->value_inst(0, 64);
+      bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg2, zero));
+      Inst *res = bb->build_inst(Op::UREM, arg1, arg2);
       Inst *res_d0 = bb->build_inst(Op::EXTRACT, res, 63, 32);
       Inst *res_d1 = bb->build_trunc(res, 32);
       bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res_d0);
