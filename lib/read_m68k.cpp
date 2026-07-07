@@ -2104,6 +2104,14 @@ void Parser::process_call()
       bb = func->build_bb();
       return;
     }
+  if (name == "__clrsbdi2")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg = bb->build_inst(Op::LOAD_BE, sp, 8);
+      Inst *res = bb->build_trunc(gen_clrsb(bb, arg), 32);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
+      return;
+    }
   if (name == "__ctzdi2")
     {
       Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
