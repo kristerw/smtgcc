@@ -115,6 +115,7 @@ private:
   void get_left_paren(unsigned idx);
   void get_right_paren(unsigned idx);
   void get_end_of_line(unsigned idx);
+  Inst *gen_ffs(Inst *arg);
   Inst *gen_parity(Inst *arg);
   Inst *build_cond(Cond_code cc);
   void process_binary_bitwise(Op op, uint32_t bitsize);
@@ -926,6 +927,18 @@ void Parser::get_end_of_line(unsigned idx)
     throw Parse_error("expected end of line after "
 		      + std::string(token_string(tokens[idx - 1])),
 				    line_number);
+}
+
+Inst *Parser::gen_ffs(Inst *arg)
+{
+  Inst *inst = bb->value_inst(0, 32);
+  for (int i = arg->bitsize - 1; i >= 0; i--)
+    {
+      Inst *bit = bb->build_extract_bit(arg, i);
+      Inst *val = bb->value_inst(i + 1, 32);
+      inst = bb->build_inst(Op::ITE, bit, val, inst);
+    }
+  return inst;
 }
 
 Inst *Parser::gen_parity(Inst *arg)
@@ -2130,6 +2143,14 @@ void Parser::process_call()
 		     exit_val);
       bb->build_br_inst(rstate->exit_bb);
       bb = func->build_bb();
+      return;
+    }
+  if (name == "__ffsdi2")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg = bb->build_inst(Op::LOAD_BE, sp, 8);
+      Inst *res = gen_ffs(arg);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
       return;
     }
   if (name == "memcpy" || name == "memmove")
