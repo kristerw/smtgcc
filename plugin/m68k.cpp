@@ -16,6 +16,7 @@ const int stack_size = 1024 * 100;
 
 void build_return(m68k_state *rstate, Function *src_func, function *fun)
 {
+  Module *module = src_func->module;
   Basic_block *bb = rstate->exit_bb;
   Basic_block *src_last_bb = src_func->bbs.back();
   assert(src_last_bb->last_inst->op == Op::RET);
@@ -54,6 +55,27 @@ void build_return(m68k_state *rstate, Function *src_func, function *fun)
 	  ret = bb->build_inst(Op::CONCAT, ret, d1);
 	}
       bb->build_ret_inst(bb->build_trunc(ret, ret_bitsize));
+      return;
+    }
+
+  if (ret_bitsize > 64)
+    {
+      uint64_t size = (ret_bitsize + 7) / 8;
+      Inst *id =
+	bb->value_inst(rstate->next_local_id++, module->ptr_id_bits);
+      Inst *mem_size = bb->value_inst(size, module->ptr_offset_bits);
+      Inst *flags = bb->value_inst(0, 32);
+
+      Basic_block *entry_bb = rstate->entry_bb;
+      Inst *ret_mem = entry_bb->build_inst(Op::MEMORY, id, mem_size, flags);
+      Inst *reg = rstate->registers[M68kRegIdx::a0];
+      entry_bb->build_inst(Op::WRITE, reg, ret_mem);
+
+      // Generate the return value from the value returned in memory.
+      Inst *retval = bb->build_inst(Op::LOAD_BE, ret_mem, size);
+      if (ret_bitsize < retval->bitsize)
+	retval = bb->build_trunc(retval, ret_bitsize);
+      bb->build_ret_inst(retval);
       return;
     }
 
