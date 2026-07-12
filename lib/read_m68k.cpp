@@ -88,8 +88,6 @@ private:
   std::pair<Inst *, Inst *> get_freg(unsigned idx);
   Inst *get_freg_value(unsigned idx, uint32_t bitsize);
   std::pair<Inst *, unsigned> get_bitfield_value(unsigned idx, Inst **offwidth = nullptr);
-  std::pair<Inst*, unsigned> load_arg(unsigned idx, uint32_t bitsize);
-  unsigned store_arg(unsigned idx, Inst *value);
   void write_areg(Inst *reg, Inst *value);
   void write_dreg(Inst *reg, Inst *value);
   void write_freg(std::pair<Inst *, Inst *> reg, Inst *value);
@@ -419,7 +417,11 @@ std::pair<Inst *, unsigned> Parser::get_bitfield_value(unsigned idx, Inst **offw
   if (is_kind(idx, Lexeme::dreg))
     inst = get_dreg_value(idx++);
   else
-    std::tie(inst, idx) = load_arg(idx, 32);
+    {
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, 32);
+      inst = bb->build_inst(Op::LOAD_BE, ptr, 4);
+    }
   get_left_brace(idx++);
   get_hash(idx++);
   Inst *offset = get_integer(idx++, 32);
@@ -438,20 +440,6 @@ std::pair<Inst *, unsigned> Parser::get_bitfield_value(unsigned idx, Inst **offw
   if (offwidth)
     *offwidth = bb->value_inst(offset->value() + with_value, 32);
   return {inst, idx};
-}
-
-std::pair<Inst*, unsigned> Parser::load_arg(unsigned idx, uint32_t bitsize)
-{
-  auto [ptr, new_idx] = get_addr(idx, bitsize);
-  Inst *value = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
-  return {value, new_idx};
-}
-
-unsigned Parser::store_arg(unsigned idx, Inst *value)
-{
-  auto [ptr, new_idx] = get_addr(idx, value->bitsize);
-  bb->build_inst(Op::STORE_BE, ptr, value);
-  return new_idx;
 }
 
 void Parser::write_areg(Inst *reg, Inst *value)
@@ -1048,15 +1036,23 @@ void Parser::process_binary_bitwise(Op op, uint32_t bitsize)
   else if (is_kind(idx, Lexeme::hash))
     std::tie(arg1, idx) = get_imm(idx, bitsize);
   else
-    std::tie(arg1, idx) = load_arg(idx, bitsize);
+    {
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg1 = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_comma(idx++);
 
   Inst *arg2;
+  Inst *ptr = nullptr;
   unsigned dest_idx = idx;
   if (is_kind(idx, Lexeme::dreg))
     arg2 = get_dreg_value(idx++, bitsize);
   else
-    std::tie(arg2, idx) = load_arg(idx, bitsize);
+    {
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg2 = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_end_of_line(idx);
 
   Inst *res = bb->build_inst(op, arg1, arg2);
@@ -1067,7 +1063,7 @@ void Parser::process_binary_bitwise(Op op, uint32_t bitsize)
   if (is_kind(idx, Lexeme::dreg))
     write_dreg(get_dreg(idx++), res);
   else
-    store_arg(idx, res);
+    bb->build_inst(Op::STORE_BE, ptr, res);
 }
 
 void Parser::process_add(uint32_t bitsize, bool is_addx)
@@ -1081,10 +1077,15 @@ void Parser::process_add(uint32_t bitsize, bool is_addx)
   else if (is_kind(idx, Lexeme::hash))
     std::tie(arg1, idx) = get_imm(idx, bitsize);
   else
-    std::tie(arg1, idx) = load_arg(idx, bitsize);
+    {
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg1 = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_comma(idx++);
 
   Inst *arg2;
+  Inst *ptr = nullptr;
   unsigned dest_idx = idx;
   bool update_cc = true;
   if (is_kind(idx, Lexeme::dreg))
@@ -1100,7 +1101,10 @@ void Parser::process_add(uint32_t bitsize, bool is_addx)
 	}
     }
   else
-    std::tie(arg2, idx) = load_arg(idx, bitsize);
+    {
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg2 = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_end_of_line(idx);
 
   Inst *res = bb->build_inst(Op::ADD, arg2, arg1);
@@ -1157,7 +1161,7 @@ void Parser::process_add(uint32_t bitsize, bool is_addx)
   else if (is_kind(idx, Lexeme::areg))
     write_dreg(get_areg(idx++), res);
   else
-    store_arg(idx, res);
+    bb->build_inst(Op::STORE_BE, ptr, res);
 }
 
 void Parser::process_sub(uint32_t bitsize, bool is_subx)
@@ -1171,10 +1175,15 @@ void Parser::process_sub(uint32_t bitsize, bool is_subx)
   else if (is_kind(idx, Lexeme::hash))
     std::tie(arg1, idx) = get_imm(idx, bitsize);
   else
-    std::tie(arg1, idx) = load_arg(idx, bitsize);
+    {
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg1 = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_comma(idx++);
 
   Inst *arg2;
+  Inst *ptr = nullptr;
   unsigned dest_idx = idx;
   bool update_cc = true;
   if (is_kind(idx, Lexeme::dreg))
@@ -1190,7 +1199,10 @@ void Parser::process_sub(uint32_t bitsize, bool is_subx)
 	}
     }
   else
-    std::tie(arg2, idx) = load_arg(idx, bitsize);
+    {
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg2 = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_end_of_line(idx);
 
   Inst *res = bb->build_inst(Op::SUB, arg2, arg1);
@@ -1247,7 +1259,7 @@ void Parser::process_sub(uint32_t bitsize, bool is_subx)
   else if (is_kind(idx, Lexeme::areg))
     write_dreg(get_areg(idx++), res);
   else
-    store_arg(idx, res);
+    bb->build_inst(Op::STORE_BE, ptr, res);
 }
 
 void Parser::process_mul(uint32_t bitsize, bool is_signed)
@@ -1259,10 +1271,15 @@ void Parser::process_mul(uint32_t bitsize, bool is_signed)
   else if (is_kind(idx, Lexeme::hash))
     std::tie(arg1, idx) = get_imm(idx, bitsize);
   else
-    std::tie(arg1, idx) = load_arg(idx, bitsize);
+    {
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg1 = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_comma(idx++);
 
   Inst *arg2;
+  Inst *ptr = nullptr;
   bool returns_64_bits = false;
   unsigned dest_idx = idx;
   if (is_kind(idx, Lexeme::dreg))
@@ -1276,7 +1293,10 @@ void Parser::process_mul(uint32_t bitsize, bool is_signed)
 	}
     }
   else
-    std::tie(arg2, idx) = load_arg(idx, bitsize);
+    {
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg2 = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_end_of_line(idx);
 
   Inst *warg1;
@@ -1326,7 +1346,7 @@ void Parser::process_mul(uint32_t bitsize, bool is_signed)
   else if (is_kind(idx, Lexeme::areg))
     write_dreg(get_areg(idx++), res);
   else
-    store_arg(idx, res);
+    bb->build_inst(Op::STORE_BE, ptr, res);
 }
 
 void Parser::process_fbinary(Op op, uint32_t bitsize)
@@ -1340,15 +1360,23 @@ void Parser::process_fbinary(Op op, uint32_t bitsize)
   else if (is_kind(idx, Lexeme::hash))
     std::tie(arg1, idx) = get_imm(idx, bitsize);
   else
-    std::tie(arg1, idx) = load_arg(idx, bitsize);
+    {
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg1 = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_comma(idx++);
 
   Inst *arg2;
+  Inst *ptr = nullptr;
   unsigned dest_idx = idx;
   if (is_kind(idx, Lexeme::freg))
     arg2 = get_freg_value(idx++, bitsize);
   else
-    std::tie(arg2, idx) = load_arg(idx, bitsize);
+    {
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg2 = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_end_of_line(idx);
 
   Inst *res = bb->build_inst(op, arg2, arg1);
@@ -1357,7 +1385,7 @@ void Parser::process_fbinary(Op op, uint32_t bitsize)
   if (is_kind(idx, Lexeme::freg))
     write_freg(get_freg(idx++), res);
   else
-    store_arg(idx, res);
+    bb->build_inst(Op::STORE_BE, ptr, res);
 }
 
 void Parser::process_shift(Op op, uint32_t bitsize)
@@ -1515,7 +1543,8 @@ void Parser::process_clr(uint32_t bitsize)
     }
   else
     {
-      unsigned idx = store_arg(1, zero);
+      auto [ptr, idx] = get_addr(1, bitsize);
+      bb->build_inst(Op::STORE_BE, ptr, zero);
       get_end_of_line(idx);
     }
 
@@ -1537,7 +1566,11 @@ void Parser::process_cmp(uint32_t bitsize)
   else if (is_kind(idx, Lexeme::hash))
     std::tie(arg1, idx) = get_imm(idx, bitsize);
   else
-    std::tie(arg1, idx) = load_arg(idx, bitsize);
+    {
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg1 = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_comma(idx++);
 
   Inst *arg2;
@@ -1553,7 +1586,11 @@ void Parser::process_cmp(uint32_t bitsize)
 	}
     }
   else
-    std::tie(arg2, idx) = load_arg(idx, bitsize);
+    {
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg2 = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_end_of_line(idx);
 
   Inst *res = bb->build_inst(Op::SUB, arg2, arg1);
@@ -1604,7 +1641,11 @@ void Parser::process_fmove(uint32_t bitsize)
   else if (is_kind(idx, Lexeme::hash))
     std::tie(value, idx) = get_imm(idx, bitsize);
   else
-    std::tie(value, idx) = load_arg(idx, bitsize);
+    {
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      value = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_comma(idx++);
 
   if (is_kind(idx, Lexeme::freg))
@@ -1623,7 +1664,9 @@ void Parser::process_fmove(uint32_t bitsize)
     }
   else
     {
-      idx = store_arg(idx, value);
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      bb->build_inst(Op::STORE_BE, ptr, value);
       get_end_of_line(idx);
     }
 }
@@ -1888,7 +1931,11 @@ void Parser::process_move(uint32_t bitsize)
   else if (is_kind(idx, Lexeme::hash))
     std::tie(value, idx) = get_imm(idx, bitsize);
   else
-    std::tie(value, idx) = load_arg(idx, bitsize);
+    {
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      value = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_comma(idx++);
 
   if (!is_kind(idx, Lexeme::areg))
@@ -1912,7 +1959,9 @@ void Parser::process_move(uint32_t bitsize)
     }
   else
     {
-      idx = store_arg(idx, value);
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      bb->build_inst(Op::STORE_BE, ptr, value);
       get_end_of_line(idx);
     }
 }
@@ -1933,7 +1982,10 @@ void Parser::process_movem(uint32_t bitsize)
 	    {
 	      Inst *reg = rstate->registers[M68kRegIdx::a0 + 7 - i];
 	      Inst *value = bb->build_inst(Op::READ, reg);
-	      next_idx = store_arg(idx, bb->build_trunc(value, bitsize));
+	      value = bb->build_trunc(value, bitsize);
+	      Inst *ptr;
+	      std::tie(ptr, next_idx) = get_addr(idx, bitsize);
+	      bb->build_inst(Op::STORE_BE, ptr, value);
 	    }
 	}
       for (int i = 0; i < 8; i++)
@@ -1942,7 +1994,10 @@ void Parser::process_movem(uint32_t bitsize)
 	    {
 	      Inst *reg = rstate->registers[M68kRegIdx::d0 + 7 - i];
 	      Inst *value = bb->build_inst(Op::READ, reg);
-	      next_idx = store_arg(idx, bb->build_trunc(value, bitsize));
+	      value = bb->build_trunc(value, bitsize);
+	      Inst *ptr;
+	      std::tie(ptr, next_idx) = get_addr(idx, bitsize);
+	      bb->build_inst(Op::STORE_BE, ptr, value);
 	    }
 	}
       get_end_of_line(next_idx);
@@ -1960,7 +2015,8 @@ void Parser::process_movem(uint32_t bitsize)
 	{
 	  if (inst->value() & (1 << i))
 	    {
-	      auto [value, _] = load_arg(1, bitsize);
+	      auto [ptr, _] = get_addr(1, bitsize);
+	      Inst *value = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
 	      Inst *reg = rstate->registers[M68kRegIdx::d0 + i];
 	      if (bitsize < 32)
 		value = bb->build_inst(Op::SEXT, value, 32);
@@ -1971,7 +2027,8 @@ void Parser::process_movem(uint32_t bitsize)
 	{
 	  if (inst->value() & (0x100 << i))
 	    {
-	      auto [value, _] = load_arg(1, bitsize);
+	      auto [ptr, _] = get_addr(1, bitsize);
+	      Inst *value = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
 	      Inst *reg = rstate->registers[M68kRegIdx::a0 + i];
 	      if (bitsize < 32)
 		value = bb->build_inst(Op::SEXT, value, 32);
@@ -1997,11 +2054,15 @@ void Parser::process_moveq()
 void Parser::process_neg(uint32_t bitsize, bool is_negx)
 {
   Inst *arg;
+  Inst *ptr = nullptr;
   unsigned idx = 1;
   if (is_kind(idx, Lexeme::dreg))
     arg = get_dreg_value(idx++, bitsize);
   else
-    std::tie(arg, idx) = load_arg(idx, bitsize);
+    {
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_end_of_line(idx);
 
   Inst *res = bb->build_inst(Op::NEG, arg);
@@ -2035,17 +2096,21 @@ void Parser::process_neg(uint32_t bitsize, bool is_negx)
   if (is_kind(1, Lexeme::dreg))
     write_dreg(get_dreg(1), res);
   else
-    store_arg(1, res);
+    bb->build_inst(Op::STORE_BE, ptr, res);
 }
 
 void Parser::process_not(uint32_t bitsize)
 {
   Inst *arg;
+  Inst *ptr = nullptr;
   unsigned idx = 1;
   if (is_kind(idx, Lexeme::dreg))
     arg = get_dreg_value(idx++, bitsize);
   else
-    std::tie(arg, idx) = load_arg(idx, bitsize);
+    {
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_end_of_line(idx);
 
   Inst *res = bb->build_inst(Op::NOT, arg);
@@ -2055,7 +2120,7 @@ void Parser::process_not(uint32_t bitsize)
   if (is_kind(1, Lexeme::dreg))
     write_dreg(get_dreg(1), res);
   else
-    store_arg(1, res);
+    bb->build_inst(Op::STORE_BE, ptr, res);
 }
 
 void Parser::process_scc(Cond_code cc)
@@ -2071,7 +2136,8 @@ void Parser::process_scc(Cond_code cc)
     }
   else
     {
-      unsigned idx = store_arg(1, res);
+      auto [ptr, idx] = get_addr(1, 8);
+      bb->build_inst(Op::STORE_BE, ptr, res);
       get_end_of_line(idx);
     }
 }
@@ -2085,7 +2151,11 @@ void Parser::process_tst(uint32_t bitsize)
   else if (is_kind(idx, Lexeme::areg))
     arg = get_areg_value(idx++, bitsize);
   else
-    std::tie(arg, idx) = load_arg(idx, bitsize);
+    {
+      Inst *ptr;
+      std::tie(ptr, idx) = get_addr(idx, bitsize);
+      arg = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+    }
   get_end_of_line(idx);
 
   set_nz00(arg);
