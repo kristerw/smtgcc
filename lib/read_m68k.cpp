@@ -133,6 +133,7 @@ private:
   void process_dbra();
   void process_rts();
   void process_trap();
+  void process_nop();
   void process_swap();
   void process_bfext(Op op);
   void process_bfffo();
@@ -1738,6 +1739,11 @@ void Parser::process_trap()
   bb = nullptr;
 }
 
+void Parser::process_nop()
+{
+  get_end_of_line(1);
+}
+
 void Parser::process_swap()
 {
   Inst *arg = get_dreg_value(1);
@@ -2610,6 +2616,8 @@ void Parser::parse_function()
     process_neg(16, true);
   else if (name == "negx.b")
     process_neg(8, true);
+  else if (name == "nop")
+    process_nop();
   else if (name == "not.l")
     process_not(32);
   else if (name == "not.w")
