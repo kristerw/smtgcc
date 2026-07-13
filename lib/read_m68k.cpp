@@ -131,6 +131,8 @@ private:
   void process_jcc(Cond_code cc);
   void process_jra();
   void process_dbra();
+  void process_rts();
+  void process_trap();
   void process_swap();
   void process_bfext(Op op);
   void process_bfffo();
@@ -1717,6 +1719,25 @@ void Parser::process_dbra()
   bb = false_bb;
 }
 
+void Parser::process_rts()
+{
+  get_end_of_line(1);
+
+  bb->build_br_inst(rstate->exit_bb);
+  bb = nullptr;
+}
+
+void Parser::process_trap()
+{
+  get_hash(1);
+  get_hex_or_integer(2, 32);
+  get_end_of_line(3);
+
+  bb->build_inst(Op::UB, bb->value_inst(1, 1));
+  bb->build_br_inst(rstate->exit_bb);
+  bb = nullptr;
+}
+
 void Parser::process_swap()
 {
   Inst *arg = get_dreg_value(1);
@@ -2604,12 +2625,7 @@ void Parser::parse_function()
   else if (name == "pea")
     process_pea();
   else if (name == "rts")
-    {
-      get_end_of_line(1);
-
-      bb->build_br_inst(rstate->exit_bb);
-      bb = nullptr;
-    }
+    process_rts();
   else if (name == "rol.l")
     process_rol(32);
   else if (name == "rol.w")
@@ -2669,15 +2685,7 @@ void Parser::parse_function()
   else if (name == "swap")
     process_swap();
   else if (name == "trap")
-    {
-      get_hash(1);
-      get_hex_or_integer(2, 32);
-      get_end_of_line(3);
-
-      bb->build_inst(Op::UB, bb->value_inst(1, 1));
-      bb->build_br_inst(rstate->exit_bb);
-      bb = nullptr;
-    }
+    process_trap();
   else if (name == "tst.l")
     process_tst(32);
   else if (name == "tst.w")
