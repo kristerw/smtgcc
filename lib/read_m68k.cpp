@@ -2095,7 +2095,39 @@ void Parser::process_movem_load(uint32_t bitsize)
 	}
     }
   else
-    throw Parse_error("unhandled movem load", line_number);
+    {
+      auto [ptr, idx] = get_addr(1, bitsize);
+      get_comma(idx++);
+      Inst *inst;
+      std::tie(inst, idx) = get_imm(idx++);
+      get_end_of_line(idx);
+
+      Inst *increment = bb->value_inst(bitsize / 8, 32);
+      for (int i = 0; i < 8; i++)
+	{
+	  if (inst->value() & (1 << i))
+	    {
+	      Inst *value = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+	      Inst *reg = rstate->registers[M68kRegIdx::d0 + i];
+	      if (bitsize < 32)
+		value = bb->build_inst(Op::SEXT, value, 32);
+	      bb->build_inst(Op::WRITE, reg, value);
+	      ptr = bb->build_inst(Op::ADD, ptr, increment);
+	    }
+	}
+      for (int i = 0; i < 8; i++)
+	{
+	  if (inst->value() & (0x100 << i))
+	    {
+	      Inst *value = bb->build_inst(Op::LOAD_BE, ptr, bitsize / 8);
+	      Inst *reg = rstate->registers[M68kRegIdx::a0 + i];
+	      if (bitsize < 32)
+		value = bb->build_inst(Op::SEXT, value, 32);
+	      bb->build_inst(Op::WRITE, reg, value);
+	      ptr = bb->build_inst(Op::ADD, ptr, increment);
+	    }
+	}
+    }
 }
 
 void Parser::process_movem_store(uint32_t bitsize)
@@ -2133,7 +2165,34 @@ void Parser::process_movem_store(uint32_t bitsize)
       get_end_of_line(next_idx);
     }
   else
-    throw Parse_error("unhandled movem load", line_number);
+    {
+      auto [ptr, next_idx] = get_addr(idx, bitsize);
+      get_end_of_line(next_idx);
+
+      Inst *increment = bb->value_inst(bitsize / 8, 32);
+      for (int i = 0; i < 8; i++)
+	{
+	  if (inst->value() & (1 << i))
+	    {
+	      Inst *reg = rstate->registers[M68kRegIdx::d0 + i];
+	      Inst *value = bb->build_inst(Op::READ, reg);
+	      value = bb->build_trunc(value, bitsize);
+	      bb->build_inst(Op::STORE_BE, ptr, value);
+	      ptr = bb->build_inst(Op::ADD, ptr, increment);
+	    }
+	}
+      for (int i = 0; i < 8; i++)
+	{
+	  if (inst->value() & (0x100 << i))
+	    {
+	      Inst *reg = rstate->registers[M68kRegIdx::a0 + i];
+	      Inst *value = bb->build_inst(Op::READ, reg);
+	      value = bb->build_trunc(value, bitsize);
+	      bb->build_inst(Op::STORE_BE, ptr, value);
+	      ptr = bb->build_inst(Op::ADD, ptr, increment);
+	    }
+	}
+    }
 }
 
 void Parser::process_movem(uint32_t bitsize)
