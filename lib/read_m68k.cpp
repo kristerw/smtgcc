@@ -141,6 +141,8 @@ private:
   void process_btst();
   void process_lea();
   void process_pea();
+  void process_link();
+  void process_unlk();
   void process_move(uint32_t bitsize);
   void process_movem(uint32_t bitsize);
   void process_moveq();
@@ -262,7 +264,10 @@ void Parser::lex_reg()
 	  tokens.emplace_back(Lexeme::freg, start_pos, pos - start_pos);
 	}
       else
-	throw Parse_error("register %fp not implemented", line_number);
+	{
+	  pos += 2;
+	  tokens.emplace_back(Lexeme::areg, start_pos, pos - start_pos);
+	}
     }
   else if (buf[pos] == 's' && buf[pos + 1] == 'p')
     {
@@ -271,6 +276,8 @@ void Parser::lex_reg()
     }
   else if (buf[pos] == 'p' && buf[pos + 1] == 'c')
     throw Parse_error("register %pc not implemented", line_number);
+  else if (buf[pos] == 'c' && buf[pos + 1] == 'c' && buf[pos + 2] == 'r')
+    throw Parse_error("register %ccr not implemented", line_number);
   else
     throw Parse_error("invalid register", line_number);
 }
@@ -365,6 +372,8 @@ Inst *Parser::get_areg(unsigned idx)
   uint32_t value;
   if (buf[tokens[idx].pos + 1] == 's')
     value = 7;
+  else if (buf[tokens[idx].pos + 1] == 'f')
+    value = 6;
   else
     value = buf[tokens[idx].pos + 2] - '0';
   return rstate->registers[M68kRegIdx::a0 + value];
@@ -1920,6 +1929,42 @@ void Parser::process_pea()
   bb->build_inst(Op::STORE_BE, sp, ptr);
 }
 
+void Parser::process_link()
+{
+  Inst *arg1_reg = get_areg(1);
+  Inst *arg1 = get_areg_value(1, 32);
+  get_comma(2);
+  auto [arg2, idx] = get_imm(3, 32);
+  get_end_of_line(idx);
+
+  // SP - 4 -> SP
+  Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+  sp = bb->build_inst(Op::ADD, sp, bb->value_inst(-4, 32));
+
+  // An -> (SP)
+  bb->build_inst(Op::STORE_BE, sp, arg1);
+
+  // SP -> An
+  bb->build_inst(Op::WRITE, arg1_reg, sp);
+
+  // SP + d_n -> SP
+  sp = bb->build_inst(Op::ADD, sp, arg2);
+  bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::a7], sp);
+}
+
+void Parser::process_unlk()
+{
+  Inst *arg_reg = get_areg(1);
+  Inst *arg = get_areg_value(1, 32);
+  get_end_of_line(2);
+
+  Inst *inst = bb->build_inst(Op::LOAD_BE, arg, 4);
+  bb->build_inst(Op::WRITE, arg_reg, inst);
+
+  Inst *sp = bb->build_inst(Op::ADD, arg, bb->value_inst(4, 32));
+  bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::a7], sp);
+}
+
 void Parser::process_move(uint32_t bitsize)
 {
   Inst *value;
@@ -2498,6 +2543,8 @@ void Parser::parse_function()
     process_call();
   else if (name == "lea")
     process_lea();
+  else if (name == "link.l" || name == "link.w")
+    process_link();
   else if (name == "lsl.l")
     process_shift(Op::SHL, 32);
   else if (name == "lsl.w")
@@ -2637,6 +2684,8 @@ void Parser::parse_function()
     process_tst(16);
   else if (name == "tst.b")
     process_tst(8);
+  else if (name == "unlk")
+    process_unlk();
   else
     throw Parse_error("unhandled instruction: "s + std::string(name),
 		      line_number);
