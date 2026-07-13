@@ -81,6 +81,8 @@ private:
   Inst *get_hex(unsigned idx, uint32_t bitsize = 32);
   Inst *get_hex_or_integer(unsigned idx, uint32_t bitsize = 32);
   bool is_kind(unsigned idx, Lexeme kind);
+  bool is_postincrement(unsigned idx);
+  bool is_predecrement(unsigned idx);
   Inst *get_areg(unsigned idx);
   Inst *get_areg_value(unsigned idx, uint32_t bitsize = 32);
   Inst *get_dreg(unsigned idx);
@@ -147,6 +149,8 @@ private:
   void process_link();
   void process_unlk();
   void process_move(uint32_t bitsize);
+  void process_movem_load(uint32_t bitsize);
+  void process_movem_store(uint32_t bitsize);
   void process_movem(uint32_t bitsize);
   void process_moveq();
   void process_neg(uint32_t bitsize, bool is_negx = false);
@@ -363,6 +367,22 @@ bool Parser::is_kind(unsigned idx, Lexeme kind)
   if (tokens.size() <= idx)
     return false;
   return tokens[idx].kind == kind;
+}
+
+bool Parser::is_postincrement(unsigned idx)
+{
+  return (is_kind(idx, Lexeme::left_paren)
+	  && is_kind(idx + 1, Lexeme::areg)
+	  && is_kind(idx + 2, Lexeme::right_paren)
+	  && is_kind(idx + 3, Lexeme::plus));
+}
+
+bool Parser::is_predecrement(unsigned idx)
+{
+  return (is_kind(idx, Lexeme::minus)
+	  && is_kind(idx + 1, Lexeme::left_paren)
+	  && is_kind(idx + 2, Lexeme::areg)
+	  && is_kind(idx + 3, Lexeme::right_paren));
 }
 
 Inst *Parser::get_areg(unsigned idx)
@@ -2038,43 +2058,9 @@ void Parser::process_move(uint32_t bitsize)
     }
 }
 
-void Parser::process_movem(uint32_t bitsize)
+void Parser::process_movem_load(uint32_t bitsize)
 {
-  if (is_kind(1, Lexeme::hash))
-    {
-      auto [inst, idx] = get_imm(1);
-      assert(inst->value() < 0x10000);
-      get_comma(idx++);
-      if (!is_kind(idx, Lexeme::minus))
-	throw Parse_error("unhandled movem", line_number);
-      unsigned next_idx = idx;
-      for (int i = 0; i < 8; i++)
-	{
-	  if (inst->value() & (1 << i))
-	    {
-	      Inst *reg = rstate->registers[M68kRegIdx::a0 + 7 - i];
-	      Inst *value = bb->build_inst(Op::READ, reg);
-	      value = bb->build_trunc(value, bitsize);
-	      Inst *ptr;
-	      std::tie(ptr, next_idx) = get_addr(idx, bitsize);
-	      bb->build_inst(Op::STORE_BE, ptr, value);
-	    }
-	}
-      for (int i = 0; i < 8; i++)
-	{
-	  if (inst->value() & (0x100 << i))
-	    {
-	      Inst *reg = rstate->registers[M68kRegIdx::d0 + 7 - i];
-	      Inst *value = bb->build_inst(Op::READ, reg);
-	      value = bb->build_trunc(value, bitsize);
-	      Inst *ptr;
-	      std::tie(ptr, next_idx) = get_addr(idx, bitsize);
-	      bb->build_inst(Op::STORE_BE, ptr, value);
-	    }
-	}
-      get_end_of_line(next_idx);
-    }
-  else
+  if (is_postincrement(1))
     {
       get_left_paren(1);
       get_areg(2);
@@ -2108,6 +2094,54 @@ void Parser::process_movem(uint32_t bitsize)
 	    }
 	}
     }
+  else
+    throw Parse_error("unhandled movem load", line_number);
+}
+
+void Parser::process_movem_store(uint32_t bitsize)
+{
+  auto [inst, idx] = get_imm(1);
+  assert(inst->value() < 0x10000);
+  get_comma(idx++);
+  if (is_predecrement(idx))
+    {
+      unsigned next_idx = idx;
+      for (int i = 0; i < 8; i++)
+	{
+	  if (inst->value() & (1 << i))
+	    {
+	      Inst *reg = rstate->registers[M68kRegIdx::a0 + 7 - i];
+	      Inst *value = bb->build_inst(Op::READ, reg);
+	      value = bb->build_trunc(value, bitsize);
+	      Inst *ptr;
+	      std::tie(ptr, next_idx) = get_addr(idx, bitsize);
+	      bb->build_inst(Op::STORE_BE, ptr, value);
+	    }
+	}
+      for (int i = 0; i < 8; i++)
+	{
+	  if (inst->value() & (0x100 << i))
+	    {
+	      Inst *reg = rstate->registers[M68kRegIdx::d0 + 7 - i];
+	      Inst *value = bb->build_inst(Op::READ, reg);
+	      value = bb->build_trunc(value, bitsize);
+	      Inst *ptr;
+	      std::tie(ptr, next_idx) = get_addr(idx, bitsize);
+	      bb->build_inst(Op::STORE_BE, ptr, value);
+	    }
+	}
+      get_end_of_line(next_idx);
+    }
+  else
+    throw Parse_error("unhandled movem load", line_number);
+}
+
+void Parser::process_movem(uint32_t bitsize)
+{
+  if (is_kind(1, Lexeme::hash))
+    process_movem_store(bitsize);
+  else
+    process_movem_load(bitsize);
 }
 
 void Parser::process_moveq()
