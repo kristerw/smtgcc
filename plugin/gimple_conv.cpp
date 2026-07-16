@@ -817,22 +817,25 @@ void Converter::load_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond)
     {
       // It is UB if the pointer provenance does not correspond to the address.
       Inst *is_ub = bb->build_inst(Op::IS_UB_MEM_ACCESS0, ptr, prov);
+      if (cond)
+	is_ub = bb->build_inst(Op::AND, is_ub, cond);
+      bb->build_inst(Op::UB, is_ub);
 
       // It is UB if the size overflows the offset field.
       Inst *size_inst = bb->value_inst(size - 1, ptr->bitsize);
       Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
       Inst *overflow = bb->build_inst(Op::IS_UB_MEM_ACCESS1, end, prov);
+      if (cond)
+	overflow = bb->build_inst(Op::AND, overflow, cond);
+      bb->build_inst(Op::UB, overflow);
 
       // It is UB if the end is outside the memory object.
       // Note: ptr is within the memory object; otherwise, the provenance check
       // or the offset overflow check would have failed.
       Inst *out_of_bound = bb->build_inst(Op::IS_UB_MEM_ACCESS2, end, prov);
-
-      is_ub = bb->build_inst(Op::OR, is_ub, overflow);
-      is_ub = bb->build_inst(Op::OR, is_ub, out_of_bound);
       if (cond)
-	is_ub = bb->build_inst(Op::AND, is_ub, cond);
-      bb->build_inst(Op::UB, is_ub);
+	out_of_bound = bb->build_inst(Op::AND, out_of_bound, cond);
+      bb->build_inst(Op::UB, out_of_bound);
     }
   else
     {
