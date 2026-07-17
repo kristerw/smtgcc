@@ -7198,8 +7198,8 @@ void Converter::process_cfn_select_vl(gimple *stmt)
     return;
 
   Inst *nof = bb->value_inst(nof_elem, arg1->bitsize);
-  Inst *cmp = bb->build_inst(Op::ULT, arg1, nof);
-  Inst *res = bb->build_inst(Op::ITE, cmp, arg1, nof);
+  Inst *cmp = bb->build_inst(Op::ULT, nof, arg1);
+  Inst *res = bb->build_inst(Op::ITE, cmp, nof, arg1);
   constrain_range(bb, lhs, res);
   tree2instruction.insert({lhs, res});
 }

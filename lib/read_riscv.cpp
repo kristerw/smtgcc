@@ -1815,8 +1815,8 @@ void Parser::process_vsetvli(bool arg1_is_imm)
     }
   else
     {
-      Inst *cmp = bb->build_inst(Op::ULT, arg1, vlmax);
-      Inst *vl = bb->build_inst(Op::ITE, cmp, arg1, vlmax);
+      Inst *cmp = bb->build_inst(Op::ULT, vlmax, arg1);
+      Inst *vl = bb->build_inst(Op::ITE, cmp, vlmax, arg1);
       bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::vl], vl);
       bb->build_inst(Op::WRITE, dest, vl);
     }
