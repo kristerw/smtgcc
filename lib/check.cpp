@@ -1264,118 +1264,56 @@ std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> Converter::prepare_ub_a
   return bbcond2ub_assume;
 }
 
-// Generate the UB expression for the function.
-//
-// For basic blocks with a common condition in src and tgt, we split
-// the list of UB into three sets:
-//  * the ones identical in both
-//  * the set unique to src
-//  * the set unique to tgt
-// The common UB is generated first (so it is CSE'd between src and tgt),
-// followed by the other two sets.
-//
-// This greatly assists the SMT solver when checking that tgt does not
-// have more UB than src, especially since it only needs to examine the
-// UB that are unique to tgt.
 void Converter::generate_ub()
 {
-  std::vector<Inst *> src_cond;
-  std::vector<Inst *> tgt_cond;
-
-  for (auto& [cond, _] : src_bbcond2ub)
-    {
-      src_cond.push_back(cond);
-    }
-  for (auto& [cond, _] : tgt_bbcond2ub)
-    {
-      tgt_cond.push_back(cond);
-    }
-
   Inst_comp comp;
-  std::vector<Inst *> cond_common;
-  std::vector<Inst *> cond_src_unique;
-  std::vector<Inst *> cond_tgt_unique;
-  std::set_intersection(src_cond.begin(), src_cond.end(),
-			tgt_cond.begin(), tgt_cond.end(),
-			std::back_inserter(cond_common), comp);
-  std::set_difference(src_cond.begin(), src_cond.end(),
-		      cond_common.begin(), cond_common.end(),
-		      std::back_inserter(cond_src_unique), comp);
-  std::set_difference(tgt_cond.begin(), tgt_cond.end(),
-		      cond_common.begin(), cond_common.end(),
-		      std::back_inserter(cond_tgt_unique), comp);
+  std::vector<Inst *> src_ub;
+  std::vector<Inst *> tgt_ub;
+  for (auto& [cond, ub_set] : src_bbcond2ub)
+    {
+      for (auto ub : ub_set)
+	src_ub.push_back(build_inst(Op::AND, cond, ub));
+    }
+  std::sort(src_ub.begin(), src_ub.end(), comp);
+  src_ub.erase(std::unique(src_ub.begin(), src_ub.end()), src_ub.end());
+  for (auto& [cond, ub_set] : tgt_bbcond2ub)
+    {
+      for (auto ub : ub_set)
+	tgt_ub.push_back(build_inst(Op::AND, cond, ub));
+    }
+  std::sort(tgt_ub.begin(), tgt_ub.end(), comp);
+  tgt_ub.erase(std::unique(tgt_ub.begin(), tgt_ub.end()), tgt_ub.end());
 
-  Inst *src_ub = value_inst(0, 1);
-  Inst *tgt_ub = value_inst(0, 1);
+  std::vector<Inst *> common;
+  std::vector<Inst *> src_unique;
+  std::vector<Inst *> tgt_unique;
+  std::set_intersection(src_ub.begin(), src_ub.end(),
+			tgt_ub.begin(), tgt_ub.end(),
+			std::back_inserter(common), comp);
+  std::set_difference(src_ub.begin(), src_ub.end(),
+		      common.begin(), common.end(),
+		      std::back_inserter(src_unique), comp);
+  std::set_difference(tgt_ub.begin(), tgt_ub.end(),
+		      common.begin(), common.end(),
+		      std::back_inserter(tgt_unique), comp);
+
   Inst *common_ub = value_inst(0, 1);
-  for (auto cond : cond_common)
-    {
-      std::set<Inst *, Inst_comp>& src_ub_set = src_bbcond2ub.at(cond);
-      std::set<Inst *, Inst_comp>& tgt_ub_set = tgt_bbcond2ub.at(cond);
+  for (auto ub : common)
+    common_ub = build_inst(Op::OR, common_ub, ub);
+  Inst *src_unique_ub = value_inst(0, 1);
+  for (auto ub : src_unique)
+    src_unique_ub = build_inst(Op::OR, src_unique_ub, ub);
+  Inst *tgt_unique_ub = value_inst(0, 1);
+  for (auto ub : tgt_unique)
+    tgt_unique_ub = build_inst(Op::OR, tgt_unique_ub, ub);
 
-      std::vector<Inst *> ub_common;
-      std::vector<Inst *> ub_src_unique;
-      std::vector<Inst *> ub_tgt_unique;
-      std::set_intersection(src_ub_set.begin(), src_ub_set.end(),
-			    tgt_ub_set.begin(), tgt_ub_set.end(),
-			    std::back_inserter(ub_common), comp);
-      std::set_difference(src_ub_set.begin(), src_ub_set.end(),
-			  ub_common.begin(), ub_common.end(),
-			  std::back_inserter(ub_src_unique), comp);
-      std::set_difference(tgt_ub_set.begin(), tgt_ub_set.end(),
-			  ub_common.begin(), ub_common.end(),
-			  std::back_inserter(ub_tgt_unique), comp);
-
-      Inst *bb_ub = value_inst(0, 1);
-      for (auto inst : ub_common)
-	{
-	  bb_ub = build_inst(Op::OR, bb_ub, inst);
-	}
-      common_ub =
-	build_inst(Op::OR, common_ub, build_inst(Op::AND, cond, bb_ub));
-
-      bb_ub = value_inst(0, 1);
-      for (auto inst : ub_src_unique)
-	{
-	  bb_ub = build_inst(Op::OR, bb_ub, inst);
-	}
-      src_ub = build_inst(Op::OR, src_ub, build_inst(Op::AND, cond, bb_ub));
-
-      bb_ub = value_inst(0, 1);
-      for (auto inst : ub_tgt_unique)
-	{
-	  bb_ub = build_inst(Op::OR, bb_ub, inst);
-	}
-      tgt_ub = build_inst(Op::OR, tgt_ub, build_inst(Op::AND, cond, bb_ub));
-    }
-
-  for (auto cond : cond_src_unique)
-    {
-      Inst *bb_ub = value_inst(0, 1);
-      for (auto inst : src_bbcond2ub.at(cond))
-	{
-	  bb_ub = build_inst(Op::OR, bb_ub, inst);
-	}
-      src_ub = build_inst(Op::OR, src_ub, build_inst(Op::AND, cond, bb_ub));
-    }
-
-  for (auto cond : cond_tgt_unique)
-    {
-      Inst *bb_ub = value_inst(0, 1);
-      for (auto inst : tgt_bbcond2ub.at(cond))
-	{
-	  bb_ub = build_inst(Op::OR, bb_ub, inst);
-	}
-      tgt_ub = build_inst(Op::OR, tgt_ub, build_inst(Op::AND, cond, bb_ub));
-    }
-
-  build_inst(Op::SRC_UB, common_ub, src_ub);
-  src.unique_ub = src_ub;
+  build_inst(Op::SRC_UB, common_ub, src_unique_ub);
+  src.unique_ub = src_unique_ub;
   src.common_ub = common_ub;
   if (has_tgt)
     {
-      build_inst(Op::TGT_UB, common_ub, tgt_ub);
-      tgt.unique_ub = tgt_ub;
+      build_inst(Op::TGT_UB, common_ub, tgt_unique_ub);
+      tgt.unique_ub = tgt_unique_ub;
       tgt.common_ub = common_ub;
     }
 }
