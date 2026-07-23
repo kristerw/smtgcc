@@ -2902,8 +2902,13 @@ void Parser::parse_function_data()
 	  if (label)
 	    {
 	      size_t offset = data.size();
-	      if (parse_data(rstate->entry_bb, data))
-		label_name2offset.emplace(*label, offset);
+	      std::vector<Builtin> builtins;
+	      if (parse_data(rstate->entry_bb, data, builtins))
+		{
+		  if (builtins.size() != 0)
+		    throw Parse_error("builtin symbol as data", line_number);
+		  label_name2offset.emplace(*label, offset);
+		}
 	    }
 	}
       else if (buf[pos] == '_' || isalpha(buf[pos]))

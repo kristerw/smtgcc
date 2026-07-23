@@ -14,7 +14,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 126> inst_info{{
+const std::array<Inst_info, 127> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -30,6 +30,7 @@ const std::array<Inst_info, 126> inst_info{{
   {"fne", Op::FNE, Inst_class::fcomparison, true, true},
 
   // Integer unary
+  {"builtin_addr", Op::BUILTIN_ADDR, Inst_class::iunary, true, false},
   {"extract_mem_id", Op::EXTRACT_MEM_ID, Inst_class::iunary, true, false},
   {"is_const_mem", Op::IS_CONST_MEM, Inst_class::iunary, true, false},
   {"is_inf", Op::IS_INF, Inst_class::iunary, true, false},

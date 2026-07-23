@@ -57,6 +57,7 @@ enum class Op : uint8_t {
   FNE,
 
   // Integer unary
+  BUILTIN_ADDR,
   EXTRACT_MEM_ID,
   IS_CONST_MEM,
   IS_INF,
@@ -235,7 +236,7 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 126> inst_info;
+extern const std::array<Inst_info, 127> inst_info;
 
 enum class Function_role {
   src, tgt, ver
@@ -503,6 +504,11 @@ private:
 };
 
 // asm_parser.cpp
+enum class Builtin : uint32_t {
+  abort,
+  assert_fail
+};
+
 struct ParserBase
 {
 protected:
@@ -522,7 +528,8 @@ protected:
 
   std::string_view parse_cmd();
   std::optional<std::string_view> parse_label_def();
-  bool parse_data(Basic_block *bb, std::vector<Inst *>& data);
+  bool parse_data(Basic_block *bb, std::vector<Inst *>& data,
+		  std::vector<Builtin>& builtins);
   void parse_rodata(Basic_block *bb);
 };
 

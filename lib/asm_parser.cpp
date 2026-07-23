@@ -95,9 +95,10 @@ std::optional<std::string_view> ParserBase::parse_label_def()
   return {};
 }
 
-bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data)
+bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data, std::vector<Builtin>& builtins)
 {
   size_t orig_data_size = data.size();
+  size_t orig_builtins_size = builtins.size();
   for (;;)
     {
       const size_t start_pos = pos;
@@ -169,37 +170,52 @@ bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data)
 					pos - sym_start_pos);
 	      auto I = sym_name2mem.find(sym_name);
 	      if (I == sym_name2mem.end())
-		throw Parse_error("unknown symbol " + std::string(sym_name),
-				  line_number);
-	      Inst *ptr = I->second;
-	      if ((buf[pos] == '+' || buf[pos] == '-')
-		  && isdigit(buf[pos + 1]))
 		{
-		  Op op = buf[pos++] == '+' ? Op::ADD : Op::SUB;
-		  uint64_t value = 0;
-		  while (isdigit(buf[pos]))
-		    {
-		      value = value * 10 + (buf[pos] - '0');
-		      pos++;
-		    }
-		  Inst *value_inst = bb->value_inst(value, ptr->bitsize);
-		  ptr = bb->build_inst(op, ptr, value_inst);
+#if defined(SMTGCC_SH)
+		  if (sym_name == "abort")
+		    builtins.push_back(Builtin::abort);
+		  else if (sym_name == "__assert_fail")
+		    builtins.push_back(Builtin::assert_fail);
+		  else
+		    throw Parse_error("unknown symbol " + std::string(sym_name),
+				      line_number);
+
+#else
+		  throw Parse_error("unknown symbol " + std::string(sym_name),
+				    line_number);
+#endif
 		}
-	      if (buf[pos] == '@')
-		throw Parse_error("'@' in symbol expression", line_number);
-	      if (buf[pos] != '\n')
-		throw Parse_error(std::string(cmd)
-				  + " unknown symbol expression",
-				  line_number);
+	      else
+		{
+		  Inst *ptr = I->second;
+		  if ((buf[pos] == '+' || buf[pos] == '-')
+		      && isdigit(buf[pos + 1]))
+		    {
+		      Op op = buf[pos++] == '+' ? Op::ADD : Op::SUB;
+		      uint64_t value = 0;
+		      while (isdigit(buf[pos]))
+			{
+			  value = value * 10 + (buf[pos] - '0');
+			  pos++;
+			}
+		      Inst *value_inst = bb->value_inst(value, ptr->bitsize);
+		      ptr = bb->build_inst(op, ptr, value_inst);
+		    }
+		  if (buf[pos] == '@')
+		    throw Parse_error("'@' in symbol expression", line_number);
+		  if (buf[pos] != '\n')
+		    throw Parse_error(std::string(cmd)
+				      + " unknown symbol expression",
+				      line_number);
 
 #if defined(SMTGCC_M68K)
-	      for (int i = 0; i < size; i++)
-		data.push_back(extract_vec_elem(bb, ptr, 8, size - 1 - i));
+		  for (int i = 0; i < size; i++)
+		    data.push_back(extract_vec_elem(bb, ptr, 8, size - 1 - i));
 #else
-	      for (int i = 0; i < size; i++)
-		data.push_back(extract_vec_elem(bb, ptr, 8, i));
+		  for (int i = 0; i < size; i++)
+		    data.push_back(extract_vec_elem(bb, ptr, 8, i));
 #endif
-
+		}
 	      skip_line();
 	    }
 	  else
@@ -354,7 +370,7 @@ bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data)
 	}
     }
 
-  return orig_data_size != data.size();
+  return orig_data_size != data.size() || orig_builtins_size != builtins.size();
 }
 
 void ParserBase::parse_rodata(Basic_block *bb)
@@ -467,7 +483,12 @@ void ParserBase::parse_rodata(Basic_block *bb)
 	      // TODO: Change to check for duplicated labels.
 	      assert(!sym_name2data.contains(label_name));
 
-	      parse_data(bb, sym_name2data[label_name]);
+	      std::vector<Inst *> data;
+	      std::vector<Builtin> builtins;
+	      parse_data(bb, data, builtins);
+	      if (builtins.size())
+		throw Parse_error("builtin symbol as data", line_number);
+	      sym_name2data[label_name] = data;
 	      continue;
 	    }
 	}

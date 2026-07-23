@@ -45,6 +45,7 @@ struct Parser : public ParserBase {
   };
   std::vector<Token> tokens;
   std::map<std::string, size_t, std::less<>> label_name2offset;
+  std::map<std::string, Builtin, std::less<>> label_name2builtin;
   Inst *function_data_mem = nullptr;
 
   Function *parse(std::string const& file_name);
@@ -162,6 +163,8 @@ private:
   void process_load(uint64_t size);
   void process_fp_store();
   void process_fp_load();
+  std::optional<Builtin> find_builtin(Inst *reg);
+  void process_jsr();
 
   void parse_function();
   void lex_line();
@@ -1388,7 +1391,7 @@ Inst *Parser::process_address(unsigned& idx, uint64_t size)
       std::string_view label_name = token_string(tokens[idx++]);
       auto it = label_name2offset.find(label_name);
       if (it == label_name2offset.end())
-	throw Parse_error("process_address: unkown label: "
+	throw Parse_error("process_address: unknown label: "
 			  + std::string(label_name), line_number);
       Inst *offset = bb->value_inst(it->second, 32);
       return bb->build_inst(Op::ADD, function_data_mem, offset);
@@ -1457,6 +1460,27 @@ void Parser::process_store(uint64_t size)
 
 void Parser::process_load(uint64_t size)
 {
+  // Function calls are done by loading a function address into a register
+  // and branching to the address in the register. As a hack, we special-
+  // case this here to make it easier for process_call to determine
+  // which builtin function we are calling.
+  if (size == 4 && tokens.size() > 1 && tokens[1].kind == Lexeme::label)
+    {
+      std::string_view label_name = token_string(tokens[1]);
+      auto it = label_name2builtin.find(label_name);
+      if (it != label_name2builtin.end())
+	{
+	  get_comma(2);
+	  Inst *dest_reg = get_reg(3);
+	  get_end_of_line(4);
+
+	  Inst *builtin = bb->value_inst((uint32_t)it->second, 32);
+	  Inst *value = bb->build_inst(Op::BUILTIN_ADDR, builtin);
+	  write_reg(dest_reg, value);
+	  return;
+	}
+    }
+
   unsigned idx = 1;
   Inst *ptr = process_address(idx, size);
   get_comma(idx++);
@@ -1516,6 +1540,47 @@ void Parser::process_fp_load()
 
       Inst *value = bb->build_inst(Op::LOAD_LE, ptr, 4);
       write_reg(dest_reg, value);
+    }
+}
+
+std::optional<Builtin> Parser::find_builtin(Inst *reg)
+{
+  Inst *inst = bb->last_inst;
+  while (inst)
+    {
+      if (inst->op == Op::WRITE && inst->args[0] == reg)
+	{
+	  if (inst->args[1]->op == Op::BUILTIN_ADDR)
+	    return (Builtin)inst->args[1]->args[0]->value();
+	  return {};
+	}
+      inst = inst->prev;
+    }
+  return {};
+}
+
+void Parser::process_jsr()
+{
+  get_at(1);
+  Inst *reg = get_reg(2);
+  get_end_of_line(3);
+
+  std::optional<Builtin> builtin = find_builtin(reg);
+  if (!builtin)
+    throw Parse_error("Unknown jsr target", line_number);
+  switch (*builtin)
+    {
+    case Builtin::abort:
+    case Builtin::assert_fail:
+      {
+	Inst *b1 = bb->value_inst(1, 1);
+	bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::abort], b1);
+	bb->build_br_inst(rstate->exit_bb);
+	bb = func->build_bb();
+	return;
+      }
+    default:
+      throw Parse_error("Unknown builtin", line_number);
     }
 }
 
@@ -1642,6 +1707,8 @@ void Parser::parse_function()
     process_fp_binary(Op::FSUB);
   else if (name == "ftrc")
     process_ftrc();
+  else if (name == "jsr")
+    process_jsr();
   else if (name == "lds")
     process_lds();
   else if (name == "lds.l")
@@ -1823,8 +1890,17 @@ void Parser::parse_function_data()
 	  if (label)
 	    {
 	      size_t offset = data.size();
-	      if (parse_data(rstate->entry_bb, data))
-		label_name2offset.emplace(*label, offset);
+	      std::vector<Builtin> builtins;
+	      if (parse_data(rstate->entry_bb, data, builtins))
+		{
+		  if (builtins.size() == 0)
+		    label_name2offset.emplace(*label, offset);
+		  else if (builtins.size() == 1)
+		    label_name2builtin.emplace(*label, builtins[0]);
+		  else
+		    throw Parse_error("builtin symbol as data", line_number);
+
+		}
 	    }
 	}
       else if (buf[pos] == '_' || isalpha(buf[pos]))
