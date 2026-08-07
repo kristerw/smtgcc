@@ -691,7 +691,7 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *in
 	return;
       if (pr.undefined_p() || pr.varying_p())
 	return;
-      if (pr.nonzero_p())
+      if (!pr.contains_zero_p())
 	{
 	  Inst *zero = bb->value_inst(0, inst->bitsize);
 	  Inst *is_ub = bb->build_inst(Op::EQ, inst, zero);
