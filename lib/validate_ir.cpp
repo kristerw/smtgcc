@@ -11,6 +11,21 @@ namespace smtgcc {
 
 namespace {
 
+// Op::VALUE must be the first instructions in the functions.
+void validate_value_insts(Function *func)
+{
+  Inst *inst = func->bbs[0]->first_inst;
+  for (; inst && inst->op == Op::VALUE; inst = inst->next)
+    ;
+  for (; inst; inst = inst->next)
+    assert(inst->op != Op::VALUE);
+  for (size_t i = 1; i < func->bbs.size(); i++)
+    {
+      for (Inst *inst = func->bbs[i]->first_inst; inst; inst = inst->next)
+	assert(inst->op != Op::VALUE);
+    }
+}
+
 void validate(Inst *inst)
 {
   // Some instructions are required to be placed in the entry block.
@@ -110,6 +125,8 @@ void validate(Function *func)
     {
       validate(bb);
     }
+
+  validate_value_insts(func);
 
   // Check that each instruction has been defined before use.
   std::set<Inst *> defined;
