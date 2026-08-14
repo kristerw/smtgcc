@@ -404,10 +404,15 @@ Inst *Converter::extract_id(Inst *inst)
   if (auto it = inst2id.find(inst); it != inst2id.end())
     return it->second;
 
-  Inst *id = create_inst(Op::EXTRACT_MEM_ID, inst);
-  id->insert_after(inst);
-  inst2id.insert({inst, id});
-  return id;
+  if (inst->op == Op::VALUE)
+    return bb->build_inst(Op::EXTRACT_MEM_ID, inst);
+  else
+    {
+      Inst *id = create_inst(Op::EXTRACT_MEM_ID, inst);
+      id->insert_after(inst);
+      inst2id.insert({inst, id});
+      return id;
+    }
 }
 
 // The size of the GCC type when stored in memory etc.
