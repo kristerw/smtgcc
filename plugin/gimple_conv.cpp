@@ -156,6 +156,9 @@ struct Converter {
   Inst *process_ternary(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree arg1_type, tree arg2_type, tree arg3_type);
   std::tuple<Inst *, Inst *, Inst *> process_ternary(enum tree_code code, tree arg1_tree, tree arg2_tree, tree arg3_tree);
   Inst *process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2, Inst *arg3, tree lhs_type, tree arg1_type, tree arg2_type, tree arg3_type);
+  std::pair<Inst *, Inst *> gen_complex(Inst *real, Inst *real_indef, Inst *imag, Inst *imag_indef);
+  std::pair<Inst *, Inst *> gen_extract_real(Inst *inst, Inst *inst_indef);
+  std::pair<Inst *, Inst *> gen_extract_imag(Inst *inst, Inst *inst_indef);
   std::pair<Inst *, Inst *> gen_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type, Inst *len = nullptr);
   std::pair<Inst *, Inst *> gen_fold_left_plus(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *mask, Inst *mas_indef, tree arg2_type, tree mask_type, Inst *len = nullptr);
   std::pair<Inst *, Inst *> gen_fold_left_plus(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, tree arg2_type);
@@ -346,8 +349,6 @@ void check_type(tree type)
     {
       if (VECTOR_TYPE_P(type))
 	throw Not_implemented("check_type: big endian vector type");
-      if (TREE_CODE(type) == COMPLEX_TYPE)
-	throw Not_implemented("check_type: big endian complex type");
     }
 
   // Note: We do not check that all elements in structures/arrays have
@@ -1339,30 +1340,24 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	real = to_mem_repr(real, elem_type);
 	Inst *imag = tree2inst(TREE_IMAGPART(expr));
 	imag = to_mem_repr(imag, elem_type);
-	Inst *res = bb->build_inst(Op::CONCAT, imag, real);
+	auto [res, res_indef] = gen_complex(real, nullptr, imag, nullptr);
 	return {res, nullptr, nullptr};
       }
     case IMAGPART_EXPR:
       {
 	tree elem_type = TREE_TYPE(expr);
-	auto [arg, indef] = tree2inst_indef(TREE_OPERAND(expr, 0));
-	Inst *high = bb->value_inst(arg->bitsize - 1, 32);
-	Inst *low = bb->value_inst(arg->bitsize / 2, 32);
-	Inst *res = bb->build_inst(Op::EXTRACT, arg, high, low);
-	if (indef)
-	  indef = bb->build_inst(Op::EXTRACT, indef, high, low);
-	std::tie(res, indef) = from_mem_repr(res, indef, elem_type);
-	return {res, indef, nullptr};
+	auto [arg, arg_indef] = tree2inst_indef(TREE_OPERAND(expr, 0));
+	auto [res, res_indef] = gen_extract_imag(arg, arg_indef);
+	std::tie(res, res_indef) = from_mem_repr(res, res_indef, elem_type);
+	return {res, res_indef, nullptr};
       }
     case REALPART_EXPR:
       {
 	tree elem_type = TREE_TYPE(expr);
-	auto [arg, indef] = tree2inst_indef(TREE_OPERAND(expr, 0));
-	Inst *res = bb->build_trunc(arg, arg->bitsize / 2);
-	if (indef)
-	  indef = bb->build_trunc(indef, arg->bitsize / 2);
-	std::tie(res, indef) = from_mem_repr(res, indef, elem_type);
-	return {res, indef, nullptr};
+	auto [arg, arg_indef] = tree2inst_indef(TREE_OPERAND(expr, 0));
+	auto [res, res_indef] = gen_extract_real(arg, arg_indef);
+	std::tie(res, res_indef) = from_mem_repr(res, res_indef, elem_type);
+	return {res, res_indef, nullptr};
       }
     case VIEW_CONVERT_EXPR:
       {
@@ -3841,6 +3836,66 @@ Inst *Converter::process_ternary_vec(enum tree_code code, Inst *arg1, Inst *arg2
   return res;
 }
 
+std::pair<Inst *, Inst *> Converter::gen_complex(Inst *real, Inst *real_indef, Inst *imag, Inst *imag_indef)
+{
+  Inst *res;
+  if (BYTES_BIG_ENDIAN)
+    res = bb->build_inst(Op::CONCAT, real, imag);
+  else
+    res = bb->build_inst(Op::CONCAT, imag, real);
+  Inst *res_indef = nullptr;
+  if (real_indef || imag_indef)
+    {
+      if (!real_indef)
+	real_indef = bb->value_inst(0, real->bitsize);
+      if (!imag_indef)
+	imag_indef = bb->value_inst(0, imag->bitsize);
+      if (BYTES_BIG_ENDIAN)
+	res_indef = bb->build_inst(Op::CONCAT, real_indef, imag_indef);
+      else
+	res_indef = bb->build_inst(Op::CONCAT, imag_indef, real_indef);
+    }
+  return {res, res_indef};
+}
+
+std::pair<Inst *, Inst *> Converter::gen_extract_real(Inst *inst, Inst *indef)
+{
+  uint32_t hi, lo;
+  if (BYTES_BIG_ENDIAN)
+    {
+      hi = inst->bitsize - 1;
+      lo = inst->bitsize / 2;
+    }
+  else
+    {
+      hi = inst->bitsize / 2;
+      lo = 0;
+    }
+  inst = bb->build_inst(Op::EXTRACT, inst, hi, lo);
+  if (indef)
+    indef = bb->build_inst(Op::EXTRACT, indef, hi, lo);
+  return {inst, indef};
+}
+
+std::pair<Inst *, Inst *> Converter::gen_extract_imag(Inst *inst, Inst *indef)
+{
+  uint32_t hi, lo;
+  if (BYTES_BIG_ENDIAN)
+    {
+      hi = inst->bitsize / 2;
+      lo = 0;
+    }
+  else
+    {
+      hi = inst->bitsize - 1;
+      lo = inst->bitsize / 2;
+    }
+  inst = bb->build_inst(Op::EXTRACT, inst, hi, lo);
+  if (indef)
+    indef = bb->build_inst(Op::EXTRACT, indef, hi, lo);
+  return {inst, indef};
+}
+
 std::pair<Inst *, Inst *> Converter::gen_vec_cond(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *arg3, Inst *arg3_indef, tree arg1_type, tree arg2_type, Inst *len)
 {
   assert(VECTOR_TYPE_P(arg1_type));
@@ -4252,7 +4307,6 @@ void Converter::process_gimple_assign(gimple *stmt)
 	    auto [arg2, arg2_indef] = tree2inst_indef(rhs2);
 	    arg1 = to_mem_repr(arg1, TREE_TYPE(rhs1));
 	    arg2 = to_mem_repr(arg2, TREE_TYPE(rhs2));
-	    inst = bb->build_inst(Op::CONCAT, arg2, arg1);
 	    if (arg1_indef || arg2_indef)
 	      {
 		if (arg1_indef)
@@ -4263,9 +4317,9 @@ void Converter::process_gimple_assign(gimple *stmt)
 		  arg1_indef = bb->value_inst(0, arg1->bitsize);
 		if (!arg2_indef)
 		  arg2_indef = bb->value_inst(0, arg2->bitsize);
-		indef =
-		  bb->build_inst(Op::CONCAT, arg2_indef, arg1_indef);
 	      }
+	    std::tie(inst, indef) =
+	      gen_complex(arg1, arg1_indef, arg2, arg2_indef);
 	  }
 	else
 	  {
@@ -4662,15 +4716,15 @@ void Converter::process_cfn_add_overflow(gimple *stmt)
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
   auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
-  Inst *res_indef = get_res_indef(arg1_indef, arg2_indef, lhs_elem_type);
-  if (res_indef)
+  Inst *inst_indef = get_res_indef(arg1_indef, arg2_indef, lhs_elem_type);
+  Inst *overflow_indef = nullptr;
+  if (inst_indef)
     {
-      Inst *overflow_indef = bb->build_trunc(res_indef, 1);
+      overflow_indef = bb->build_trunc(inst_indef, 1);
       overflow_indef =
-	bb->build_inst(Op::ZEXT, overflow_indef, res_indef->bitsize);
-      res_indef = to_mem_repr(res_indef, lhs_elem_type);
+	bb->build_inst(Op::ZEXT, overflow_indef, inst_indef->bitsize);
+      inst_indef = to_mem_repr(inst_indef, lhs_elem_type);
       overflow_indef = to_mem_repr(overflow_indef, lhs_elem_type);
-      res_indef = bb->build_inst(Op::CONCAT, overflow_indef, res_indef);
     }
 
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
@@ -4687,18 +4741,20 @@ void Converter::process_cfn_add_overflow(gimple *stmt)
     arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize);
   else
     arg2 = bb->build_inst(Op::SEXT, arg2, bitsize);
-  Inst *inst = bb->build_inst(Op::ADD, arg1, arg2);
-  Inst *res = bb->build_trunc(inst, lhs_elem_bitsize);
-  Inst *eres;
+  Inst *wide_result = bb->build_inst(Op::ADD, arg1, arg2);
+  Inst *inst = bb->build_trunc(wide_result, lhs_elem_bitsize);
+  Inst *einst;
   if (TYPE_UNSIGNED(lhs_elem_type))
-    eres = bb->build_inst(Op::ZEXT, res, bitsize);
+    einst = bb->build_inst(Op::ZEXT, inst, bitsize);
   else
-    eres = bb->build_inst(Op::SEXT, res, bitsize);
-  Inst *overflow = bb->build_inst(Op::NE, inst, eres);
+    einst = bb->build_inst(Op::SEXT, inst, bitsize);
+  Inst *overflow = bb->build_inst(Op::NE, wide_result, einst);
 
-  res = to_mem_repr(res, lhs_elem_type);
-  overflow = bb->build_inst(Op::ZEXT, overflow, res->bitsize);
-  res = bb->build_inst(Op::CONCAT, overflow, res);
+  inst = to_mem_repr(inst, lhs_elem_type);
+  overflow = bb->build_inst(Op::ZEXT, overflow, inst->bitsize);
+
+  auto [res, res_indef] =
+    gen_complex(inst, inst_indef, overflow, overflow_indef);
   constrain_range(bb, lhs, res);
   tree2instruction.insert({lhs, res});
   if (res_indef)
@@ -6920,23 +6976,27 @@ void Converter::process_cfn_mul_overflow(gimple *stmt)
   if (!lhs)
     return;
   if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
-    throw Not_implemented("process_cfn_mul_overflow: vector type");
+    throw Not_implemented("process_cfn_add_overflow: vector type");
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
   auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
-  Inst *res_indef = get_res_indef(arg1_indef, arg2_indef, lhs_elem_type);
-  if (res_indef)
+  Inst *inst_indef = get_res_indef(arg1_indef, arg2_indef, lhs_elem_type);
+  Inst *overflow_indef = nullptr;
+  if (inst_indef)
     {
-      Inst *overflow_indef = bb->build_trunc(res_indef, 1);
+      overflow_indef = bb->build_trunc(inst_indef, 1);
       overflow_indef =
-	bb->build_inst(Op::ZEXT, overflow_indef, res_indef->bitsize);
-      res_indef = to_mem_repr(res_indef, lhs_elem_type);
+	bb->build_inst(Op::ZEXT, overflow_indef, inst_indef->bitsize);
+      inst_indef = to_mem_repr(inst_indef, lhs_elem_type);
       overflow_indef = to_mem_repr(overflow_indef, lhs_elem_type);
-      res_indef = bb->build_inst(Op::CONCAT, overflow_indef, res_indef);
     }
+
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   unsigned bitsize =
     1 + std::max(arg1->bitsize + arg2->bitsize, lhs_elem_bitsize);
+  if (TYPE_UNSIGNED(lhs_elem_type) != TYPE_UNSIGNED(arg1_type)
+      || TYPE_UNSIGNED(lhs_elem_type) != TYPE_UNSIGNED(arg2_type))
+    bitsize++;
   if (TYPE_UNSIGNED(arg1_type))
     arg1 = bb->build_inst(Op::ZEXT, arg1, bitsize);
   else
@@ -6945,18 +7005,20 @@ void Converter::process_cfn_mul_overflow(gimple *stmt)
     arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize);
   else
     arg2 = bb->build_inst(Op::SEXT, arg2, bitsize);
-  Inst *inst = bb->build_inst(Op::MUL, arg1, arg2);
-  Inst *res = bb->build_trunc(inst, lhs_elem_bitsize);
-  Inst *eres;
+  Inst *wide_result = bb->build_inst(Op::MUL, arg1, arg2);
+  Inst *inst = bb->build_trunc(wide_result, lhs_elem_bitsize);
+  Inst *einst;
   if (TYPE_UNSIGNED(lhs_elem_type))
-    eres = bb->build_inst(Op::ZEXT, res, bitsize);
+    einst = bb->build_inst(Op::ZEXT, inst, bitsize);
   else
-    eres = bb->build_inst(Op::SEXT, res, bitsize);
-  Inst *overflow = bb->build_inst(Op::NE, inst, eres);
+    einst = bb->build_inst(Op::SEXT, inst, bitsize);
+  Inst *overflow = bb->build_inst(Op::NE, wide_result, einst);
 
-  res = to_mem_repr(res, lhs_elem_type);
-  overflow = bb->build_inst(Op::ZEXT, overflow, res->bitsize);
-  res = bb->build_inst(Op::CONCAT, overflow, res);
+  inst = to_mem_repr(inst, lhs_elem_type);
+  overflow = bb->build_inst(Op::ZEXT, overflow, inst->bitsize);
+
+  auto [res, res_indef] =
+    gen_complex(inst, inst_indef, overflow, overflow_indef);
   constrain_range(bb, lhs, res);
   tree2instruction.insert({lhs, res});
   if (res_indef)
@@ -7247,20 +7309,21 @@ void Converter::process_cfn_sub_overflow(gimple *stmt)
   if (!lhs)
     return;
   if (VECTOR_TYPE_P(TREE_TYPE(lhs)))
-    throw Not_implemented("process_cfn_sub_overflow: vector type");
+    throw Not_implemented("process_cfn_add_overflow: vector type");
   tree lhs_elem_type = TREE_TYPE(TREE_TYPE(lhs));
   auto [arg1, arg1_indef] = tree2inst_indef(arg1_expr);
   auto [arg2, arg2_indef] = tree2inst_indef(arg2_expr);
-  Inst *res_indef = get_res_indef(arg1_indef, arg2_indef, lhs_elem_type);
-  if (res_indef)
+  Inst *inst_indef = get_res_indef(arg1_indef, arg2_indef, lhs_elem_type);
+  Inst *overflow_indef = nullptr;
+  if (inst_indef)
     {
-      Inst *overflow_indef = bb->build_trunc(res_indef, 1);
-      overflow_indef
-	= bb->build_inst(Op::ZEXT, overflow_indef, res_indef->bitsize);
-      res_indef = to_mem_repr(res_indef, lhs_elem_type);
+      overflow_indef = bb->build_trunc(inst_indef, 1);
+      overflow_indef =
+	bb->build_inst(Op::ZEXT, overflow_indef, inst_indef->bitsize);
+      inst_indef = to_mem_repr(inst_indef, lhs_elem_type);
       overflow_indef = to_mem_repr(overflow_indef, lhs_elem_type);
-      res_indef = bb->build_inst(Op::CONCAT, overflow_indef, res_indef);
     }
+
   unsigned lhs_elem_bitsize = bitsize_for_type(lhs_elem_type);
   unsigned bitsize = std::max(arg1->bitsize, arg2->bitsize);
   bitsize = 1 + std::max(bitsize, lhs_elem_bitsize);
@@ -7275,18 +7338,20 @@ void Converter::process_cfn_sub_overflow(gimple *stmt)
     arg2 = bb->build_inst(Op::ZEXT, arg2, bitsize);
   else
     arg2 = bb->build_inst(Op::SEXT, arg2, bitsize);
-  Inst *inst = bb->build_inst(Op::SUB, arg1, arg2);
-  Inst *res = bb->build_trunc(inst, lhs_elem_bitsize);
-  Inst *eres;
+  Inst *wide_result = bb->build_inst(Op::SUB, arg1, arg2);
+  Inst *inst = bb->build_trunc(wide_result, lhs_elem_bitsize);
+  Inst *einst;
   if (TYPE_UNSIGNED(lhs_elem_type))
-    eres = bb->build_inst(Op::ZEXT, res, bitsize);
+    einst = bb->build_inst(Op::ZEXT, inst, bitsize);
   else
-    eres = bb->build_inst(Op::SEXT, res, bitsize);
-  Inst *overflow = bb->build_inst(Op::NE, inst, eres);
+    einst = bb->build_inst(Op::SEXT, inst, bitsize);
+  Inst *overflow = bb->build_inst(Op::NE, wide_result, einst);
 
-  res = to_mem_repr(res, lhs_elem_type);
-  overflow = bb->build_inst(Op::ZEXT, overflow, res->bitsize);
-  res = bb->build_inst(Op::CONCAT, overflow, res);
+  inst = to_mem_repr(inst, lhs_elem_type);
+  overflow = bb->build_inst(Op::ZEXT, overflow, inst->bitsize);
+
+  auto [res, res_indef] =
+    gen_complex(inst, inst_indef, overflow, overflow_indef);
   constrain_range(bb, lhs, res);
   tree2instruction.insert({lhs, res});
   if (res_indef)
