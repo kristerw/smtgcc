@@ -2350,6 +2350,38 @@ void Parser::process_call()
       bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
       return;
     }
+  if (name == "__ashldi3")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg1 = bb->build_inst(Op::LOAD_BE, sp, 8);
+      Inst *ptr = bb->build_inst(Op::ADD, sp, bb->value_inst(8, 32));
+      Inst *arg2 = bb->build_inst(Op::LOAD_BE, ptr, 4);
+      Inst *bitsize = bb->value_inst(64, 32);
+      bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
+      arg2 = bb->build_inst(Op::ZEXT, bb->build_trunc (arg2, 6), 64);
+      Inst *res = bb->build_inst(Op::SHL, arg1, arg2);
+      Inst *res_d0 = bb->build_inst(Op::EXTRACT, res, 63, 32);
+      Inst *res_d1 = bb->build_trunc(res, 32);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res_d0);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d1], res_d1);
+      return;
+    }
+  if (name == "__ashrdi3")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg1 = bb->build_inst(Op::LOAD_BE, sp, 8);
+      Inst *ptr = bb->build_inst(Op::ADD, sp, bb->value_inst(8, 32));
+      Inst *arg2 = bb->build_inst(Op::LOAD_BE, ptr, 4);
+      Inst *bitsize = bb->value_inst(64, 32);
+      bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
+      arg2 = bb->build_inst(Op::ZEXT, bb->build_trunc (arg2, 6), 64);
+      Inst *res = bb->build_inst(Op::ASHR, arg1, arg2);
+      Inst *res_d0 = bb->build_inst(Op::EXTRACT, res, 63, 32);
+      Inst *res_d1 = bb->build_trunc(res, 32);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res_d0);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d1], res_d1);
+      return;
+    }
   if (name == "__clrsbdi2")
     {
       Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
@@ -2405,6 +2437,22 @@ void Parser::process_call()
       Inst *arg = bb->build_inst(Op::LOAD_BE, sp, 8);
       Inst *res = gen_ffs(arg);
       bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
+      return;
+    }
+  if (name == "__lshrdi3")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg1 = bb->build_inst(Op::LOAD_BE, sp, 8);
+      Inst *ptr = bb->build_inst(Op::ADD, sp, bb->value_inst(8, 32));
+      Inst *arg2 = bb->build_inst(Op::LOAD_BE, ptr, 4);
+      Inst *bitsize = bb->value_inst(64, 32);
+      bb->build_inst(Op::UB, bb->build_inst(Op::ULE, bitsize, arg2));
+      arg2 = bb->build_inst(Op::ZEXT, bb->build_trunc (arg2, 6), 64);
+      Inst *res = bb->build_inst(Op::LSHR, arg1, arg2);
+      Inst *res_d0 = bb->build_inst(Op::EXTRACT, res, 63, 32);
+      Inst *res_d1 = bb->build_trunc(res, 32);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res_d0);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d1], res_d1);
       return;
     }
   if (name == "memcpy" || name == "memmove")
