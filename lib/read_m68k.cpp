@@ -2339,6 +2339,17 @@ void Parser::process_call()
       bb = func->build_bb();
       return;
     }
+  if (name == "__addvsi3")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg1 = bb->build_inst(Op::LOAD_BE, sp, 4);
+      Inst *ptr = bb->build_inst(Op::ADD, sp, bb->value_inst(4, 32));
+      Inst *arg2 = bb->build_inst(Op::LOAD_BE, ptr, 4);
+      bb->build_inst(Op::UB, bb->build_inst(Op::SADD_OVERFLOW, arg1, arg2));
+      Inst *res = bb->build_inst(Op::ADD, arg1, arg2);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
+      return;
+    }
   if (name == "__clrsbdi2")
     {
       Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
@@ -2439,6 +2450,27 @@ void Parser::process_call()
       bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d1], res_d1);
       return;
     }
+  if (name == "__mulvsi3")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg1 = bb->build_inst(Op::LOAD_BE, sp, 4);
+      Inst *ptr = bb->build_inst(Op::ADD, sp, bb->value_inst(4, 32));
+      Inst *arg2 = bb->build_inst(Op::LOAD_BE, ptr, 4);
+      bb->build_inst(Op::UB, bb->build_inst(Op::SMUL_OVERFLOW, arg1, arg2));
+      Inst *res = bb->build_inst(Op::MUL, arg1, arg2);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
+      return;
+    }
+  if (name == "__negvsi2")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg = bb->build_inst(Op::LOAD_BE, sp, 4);
+      Inst *min_int_inst = bb->value_inst(0x80000000, 32);
+      bb->build_inst(Op::UB, bb->build_inst(Op::EQ, arg, min_int_inst));
+      Inst *res = bb->build_inst(Op::NEG, arg);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
+      return;
+    }
   if (name == "__paritydi2")
     {
       Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
@@ -2468,6 +2500,17 @@ void Parser::process_call()
       Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
       Inst *arg = bb->build_inst(Op::LOAD_BE, sp, 4);
       Inst *res = gen_popcount(bb, arg);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
+      return;
+    }
+  if (name == "__subvsi3")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg1 = bb->build_inst(Op::LOAD_BE, sp, 4);
+      Inst *ptr = bb->build_inst(Op::ADD, sp, bb->value_inst(4, 32));
+      Inst *arg2 = bb->build_inst(Op::LOAD_BE, ptr, 4);
+      bb->build_inst(Op::UB, bb->build_inst(Op::SSUB_OVERFLOW, arg1, arg2));
+      Inst *res = bb->build_inst(Op::SUB, arg1, arg2);
       bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
       return;
     }
