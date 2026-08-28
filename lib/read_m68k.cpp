@@ -2390,6 +2390,14 @@ void Parser::process_call()
       bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
       return;
     }
+  if (name == "__clrsbsi2")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *arg = bb->build_inst(Op::LOAD_BE, sp, 4);
+      Inst *res = gen_clrsb(bb, arg);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
+      return;
+    }
   if (name == "__ctzdi2")
     {
       Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
