@@ -2477,6 +2477,21 @@ void Parser::process_call()
       bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], dest_ptr);
       return;
     }
+  if (name == "mempcpy")
+    {
+      Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
+      Inst *dest_ptr = bb->build_inst(Op::LOAD_BE, sp, 4);
+      Inst *src_ptr =
+	bb->build_inst(Op::LOAD_BE,
+		       bb->build_inst(Op::ADD, sp, bb->value_inst(4, 32)), 4);
+      Inst *size =
+	bb->build_inst(Op::LOAD_BE,
+		       bb->build_inst(Op::ADD, sp, bb->value_inst(8, 32)), 4);
+      bb->build_inst(Op::MEMMOVE, dest_ptr, src_ptr, size);
+      Inst *res = bb->build_inst(Op::ADD, dest_ptr, size);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
+      return;
+    }
   if (name == "memset")
     {
       Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
