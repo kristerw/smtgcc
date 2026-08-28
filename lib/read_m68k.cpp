@@ -2472,8 +2472,9 @@ void Parser::process_call()
 		       bb->build_inst(Op::ADD, sp, bb->value_inst(4, 32)), 4);
       Inst *size =
 	bb->build_inst(Op::LOAD_BE,
-		       bb->build_inst(Op::ADD, sp, bb->value_inst(8, 32)), 8);
+		       bb->build_inst(Op::ADD, sp, bb->value_inst(8, 32)), 4);
       bb->build_inst(Op::MEMMOVE, dest_ptr, src_ptr, size);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], dest_ptr);
       return;
     }
   if (name == "memset")
@@ -2485,9 +2486,10 @@ void Parser::process_call()
 		       bb->build_inst(Op::ADD, sp, bb->value_inst(4, 32)), 4);
       Inst *size =
 	bb->build_inst(Op::LOAD_BE,
-		       bb->build_inst(Op::ADD, sp, bb->value_inst(8, 32)), 8);
+		       bb->build_inst(Op::ADD, sp, bb->value_inst(8, 32)), 4);
       value = bb->build_trunc(value, 8);
       bb->build_inst(Op::MEMSET, dest_ptr, value, size);
+      bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], dest_ptr);
       return;
     }
   if (name == "__moddi3")
