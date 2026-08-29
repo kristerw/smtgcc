@@ -176,6 +176,8 @@ bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data, std::vec
 		    builtins.push_back(Builtin::abort);
 		  else if (sym_name == "__assert_fail")
 		    builtins.push_back(Builtin::assert_fail);
+		  else if (sym_name == "exit")
+		    builtins.push_back(Builtin::exit);
 		  else
 		    throw Parse_error("unknown symbol " + std::string(sym_name),
 				      line_number);

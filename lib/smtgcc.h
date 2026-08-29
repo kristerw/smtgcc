@@ -506,7 +506,8 @@ private:
 // asm_parser.cpp
 enum class Builtin : uint32_t {
   abort,
-  assert_fail
+  assert_fail,
+  exit
 };
 
 struct ParserBase

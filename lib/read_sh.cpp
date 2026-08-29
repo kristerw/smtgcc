@@ -1568,6 +1568,17 @@ void Parser::process_jsr()
   std::optional<Builtin> builtin = find_builtin(reg);
   if (!builtin)
     throw Parse_error("Unknown jsr target", line_number);
+
+  // The delay slot handling requires a new basic block for instructions
+  // having a delay slot.
+  // TODO: Implement this in a better way, as the new basic block interacts
+  // badly with find_builtin for later calls.
+  delay_slot = true;
+  branch_bb = bb;
+  Basic_block *new_bb = func->build_bb();
+  bb->build_br_inst(new_bb);
+  bb = new_bb;
+
   switch (*builtin)
     {
     case Builtin::abort:
@@ -1575,6 +1586,18 @@ void Parser::process_jsr()
       {
 	Inst *b1 = bb->value_inst(1, 1);
 	bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::abort], b1);
+	bb->build_br_inst(rstate->exit_bb);
+	bb = func->build_bb();
+	return;
+      }
+    case Builtin::exit:
+      {
+	Inst *b1 = bb->value_inst(1, 1);
+	Inst *exit_val =
+	  bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r4]);
+	bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::exit], b1);
+	bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::exit_val],
+		       exit_val);
 	bb->build_br_inst(rstate->exit_bb);
 	bb = func->build_bb();
 	return;
