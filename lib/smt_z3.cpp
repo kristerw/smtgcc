@@ -19,6 +19,8 @@ class Converter {
   std::map<const Inst *, z3::expr> inst2fp;
   std::map<const Inst *, z3::expr> inst2bool;
 
+  z3::expr bv_canonical_nan(uint32_t bitsize);
+  z3::expr bv_is_nan(z3::expr bv, uint32_t bitsize);
   z3::expr ite(z3::expr c, z3::expr a, z3::expr b);
   z3::expr get_value(unsigned __int128 value, uint32_t bitsize);
   Z3_sort fp_sort(uint32_t bitsize);
@@ -55,7 +57,51 @@ public:
 
   Result_state src;
   Result_state tgt;
+
+  // Floating-point instructions we know are not non-canonical NaN.
+  std::set<const Inst*> fp_canonical;
 };
+
+std::pair<long unsigned int, long unsigned int> fp_exp_sig_size(uint32_t bitsize)
+{
+  switch (bitsize)
+    {
+    case 16:
+      return {5, 11};
+    case 32:
+      return {8, 24};
+    case 64:
+      return {11, 53};
+    case 128:
+      return {15, 113};
+    default:
+      throw Not_implemented("fp_sort: f" + std::to_string(bitsize));
+    }
+}
+
+// Returns a Term representing the canonical NaN as a bitvector.
+z3::expr Converter::bv_canonical_nan(uint32_t bitsize)
+{
+  assert(bitsize <= 128);
+  auto [exp_size, sig_size] = fp_exp_sig_size(bitsize);
+  unsigned __int128 value = -1;
+  value = value << (128 - bitsize + 1);
+  value = value >> (128 - bitsize + 1 + sig_size - 2);
+  value = value << (sig_size - 2);
+  return get_value(value, bitsize);
+}
+
+z3::expr Converter::bv_is_nan(z3::expr bv, uint32_t bitsize)
+{
+  auto [exp_size, sig_size] = fp_exp_sig_size(bitsize);
+  uint32_t exp_hi = bitsize - 2;
+  uint32_t exp_lo = sig_size - 1;
+  z3::expr exp = bv.extract(exp_hi, exp_lo);
+  z3::expr sig = bv.extract(sig_size - 2, 0);
+  z3::expr m1 = get_value(-1, exp_size);
+  z3::expr zero = get_value(0, sig_size - 1);
+  return exp == m1 && sig != zero;
+}
 
 z3::expr Converter::ite(z3::expr c, z3::expr a, z3::expr b)
 {
@@ -102,10 +148,13 @@ z3::expr Converter::inst_as_bv(const Inst *inst)
       // We do not have a bitvector value for inst. This means there must
       // be a floating-point value for this instruction. Convert it to a
       // bitvector.
-      z3::expr expr =
-	z3::expr(ctx, Z3_mk_fpa_to_ieee_bv(ctx, inst2fp.at(inst)));
-      inst2bv.emplace(inst, expr);
-      return expr;
+      z3::expr bv = z3::expr(ctx, Z3_mk_fpa_to_ieee_bv(ctx, inst2fp.at(inst)));
+      z3::expr is_nan = bv_is_nan(bv, inst->bitsize);
+      z3::expr bv_nan = bv_canonical_nan(inst->bitsize);
+      z3::expr res = ite(is_nan, bv_nan, bv);
+      fp_canonical.insert(inst);
+      inst2bv.emplace(inst, res);
+      return res;
     }
 }
 
@@ -313,12 +362,17 @@ void Converter::build_bv_unary_smt(const Inst *inst)
       break;
     case Op::IS_NONCANONICAL_NAN:
       {
-	z3::expr farg1 = inst_as_fp(inst->args[0]);
-	z3::expr is_nan = z3::expr(ctx, Z3_mk_fpa_is_nan(ctx, farg1));
-	Z3_sort sort = fp_sort(inst->args[0]->bitsize);
-	z3::expr nan = z3::expr(ctx, Z3_mk_fpa_nan(ctx, sort));
-	z3::expr nan_bv = z3::expr(ctx, Z3_mk_fpa_to_ieee_bv(ctx, nan));
-	inst2bool.emplace(inst, is_nan && (nan_bv != arg1));
+	if (fp_canonical.contains(inst))
+	  {
+	    inst2bool.emplace(inst, ctx.bool_val(false));
+	    return;
+	  }
+	z3::expr is_nan = bv_is_nan(arg1, inst->args[0]->bitsize);
+	z3::expr bv_nan = bv_canonical_nan(inst->args[0]->bitsize);
+	z3::expr is_noncanonical = arg1 != bv_nan;
+	z3::expr res = is_nan && is_noncanonical;
+	inst2bool.emplace(inst, res);
+	return;
       }
       break;
     case Op::MOV:
