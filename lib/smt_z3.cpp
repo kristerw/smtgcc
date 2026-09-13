@@ -82,12 +82,7 @@ std::pair<long unsigned int, long unsigned int> fp_exp_sig_size(uint32_t bitsize
 // Returns a Term representing the canonical NaN as a bitvector.
 z3::expr Converter::bv_canonical_nan(uint32_t bitsize)
 {
-  assert(bitsize <= 128);
-  auto [exp_size, sig_size] = fp_exp_sig_size(bitsize);
-  unsigned __int128 value = -1;
-  value = value << (128 - bitsize + 1);
-  value = value >> (128 - bitsize + 1 + sig_size - 2);
-  value = value << (sig_size - 2);
+  unsigned __int128 value = canonical_nan_value(bitsize);
   return get_value(value, bitsize);
 }
 

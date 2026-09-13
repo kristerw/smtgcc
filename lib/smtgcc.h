@@ -345,6 +345,7 @@ struct Basic_block {
   Inst *build_trunc(Inst *arg, uint32_t nof_bits);
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   Inst *value_m1_inst(uint32_t bitsize);
+  unsigned __int128 canonical_nan_value(uint32_t bitsize);
   void print(FILE *stream) const;
 };
 
@@ -489,6 +490,7 @@ struct SStats {
   bool skipped = true;
 };
 
+unsigned __int128 canonical_nan_value(uint32_t bitsize);
 uint64_t get_time();
 
 // cache.cpp

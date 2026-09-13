@@ -1598,6 +1598,44 @@ void destroy_instruction(Inst *inst)
   delete inst;
 }
 
+unsigned __int128 canonical_nan_value(uint32_t bitsize)
+{
+#if defined(SMTGCC_M68K)
+  switch (bitsize)
+    {
+    case 32:
+      return 0x7fffffff;
+    case 64:
+      return 0x7ffffffffffffffful;
+    default:
+      break;
+    }
+#elif defined(SMTGCC_SH)
+  switch (bitsize)
+    {
+    case 32:
+      return 0x7fbfffff;
+    case 64:
+      return 0x7ff7fffffffffffful;
+    default:
+      break;
+    }
+#else
+  switch (bitsize)
+    {
+    case 16:
+      return 0x7e00;
+    case 32:
+      return 0x7fc00000;
+    case 64:
+      return 0x7ff8000000000000ul;
+    default:
+      break;
+    }
+#endif
+  throw Not_implemented("canonical_nan_value: unhandled bitsize");
+}
+
 uint64_t get_time()
 {
   struct timespec ts;
