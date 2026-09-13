@@ -288,6 +288,7 @@ struct Converter {
   void init_var(tree decl, Inst *mem_inst);
   void make_uninit(Inst *ptr, uint64_t size);
   void build_ub_assume(Basic_block *bb, Inst *cond);
+  void constrain_src_finite_math_only(Inst *inst);
   void constrain_src_value(Inst *inst, tree type, Inst *mem_flags = nullptr);
   void process_variables();
   void process_func_args();
@@ -533,6 +534,22 @@ void Converter::build_ub_assume(Basic_block *bb, Inst *cond)
     bb->build_inst(Op::UB, cond);
 }
 
+// Add checks in the src function to ensure that the scalar floating-point
+// value is finite.
+void Converter::constrain_src_finite_math_only(Inst *inst)
+{
+  if (role == Function_role::tgt)
+    return;
+
+  auto [exp_size, sig_size] = fp_exp_sig_size(inst->bitsize);
+  uint32_t exp_hi = inst->bitsize - 2;
+  uint32_t exp_lo = sig_size - 1;
+  Inst *exp = bb->build_inst(Op::EXTRACT, inst, exp_hi, exp_lo);
+  Inst *m1 = bb->value_inst(-1, exp->bitsize);
+  Inst *is_finite = bb->build_inst(Op::NE, exp, m1);
+  build_ub_assume(bb, is_finite);
+}
+
 // Add checks in the src function to ensure that the value is a valid value
 // for the type. The main use is to make sure the initial state is valid
 // (for example, global pointers can't point to local memory).
@@ -593,7 +610,10 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
     }
   if (SCALAR_FLOAT_TYPE_P(type))
     {
-      build_ub_assume(bb, bb->build_inst(Op::IS_NONCANONICAL_NAN, inst));
+      if (flag_finite_math_only)
+	constrain_src_finite_math_only(inst);
+      else
+	build_ub_assume(bb, bb->build_inst(Op::IS_NONCANONICAL_NAN, inst));
       return;
     }
   if (INTEGRAL_TYPE_P(type) && inst->bitsize != bitsize_for_type(type))
@@ -2856,17 +2876,37 @@ std::pair<Inst *, Inst *> Converter::process_binary_float(enum tree_code code, I
 	return {bb->build_inst(Op::OR, lt, gt), res_indef};
       }
     case RDIV_EXPR:
-      return {bb->build_inst(Op::FDIV, arg1, arg2), res_indef};
+      {
+	Inst *res = bb->build_inst(Op::FDIV, arg1, arg2);
+	if (flag_finite_math_only)
+	  constrain_src_finite_math_only(res);
+	return {res, res_indef};
+      }
     case MAX_EXPR:
       return {gen_fmax(bb, arg1, arg2), res_indef};
     case MIN_EXPR:
       return {gen_fmin(bb, arg1, arg2), res_indef};
     case MINUS_EXPR:
-      return {bb->build_inst(Op::FSUB, arg1, arg2), res_indef};
+      {
+	Inst *res = bb->build_inst(Op::FSUB, arg1, arg2);
+	if (flag_finite_math_only)
+	  constrain_src_finite_math_only(res);
+	return {res, res_indef};
+      }
     case MULT_EXPR:
-      return {bb->build_inst(Op::FMUL, arg1, arg2), res_indef};
+      {
+	Inst *res = bb->build_inst(Op::FMUL, arg1, arg2);
+	if (flag_finite_math_only)
+	  constrain_src_finite_math_only(res);
+	return {res, res_indef};
+      }
     case PLUS_EXPR:
-      return {bb->build_inst(Op::FADD, arg1, arg2), res_indef};
+      {
+	Inst *res = bb->build_inst(Op::FADD, arg1, arg2);
+	if (flag_finite_math_only)
+	  constrain_src_finite_math_only(res);
+	return {res, res_indef};
+      }
     default:
       break;
     }

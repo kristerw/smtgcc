@@ -73,23 +73,6 @@ public:
   Term rm_rtz;
 };
 
-std::pair<long unsigned int, long unsigned int> fp_exp_sig_size(uint32_t bitsize)
-{
-  switch (bitsize)
-    {
-    case 16:
-      return {5, 11};
-    case 32:
-      return {8, 24};
-    case 64:
-      return {11, 53};
-    case 128:
-      return {15, 113};
-    default:
-      throw Not_implemented("fp_sort: f" + std::to_string(bitsize));
-    }
-}
-
 Sort Converter::fp_sort(uint32_t bitsize)
 {
   auto [exp_size, sig_size] = fp_exp_sig_size(bitsize);

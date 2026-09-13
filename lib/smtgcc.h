@@ -490,6 +490,7 @@ struct SStats {
   bool skipped = true;
 };
 
+std::pair<long unsigned int, long unsigned int> fp_exp_sig_size(uint32_t bitsize);
 unsigned __int128 canonical_nan_value(uint32_t bitsize);
 uint64_t get_time();
 

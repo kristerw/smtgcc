@@ -1598,6 +1598,23 @@ void destroy_instruction(Inst *inst)
   delete inst;
 }
 
+std::pair<long unsigned int, long unsigned int> fp_exp_sig_size(uint32_t bitsize)
+{
+  switch (bitsize)
+    {
+    case 16:
+      return {5, 11};
+    case 32:
+      return {8, 24};
+    case 64:
+      return {11, 53};
+    case 128:
+      return {15, 113};
+    default:
+      throw Not_implemented("fp_exp_sig_size: f" + std::to_string(bitsize));
+    }
+}
+
 unsigned __int128 canonical_nan_value(uint32_t bitsize)
 {
 #if defined(SMTGCC_M68K)
