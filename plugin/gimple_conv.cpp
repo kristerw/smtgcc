@@ -188,6 +188,7 @@ struct Converter {
   void process_cfn_built_in_atomic_store(gimple *stmt, uint64_t size);
   void process_cfn_built_in_atomic_exchange(gimple *stmt);
   void process_cfn_built_in_atomic_exchange(gimple *stmt, uint64_t size);
+  void process_cfn_atomic_compare_exchange(gimple *stmt);
   void process_cfn_built_in_atomic_compare_exchange(gimple *stmt);
   void process_cfn_built_in_atomic_compare_exchange(gimple *stmt,
 						    uint64_t size);
@@ -5018,6 +5019,44 @@ void Converter::process_cfn_built_in_atomic_exchange(gimple *stmt, uint64_t size
     }
 }
 
+void Converter::process_cfn_atomic_compare_exchange(gimple *stmt)
+{
+  assert(gimple_call_num_args(stmt) == 6);
+  auto [ptr, ptr_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
+  auto [expected, expected_indef] = tree2inst_indef(gimple_call_arg(stmt, 1));
+  auto [desired, desired_indef] = tree2inst_indef(gimple_call_arg(stmt, 2));
+  // The size is encoded in the bottom 8 bits.
+  int64_t size = get_int_cst_val(gimple_call_arg(stmt, 3)) & 0xff;
+  assert(size * 8 == expected->bitsize);
+  assert(size * 8 == desired->bitsize);
+
+  store_ub_check(ptr, ptr_prov, size);
+
+  auto [orig, orig_indef, orig_flag] = load_value(ptr, size);
+  // We ignore indef in the comparison. I.e. the values are the same iff
+  // all bits (including padding) are the same.
+  Inst *cond = bb->build_inst(Op::EQ, orig, expected);
+  Basic_block *true_bb = func->build_bb();
+  Basic_block *next_bb = func->build_bb();
+  bb->build_br_inst(cond, true_bb, next_bb);
+
+  bb = true_bb;
+  store_value(ptr, desired, desired_indef);
+  bb->build_br_inst(next_bb);
+
+  bb = next_bb;
+  Inst *res_expected = bb->build_inst(Op::ITE, cond, expected, orig);
+  Inst *res_cond = bb->build_inst(Op::ZEXT, cond, res_expected->bitsize);
+  auto [res, _] = gen_complex(res_expected, nullptr, res_cond, nullptr);
+
+  tree lhs = gimple_call_lhs(stmt);
+  if (lhs)
+    {
+      constrain_range(bb, lhs, res);
+      tree2instruction.insert({lhs, res});
+    }
+}
+
 void Converter::process_cfn_built_in_atomic_compare_exchange(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 6);
@@ -8104,6 +8143,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
       break;
     case CFN_ADD_OVERFLOW:
       process_cfn_add_overflow(stmt);
+      break;
+    case CFN_ATOMIC_COMPARE_EXCHANGE:
+      process_cfn_atomic_compare_exchange(stmt);
       break;
     case CFN_BIT_ANDN:
       process_cfn_bit_andn(stmt);
