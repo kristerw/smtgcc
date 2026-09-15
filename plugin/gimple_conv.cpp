@@ -83,6 +83,7 @@ struct Converter {
   std::map<tree, Inst *> tree2indef;
   std::map<tree, Inst *> tree2prov;
   std::map<tree, Inst *> decl2instruction;
+  std::map<tree, Inst *> parm_decl2mem;
   std::map<Inst *, Inst *> inst2memory_flagsx;
   std::map<Inst *, Inst *> inst2id;
   std::vector<Inst *> static_var_ids;
@@ -1461,6 +1462,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
     case TARGET_MEM_REF:
     case VAR_DECL:
     case RESULT_DECL:
+    case PARM_DECL:
       return process_load(expr);
     default:
       {
@@ -1913,6 +1915,12 @@ Addr Converter::process_address(tree expr, bool is_mem_access)
       assert(ptr->op == Op::MEMORY);
       Inst *id = extract_id(ptr);
       return {ptr, 0, id};
+    }
+  if (code == PARM_DECL && TREE_ADDRESSABLE(expr))
+    {
+      Inst *ptr = parm_decl2mem.at(expr);
+      Inst *prov = extract_id(ptr);
+      return {ptr, 0, prov};
     }
 
   const char *name = get_tree_code_name(TREE_CODE(expr));
@@ -9468,6 +9476,7 @@ void Converter::process_func_args()
 	  Inst *param_inst = build_memory_inst(id, size, MEM_KEEP, true);
 	  tree2prov.insert({decl, param_inst->args[0]});
 	  tree2instruction.insert({decl, param_inst});
+	  tree2prov.insert({decl, extract_id(param_inst)});
 	}
       else
 	{
@@ -9475,7 +9484,28 @@ void Converter::process_func_args()
 	  Inst *param_bitsize = entry_bb->value_inst(bitsize, 32);
 	  Inst *param_inst =
 	    entry_bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
-	  tree2instruction.insert({decl, param_inst});
+	  if (TREE_ADDRESSABLE(decl))
+	    {
+	      Inst *inst = to_mem_repr(param_inst, TREE_TYPE(decl));
+	      uint64_t size = inst->bitsize / 8;
+	      uint64_t id;
+	      if (state->decl2id.contains(decl))
+		id = state->decl2id.at(decl);
+	      else
+		{
+		  if (state->id_local <= state->ptr_id_min)
+		    throw Not_implemented("process_func_args: "
+					  "too many local variables");
+		  id = --state->id_local;
+		  state->decl2id.insert({decl, id});
+		}
+	      Inst *mem = build_memory_inst(id, size, 0, false);
+	      Op store_op = BYTES_BIG_ENDIAN ? Op::STORE_BE : Op::STORE_LE;
+	      entry_bb->build_inst(store_op, mem, inst);
+	      parm_decl2mem.insert({decl, mem});
+	    }
+	  else
+	    tree2instruction.insert({decl, param_inst});
 
 	  // Pointers cannot point to local variables or to the this pointer
 	  // in constructors.
@@ -9527,6 +9557,9 @@ void Converter::process_func_args()
 	      build_ub_assume(entry_bb, cond);
 	    }
 
+	  if (POINTER_TYPE_P(TREE_TYPE(decl)))
+	    tree2prov.insert({decl, extract_id(param_inst)});
+
 	  // VRP
 	  // If there are recorded data, we get a constant value, and a mask
 	  // indicating which bits varies. For example, for a funcion
@@ -9548,13 +9581,6 @@ void Converter::process_func_args()
 	      Inst *cond = entry_bb->build_inst(Op::NE, v_inst, and_inst);
 	      build_ub_assume(entry_bb, cond);
 	    }
-	}
-
-      if (POINTER_TYPE_P(TREE_TYPE(decl)))
-	{
-	  Inst *param_inst = tree2instruction.at(decl);
-	  Inst *id = extract_id(param_inst);
-	  tree2prov.insert({decl, id});
 	}
 
       param_number++;
