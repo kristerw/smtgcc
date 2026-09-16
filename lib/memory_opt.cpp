@@ -746,6 +746,27 @@ void canonicalize_memory(Function *func)
   // more code CSE and leave less memory for the SMT solver to track.
   forward_const(func);
 
+  // The Op::LOAD_BE/Op::LOAD_LE expansion may create a large number of
+  // useless instructions when only a few bytes are extracted from the
+  // object. This is common for large vectors when forwprop changes
+  //   _2 = *x_4(D);
+  //   _7 = BIT_FIELD_REF <_2, 64, 0>;
+  //   _9 = BIT_FIELD_REF <_2, 64, 64>;
+  //  ...
+  // to
+  //   _7 = BIT_FIELD_REF <*x_4(D), 64, 0>;
+  //   _9 = BIT_FIELD_REF <*x_4(D), 64, 64>;
+  //   ...
+  //
+  // These are not eliminated by DCE as it does not know that only a few
+  // bits are used. Run simplify_insts to get rid of the Op::EXTRACT.
+  // TODO: This should be fixed by not generating the dead instructions
+  // to begin with. Either when expanding the GIMPLE or when expanding
+  // the loads. On the other hand, the problem will mostly go away when
+  // we move the expansion to the converter, as the redundant loads will
+  // then be CSEd directly when created.
+  simplify_insts(func);
+
   // Dead instructions using Op::MEMORY may make the code below treat the
   // memory as used. Run DCE first to ensure we get the intended result.
   dead_code_elimination(func);
@@ -818,6 +839,27 @@ void canonicalize_memory(Module *module)
   // more code CSE and leave less memory for the SMT solver to track.
   forward_const(src);
   forward_const(tgt);
+
+  // The Op::LOAD_BE/Op::LOAD_LE expansion may create a large number of
+  // useless instructions when only a few bytes are extracted from the
+  // object. This is common for large vectors when forwprop changes
+  //   _2 = *x_4(D);
+  //   _7 = BIT_FIELD_REF <_2, 64, 0>;
+  //   _9 = BIT_FIELD_REF <_2, 64, 64>;
+  //  ...
+  // to
+  //   _7 = BIT_FIELD_REF <*x_4(D), 64, 0>;
+  //   _9 = BIT_FIELD_REF <*x_4(D), 64, 64>;
+  //   ...
+  //
+  // These are not eliminated by DCE as it does not know that only a few
+  // bits are used. Run simplify_insts to get rid of the Op::EXTRACT.
+  // TODO: This should be fixed by not generating the dead instructions
+  // to begin with. Either when expanding the GIMPLE or when expanding
+  // the loads. On the other hand, the problem will mostly go away when
+  // we move the expansion to the converter, as the redundant loads will
+  // then be CSEd directly when created.
+  simplify_insts(module);
 
   // Dead instructions using Op::MEMORY may make the code below treat the
   // memory as used. Run DCE first to ensure we get the intended result.
