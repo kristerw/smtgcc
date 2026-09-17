@@ -5869,7 +5869,7 @@ void Converter::process_cfn_divmod(gimple *stmt)
 					   lhs_elem_type, arg1_type,
 					   arg2_type);
   div = to_mem_repr(div, lhs_elem_type);
-  Inst *inst = bb->build_inst(Op::CONCAT, mod, div);
+  auto [inst, _] = gen_complex(div, nullptr, mod, nullptr);
   constrain_range(bb, lhs, inst);
   tree2instruction.insert({lhs, inst});
 }
