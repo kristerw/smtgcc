@@ -2924,19 +2924,13 @@ std::pair<Inst *, Inst *> Converter::process_binary_float(enum tree_code code, I
 Inst *Converter::process_binary_complex(enum tree_code code, Inst *arg1, Inst *arg2, tree lhs_type)
 {
   tree elem_type = TREE_TYPE(lhs_type);
-  uint64_t bitsize = arg1->bitsize;
-  uint64_t elem_bitsize = bitsize / 2;
-  Inst *real_high = bb->value_inst(elem_bitsize - 1, 32);
-  Inst *real_low = bb->value_inst(0, 32);
-  Inst *imag_high = bb->value_inst(bitsize - 1, 32);
-  Inst *imag_low = bb->value_inst(elem_bitsize, 32);
-  Inst *arg1_real = bb->build_inst(Op::EXTRACT, arg1, real_high, real_low);
+  auto [arg1_real, arg1_real_indef] = gen_extract_real(arg1, nullptr);
   arg1_real = from_mem_repr(arg1_real, elem_type);
-  Inst *arg1_imag = bb->build_inst(Op::EXTRACT, arg1, imag_high, imag_low);
+  auto [arg1_imag, arg1_imag_indef] = gen_extract_imag(arg1, nullptr);
   arg1_imag = from_mem_repr(arg1_imag, elem_type);
-  Inst *arg2_real = bb->build_inst(Op::EXTRACT, arg2, real_high, real_low);
+  auto [arg2_real, arg2_real_indef] = gen_extract_real(arg2, nullptr);
   arg2_real = from_mem_repr(arg2_real, elem_type);
-  Inst *arg2_imag = bb->build_inst(Op::EXTRACT, arg2, imag_high, imag_low);
+  auto [arg2_imag, arg2_imag_indef] = gen_extract_imag(arg2, nullptr);
   arg2_imag = from_mem_repr(arg2_imag, elem_type);
 
   switch (code)
@@ -2952,7 +2946,9 @@ Inst *Converter::process_binary_complex(enum tree_code code, Inst *arg1, Inst *a
 				elem_type, elem_type, elem_type);
 	inst_real = to_mem_repr(inst_real, elem_type);
 	inst_imag = to_mem_repr(inst_imag, elem_type);
-	return bb->build_inst(Op::CONCAT, inst_imag, inst_real);
+	auto [res, res_indef] =
+	  gen_complex(inst_real, nullptr, inst_imag, nullptr);
+	return res;
       }
     default:
       break;
@@ -2964,19 +2960,13 @@ Inst *Converter::process_binary_complex(enum tree_code code, Inst *arg1, Inst *a
 Inst *Converter::process_binary_complex_cmp(enum tree_code code, Inst *arg1, Inst *arg2, tree lhs_type, tree arg1_type)
 {
   tree elem_type = TREE_TYPE(arg1_type);
-  uint64_t bitsize = arg1->bitsize;
-  uint64_t elem_bitsize = bitsize / 2;
-  Inst *real_high = bb->value_inst(elem_bitsize - 1, 32);
-  Inst *real_low = bb->value_inst(0, 32);
-  Inst *imag_high = bb->value_inst(bitsize - 1, 32);
-  Inst *imag_low = bb->value_inst(elem_bitsize, 32);
-  Inst *arg1_real = bb->build_inst(Op::EXTRACT, arg1, real_high, real_low);
+  auto [arg1_real, arg1_real_indef] = gen_extract_real(arg1, nullptr);
   arg1_real = from_mem_repr(arg1_real, elem_type);
-  Inst *arg1_imag = bb->build_inst(Op::EXTRACT, arg1, imag_high, imag_low);
+  auto [arg1_imag, arg1_imag_indef] = gen_extract_imag(arg1, nullptr);
   arg1_imag = from_mem_repr(arg1_imag, elem_type);
-  Inst *arg2_real = bb->build_inst(Op::EXTRACT, arg2, real_high, real_low);
+  auto [arg2_real, arg2_real_indef] = gen_extract_real(arg2, nullptr);
   arg2_real = from_mem_repr(arg2_real, elem_type);
-  Inst *arg2_imag = bb->build_inst(Op::EXTRACT, arg2, imag_high, imag_low);
+  auto [arg2_imag, arg2_imag_indef] = gen_extract_imag(arg2, nullptr);
   arg2_imag = from_mem_repr(arg2_imag, elem_type);
 
   switch (code)
