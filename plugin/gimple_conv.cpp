@@ -2671,15 +2671,9 @@ std::pair<Inst *, Inst *> Converter::process_unary_float(enum tree_code code, In
 Inst *Converter::process_unary_complex(enum tree_code code, Inst *arg1, tree lhs_type)
 {
   tree elem_type = TREE_TYPE(lhs_type);
-  uint64_t bitsize = arg1->bitsize;
-  uint64_t elem_bitsize = bitsize / 2;
-  Inst *real_high = bb->value_inst(elem_bitsize - 1, 32);
-  Inst *real_low = bb->value_inst(0, 32);
-  Inst *imag_high = bb->value_inst(bitsize - 1, 32);
-  Inst *imag_low = bb->value_inst(elem_bitsize, 32);
-  Inst *arg1_real = bb->build_inst(Op::EXTRACT, arg1, real_high, real_low);
+  auto [arg1_real, arg1_real_indef] = gen_extract_real(arg1, nullptr);
   arg1_real = from_mem_repr(arg1_real, elem_type);
-  Inst *arg1_imag = bb->build_inst(Op::EXTRACT, arg1, imag_high, imag_low);
+  auto [arg1_imag, arg1_imag_indef] = gen_extract_imag(arg1, nullptr);
   arg1_imag = from_mem_repr(arg1_imag, elem_type);
 
   switch (code)
@@ -2691,7 +2685,9 @@ Inst *Converter::process_unary_complex(enum tree_code code, Inst *arg1, tree lhs
 					 elem_type, elem_type);
 	arg1_real = to_mem_repr(arg1_real, elem_type);
 	inst_imag = to_mem_repr(inst_imag, elem_type);
-	return bb->build_inst(Op::CONCAT, inst_imag, arg1_real);
+	auto [res, res_indef] =
+	  gen_complex(arg1_real, nullptr, inst_imag, nullptr);
+	return res;
       }
     case NEGATE_EXPR:
       {
@@ -2701,7 +2697,9 @@ Inst *Converter::process_unary_complex(enum tree_code code, Inst *arg1, tree lhs
 	  process_unary_scalar(code, arg1_imag, elem_type, elem_type);
 	inst_real = to_mem_repr(inst_real, elem_type);
 	inst_imag = to_mem_repr(inst_imag, elem_type);
-	return bb->build_inst(Op::CONCAT, inst_imag, inst_real);
+	auto [res, res_indef] =
+	  gen_complex(inst_real, nullptr, inst_imag, nullptr);
+	return res;
       }
     case PAREN_EXPR:
       return arg1;
