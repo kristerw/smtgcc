@@ -8873,7 +8873,7 @@ void Converter::process_gimple_call(gimple *stmt)
 	  else
 	    throw Not_implemented("gimple_call: " + name);
 	}
-      else if (name == "__assert_fail")
+      else if (name == "__assert_fail" || name == "__assert_func")
 	{
 	  // Generate this as abort() for now.
 	  //

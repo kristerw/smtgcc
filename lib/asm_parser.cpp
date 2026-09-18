@@ -174,7 +174,8 @@ bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data, std::vec
 #if defined(SMTGCC_SH)
 		  if (sym_name == "abort")
 		    builtins.push_back(Builtin::abort);
-		  else if (sym_name == "__assert_fail")
+		  else if (sym_name == "__assert_fail"
+			   || sym_name == "__assert_func")
 		    builtins.push_back(Builtin::assert_fail);
 		  else if (sym_name == "exit")
 		    builtins.push_back(Builtin::exit);

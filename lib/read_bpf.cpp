@@ -723,7 +723,7 @@ void Parser::process_call()
   std::string_view name = get_name(1);
   get_end_of_line(2);
 
-  if (name == "abort" || name == "__assert_fail")
+  if (name == "abort" || name == "__assert_fail" || name == "__assert_func")
     {
       Inst *b1 = bb->value_inst(1, 1);
       bb->build_inst(Op::WRITE, rstate->registers[BpfRegIdx::abort], b1);
