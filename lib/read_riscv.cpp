@@ -1113,7 +1113,7 @@ void Parser::process_call()
       write_retval(res);
       return;
     }
-  if (name == "abort")
+  if (name == "abort" || name == "__assert_fail" || name == "__assert_func")
     {
       Inst *b1 = bb->value_inst(1, 1);
       bb->build_inst(Op::WRITE, rstate->registers[RiscvRegIdx::abort], b1);
