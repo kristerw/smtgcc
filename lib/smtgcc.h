@@ -111,6 +111,7 @@ enum class Op : uint8_t {
   EXTRACT,
   IS_UB_MEM_OVERLAP,
   ITE,
+  ITE_UB,
 
   // Conversions
   F2S,
@@ -236,7 +237,7 @@ struct Inst_info {
   bool is_commutative;
 };
 
-extern const std::array<Inst_info, 127> inst_info;
+extern const std::array<Inst_info, 128> inst_info;
 
 enum class Function_role {
   src, tgt, ver

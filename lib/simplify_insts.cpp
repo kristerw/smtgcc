@@ -56,6 +56,7 @@ private:
   Inst *simplify_sle();
   Inst *simplify_slt();
   Inst *simplify_ite();
+  Inst *simplify_ite_ub();
   Inst *simplify_shl();
   Inst *simplify_smul_overflow();
   Inst *simplify_ssub_overflow();
@@ -1837,6 +1838,31 @@ Inst *Simplify::simplify_ite()
   return inst;
 }
 
+Inst *Simplify::simplify_ite_ub()
+{
+  Inst *const arg1 = inst->args[0];
+  Inst *const arg2 = inst->args[1];
+  Inst *const arg3 = inst->args[2];
+
+  // ite_ub 0, a, b -> b
+  if (is_value_zero(arg1))
+    return arg3;
+
+  // ite_ub 1, a, b -> a
+  if (is_value_one(arg1))
+    return arg2;
+
+  // ite_ub a, 1, 0 -> a
+  if (is_value_one(arg2) && is_value_zero(arg3))
+    return arg1;
+
+  // ite_ub a, 0, 1 -> not a
+  if (is_value_one(arg3) && is_value_zero(arg2))
+    return build_inst(Op::NOT, arg1);
+
+  return inst;
+}
+
 Inst *Simplify::simplify_ule()
 {
   Inst *const arg1 = inst->args[0];
@@ -3058,6 +3084,9 @@ Inst *Simplify::simplify()
       break;
     case Op::ITE:
       inst = simplify_ite();
+      break;
+    case Op::ITE_UB:
+      inst = simplify_ite_ub();
       break;
     case Op::SHL:
       inst = simplify_shl();

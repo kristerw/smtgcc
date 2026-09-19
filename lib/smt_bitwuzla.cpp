@@ -605,6 +605,14 @@ void Converter::build_ternary_smt(const Inst *inst)
 	  inst2bv.emplace(inst, ite(arg1, arg2, arg3));
 	}
       break;
+    case Op::ITE_UB:
+      {
+	assert(is_value_zero(inst->args[2]));
+	Term arg1 = inst_as_bool(inst->args[0]);
+	Term arg2 = inst_as_bool(inst->args[1]);
+	inst2bool.emplace(inst, tm.mk_term(Kind::AND, {arg1, arg2}));
+	break;
+      }
     default:
       throw Not_implemented("build_ternary_smt: "s + inst->name());
     }

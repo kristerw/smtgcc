@@ -1269,17 +1269,18 @@ void Converter::generate_ub()
   Inst_comp comp;
   std::vector<Inst *> src_ub;
   std::vector<Inst *> tgt_ub;
+  Inst *b0 = value_inst(0, 1);
   for (auto& [cond, ub_set] : src_bbcond2ub)
     {
       for (auto ub : ub_set)
-	src_ub.push_back(build_inst(Op::AND, cond, ub));
+	src_ub.push_back(build_inst(Op::ITE_UB, cond, ub, b0));
     }
   std::sort(src_ub.begin(), src_ub.end(), comp);
   src_ub.erase(std::unique(src_ub.begin(), src_ub.end()), src_ub.end());
   for (auto& [cond, ub_set] : tgt_bbcond2ub)
     {
       for (auto ub : ub_set)
-	tgt_ub.push_back(build_inst(Op::AND, cond, ub));
+	tgt_ub.push_back(build_inst(Op::ITE_UB, cond, ub, b0));
     }
   std::sort(tgt_ub.begin(), tgt_ub.end(), comp);
   tgt_ub.erase(std::unique(tgt_ub.begin(), tgt_ub.end()), tgt_ub.end());
@@ -1320,6 +1321,7 @@ void Converter::generate_ub()
 
 void Converter::verify_generate_ub()
 {
+  Inst *b0 = value_inst(0, 1);
   Inst *ub = value_inst(0, 1);
   for (auto& [cond, insts] : ver_bbcond2ub)
     {
@@ -1328,7 +1330,7 @@ void Converter::verify_generate_ub()
 	{
 	  bb_ub = build_inst(Op::OR, bb_ub, inst);
 	}
-      ub = build_inst(Op::OR, ub, build_inst(Op::AND, cond, bb_ub));
+      ub = build_inst(Op::OR, ub, build_inst(Op::ITE_UB, cond, bb_ub, b0));
     }
 
   Inst *ub_assume = value_inst(0, 1);
@@ -1340,7 +1342,7 @@ void Converter::verify_generate_ub()
 	  bb_ub = build_inst(Op::OR, bb_ub, inst);
 	}
       ub_assume =
-	build_inst(Op::OR, ub_assume, build_inst(Op::AND, cond, bb_ub));
+	build_inst(Op::OR, ub_assume, build_inst(Op::ITE_UB, cond, bb_ub, b0));
     }
 
   build_inst(Op::VER_UB, ub_assume, ub);

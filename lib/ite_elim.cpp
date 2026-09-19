@@ -473,7 +473,7 @@ void Ite_elim::handle_arg(Inst *inst, size_t idx)
   do {
     modified = false;
     Inst *arg = inst->args[idx];
-    if (arg->op == Op::ITE)
+    if (arg->op == Op::ITE || arg->op == Op::ITE_UB)
       modified = handle_arg_ite(inst, idx);
     else if (arg->bitsize == 1)
       modified = handle_arg_bool(inst, idx);
@@ -696,7 +696,7 @@ void Ite_elim::propagate_from_uses(Inst *inst)
 
       // If the use is a value in a true/false branch of an Op::ITE, then
       // we add the Op::ITE condition to the resulting condition bitset.
-      if (use->op == Op::ITE
+      if ((use->op == Op::ITE || use->op == Op::ITE_UB)
 	  && inst != use->args[0]
 	  && use->args[1] != use->args[2]
 	  && inst2bit_idx.contains(use->args[0]))
@@ -752,7 +752,7 @@ bool Ite_elim::run()
 
       // Ensure Op::ITE instructions are in a canonical form after
       // argument propagation.
-      if (inst->op == Op::ITE)
+      if (inst->op == Op::ITE || inst->op == Op::ITE_UB)
 	{
 	  if (is_value_zero(inst->args[0]))
 	    {
@@ -772,7 +772,7 @@ bool Ite_elim::run()
 	}
 
       // Ensure Op::ITE conditions have a bit in the condition bit set.
-      if (inst->op == Op::ITE
+      if ((inst->op == Op::ITE || inst->op == Op::ITE_UB)
 	  && next_bit_idx < nof_cond
 	  && !inst2bit_idx.contains(inst->args[0]))
 	{

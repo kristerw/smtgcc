@@ -14,7 +14,7 @@ using namespace std::string_literals;
 
 namespace smtgcc {
 
-const std::array<Inst_info, 127> inst_info{{
+const std::array<Inst_info, 128> inst_info{{
   // Integer Comparison
   {"eq", Op::EQ, Inst_class::icomparison, true, true},
   {"ne", Op::NE, Inst_class::icomparison, true, true},
@@ -84,6 +84,7 @@ const std::array<Inst_info, 127> inst_info{{
   {"extract", Op::EXTRACT, Inst_class::ternary, true, false},
   {"is_ub_mem_overlap", Op::IS_UB_MEM_OVERLAP, Inst_class::ternary, true, false},
   {"ite", Op::ITE, Inst_class::ternary, true, false},
+  {"ite_ub", Op::ITE_UB, Inst_class::ternary, true, false},
 
   // Conversions
   {"f2s", Op::F2S, Inst_class::conv, true, false},
@@ -471,6 +472,14 @@ Inst *create_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
       assert(arg1->bitsize == 1);
       assert(arg2->bitsize == arg3->bitsize);
       inst->bitsize = arg2->bitsize;
+    }
+  else if (op == Op::ITE_UB)
+    {
+      assert(arg1->bitsize == 1);
+      assert(arg2->bitsize == 1);
+      assert(arg3->bitsize == 1);
+      assert(is_value_zero(arg2) || is_value_zero(arg3));
+      inst->bitsize = 1;
     }
   else if (op == Op::IS_UB_MEM_OVERLAP)
     {
