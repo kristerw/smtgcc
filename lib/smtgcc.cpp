@@ -1655,6 +1655,8 @@ unsigned __int128 canonical_nan_value(uint32_t bitsize)
       return 0x7fc00000;
     case 64:
       return 0x7ff8000000000000ul;
+    case 128:
+      return ((unsigned __int128)0x7fff8000) << 96;
     default:
       break;
     }
