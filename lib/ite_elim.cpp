@@ -21,7 +21,7 @@ namespace smtgcc {
 namespace {
 
 // The maximum number of different Op::ITE conditions.
-const int nof_cond = 256;
+const int nof_cond = 1024;
 
 // Max recursion depth for specialize_cond.
 const int max_depth = 10;
