@@ -741,9 +741,8 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *in
   if (r.undefined_p() || r.varying_p())
     return;
 
-  // TODO: Implement wide types.
   if (inst->bitsize > 128)
-    return;
+    throw Not_implemented("constrain_range: bitsize > 128");
 
   // TODO: get_nonzero_bits is deprecated if I understand correctly. This
   // should be updated to the new API.
