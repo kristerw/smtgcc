@@ -1293,7 +1293,13 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	int nof_bytes = GET_MODE_SIZE(SCALAR_FLOAT_TYPE_MODE(type));
 	Inst *res;
 	if (REAL_VALUE_ISNAN(TREE_REAL_CST(expr)))
-	  res = bb->build_inst(Op::NAN, TYPE_PRECISION(type));
+	  {
+	    if (REAL_VALUE_ISSIGNALING_NAN(TREE_REAL_CST(expr)))
+	      throw Not_implemented("tree2inst_indef_prov: signaling NaN");
+	    if (REAL_VALUE_NEGATIVE(TREE_REAL_CST(expr)))
+	      throw Not_implemented("tree2inst_indef_prov: negative NaN");
+	    res = bb->build_inst(Op::NAN, TYPE_PRECISION(type));
+	  }
 	else
 	  {
 	    assert(nof_bytes <= 16);
