@@ -240,6 +240,9 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
       return;
     }
 
+  if (lookup_attribute("RVV sizeless type", TYPE_ATTRIBUTES(ret_type)))
+    throw Not_implemented("riscv: returning RVV sizeless type");
+
   // Handle the hardware floating-point calling convention.
   std::vector<struct_elem> elems;
   int nof_r = 0;
@@ -511,6 +514,9 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
 	  // setting up the parameters.
 	  throw Not_implemented("setup_riscv_function: C++ constructors");
 	}
+
+      if (lookup_attribute("RVV sizeless type", TYPE_ATTRIBUTES(type)))
+	throw Not_implemented("riscv: RVV sizeless type function param");
 
       std::optional<Regs> arg_regs =
 	regs_for_value(&rstate, param, type, RiscvRegIdx::f18 - freg_nbr);
