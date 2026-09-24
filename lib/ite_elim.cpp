@@ -10,6 +10,7 @@
 //   %2 = add %b, %d
 //   %3 = ite %a, %2, %e
 //
+#include <algorithm>
 #include <bitset>
 #include <cassert>
 #include <optional>
@@ -685,7 +686,19 @@ void Ite_elim::propagate_from_uses(Inst *inst)
   true_conds.set();
   std::bitset<nof_cond> false_conds;
   false_conds.set();
-  for (auto use : inst->used_by)
+
+  // The loop below may produce different IR depending on the iteration order.
+  // Work around this by sorting the instructions.
+  // TODO: Implement the loop in a way that is independent of iteration order.
+  struct {
+    bool operator()(const Inst *a, const Inst *b) const {
+      return a->id < b->id;
+    }
+  } comp;
+  std::vector<Inst *> used_by(inst->used_by.begin(), inst->used_by.end());
+  std::sort(used_by.begin(), used_by.end(), comp);
+
+  for (auto use : used_by)
     {
       std::bitset<nof_cond> use_true;
       if (used_true.contains(use))
