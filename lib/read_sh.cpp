@@ -60,10 +60,12 @@ private:
   std::map<std::string_view, Basic_block *> label2bb;
   std::map<uint32_t, Inst *> id2inst;
 
-  // Is this instruction in a delay slot? If so, branch_bb contains
-  // the basic block where the branch instruction lives.
-  bool delay_slot = false;
-  Basic_block *branch_bb;
+  // Delay slot handling.
+  bool delay_slot_rts = false;
+  std::optional<Builtin> delay_slot_jsr;
+  std::optional<std::pair<Inst *, Basic_block *>> delay_slot_bf;
+  std::optional<std::pair<Inst *, Basic_block *>> delay_slot_bt;
+  std::optional<Basic_block *> delay_slot_bra;
 
   void skip_space_and_comments();
   void lex_label_or_label_def();
@@ -151,10 +153,13 @@ private:
   void process_ftrc();
   void process_flds();
   void process_fsts();
-  void process_bf(bool delayed);
-  void process_bt(bool delayed);
-  void process_bra();
-  void process_rts();
+  bool process_bf(bool delayed);
+  void gen_bf(Inst *t, Basic_block *true_bb);
+  bool process_bt(bool delayed);
+  void gen_bt(Inst *t, Basic_block *true_bb);
+  bool process_bra();
+  void gen_bra(Basic_block *dest_bb);
+  bool process_rts();
   void process_swap_b();
   void process_swap_w();
   void process_xtrct();
@@ -164,7 +169,8 @@ private:
   void process_fp_store();
   void process_fp_load();
   std::optional<Builtin> find_builtin(Inst *reg);
-  void process_jsr();
+  bool process_jsr();
+  void gen_call(Builtin builtin);
 
   void parse_function();
   void lex_line();
@@ -1283,65 +1289,67 @@ void Parser::process_fsts()
   write_reg(rn_reg, fpul);
 }
 
-void Parser::process_bf(bool delayed)
+bool Parser::process_bf(bool delayed)
 {
   Basic_block *true_bb = get_bb(1);
   get_end_of_line(2);
 
-  if (delayed)
-    {
-      delay_slot = true;
-      branch_bb = bb;
-    }
-
   Inst *t = bb->build_inst(Op::READ, rstate->registers[ShRegIdx::t]);
+  if (delayed)
+    delay_slot_bf = {t, true_bb};
+  else
+    gen_bf(t, true_bb);
+  return delayed;
+}
+
+void Parser::gen_bf(Inst *t, Basic_block *true_bb)
+{
   Basic_block *false_bb = func->build_bb();
   bb->build_br_inst(t, false_bb, true_bb);
   bb = false_bb;
 }
 
-void Parser::process_bt(bool delayed)
+bool Parser::process_bt(bool delayed)
 {
   Basic_block *true_bb = get_bb(1);
   get_end_of_line(2);
 
-  if (delayed)
-    {
-      delay_slot = true;
-      branch_bb = bb;
-    }
-
   Inst *t = bb->build_inst(Op::READ, rstate->registers[ShRegIdx::t]);
+  if (delayed)
+    delay_slot_bt = {t, true_bb};
+  else
+    gen_bt(t, true_bb);
+  return delayed;
+}
+
+void Parser::gen_bt(Inst *t, Basic_block *true_bb)
+{
   Basic_block *false_bb = func->build_bb();
   bb->build_br_inst(t, true_bb, false_bb);
   bb = false_bb;
 }
 
-void Parser::process_bra()
+bool Parser::process_bra()
 {
   Basic_block *dest_bb = get_bb(1);
   get_end_of_line(2);
 
-  delay_slot = true;
-  branch_bb = bb;
-
-  // We must emit this as a conditional branch with a constant condition
-  // because of how our delay slot handling works.
-  Basic_block *dummy_bb = func->build_bb();
-  Inst *b1 = bb->value_inst(1, 1);
-  bb->build_br_inst(b1, dest_bb, dummy_bb);
-  bb = dummy_bb;
+  delay_slot_bra = dest_bb;
+  return true;
 }
 
-void Parser::process_rts()
+void Parser::gen_bra(Basic_block *dest_bb)
+{
+  bb->build_br_inst(dest_bb);
+  bb = func->build_bb();
+}
+
+bool Parser::process_rts()
 {
   get_end_of_line(1);
 
-  delay_slot = true;
-  branch_bb = bb;
-
-  bb->build_br_inst(rstate->exit_bb);
-  bb = func->build_bb();
+  delay_slot_rts = true;
+  return true;
 }
 
 void Parser::process_swap_b()
@@ -1559,7 +1567,7 @@ std::optional<Builtin> Parser::find_builtin(Inst *reg)
   return {};
 }
 
-void Parser::process_jsr()
+bool Parser::process_jsr()
 {
   get_at(1);
   Inst *reg = get_reg(2);
@@ -1568,18 +1576,13 @@ void Parser::process_jsr()
   std::optional<Builtin> builtin = find_builtin(reg);
   if (!builtin)
     throw Parse_error("Unknown jsr target", line_number);
+  delay_slot_jsr = *builtin;
+  return true;
+}
 
-  // The delay slot handling requires a new basic block for instructions
-  // having a delay slot.
-  // TODO: Implement this in a better way, as the new basic block interacts
-  // badly with find_builtin for later calls.
-  delay_slot = true;
-  branch_bb = bb;
-  Basic_block *new_bb = func->build_bb();
-  bb->build_br_inst(new_bb);
-  bb = new_bb;
-
-  switch (*builtin)
+void Parser::gen_call(Builtin builtin)
+{
+  switch (builtin)
     {
     case Builtin::abort:
     case Builtin::assert_fail:
@@ -1722,13 +1725,11 @@ void Parser::parse_function()
     return;
   }
 
-  bool processing_delay_slot = delay_slot;
-  delay_slot = false;
-
   if (tokens[0].kind != Lexeme::name)
     throw Parse_error("syntax error: " + std::string(token_string(tokens[0])),
 		      line_number);
 
+  bool is_delayed = false;
   std::string_view name = get_name(0);
   if (name.starts_with(".cfi"))
     ;
@@ -1755,15 +1756,15 @@ void Parser::parse_function()
   else if (name == "and")
     process_binary(Op::AND);
   else if (name == "bf")
-    process_bf(false);
+    is_delayed = process_bf(false);
   else if (name == "bf/s")
-    process_bf(true);
+    is_delayed = process_bf(true);
   else if (name == "bra")
-    process_bra();
+    is_delayed = process_bra();
   else if (name == "bt")
-    process_bt(false);
+    is_delayed = process_bt(false);
   else if (name == "bt/s")
-    process_bt(true);
+    is_delayed = process_bt(true);
   else if (name == "cmp/pl")
     process_cmp_0(Cond_code::PL);
   else if (name == "cmp/pz")
@@ -1833,7 +1834,7 @@ void Parser::parse_function()
   else if (name == "ftrc")
     process_ftrc();
   else if (name == "jsr")
-    process_jsr();
+    is_delayed = process_jsr();
   else if (name == "lds")
     process_lds();
   else if (name == "lds.l")
@@ -1875,7 +1876,7 @@ void Parser::parse_function()
   else if (name == "rotr")
     process_rotr();
   else if (name == "rts")
-    process_rts();
+    is_delayed = process_rts();
   else if (name == "sett")
     process_sett();
   else if (name == "shad")
@@ -1924,13 +1925,41 @@ void Parser::parse_function()
     throw Parse_error("unhandled instruction: "s + std::string(name),
 		      line_number);
 
-  if (processing_delay_slot)
+  if (!is_delayed)
     {
-      while (bb->first_inst)
+      if (delay_slot_rts)
 	{
-	  bb->first_inst->move_before(branch_bb->last_inst);
+	  delay_slot_rts = false;
+	  bb->build_br_inst(rstate->exit_bb);
+	  bb = func->build_bb();
+	}
+      else if (delay_slot_jsr)
+	{
+	  Builtin builtin = *delay_slot_jsr;
+	  delay_slot_jsr = {};
+	  gen_call(builtin);
+	}
+      else if (delay_slot_bf)
+	{
+	  auto [t, true_bb] = *delay_slot_bf;
+	  delay_slot_bf = {};
+	  gen_bf(t, true_bb);
+	}
+      else if (delay_slot_bt)
+	{
+	  auto [t, true_bb] = *delay_slot_bt;
+	  delay_slot_bt = {};
+	  gen_bt(t, true_bb);
+	}
+      else if (delay_slot_bra)
+	{
+	  Basic_block *dest_bb = *delay_slot_bra;
+	  delay_slot_bra = {};
+	  gen_bra(dest_bb);
 	}
     }
+  else
+    is_delayed = false;
 }
 
 void Parser::lex_line()
