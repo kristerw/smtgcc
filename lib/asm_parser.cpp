@@ -191,6 +191,10 @@ bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data, std::vec
 		    builtins.push_back(Builtin::ctzdi2);
 		  else if (sym_name == "__ctzsi2")
 		    builtins.push_back(Builtin::ctzsi2);
+		  else if (sym_name == "__paritydi2")
+		    builtins.push_back(Builtin::paritydi2);
+		  else if (sym_name == "__paritysi2")
+		    builtins.push_back(Builtin::paritysi2);
 		  else
 		    throw Parse_error("unknown symbol " + std::string(sym_name),
 				      line_number);

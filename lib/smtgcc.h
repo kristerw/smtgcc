@@ -517,7 +517,9 @@ enum class Builtin : uint32_t {
   clzdi2,
   clzsi2,
   ctzdi2,
-  ctzsi2
+  ctzsi2,
+  paritydi2,
+  paritysi2
 };
 
 struct ParserBase
