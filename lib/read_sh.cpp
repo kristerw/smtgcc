@@ -1686,6 +1686,24 @@ void Parser::process_jsr()
 	bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::r0], res);
 	return;
       }
+    case Builtin::popcountsi2:
+      {
+	Inst *arg = bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r4]);
+	Inst *res = gen_popcount(bb, arg);
+	bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::r0], res);
+	return;
+      }
+    case Builtin::popcountdi2:
+      {
+	Inst *arg_lo =
+	  bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r4]);
+	Inst *arg_hi =
+	  bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r5]);
+	Inst *arg = bb->build_inst(Op::CONCAT, arg_hi, arg_lo);
+	Inst *res = bb->build_trunc(gen_popcount(bb, arg), 32);
+	bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::r0], res);
+	return;
+      }
     default:
       throw Parse_error("Unknown builtin", line_number);
     }
