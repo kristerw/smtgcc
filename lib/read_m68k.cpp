@@ -116,7 +116,6 @@ private:
   void get_right_paren(unsigned idx);
   void get_end_of_line(unsigned idx);
   Inst *gen_ffs(Inst *arg);
-  Inst *gen_parity(Inst *arg);
   Inst *build_cond(Cond_code cc);
   void process_binary_bitwise(Op op, uint32_t bitsize);
   void process_add(uint32_t bitsize, bool is_addx = false);
@@ -958,19 +957,6 @@ Inst *Parser::gen_ffs(Inst *arg)
       Inst *val = bb->value_inst(i + 1, 32);
       inst = bb->build_inst(Op::ITE, bit, val, inst);
     }
-  return inst;
-}
-
-Inst *Parser::gen_parity(Inst *arg)
-{
-  Inst *inst = bb->build_extract_bit(arg, 0);
-  for (uint32_t i = 1; i < arg->bitsize; i++)
-    {
-      Inst *bit = bb->build_extract_bit(arg, i);
-      inst = bb->build_inst(Op::XOR, inst, bit);
-    }
-  inst = bb->build_inst(Op::ZEXT, inst, 32);
-
   return inst;
 }
 
@@ -2548,7 +2534,7 @@ void Parser::process_call()
     {
       Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
       Inst *arg = bb->build_inst(Op::LOAD_BE, sp, 8);
-      Inst *res = gen_parity(arg);
+      Inst *res = bb->build_trunc(gen_parity(bb, arg), 32);
       bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
       return;
     }
@@ -2556,7 +2542,7 @@ void Parser::process_call()
     {
       Inst *sp = bb->build_inst(Op::READ, rstate->registers[M68kRegIdx::a7]);
       Inst *arg = bb->build_inst(Op::LOAD_BE, sp, 4);
-      Inst *res = gen_parity(arg);
+      Inst *res = gen_parity(bb, arg);
       bb->build_inst(Op::WRITE, rstate->registers[M68kRegIdx::d0], res);
       return;
     }

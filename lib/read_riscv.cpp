@@ -103,7 +103,6 @@ private:
   void get_end_of_line(unsigned idx);
   void process_cond_branch(Op op, bool swap = false);
   Inst *gen_ffs(Inst *arg);
-  Inst *gen_parity(Inst *arg);
   Inst *gen_sdiv(Inst *arg1, Inst *arg2);
   Inst *gen_udiv(Inst *arg1, Inst *arg2);
   Inst *read_arg(uint32_t reg, uint32_t bitsize);
@@ -779,19 +778,6 @@ Inst *Parser::gen_ffs(Inst *arg)
   return inst;
 }
 
-Inst *Parser::gen_parity(Inst *arg)
-{
-  Inst *inst = bb->build_extract_bit(arg, 0);
-  for (uint32_t i = 1; i < arg->bitsize; i++)
-    {
-      Inst *bit = bb->build_extract_bit(arg, i);
-      inst = bb->build_inst(Op::XOR, inst, bit);
-    }
-  inst = bb->build_inst(Op::ZEXT, inst, reg_bitsize);
-
-  return inst;
-}
-
 Inst *Parser::gen_sdiv(Inst *arg1, Inst *arg2)
 {
   Inst *zero = bb->value_inst(0, arg2->bitsize);
@@ -1094,14 +1080,14 @@ void Parser::process_call()
   if (name == "__paritydi2")
     {
       Inst *arg = read_arg(RiscvRegIdx::x10, 64);
-      Inst *res = gen_parity(arg);
+      Inst *res = bb->build_trunc(gen_parity(bb, arg), reg_bitsize);
       write_retval(res);
       return;
     }
   if (name == "__paritysi2" && reg_bitsize == 32)
     {
       Inst *arg = read_arg(RiscvRegIdx::x10, 32);
-      Inst *res = gen_parity(arg);
+      Inst *res = gen_parity(bb, arg);
       write_retval(res);
       return;
     }
