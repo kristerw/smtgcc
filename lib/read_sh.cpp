@@ -1602,6 +1602,30 @@ void Parser::process_jsr()
 	bb = func->build_bb();
 	return;
       }
+    case Builtin::clzsi2:
+      {
+	Inst *arg = bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r4]);
+	Inst *zero = bb->value_inst(0, arg->bitsize);
+	Inst *ub = bb->build_inst(Op::EQ, arg, zero);
+	bb->build_inst(Op::UB, ub);
+	Inst *res = gen_clz(bb, arg);
+	bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::r0], res);
+	return;
+      }
+    case Builtin::clzdi2:
+      {
+	Inst *arg_lo =
+	  bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r4]);
+	Inst *arg_hi =
+	  bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r5]);
+	Inst *arg = bb->build_inst(Op::CONCAT, arg_hi, arg_lo);
+	Inst *zero = bb->value_inst(0, arg->bitsize);
+	Inst *ub = bb->build_inst(Op::EQ, arg, zero);
+	bb->build_inst(Op::UB, ub);
+	Inst *res = bb->build_trunc(gen_clz(bb, arg), 32);
+	bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::r0], res);
+	return;
+      }
     case Builtin::ctzsi2:
       {
 	Inst *arg = bb->build_inst(Op::READ, rstate->registers[ShRegIdx::r4]);

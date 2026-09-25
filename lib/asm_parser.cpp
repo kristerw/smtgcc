@@ -179,6 +179,10 @@ bool ParserBase::parse_data(Basic_block *bb, std::vector<Inst *>& data, std::vec
 		    builtins.push_back(Builtin::assert_fail);
 		  else if (sym_name == "exit")
 		    builtins.push_back(Builtin::exit);
+		  else if (sym_name == "__clzdi2")
+		    builtins.push_back(Builtin::clzdi2);
+		  else if (sym_name == "__clzsi2")
+		    builtins.push_back(Builtin::clzsi2);
 		  else if (sym_name == "__ctzdi2")
 		    builtins.push_back(Builtin::ctzdi2);
 		  else if (sym_name == "__ctzsi2")

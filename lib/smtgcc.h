@@ -512,6 +512,8 @@ enum class Builtin : uint32_t {
   abort,
   assert_fail,
   exit,
+  clzdi2,
+  clzsi2,
   ctzdi2,
   ctzsi2
 };
