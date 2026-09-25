@@ -511,7 +511,9 @@ private:
 enum class Builtin : uint32_t {
   abort,
   assert_fail,
-  exit
+  exit,
+  ctzdi2,
+  ctzsi2
 };
 
 struct ParserBase
