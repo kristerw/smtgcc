@@ -1117,7 +1117,14 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
       Solver_result solver_result = run_solver(solver, "abort/exit", conv);
       stats.time[0] = std::max(get_time() - start_time, (uint64_t)1);
       if (solver_result.status == Result_status::incorrect)
-	return std::pair<SStats, Solver_result>(stats, solver_result);
+	{
+	  assert(solver_result.message);
+	  std::string msg = *solver_result.message;
+	  Term tgt_ub_val = solver.get_value(tgt_unique_ub_term);
+	  msg = msg + "tgt ub: " + tgt_ub_val.value<std::string>() + "\n";
+	  Solver_result result = {Result_status::incorrect, msg};
+	  return std::pair<SStats, Solver_result>(stats, result);
+	}
       if (solver_result.status == Result_status::unknown)
 	{
 	  assert(solver_result.message);
@@ -1191,6 +1198,8 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 	      msg = msg + "src indef: " + value_string(src_indef_val) + "\n";
 	      msg = msg + "tgt indef: " + value_string(tgt_indef_val) + "\n";
 	    }
+	  Term tgt_ub_val = solver.get_value(tgt_unique_ub_term);
+	  msg = msg + "tgt ub: " + tgt_ub_val.value<std::string>() + "\n";
 	  Solver_result result = {Result_status::incorrect, msg};
 	  return std::pair<SStats, Solver_result>(stats, result);
 	}
@@ -1286,6 +1295,8 @@ std::pair<SStats, Solver_result> check_refine_bitwuzla(Function *func)
 	  msg = msg + "tgt *.ptr: " + value_string(tgt_byte_val) + "\n";
 	  msg = msg + "src indef: " + value_string(src_indef_val) + "\n";
 	  msg = msg + "tgt indef: " + value_string(tgt_indef_val) + "\n";
+	  Term tgt_ub_val = solver.get_value(tgt_unique_ub_term);
+	  msg = msg + "tgt ub: " + tgt_ub_val.value<std::string>() + "\n";
 	  Solver_result result = {Result_status::incorrect, msg};
 	  return std::pair<SStats, Solver_result>(stats, result);
 	}
