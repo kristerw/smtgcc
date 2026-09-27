@@ -1860,6 +1860,10 @@ Inst *Simplify::simplify_ite_ub()
   if (is_value_one(arg3) && is_value_zero(arg2))
     return build_inst(Op::NOT, arg1);
 
+  // ite_ub a, b, b -> b
+  if (arg2 == arg3)
+    return arg2;
+
   return inst;
 }
 
