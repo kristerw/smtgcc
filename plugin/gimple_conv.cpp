@@ -7361,9 +7361,34 @@ void Converter::process_cfn_signbit(gimple *stmt)
       Inst *res_indef = get_res_indef(elem1_indef, lhs_elem_type);
       Inst *res;
       uint32_t bitsize = bitsize_for_type(lhs_elem_type);
+      assert(bitsize <= 128);
+      // signbit(x) returns nonzero if the sign of x is negative. It does
+      // not matter which non-zero value we use when checking GIMPLE,
+      // but assembly checking reports an error for functions such as
+      //   int foo(float x) {
+      //     return __builtin_signbitf(x);
+      //   }
+      // unless we generate the same value as the backend does.
+      // The backend typically generates it as `x & 0x80000000` when
+      // it fits in the return type, so we use that as our default
+      // strategy.
+#ifdef SMTGCC_M68K
+      {
+	if (elem1->bitsize > bitsize)
+	  {
+	    Inst *shift =
+	      bb->value_inst(elem1->bitsize - bitsize, elem1->bitsize);
+	    elem1 = bb->build_inst(Op::LSHR, elem1, shift);
+	    elem1 = bb->build_trunc(elem1, bitsize);
+	  }
+	unsigned __int128 mask =
+	  ((unsigned __int128)1) << (elem1->bitsize - 1);
+	Inst *mask_inst = bb->value_inst(mask, elem1->bitsize);
+	res = bb->build_inst(Op::AND, elem1, mask_inst);
+      }
+#else
       if (bitsize >= elem1->bitsize)
 	{
-	  assert(bitsize <= 128);
 	  unsigned __int128 mask =
 	    ((unsigned __int128)1) << (elem1->bitsize - 1);
 	  Inst *mask_inst = bb->value_inst(mask, elem1->bitsize);
@@ -7371,6 +7396,7 @@ void Converter::process_cfn_signbit(gimple *stmt)
 	}
       else
 	res = bb->build_extract_bit(elem1, elem1->bitsize - 1);
+#endif
       if (res->bitsize < bitsize)
 	res = bb->build_inst(Op::ZEXT, res, bitsize);
       return {res, res_indef};
