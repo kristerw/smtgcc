@@ -95,8 +95,6 @@ void tv_function::check(my_plugin *plugin_data)
 	}
       sort_stores(module);
 
-      validate(module);
-
       Solver_result result = check_refine(module);
       if (result.status != Result_status::correct)
 	{

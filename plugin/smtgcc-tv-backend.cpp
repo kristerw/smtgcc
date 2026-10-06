@@ -125,7 +125,6 @@ static void finish(void *, void *data)
 #elif defined(SMTGCC_SH)
 	  Function *func = parse_sh(file_name, &state);
 #endif
-	  validate(func);
 
 	  unroll_and_optimize(func, state.symbolic_id);
 

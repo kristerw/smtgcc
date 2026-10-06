@@ -9912,8 +9912,6 @@ Function *Converter::process_function()
 
   reverse_post_order(func);
 
-  validate(func);
-
   Function *f = func;
   func = nullptr;
   return f;
@@ -9945,7 +9943,6 @@ void unroll_and_optimize(Function *func, int64_t& symbolic_id)
       while (cfg_modified);
     }
   dead_code_elimination(func);
-  validate(func);
 }
 
 void unroll_and_optimize(Module *module)

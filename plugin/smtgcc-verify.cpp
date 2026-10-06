@@ -69,8 +69,6 @@ static void verify(my_plugin *plugin_data)
 	}
       sort_stores(func);
 
-      validate(func);
-
       Solver_result result = verify(func);
       if (result.status != Result_status::correct)
 	{
