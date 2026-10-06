@@ -1188,7 +1188,7 @@ void Converter::remove_redundant_ub(Function *func)
 					checked_ub.begin(), checked_ub.end(),
 					std::inserter(tmp, tmp.begin()),
 					comp);
-		  checked_ub = tmp;
+		  checked_ub = std::move(tmp);
 		}
 	    }
 	  if (always_ub)
@@ -1211,7 +1211,7 @@ void Converter::remove_redundant_ub(Function *func)
 	  std::set_difference(ub_set.begin(), ub_set.end(),
 			      checked_ub.begin(), checked_ub.end(),
 			      std::inserter(tmp, tmp.begin()), comp);
-	  ub_set = tmp;
+	  ub_set = std::move(tmp);
 	}
 
       // Add the UB checks from this BB.
@@ -1221,7 +1221,7 @@ void Converter::remove_redundant_ub(Function *func)
 	  checked_ub.clear();
 	  checked_ub.insert(b1);
 	}
-      bb2checked_ub.insert({bb, checked_ub});
+      bb2checked_ub.emplace(bb, std::move(checked_ub));
     }
 }
 
