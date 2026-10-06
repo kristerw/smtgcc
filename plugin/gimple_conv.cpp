@@ -932,12 +932,23 @@ std::pair<Inst *, Inst *> Converter::to_mem_repr(Inst *inst, Inst *indef, tree t
     return {inst, indef};
 
   assert(inst->bitsize < bitsize);
-  if (INTEGRAL_TYPE_P(type))
+  if (TREE_CODE(type) == BOOLEAN_TYPE)
     {
       Op op = TYPE_UNSIGNED(type) ? Op::ZEXT : Op::SEXT;
       inst = bb->build_inst(op, inst, bitsize);
       if (indef)
 	indef = bb->build_inst(Op::SEXT, indef, bitsize);
+    }
+  else if (BITINT_TYPE_P(type))
+    {
+      uint64_t padding_bitsize = bitsize - inst->bitsize;
+      if (!indef)
+	indef = bb->value_inst(0, inst->bitsize);
+      // TODO: The padding should be Op::SYMBOLIC.
+      Inst *padding = bb->value_inst(0, padding_bitsize);
+      Inst *padding_indef = bb->value_inst(-1, padding_bitsize);
+      inst = bb->build_inst(Op::CONCAT, padding, inst);
+      indef = bb->build_inst(Op::CONCAT, padding_indef, indef);
     }
   else if (VECTOR_TYPE_P(type)
 	   && TREE_CODE(TREE_TYPE(type)) == BOOLEAN_TYPE
@@ -949,6 +960,8 @@ std::pair<Inst *, Inst *> Converter::to_mem_repr(Inst *inst, Inst *indef, tree t
       if (indef)
 	indef = bb->build_inst(Op::ZEXT, indef, bitsize);
     }
+  else
+    throw Not_implemented("to_mem_repr: unhandled type");
 
   return {inst, indef};
 }
