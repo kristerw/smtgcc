@@ -87,6 +87,8 @@ private:
   Inst *get_areg_value(unsigned idx, uint32_t bitsize = 32);
   Inst *get_dreg(unsigned idx);
   Inst *get_dreg_value(unsigned idx, uint32_t bitsize = 32);
+  Inst *get_reg(unsigned idx);
+  Inst *get_reg_value(unsigned idx);
   std::pair<Inst *, Inst *> get_freg(unsigned idx);
   Inst *get_freg_value(unsigned idx, uint32_t bitsize);
   std::pair<Inst *, unsigned> get_bitfield_value(unsigned idx, Inst **offwidth = nullptr);
@@ -127,6 +129,7 @@ private:
   void process_ror(uint32_t bitsize);
   void process_clr(uint32_t bitsize);
   void process_cmp(uint32_t bitsize);
+  void process_exg();
   void process_ext(uint32_t src_bitsize, uint32_t dest_bitsize);
   void process_fmove(uint32_t bitsize);
   void process_jcc(Cond_code cc);
@@ -420,6 +423,21 @@ Inst *Parser::get_dreg(unsigned idx)
 Inst *Parser::get_dreg_value(unsigned idx, uint32_t bitsize)
 {
   return bb->build_trunc(bb->build_inst(Op::READ, get_dreg(idx)), bitsize);
+}
+
+Inst *Parser::get_reg(unsigned idx)
+{
+  if (tokens.size() <= idx)
+    throw Parse_error("expected more arguments", line_number);
+  if (tokens[idx].kind == Lexeme::dreg)
+    return get_dreg(idx);
+  else
+    return get_areg(idx);
+}
+
+Inst *Parser::get_reg_value(unsigned idx)
+{
+  return bb->build_inst(Op::READ, get_reg(idx));
 }
 
 std::pair<Inst *, Inst *> Parser::get_freg(unsigned idx)
@@ -1636,6 +1654,19 @@ void Parser::process_cmp(uint32_t bitsize)
   set_xnzvc(nullptr, n, z, v, c);
 }
 
+void Parser::process_exg()
+{
+  Inst *reg1 = get_reg(1);
+  Inst *value1 = get_reg_value(1);
+  get_comma(2);
+  Inst *reg2 = get_reg(3);
+  Inst *value2 = get_reg_value(3);
+  get_end_of_line(4);
+
+  bb->build_inst(Op::WRITE, reg1, value2);
+  bb->build_inst(Op::WRITE, reg2, value1);
+}
+
 void Parser::process_ext(uint32_t src_bitsize, uint32_t dest_bitsize)
 {
   Inst *dest = get_dreg(1);
@@ -2705,6 +2736,8 @@ void Parser::parse_function()
     process_binary_bitwise(Op::XOR, 16);
   else if (name == "eor.b")
     process_binary_bitwise(Op::XOR, 8);
+  else if (name == "exg")
+    process_exg();
   else if (name == "ext.l")
     process_ext(16, 32);
   else if (name == "ext.w")
