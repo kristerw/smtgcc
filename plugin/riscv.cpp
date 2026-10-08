@@ -226,19 +226,22 @@ std::optional<Regs> regs_for_value(riscv_state *rstate, Inst *value, tree type, 
 void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32_t *reg_nbr)
 {
   Function *tgt = rstate->module->functions[1];
-  Basic_block *bb = rstate->exit_bb;
-  tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
-
+  Basic_block *exit_bb = rstate->exit_bb;
   Basic_block *src_last_bb = src_func->bbs.back();
   assert(src_last_bb->last_inst->op == Op::RET);
-  uint64_t ret_bitsize = 0;
-  if (src_last_bb->last_inst->nof_args > 0)
-    ret_bitsize = src_last_bb->last_inst->args[0]->bitsize;
-  if (ret_bitsize == 0)
+  if (src_last_bb->last_inst->nof_args == 0)
     {
-      bb->build_ret_inst();
+      exit_bb->build_ret_inst();
       return;
     }
+  tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
+  uint64_t ret_bitsize = src_last_bb->last_inst->args[0]->bitsize;
+  Inst *retval_phi = exit_bb->build_phi_inst(ret_bitsize);
+  exit_bb->build_ret_inst(retval_phi);
+  Inst *abort_retval = rstate->abort_bb->value_inst(0, ret_bitsize);
+  retval_phi->add_phi_arg(abort_retval, rstate->abort_bb);
+
+  Basic_block *bb = rstate->return_bb;
 
   if (lookup_attribute("RVV sizeless type", TYPE_ATTRIBUTES(ret_type)))
     throw Not_implemented("riscv: returning RVV sizeless type");
@@ -275,8 +278,8 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
 	      Inst *imag =
 		bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f11]);
 	      imag = bb->build_trunc(imag, elt_bitsize);
-	      value =
-		bb->build_ret_inst(bb->build_inst(Op::CONCAT, imag, real));
+	      value = bb->build_inst(Op::CONCAT, imag, real);
+	      retval_phi->add_phi_arg(value, rstate->return_bb);
 	      return;
 	    }
 	  if (fld_bitoffset > 0 && (!retval || retval->bitsize < fld_bitoffset))
@@ -300,7 +303,7 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
 	  Inst *pad = bb->value_inst(0, ret_bitsize - retval->bitsize);
 	  retval = bb->build_inst(Op::CONCAT, pad, retval);
 	}
-      bb->build_ret_inst(retval);
+      retval_phi->add_phi_arg(retval, rstate->return_bb);
       return;
     }
   if (COMPLEX_FLOAT_TYPE_P(ret_type)
@@ -314,7 +317,8 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
       Inst *imag =
 	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f11]);
       imag = bb->build_trunc(imag, elt_bitsize);
-      bb->build_ret_inst(bb->build_inst(Op::CONCAT, imag, real));
+      Inst *retval = bb->build_inst(Op::CONCAT, imag, real);
+      retval_phi->add_phi_arg(retval, rstate->return_bb);
       return;
     }
   if (SCALAR_FLOAT_TYPE_P(ret_type) && ret_bitsize <= rstate->freg_bitsize)
@@ -323,7 +327,7 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
 	bb->build_inst(Op::READ, rstate->registers[RiscvRegIdx::f10]);
       if (ret_bitsize < retval->bitsize)
 	retval = bb->build_trunc(retval, ret_bitsize);
-      bb->build_ret_inst(retval);
+      retval_phi->add_phi_arg(retval, rstate->return_bb);
       return;
     }
 
@@ -340,7 +344,7 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
 	}
       if (ret_bitsize < retval->bitsize)
 	retval = bb->build_trunc(retval, ret_bitsize);
-      bb->build_ret_inst(retval);
+      retval_phi->add_phi_arg(retval, rstate->return_bb);
     }
   else
     {
@@ -370,7 +374,7 @@ void build_return(riscv_state *rstate, Function *src_func, function *fun, uint32
 	}
       if (ret_bitsize < retval->bitsize)
 	retval = bb->build_trunc(retval, ret_bitsize);
-      bb->build_ret_inst(retval);
+      retval_phi->add_phi_arg(retval, rstate->return_bb);
     }
 }
 
@@ -422,6 +426,10 @@ riscv_state setup_riscv_function(CommonState *state, Function *src_func, functio
   Function *tgt = module->build_function("tgt");
   rstate.entry_bb = tgt->build_bb();
   rstate.exit_bb = tgt->build_bb();
+  rstate.return_bb = tgt->build_bb();
+  rstate.return_bb->build_br_inst(rstate.exit_bb);
+  rstate.abort_bb = tgt->build_bb();
+  rstate.abort_bb->build_br_inst(rstate.exit_bb);
 
   assert(module->functions.size() == 2);
   Basic_block *bb = rstate.entry_bb;

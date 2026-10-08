@@ -13,17 +13,22 @@ const int stack_size = 1024 * 100;
 
 void build_return(bpf_state *rstate, Function *src_func, function *fun)
 {
-  Basic_block *bb = rstate->exit_bb;
+  Basic_block *exit_bb = rstate->exit_bb;
   Basic_block *src_last_bb = src_func->bbs.back();
   assert(src_last_bb->last_inst->op == Op::RET);
   if (src_last_bb->last_inst->nof_args == 0)
     {
-      bb->build_ret_inst();
+      exit_bb->build_ret_inst();
       return;
     }
   tree ret_type = TREE_TYPE(DECL_RESULT(fun->decl));
   uint64_t ret_bitsize = src_last_bb->last_inst->args[0]->bitsize;
+  Inst *retval_phi = exit_bb->build_phi_inst(ret_bitsize);
+  exit_bb->build_ret_inst(retval_phi);
+  Inst *abort_retval = rstate->abort_bb->value_inst(0, ret_bitsize);
+  retval_phi->add_phi_arg(abort_retval, rstate->abort_bb);
 
+  Basic_block *bb = rstate->return_bb;
   if ((INTEGRAL_TYPE_P(ret_type)
        || POINTER_TYPE_P(ret_type)
        || SCALAR_FLOAT_TYPE_P(ret_type))
@@ -33,7 +38,7 @@ void build_return(bpf_state *rstate, Function *src_func, function *fun)
 	bb->build_inst(Op::READ, rstate->registers[BpfRegIdx::r0]);
       if (ret_bitsize < retval->bitsize)
 	retval = bb->build_trunc(retval, ret_bitsize);
-      bb->build_ret_inst(retval);
+      retval_phi->add_phi_arg(retval, rstate->return_bb);
       return;
     }
 
@@ -56,6 +61,10 @@ bpf_state setup_bpf_function(CommonState *state, Function *src_func, function *f
   Function *tgt = module->build_function("tgt");
   rstate.entry_bb = tgt->build_bb();
   rstate.exit_bb = tgt->build_bb();
+  rstate.return_bb = tgt->build_bb();
+  rstate.return_bb->build_br_inst(rstate.exit_bb);
+  rstate.abort_bb = tgt->build_bb();
+  rstate.abort_bb->build_br_inst(rstate.exit_bb);
 
   assert(module->functions.size() == 2);
   Basic_block *bb = rstate.entry_bb;

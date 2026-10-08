@@ -721,6 +721,8 @@ struct aarch64_state {
   Module *module;
   Basic_block *entry_bb;
   Basic_block *exit_bb;
+  Basic_block *return_bb;
+  Basic_block *abort_bb;
   uint32_t reg_bitsize;
   uint32_t freg_bitsize;
   std::vector<MemoryObject> memory_objects;
@@ -762,6 +764,8 @@ struct bpf_state {
   Module *module;
   Basic_block *entry_bb;
   Basic_block *exit_bb;
+  Basic_block *return_bb;
+  Basic_block *abort_bb;
   std::vector<MemoryObject> memory_objects;
   int next_local_id;
   int64_t symbolic_id;
@@ -833,6 +837,8 @@ struct m68k_state {
   Module *module;
   Basic_block *entry_bb;
   Basic_block *exit_bb;
+  Basic_block *return_bb;
+  Basic_block *abort_bb;
   std::vector<MemoryObject> memory_objects;
   int next_local_id;
   int64_t symbolic_id;
@@ -961,6 +967,8 @@ struct riscv_state {
   Module *module;
   Basic_block *entry_bb;
   Basic_block *exit_bb;
+  Basic_block *return_bb;
+  Basic_block *abort_bb;
   uint32_t reg_bitsize;
   uint32_t freg_bitsize;
   uint32_t vreg_bitsize;
@@ -1038,6 +1046,8 @@ struct sh_state {
   Module *module;
   Basic_block *entry_bb;
   Basic_block *exit_bb;
+  Basic_block *return_bb;
+  Basic_block *abort_bb;
   std::vector<MemoryObject> memory_objects;
   int next_local_id;
   int64_t symbolic_id;

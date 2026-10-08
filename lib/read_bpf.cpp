@@ -727,7 +727,7 @@ void Parser::process_call()
     {
       Inst *b1 = bb->value_inst(1, 1);
       bb->build_inst(Op::WRITE, rstate->registers[BpfRegIdx::abort], b1);
-      bb->build_br_inst(rstate->exit_bb);
+      bb->build_br_inst(rstate->abort_bb);
       bb = func->build_bb();
       return;
     }
@@ -740,7 +740,7 @@ void Parser::process_call()
       bb->build_inst(Op::WRITE, rstate->registers[BpfRegIdx::exit], b1);
       bb->build_inst(Op::WRITE, rstate->registers[BpfRegIdx::exit_val],
 		     exit_val);
-      bb->build_br_inst(rstate->exit_bb);
+      bb->build_br_inst(rstate->abort_bb);
       bb = func->build_bb();
       return;
     }
@@ -858,7 +858,7 @@ void Parser::process_exit()
 {
   get_end_of_line(1);
 
-  bb->build_br_inst(rstate->exit_bb);
+  bb->build_br_inst(rstate->return_bb);
   bb = func->build_bb();
 }
 

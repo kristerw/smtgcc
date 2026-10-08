@@ -2055,7 +2055,7 @@ void Parser::process_call()
     {
       Inst *b1 = bb->value_inst(1, 1);
       bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::abort], b1);
-      bb->build_br_inst(rstate->exit_bb);
+      bb->build_br_inst(rstate->abort_bb);
       bb = func->build_bb();
       return;
     }
@@ -2068,7 +2068,7 @@ void Parser::process_call()
       bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::exit], b1);
       bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::exit_val],
 		     exit_val);
-      bb->build_br_inst(rstate->exit_bb);
+      bb->build_br_inst(rstate->abort_bb);
       bb = func->build_bb();
       return;
     }
@@ -2102,7 +2102,7 @@ void Parser::process_call()
 void Parser::process_tail_call()
 {
   process_call();
-  bb->build_br_inst(rstate->exit_bb);
+  bb->build_br_inst(rstate->return_bb);
   bb = nullptr;
 }
 
@@ -7693,7 +7693,7 @@ void Parser::parse_function()
     {
       get_end_of_line(1);
 
-      bb->build_br_inst(rstate->exit_bb);
+      bb->build_br_inst(rstate->return_bb);
       bb = nullptr;
     }
   else if (name == "brk")
@@ -7702,7 +7702,7 @@ void Parser::parse_function()
       get_end_of_line(2);
 
       bb->build_inst(Op::UB, bb->value_inst(1, 1));
-      bb->build_br_inst(rstate->exit_bb);
+      bb->build_br_inst(rstate->return_bb);
       bb = nullptr;
     }
 

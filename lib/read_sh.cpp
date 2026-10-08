@@ -1589,7 +1589,7 @@ void Parser::gen_call(Builtin builtin)
       {
 	Inst *b1 = bb->value_inst(1, 1);
 	bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::abort], b1);
-	bb->build_br_inst(rstate->exit_bb);
+	bb->build_br_inst(rstate->abort_bb);
 	bb = func->build_bb();
 	return;
       }
@@ -1601,7 +1601,7 @@ void Parser::gen_call(Builtin builtin)
 	bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::exit], b1);
 	bb->build_inst(Op::WRITE, rstate->registers[ShRegIdx::exit_val],
 		       exit_val);
-	bb->build_br_inst(rstate->exit_bb);
+	bb->build_br_inst(rstate->abort_bb);
 	bb = func->build_bb();
 	return;
       }
@@ -1930,7 +1930,7 @@ void Parser::parse_function()
       if (delay_slot_rts)
 	{
 	  delay_slot_rts = false;
-	  bb->build_br_inst(rstate->exit_bb);
+	  bb->build_br_inst(rstate->return_bb);
 	  bb = func->build_bb();
 	}
       else if (delay_slot_jsr)

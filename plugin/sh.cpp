@@ -82,17 +82,22 @@ Inst *extract_vec_elem(Basic_block *bb, Inst *inst, uint32_t elem_bitsize, uint3
 
 void build_return(sh_state *rstate, Function *src_func, function *fun)
 {
-  Basic_block *bb = rstate->exit_bb;
+  Basic_block *exit_bb = rstate->exit_bb;
   Basic_block *src_last_bb = src_func->bbs.back();
   assert(src_last_bb->last_inst->op == Op::RET);
   if (src_last_bb->last_inst->nof_args == 0)
     {
-      bb->build_ret_inst();
+      exit_bb->build_ret_inst();
       return;
     }
   tree ret_expr = DECL_RESULT(fun->decl);
   uint64_t ret_bitsize = src_last_bb->last_inst->args[0]->bitsize;
+  Inst *retval_phi = exit_bb->build_phi_inst(ret_bitsize);
+  exit_bb->build_ret_inst(retval_phi);
+  Inst *abort_retval = rstate->abort_bb->value_inst(0, ret_bitsize);
+  retval_phi->add_phi_arg(abort_retval, rstate->abort_bb);
 
+  Basic_block *bb = rstate->return_bb;
   if (TREE_CODE(TREE_TYPE(ret_expr)) == COMPLEX_TYPE
       && is_returned_in_fregs(ret_expr))
     {
@@ -119,7 +124,7 @@ void build_return(sh_state *rstate, Function *src_func, function *fun)
 	}
       Inst *retval = bb->build_inst(Op::CONCAT, imag, real);
 
-      bb->build_ret_inst(retval);
+      retval_phi->add_phi_arg(retval, rstate->return_bb);
       return;
     }
   if (is_returned_in_fregs(ret_expr))
@@ -134,7 +139,7 @@ void build_return(sh_state *rstate, Function *src_func, function *fun)
 	  else
 	    retval = bb->build_inst(Op::CONCAT, inst, retval);
 	}
-      bb->build_ret_inst(retval);
+      retval_phi->add_phi_arg(retval, rstate->return_bb);
       return;
     }
   if (is_returned_in_regs(ret_expr))
@@ -148,7 +153,7 @@ void build_return(sh_state *rstate, Function *src_func, function *fun)
 	}
       if (ret_bitsize < retval->bitsize)
 	retval = bb->build_trunc(retval, ret_bitsize);
-      bb->build_ret_inst(retval);
+      retval_phi->add_phi_arg(retval, rstate->return_bb);
       return;
     }
   if (TREE_CODE(TREE_TYPE(ret_expr)) == RECORD_TYPE
@@ -183,7 +188,7 @@ void build_return(sh_state *rstate, Function *src_func, function *fun)
 	  else
 	    retval = data_byte;
 	}
-      bb->build_ret_inst(retval);
+      retval_phi->add_phi_arg(retval, rstate->return_bb);
       return;
     }
 
@@ -206,6 +211,10 @@ sh_state setup_sh_function(CommonState *state, Function *src_func, function *fun
   Function *tgt = module->build_function("tgt");
   rstate.entry_bb = tgt->build_bb();
   rstate.exit_bb = tgt->build_bb();
+  rstate.return_bb = tgt->build_bb();
+  rstate.return_bb->build_br_inst(rstate.exit_bb);
+  rstate.abort_bb = tgt->build_bb();
+  rstate.abort_bb->build_br_inst(rstate.exit_bb);
 
   assert(module->functions.size() == 2);
   Basic_block *bb = rstate.entry_bb;

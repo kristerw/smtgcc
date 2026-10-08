@@ -78,6 +78,8 @@ struct Converter {
   std::map<basic_block, Basic_block *> gccbb_bottom2bb;
   std::map<Basic_block *, std::pair<Inst *, Inst *> > bb2retval;
   std::set<Basic_block *> bb_abort;
+  Basic_block *abort_bb;
+  Basic_block *exit_bb;
   std::map<Basic_block *, Inst *> bb2exit;
   std::map<tree, Inst *> tree2instruction;
   std::map<tree, Inst *> tree2indef;
@@ -93,7 +95,7 @@ struct Converter {
   Function_role role;
 
   void handle_ipcp_ts(tree parm);
-  Inst *extract_id(Inst *inst);
+  Inst *extract_id(Basic_block *bb, Inst *inst);
   uint64_t bytesize_for_type(tree type);
   std::pair<Inst *, Inst *> to_mem_repr(Inst *inst, Inst *indef, tree type);
   Inst *to_mem_repr(Inst *inst, tree type);
@@ -403,7 +405,7 @@ void Converter::handle_ipcp_ts(tree parm)
   throw Not_implemented("ipcp transformation summary for param");
 }
 
-Inst *Converter::extract_id(Inst *inst)
+Inst *Converter::extract_id(Basic_block *bb, Inst *inst)
 {
   if (auto it = inst2id.find(inst); it != inst2id.end())
     return it->second;
@@ -580,12 +582,12 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
   // TODO: mem_flags is not correct name -- it is only one flag.
   if (POINTER_TYPE_P(type))
     {
-      Inst *id = extract_id(inst);
+      Inst *id = extract_id(bb, inst);
       Inst *zero = bb->value_inst(0, id->bitsize);
       Inst *not_written = nullptr;
       if (mem_flags)
 	{
-	  not_written = extract_id(mem_flags);
+	  not_written = extract_id(bb, mem_flags);
 	  not_written = bb->build_inst(Op::EQ, not_written, zero);
 	}
       Inst *cond = bb->build_inst(Op::SLT, id, zero);
@@ -1172,7 +1174,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::extract_component_ref(tree expr)
   if (POINTER_TYPE_P(type) && TYPE_RESTRICT(type))
     throw Not_implemented("extract_component_ref: extracting restrict pointer");
   if (!prov && POINTER_TYPE_P(type))
-    prov = extract_id(inst);
+    prov = extract_id(bb, inst);
   return {inst, indef, prov};
 }
 
@@ -1244,7 +1246,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	      throw Not_implemented("tree2inst_indef_prov: "
 				    "loading restrict pointer");
 	    if (POINTER_TYPE_P(TREE_TYPE(expr)))
-	      prov = extract_id(inst);
+	      prov = extract_id(bb, inst);
 	    return {inst, indef, prov};
 	  }
 	throw Not_implemented("tree2inst: unhandled ssa_name");
@@ -1280,7 +1282,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	  inst = bb->build_inst(Op::SEXT, inst, precision);
 
 	if (POINTER_TYPE_P(TREE_TYPE(expr)))
-	  prov = extract_id(inst);
+	  prov = extract_id(bb, inst);
 
 	return {inst, nullptr, prov};
       }
@@ -1411,7 +1413,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	  {
 	    assert(!POINTER_TYPE_P(src_type) || prov);
 	    if (!prov)
-	      prov = extract_id(arg);
+	      prov = extract_id(bb, arg);
 	  }
 	return {arg, indef, prov};
       }
@@ -1458,7 +1460,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 	  throw Not_implemented("tree2inst_indef_prov: "
 				"extracting restrict pointer");
 	if (POINTER_TYPE_P(TREE_TYPE(expr)) && !prov)
-	  prov = extract_id(value);
+	  prov = extract_id(bb, value);
 	return {value, indef, prov};
       }
     case ARRAY_REF:
@@ -1897,7 +1899,7 @@ Addr Converter::process_address(tree expr, bool is_mem_access)
 	process_decl(expr);
       Inst *ptr = decl2instruction.at(expr);
       assert(ptr->op == Op::MEMORY);
-      Inst *id = extract_id(ptr);
+      Inst *id = extract_id(bb, ptr);
       return {ptr, 0, id};
     }
   if (code == ARRAY_REF)
@@ -1922,7 +1924,7 @@ Addr Converter::process_address(tree expr, bool is_mem_access)
   if (code == INTEGER_CST)
     {
       Inst *ptr = tree2inst(expr);
-      Inst *prov = extract_id(ptr);
+      Inst *prov = extract_id(bb, ptr);
       return {ptr, 0, prov};
     }
   if (code == RESULT_DECL)
@@ -1931,13 +1933,13 @@ Addr Converter::process_address(tree expr, bool is_mem_access)
 	process_decl(expr);
       Inst *ptr = decl2instruction.at(expr);
       assert(ptr->op == Op::MEMORY);
-      Inst *id = extract_id(ptr);
+      Inst *id = extract_id(bb, ptr);
       return {ptr, 0, id};
     }
   if (code == PARM_DECL && TREE_ADDRESSABLE(expr))
     {
       Inst *ptr = parm_decl2mem.at(expr);
-      Inst *prov = extract_id(ptr);
+      Inst *prov = extract_id(bb, ptr);
       return {ptr, 0, prov};
     }
 
@@ -2074,7 +2076,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
   if (POINTER_TYPE_P(type) && TYPE_RESTRICT(type))
     throw Not_implemented("process_load: loading restrict pointer");
   if (POINTER_TYPE_P(type))
-    prov = extract_id(value);
+    prov = extract_id(bb, value);
 
   return {value, indef, prov};
 }
@@ -2243,7 +2245,7 @@ void Converter::process_store(tree addr_expr, tree value_expr)
   if (POINTER_TYPE_P(value_type))
     {
       assert(prov);
-      Inst *value_mem_id = extract_id(value);
+      Inst *value_mem_id = extract_id(bb, value);
       Inst *is_ub = bb->build_inst(Op::NE, prov, value_mem_id);
       bb->build_inst(Op::UB, is_ub);
     }
@@ -2265,7 +2267,7 @@ void Converter::process_store(tree addr_expr, tree value_expr)
   if (state->arch != Arch::gimple
       && role == Function_role::src && POINTER_TYPE_P(value_type))
     {
-      Inst *value_mem_id = extract_id(value);
+      Inst *value_mem_id = extract_id(bb, value);
       Inst *zero = bb->value_inst(0, module->ptr_id_bits);
       Inst *is_ub = bb->build_inst(Op::SLT, value_mem_id, zero);
       bb->build_inst(Op::UB, is_ub);
@@ -2428,7 +2430,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
       && POINTER_TYPE_P(src_type)
       && !POINTER_TYPE_P(dest_type))
     {
-      Inst *value_mem_id = extract_id(inst);
+      Inst *value_mem_id = extract_id(bb, inst);
       Inst *zero = bb->value_inst(0, module->ptr_id_bits);
       Inst *is_ub = bb->build_inst(Op::SLT, value_mem_id, zero);
       bb->build_inst(Op::UB, is_ub);
@@ -2463,7 +2465,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::type_convert(Inst *inst, Inst *ind
 	    {
 	      assert(!POINTER_TYPE_P(src_type) || prov);
 	      if (!prov)
-		prov = extract_id(inst);
+		prov = extract_id(bb, inst);
 	    }
 	  if (TREE_CODE(dest_type) == BOOLEAN_TYPE && dest_prec > 1)
 	    check_wide_bool(inst, dest_type);
@@ -4160,7 +4162,7 @@ void Converter::process_constructor(tree lhs, tree rhs)
 
   if (TREE_CLOBBER_P(rhs) && CLOBBER_KIND(rhs) == CLOBBER_STORAGE_END)
     {
-      bb->build_inst(Op::FREE, extract_id(addr.ptr));
+      bb->build_inst(Op::FREE, extract_id(bb, addr.ptr));
       return;
     }
 
@@ -4748,10 +4750,8 @@ void Converter::process_cfn_abort(gimple *stmt)
   // noreturn, but it is unclear to me if this is guaranteed in GIMPLE.
   // We therefore ensure that we branch to the exit block and create a
   // new dead block for the remaining instructions, if any.
-  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
-  Basic_block *exit_bb = gccbb_top2bb.at(gcc_exit_block);
   Basic_block *dead_bb = func->build_bb();
-  bb->build_br_inst(bb->value_inst(1, 1), exit_bb, dead_bb);
+  bb->build_br_inst(bb->value_inst(1, 1), abort_bb, dead_bb);
   bb_abort.insert(bb);
   bb = dead_bb;
 }
@@ -5817,10 +5817,8 @@ void Converter::process_cfn_exit(gimple *stmt)
   // noreturn, but it is unclear to me if this is guaranteed in GIMPLE.
   // We therefore ensure that we branch to the exit block and create a
   // new dead block for the remaining instructions, if any.
-  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
-  Basic_block *exit_bb = gccbb_top2bb.at(gcc_exit_block);
   Basic_block *dead_bb = func->build_bb();
-  bb->build_br_inst(bb->value_inst(1, 1), exit_bb, dead_bb);
+  bb->build_br_inst(bb->value_inst(1, 1), abort_bb, dead_bb);
   bb2exit.insert({bb, arg1});
   bb = dead_bb;
 }
@@ -6544,7 +6542,7 @@ void Converter::process_cfn_mask_len_load(gimple *stmt)
   tree2instruction.insert({lhs, inst});
   tree2indef.insert({lhs, indef});
   if (POINTER_TYPE_P(lhs_type))
-    tree2prov.insert({lhs, extract_id(inst)});
+    tree2prov.insert({lhs, extract_id(bb, inst)});
 }
 
 void Converter::process_cfn_mask_load(gimple *stmt)
@@ -6572,7 +6570,7 @@ void Converter::process_cfn_mask_load(gimple *stmt)
   tree2instruction.insert({lhs, inst});
   tree2indef.insert({lhs, indef});
   if (POINTER_TYPE_P(lhs_type))
-    tree2prov.insert({lhs, extract_id(inst)});
+    tree2prov.insert({lhs, extract_id(bb, inst)});
 }
 
 std::pair<Inst*,Inst*> Converter::store_lanes(tree value_type, Inst *value, Inst *value_indef)
@@ -7989,10 +7987,8 @@ void Converter::process_cfn_ubsan_handle_ub()
   // call in this basic block. We therefore ensure that we branch to
   // the exit block and create a new dead block for the remaining
   // instructions, if any.
-  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
-  Basic_block *exit_bb = gccbb_top2bb.at(gcc_exit_block);
   Basic_block *dead_bb = func->build_bb();
-  bb->build_br_inst(bb->value_inst(1, 1), exit_bb, dead_bb);
+  bb->build_br_inst(bb->value_inst(1, 1), abort_bb, dead_bb);
   bb_abort.insert(bb);
   bb = dead_bb;
 }
@@ -8050,10 +8046,8 @@ void Converter::process_cfn_ubsan_check_op(gimple *stmt, Op op, Op overflow_op)
 	}
 
       Inst *overflowed = bb->build_inst(overflow_op, elem1, elem2);
-      basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
-      Basic_block *exit_bb = gccbb_top2bb.at(gcc_exit_block);
       Basic_block *next_bb = func->build_bb();
-      bb->build_br_inst(overflowed, exit_bb, next_bb);
+      bb->build_br_inst(overflowed, abort_bb, next_bb);
       bb_abort.insert(bb);
       bb = next_bb;
     }
@@ -8925,10 +8919,8 @@ void Converter::process_gimple_call(gimple *stmt)
 	  // call in this basic block. We therefore ensure that we branch to
 	  // the exit block and create a new dead block for the remaining
 	  // instructions, if any.
-	  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
-	  Basic_block *exit_bb = gccbb_top2bb.at(gcc_exit_block);
 	  Basic_block *dead_bb = func->build_bb();
-	  bb->build_br_inst(bb->value_inst(1, 1), exit_bb, dead_bb);
+	  bb->build_br_inst(bb->value_inst(1, 1), abort_bb, dead_bb);
 	  bb_abort.insert(bb);
 	  bb = dead_bb;
 	}
@@ -9115,14 +9107,20 @@ void Converter::generate_abort_inst()
   if (bb_abort.empty())
     return;
 
-  Inst *abort_called = bb->build_phi_inst(1);
-  for (Basic_block *pred_bb : bb->preds)
+  Inst *abort_called = abort_bb->build_phi_inst(1);
+  for (Basic_block *pred_bb : abort_bb->preds)
     {
-      Inst *a = bb->value_inst(bb_abort.contains(pred_bb), 1);
+      Inst *a = abort_bb->value_inst(bb_abort.contains(pred_bb), 1);
       abort_called->add_phi_arg(a, pred_bb);
     }
-  Inst *abort_san_called = bb->value_inst(0, 1);
-  bb->build_inst(Op::ABORT, abort_called, abort_san_called);
+
+  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
+  Basic_block *return_bb = gccbb_top2bb.at(gcc_exit_block);
+  Inst *phi = exit_bb->build_phi_inst(1);
+  phi->add_phi_arg(abort_called, abort_bb);
+  phi->add_phi_arg(return_bb->value_inst(0, 1), return_bb);
+  Inst *abort_san_called = abort_bb->value_inst(0, 1);
+  exit_bb->build_inst(Op::ABORT, phi, abort_san_called);
 }
 
 void Converter::generate_exit_inst()
@@ -9130,21 +9128,31 @@ void Converter::generate_exit_inst()
   if (bb2exit.empty())
     return;
 
-  Inst *exit_called = bb->build_phi_inst(1);
-  Inst *exit_val = bb->build_phi_inst(bitsize_for_type(integer_type_node));
-  for (Basic_block *pred_bb : bb->preds)
+  Inst *exit_called = abort_bb->build_phi_inst(1);
+  Inst *exit_val =
+    abort_bb->build_phi_inst(bitsize_for_type(integer_type_node));
+  for (Basic_block *pred_bb : abort_bb->preds)
     {
-      Inst *e = bb->value_inst(bb2exit.contains(pred_bb), 1);
+      Inst *e = abort_bb->value_inst(bb2exit.contains(pred_bb), 1);
       exit_called->add_phi_arg(e, pred_bb);
 
       Inst *v;
       if (bb2exit.contains(pred_bb))
 	v = bb2exit[pred_bb];
       else
-	v = bb->value_inst(0, exit_val->bitsize);
+	v = abort_bb->value_inst(0, exit_val->bitsize);
       exit_val->add_phi_arg(v, pred_bb);
     }
-  bb->build_inst(Op::EXIT, exit_called, exit_val);
+
+  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
+  Basic_block *return_bb = gccbb_top2bb.at(gcc_exit_block);
+  Inst *phi1 = exit_bb->build_phi_inst(1);
+  Inst *phi2 = exit_bb->build_phi_inst(exit_val->bitsize);
+  phi1->add_phi_arg(exit_called, abort_bb);
+  phi2->add_phi_arg(exit_val, abort_bb);
+  phi1->add_phi_arg(return_bb->value_inst(0, 1), return_bb);
+  phi2->add_phi_arg(return_bb->value_inst(0, exit_val->bitsize), return_bb);
+  exit_bb->build_inst(Op::EXIT, phi1, phi2);
 }
 
 void Converter::generate_return_inst()
@@ -9152,17 +9160,20 @@ void Converter::generate_return_inst()
   tree retval_type = TREE_TYPE(DECL_RESULT(fun->decl));
   if (VOID_TYPE_P(retval_type))
     {
-      bb->build_ret_inst();
+      exit_bb->build_ret_inst();
       return;
     }
   int retval_bitsize = bitsize_for_type(retval_type);
   if (!retval_bitsize)
     {
-      bb->build_ret_inst();
+      exit_bb->build_ret_inst();
       return;
     }
 
-  // Some predecessors to the exit block may not have a return value;
+  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
+  Basic_block *return_bb = gccbb_top2bb.at(gcc_exit_block);
+
+  // Some predecessors to the GIMPLE  exit block may not have a return value;
   // They may have a return without value, or the predecessor may be
   // a builtin_unreachable, etc. We therefore creates a dummy value,
   // marked as indefinite, for these predecessors to make the IR valid.
@@ -9170,7 +9181,7 @@ void Converter::generate_return_inst()
     Inst *retval = nullptr;
     Inst *indef = nullptr;
     Basic_block *entry_bb = func->bbs[0];
-    for (Basic_block *pred_bb : bb->preds)
+    for (Basic_block *pred_bb : return_bb->preds)
       {
 	if (!bb2retval.contains(pred_bb))
 	  {
@@ -9196,14 +9207,14 @@ void Converter::generate_return_inst()
 
   Inst *retval;
   Inst *retval_indef;
-  if (bb->preds.size() == 1)
-    std::tie(retval, retval_indef) = bb2retval.at(bb->preds[0]);
+  if (return_bb->preds.size() == 1)
+    std::tie(retval, retval_indef) = bb2retval.at(return_bb->preds[0]);
   else
     {
-      Inst *phi = bb->build_phi_inst(retval_bitsize);
-      Inst *phi_indef = bb->build_phi_inst(retval_bitsize);
+      Inst *phi = return_bb->build_phi_inst(retval_bitsize);
+      Inst *phi_indef = return_bb->build_phi_inst(retval_bitsize);
       bool need_indef_phi = false;
-      for (Basic_block *pred_bb : bb->preds)
+      for (Basic_block *pred_bb : return_bb->preds)
 	{
 	  auto [ret, ret_indef] = bb2retval.at(pred_bb);
 	  phi->add_phi_arg(ret, pred_bb);
@@ -9219,22 +9230,31 @@ void Converter::generate_return_inst()
   // GCC treats it as UB to return the address of a local variable.
   if (POINTER_TYPE_P(retval_type))
     {
-      Inst *mem_id = extract_id(retval);
-      Inst *zero = bb->value_inst(0, module->ptr_id_bits);
-      Inst *cond = bb->build_inst(Op::SLT, mem_id, zero);
+      Inst *mem_id = extract_id(return_bb, retval);
+      Inst *zero = return_bb->value_inst(0, module->ptr_id_bits);
+      Inst *cond = return_bb->build_inst(Op::SLT, mem_id, zero);
       if (retval_indef)
 	{
-	  Inst *zero2 = bb->value_inst(0, retval_indef->bitsize);
-	  Inst *cond2 = bb->build_inst(Op::EQ, retval_indef, zero2);
-	  cond = bb->build_inst(Op::AND, cond, cond2);
+	  Inst *zero2 = return_bb->value_inst(0, retval_indef->bitsize);
+	  Inst *cond2 = return_bb->build_inst(Op::EQ, retval_indef, zero2);
+	  cond = return_bb->build_inst(Op::AND, cond, cond2);
 	}
-      bb->build_inst(Op::UB, cond);
+      return_bb->build_inst(Op::UB, cond);
     }
 
+  Inst *phi = exit_bb->build_phi_inst(retval->bitsize);
+  phi->add_phi_arg(retval, return_bb);
+  phi->add_phi_arg(return_bb->value_inst(0, retval->bitsize), abort_bb);
   if (retval_indef)
-    bb->build_ret_inst(retval, retval_indef);
+    {
+      Inst *phi_indef = exit_bb->build_phi_inst(retval->bitsize);
+      phi_indef->add_phi_arg(retval_indef, return_bb);
+      phi_indef->add_phi_arg(return_bb->value_inst(0, retval->bitsize),
+			     abort_bb);
+      exit_bb->build_ret_inst(phi, phi_indef);
+    }
   else
-    bb->build_ret_inst(retval);
+    exit_bb->build_ret_inst(phi);
 }
 
 // Write the values to initialized variables.
@@ -9508,7 +9528,7 @@ void Converter::process_func_args()
 	  Inst *param_inst = build_memory_inst(id, size, MEM_KEEP, true);
 	  tree2prov.insert({decl, param_inst->args[0]});
 	  tree2instruction.insert({decl, param_inst});
-	  tree2prov.insert({decl, extract_id(param_inst)});
+	  tree2prov.insert({decl, extract_id(bb, param_inst)});
 	}
       else
 	{
@@ -9560,7 +9580,7 @@ void Converter::process_func_args()
 		      // other memory ID UB instead of just setting it to the
 		      // memory directly -- this is needed to ensure we test
 		      // with different alignment/sizes.
-		      Inst *id1 = extract_id(param_inst);
+		      Inst *id1 = extract_id(bb, param_inst);
 		      Inst *id2 =
 			entry_bb->value_inst(restrict_id, module->ptr_id_bits);
 		      build_ub_assume(entry_bb,
@@ -9590,7 +9610,7 @@ void Converter::process_func_args()
 	    }
 
 	  if (POINTER_TYPE_P(TREE_TYPE(decl)))
-	    tree2prov.insert({decl, extract_id(param_inst)});
+	    tree2prov.insert({decl, extract_id(bb, param_inst)});
 
 	  // VRP
 	  // If there are recorded data, we get a constant value, and a mask
@@ -9623,7 +9643,7 @@ void Converter::process_func_args()
       constrain_src_value(param_inst, TREE_TYPE(decl));
 
       // TODO: This should move into constrain_src_value.
-      Inst *id = extract_id(param_inst);
+      Inst *id = extract_id(bb, param_inst);
       Inst *one = entry_bb->value_inst(1, module->ptr_id_bits);
       build_ub_assume(entry_bb, entry_bb->build_inst(Op::EQ, id, one));
     }
@@ -9746,11 +9766,7 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	      bb->build_br_inst(gccbb_top2bb.at(gcc_exit_block));
 	    }
 	  else
-	    {
-	      generate_abort_inst();
-	      generate_exit_inst();
-	      generate_return_inst();
-	    }
+	    bb->build_br_inst(exit_bb);
 	}
       else if (cond_stmt)
 	{
@@ -9797,6 +9813,12 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	}
     }
   bb = nullptr;
+
+  // Generate all the result instructions.
+  abort_bb->build_br_inst(exit_bb);
+  generate_abort_inst();
+  generate_exit_inst();
+  generate_return_inst();
 
   // We have created all instructions, so it is now safe to add the phi
   // arguments (as they must have been created now).
@@ -9872,6 +9894,8 @@ Function *Converter::process_function()
 	basic_block gcc_bb = (*fun->cfg->x_basic_block_info)[postorder[i]];
 	gccbb_top2bb.insert({gcc_bb, func->build_bb()});
       }
+    abort_bb = func->build_bb();
+    exit_bb = func->build_bb();
     bb = func->bbs[0];
 
     process_func_args();
