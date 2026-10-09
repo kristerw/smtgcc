@@ -256,6 +256,7 @@ class Converter : Simplify_config {
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   Inst *simplify(Inst *inst);
   void flatten_and(Inst *inst, std::set<Inst *, Inst_comp>& elems);
+  void flatten_and(Inst *inst, std::vector<Inst *>& elems);
   void flatten_add(Inst *inst, std::vector<Inst *>& elems);
   Inst *canonicalize_and(Inst *inst);
   Inst *canonicalize_add(Inst *inst);
@@ -345,6 +346,17 @@ void Converter::flatten_and(Inst *inst, std::set<Inst *, Inst_comp>& elems)
     }
   else
     elems.insert(inst);
+}
+
+void Converter::flatten_and(Inst *inst, std::vector<Inst *>& elems)
+{
+  if (inst->op == Op::AND)
+    {
+      flatten_and(inst->args[0], elems);
+      flatten_and(inst->args[1], elems);
+    }
+  else
+    elems.push_back(inst);
 }
 
 void Converter::flatten_add(Inst *inst, std::vector<Inst *>& elems)
@@ -1428,20 +1440,30 @@ Inst *Converter::build_phi_ite(Basic_block *bb, const std::function<Inst *(Basic
 
   Inst_comp comp;
   Inst *inst = pred2inst(preds.back());
-  std::set<Inst *, Inst_comp> common;
+  std::vector<Inst *> common;
+  common.reserve(1000);
+  std::vector<Inst *> conds;
+  conds.reserve(1000);
+  std::vector<Inst*> needed_conds;
+  needed_conds.reserve(1000);
   flatten_and(get_full_edge_cond(preds.back(), bb), common);
   for (int i = preds.size() - 2; i >= 0; i--)
     {
-      std::set<Inst *, Inst_comp> conds;
+      conds.clear();
+      needed_conds.clear();
+
       Inst *full_cond = get_full_edge_cond(preds[i], bb);
       flatten_and(full_cond, conds);
+      std::sort(conds.begin(), conds.end(), comp);
+      conds.erase(std::unique(conds.begin(), conds.end()), conds.end());
 
-      std::set<Inst*, Inst_comp> tmp;
+      std::vector<Inst*> tmp;
+      tmp.reserve(conds.size());
       std::set_intersection(common.begin(), common.end(),
 			    conds.begin(), conds.end(),
-			    std::inserter(tmp, tmp.begin()), comp);
+			    std::back_inserter(tmp), comp);
       common = std::move(tmp);
-      std::vector<Inst*> needed_conds;
+
       needed_conds.reserve(conds.size());
       std::set_difference(conds.begin(), conds.end(),
 			  common.begin(), common.end(),
