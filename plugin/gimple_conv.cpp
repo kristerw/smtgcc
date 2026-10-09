@@ -1794,11 +1794,30 @@ void Converter::process_decl(tree decl)
 {
   if (DECL_REGISTER(decl))
     throw Not_implemented("process_decl: DECL_REGISTER variable");
-  uint64_t size = bytesize_for_type(TREE_TYPE(decl));
+  uint64_t size;
+  tree type = TREE_TYPE(decl);
+  if (!COMPLETE_TYPE_P(type))
+    {
+      // For unbounded arrays, we use the largest array size that fits
+      // within the default anonymous memory size (or one element if the
+      // element size is larger than the default anonymous memory size).
+      if (TREE_CODE(type) == ARRAY_TYPE)
+	{
+	  uint64_t elem_size = bytesize_for_type(TREE_TYPE(type));
+	  uint64_t nof = ANON_MEM_SIZE / elem_size;
+	  if (nof == 0)
+	    nof = 1;
+	  size = nof * elem_size;
+	}
+      else
+	throw Not_implemented("process_decl: incomplete type");
+    }
+  else
+    size = bytesize_for_type(type);
   if (size >= ((uint64_t)1 << module->ptr_offset_bits))
     throw Not_implemented("process_decl: too large variable");
   if (size == 0)
-    throw Not_implemented("process_decl: unknown size");
+    throw Not_implemented("process_decl: zero sized variable");
   uint64_t id;
   if (state->decl2id.contains(decl))
     id = state->decl2id.at(decl);
