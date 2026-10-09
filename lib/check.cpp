@@ -193,9 +193,17 @@ class Converter : Simplify_config {
   // Maps basic blocks to an expression telling if it is executed.
   std::map<Basic_block *, Inst *> bb2cond;
 
-  // Maps basic blocks to the expressions determining if it contain UB.
-  std::map<Basic_block *, std::set<Inst *, Inst_comp>> bb2ub;
-  std::map<Basic_block *, std::set<Inst *, Inst_comp>> bb2ub_assume;
+  // Maps a basic block to the set of expressions determining if it
+  // contains UB.
+  std::map<Basic_block *, std::vector<Inst *>> bb2ub;
+  std::map<Basic_block *, std::vector<Inst *>> bb2ub_assume;
+
+  // Maps the path condition for a basic block to the set of expressions
+  // determining if it contains UB.
+  std::map<Inst *, std::vector<Inst *>, Inst_comp> src_bbcond2ub;
+  std::map<Inst *, std::vector<Inst *>, Inst_comp> tgt_bbcond2ub;
+  std::map<Inst *, std::vector<Inst *>, Inst_comp> ver_bbcond2ub;
+  std::map<Inst *, std::vector<Inst *>, Inst_comp> ver_bbcond2ub_assume;
 
   // Maps basic blocks to the memory state at the end of the basic block.
   std::map<Basic_block *, Inst *> bb2memory;
@@ -215,10 +223,6 @@ class Converter : Simplify_config {
 
   Cse cse;
 
-  std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> ver_bbcond2ub;
-  std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> ver_bbcond2ub_assume;
-  std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> src_bbcond2ub;
-  std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> tgt_bbcond2ub;
   bool has_tgt = false;
 
   // The memory state before src and tgt. This is used to have identical
@@ -234,8 +238,8 @@ class Converter : Simplify_config {
   void add_assume_ub(Basic_block *bb, Inst *cond);
   void move_ub_earlier(Function *func);
   void remove_redundant_ub(Function *func);
-  std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> prepare_ub(Function *func);
-  std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> prepare_ub_assume(Function *func);
+  std::map<Inst *, std::vector<Inst *>, Inst_comp> prepare_ub(Function *func);
+  std::map<Inst *, std::vector<Inst *>, Inst_comp> prepare_ub_assume(Function *func);
   void generate_ub();
   void verify_generate_ub();
   Inst *get_full_edge_cond(Basic_block *src, Basic_block *dest);
@@ -1086,7 +1090,7 @@ void Converter::add_ub(Basic_block *bb, Inst *cond)
       add_ub(bb, build_inst(Op::NOT, cond->args[0]->args[1]));
     }
   else
-    bb2ub[bb].insert(cond);
+    bb2ub[bb].push_back(cond);
 }
 
 void Converter::add_assume_ub(Basic_block *bb, Inst *cond)
@@ -1094,21 +1098,49 @@ void Converter::add_assume_ub(Basic_block *bb, Inst *cond)
   if (cond->op == Op::VALUE && cond->value() == 1)
     return;
 
-  bb2ub_assume[bb].insert(build_inst(Op::NOT, cond));
+  bb2ub_assume[bb].push_back(build_inst(Op::NOT, cond));
+}
+
+bool is_always_ub(const std::vector<Inst *>& v)
+{
+  return v.size() == 1 && is_value_one(v[0]);
+}
+
+// Canonicalize a list of UB conditions:
+//  * Sort the elements according to Inst_comp.
+//  * Remove duplicates.
+//  * If `true` is in the set, then all other elements are removed.
+void canonicalize_ub_set(std::vector<Inst *>& v)
+{
+  for (auto cond : v)
+    {
+      if (is_value_one(cond))
+	{
+	  v.clear();
+	  v.push_back(cond);
+	  break;
+	}
+    }
+  Inst_comp comp;
+  std::sort(v.begin(), v.end(), comp);
+  v.erase(std::unique(v.begin(), v.end()), v.end());
 }
 
 // Duplicate UB checks on dominating BBs when they are checked on all paths.
+// We assume the vectors in bb2ub are sorted with Inst_comp, and "always UB"
+// basic blocks only have one element.
 void Converter::move_ub_earlier(Function *func)
 {
   Inst_comp comp;
-  Inst *b1 = value_inst(1, 1);
   for (int i = func->bbs.size() - 1; i >= 0; i--)
     {
       Basic_block *bb = func->bbs[i];
-      std::set<Inst *, Inst_comp>& ub_set = bb2ub[bb];
+      std::vector<Inst *>& ub_set = bb2ub[bb];
+      if (is_always_ub(ub_set))
+	continue;
 
       // Find the UB checks that are performed on all paths from this BB.
-      std::set<Inst *, Inst_comp> checked_ub;
+      std::vector<Inst *> checked_ub;
       if (bb->succs.size() == 1)
 	checked_ub = bb2ub.at(bb->succs[0]);
       else if (bb->succs.size() > 1)
@@ -1116,55 +1148,50 @@ void Converter::move_ub_earlier(Function *func)
 	  bool always_ub = true;
 	  for (auto succ : bb->succs)
 	    {
-	      std::set<Inst*, Inst_comp>& succ_set = bb2ub.at(succ);
-	      if (succ_set.contains(b1))
+	      std::vector<Inst *>& succ_ub = bb2ub.at(succ);
+	      if (is_always_ub(succ_ub))
 		continue;
 	      if (always_ub)
 		{
 		  // This is the first successor to handle.
 		  always_ub = false;
-		  checked_ub = succ_set;
+		  checked_ub = succ_ub;
 		}
 	      else
 		{
-		  std::set<Inst*, Inst_comp> tmp;
-		  std::set_intersection(succ_set.begin(), succ_set.end(),
+		  std::vector<Inst*> tmp;
+		  tmp.reserve(checked_ub.size());
+		  std::set_intersection(succ_ub.begin(), succ_ub.end(),
 					checked_ub.begin(), checked_ub.end(),
-					std::inserter(tmp, tmp.begin()),
-					comp);
-		  checked_ub = tmp;
+					std::back_inserter(tmp), comp);
+		  checked_ub = std::move(tmp);
 		}
 	    }
 	  if (always_ub)
 	    {
 	      assert(checked_ub.empty());
-	      checked_ub.insert(b1);
+	      checked_ub.push_back(value_inst(1, 1));
 	    }
 	}
 
       // Add the checks to the current BB.
-      ub_set.insert(checked_ub.begin(), checked_ub.end());
-      if (ub_set.size() > 1 && ub_set.contains(b1))
-	{
-	  ub_set.clear();
-	  ub_set.insert(b1);
-	}
+      ub_set.insert(ub_set.begin(), checked_ub.begin(), checked_ub.end());
+      canonicalize_ub_set(ub_set);
     }
 }
 
-// For all basic blocks, temove UB that have already been checked on all
+// For all basic blocks, remove UB that have already been checked on all
 // paths to the BB.
 void Converter::remove_redundant_ub(Function *func)
 {
   Inst_comp comp;
-  Inst *b1 = value_inst(1, 1);
-  std::map<Basic_block*,std::set<Inst*, Inst_comp>> bb2checked_ub;
+  std::map<Basic_block*, std::vector<Inst*>> bb2checked_ub;
   for (auto bb : func->bbs)
     {
-      std::set<Inst *, Inst_comp>& ub_set = bb2ub[bb];
+      std::vector<Inst *>& ub_set = bb2ub[bb];
 
       // Find the UB checks that are performed on all paths to this BB.
-      std::set<Inst *, Inst_comp> checked_ub;
+      std::vector<Inst *> checked_ub;
       if (bb->preds.size() == 1)
 	checked_ub = bb2checked_ub.at(bb->preds[0]);
       else if (bb->preds.size() > 1)
@@ -1172,34 +1199,34 @@ void Converter::remove_redundant_ub(Function *func)
 	  bool always_ub = true;
 	  for (auto pred : bb->preds)
 	    {
-	      std::set<Inst*, Inst_comp>& pred_set = bb2checked_ub.at(pred);
-	      if (pred_set.contains(b1))
+	      std::vector<Inst *>& pred_ub = bb2checked_ub.at(pred);
+	      if (is_always_ub(pred_ub))
 		continue;
 	      if (always_ub)
 		{
 		  // This is the first predecessor to handle.
 		  always_ub = false;
-		  checked_ub = pred_set;
+		  checked_ub = pred_ub;
 		}
 	      else
 		{
-		  std::set<Inst*, Inst_comp> tmp;
-		  std::set_intersection(pred_set.begin(), pred_set.end(),
+		  std::vector<Inst *> tmp;
+		  tmp.reserve(checked_ub.size());
+		  std::set_intersection(pred_ub.begin(), pred_ub.end(),
 					checked_ub.begin(), checked_ub.end(),
-					std::inserter(tmp, tmp.begin()),
-					comp);
+					std::back_inserter(tmp), comp);
 		  checked_ub = std::move(tmp);
 		}
 	    }
 	  if (always_ub)
 	    {
 	      assert(checked_ub.empty());
-	      checked_ub.insert(b1);
+	      checked_ub.push_back(value_inst(1, 1));
 	    }
 	}
 
       // Remove UB that are already checked by the predecessor BBs.
-      if (checked_ub.contains(b1))
+      if (is_always_ub(checked_ub))
 	{
 	  // All predecessors are always UB, so the UB in this
 	  // BB does not affect the result.
@@ -1207,59 +1234,60 @@ void Converter::remove_redundant_ub(Function *func)
 	}
       else
 	{
-	  std::set<Inst*, Inst_comp> tmp;
+	  std::vector<Inst*> tmp;
 	  std::set_difference(ub_set.begin(), ub_set.end(),
 			      checked_ub.begin(), checked_ub.end(),
-			      std::inserter(tmp, tmp.begin()), comp);
+			      std::back_inserter(tmp), comp);
 	  ub_set = std::move(tmp);
 	}
 
-      // Add the UB checks from this BB.
-      checked_ub.insert(ub_set.begin(), ub_set.end());
-      if (checked_ub.size() > 1 && checked_ub.contains(b1))
-	{
-	  checked_ub.clear();
-	  checked_ub.insert(b1);
-	}
+      // Add the checks to the current BB.
+      checked_ub.insert(checked_ub.begin(), ub_set.begin(), ub_set.end());
+      canonicalize_ub_set(checked_ub);
       bb2checked_ub.emplace(bb, std::move(checked_ub));
     }
 }
 
-std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> Converter::prepare_ub(Function *func)
+std::map<Inst *, std::vector<Inst *>, Inst_comp> Converter::prepare_ub(Function *func)
 {
-  // Hoist UB to the dominating BB when all successor paths trigger
-  // the same UB.
+  for (auto bb : func->bbs)
+    canonicalize_ub_set(bb2ub[bb]);
+
   move_ub_earlier(func);
   remove_redundant_ub(func);
 
   // Merge the UB from the basic blocks with the same path condition.
-  std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> bbcond2ub;
+  std::map<Inst *, std::vector<Inst *>, Inst_comp> bbcond2ub;
   for (auto bb : func->bbs)
     {
-      if (!bb2ub.contains(bb))
-	continue;
-
-      const std::set<Inst *, Inst_comp>& bb_ub = bb2ub[bb];
-      std::set<Inst *, Inst_comp>& cond_ub = bbcond2ub[bb2cond.at(bb)];
-      cond_ub.insert(bb_ub.begin(), bb_ub.end());
+      if (!bb2ub[bb].empty())
+	{
+	  const std::vector<Inst *>& bb_ub = bb2ub[bb];
+	  std::vector<Inst *>& cond_ub = bbcond2ub[bb2cond.at(bb)];
+	  cond_ub.insert(cond_ub.begin(), bb_ub.begin(), bb_ub.end());
+	}
     }
+  for (auto& [_, ub_set] : bbcond2ub)
+    canonicalize_ub_set(ub_set);
 
   return bbcond2ub;
 }
 
-std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> Converter::prepare_ub_assume(Function *func)
+std::map<Inst *, std::vector<Inst *>, Inst_comp> Converter::prepare_ub_assume(Function *func)
 {
   // Merge the UB from the basic blocks with the same path condition.
-  std::map<Inst *, std::set<Inst *, Inst_comp>, Inst_comp> bbcond2ub_assume;
+  std::map<Inst *, std::vector<Inst *>, Inst_comp> bbcond2ub_assume;
   for (auto bb : func->bbs)
     {
-      if (!bb2ub_assume.contains(bb))
-	continue;
-
-      const std::set<Inst *, Inst_comp>& bb_ub = bb2ub_assume[bb];
-      std::set<Inst *, Inst_comp>& cond_ub = bbcond2ub_assume[bb2cond.at(bb)];
-      cond_ub.insert(bb_ub.begin(), bb_ub.end());
+      if (bb2ub_assume.contains(bb))
+	{
+	  const std::vector<Inst *>& bb_ub = bb2ub_assume[bb];
+	  std::vector<Inst *>& cond_ub = bbcond2ub_assume[bb2cond.at(bb)];
+	  cond_ub.insert(cond_ub.begin(), bb_ub.begin(), bb_ub.end());
+	}
     }
+  for (auto& [_, ub_set] : bbcond2ub_assume)
+    canonicalize_ub_set(ub_set);
 
   return bbcond2ub_assume;
 }
@@ -2257,6 +2285,7 @@ void Converter::convert_function(Function *func, Function_role role)
   // for the other use cases.
   bb2cond.clear();
   bb2ub.clear();
+  bb2ub_assume.clear();
   bb2memory.clear();
   bb2memory_size.clear();
   bb2memory_flag.clear();
