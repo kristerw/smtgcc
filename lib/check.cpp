@@ -255,7 +255,6 @@ class Converter : Simplify_config {
   Inst *get_cmp_inst(const Cse_key& key);
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   Inst *simplify(Inst *inst);
-  void flatten_and(Inst *inst, std::set<Inst *, Inst_comp>& elems);
   void flatten_and(Inst *inst, std::vector<Inst *>& elems);
   void flatten_add(Inst *inst, std::vector<Inst *>& elems);
   Inst *canonicalize_and(Inst *inst);
@@ -335,17 +334,6 @@ Inst *Converter::simplify(Inst *inst)
     inst = simplify_inst(inst, this);
 
   return inst;
-}
-
-void Converter::flatten_and(Inst *inst, std::set<Inst *, Inst_comp>& elems)
-{
-  if (inst->op == Op::AND)
-    {
-      flatten_and(inst->args[0], elems);
-      flatten_and(inst->args[1], elems);
-    }
-  else
-    elems.insert(inst);
 }
 
 void Converter::flatten_and(Inst *inst, std::vector<Inst *>& elems)
@@ -513,24 +501,35 @@ Inst *Converter::canonicalize_and(Inst *inst)
   assert(inst->op == Op::AND);
   assert(inst->bitsize == 1);
 
-  Inst *arg1 = inst->args[0];
-  Inst *arg2 = inst->args[1];
-
   // Collect the elements.
-  std::set<Inst *, Inst_comp> elems;
-  flatten_and(arg1, elems);
-  flatten_and(arg2, elems);
-
-  assert(!elems.empty());
+  std::vector<Inst *> elems;
+  flatten_and(inst, elems);
+  Inst_comp inst_comp;
+  std::sort(elems.begin(), elems.end(), inst_comp);
+  elems.erase(std::unique(elems.begin(), elems.end()), elems.end());
   if (elems.size() == 1)
-    return *elems.begin();
+    return elems[0];
 
   // x & !x -> 0
-  for (auto elem : elems)
-    {
-      if (elem->op == Op::NOT && elems.contains(elem->args[0]))
-	return value_inst(0, arg1->bitsize);
-    }
+  {
+    std::vector<Inst *> negated;
+    std::vector<Inst *> non_negated;
+    negated.reserve(elems.size());
+    non_negated.reserve(elems.size());
+    for (auto elem : elems)
+      {
+	if (elem->op == Op::NOT)
+	  negated.push_back(elem->args[0]);
+	else
+	  non_negated.push_back(elem);
+      }
+    std::vector<Inst *> tmp;
+    std::set_intersection(non_negated.begin(), non_negated.end(),
+			  negated.begin(), negated.end(),
+			  std::back_inserter(tmp), inst_comp);
+    if (!tmp.empty())
+      return value_inst(0, 1);
+  }
 
   // Eliminate redundant comparison with a constant. For example:
   //   x > 3 && x > 4
@@ -541,6 +540,7 @@ Inst *Converter::canonicalize_and(Inst *inst)
     std::map<Inst*, std::vector<Inst*>, Inst_comp> slt_comps;
     std::map<Inst*, std::vector<Inst*>, Inst_comp> eq_comps;
     std::map<Inst*, std::vector<Inst*>, Inst_comp> not_eq_comps;
+    std::vector<Inst *> erase;
 
     // Collect Op::ULT, Op::ULE, and Op::EQ between an instruction and
     // a constant.
@@ -603,12 +603,9 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	// been eliminated above.
 	if (not_eq_comps.contains(x))
 	  {
-	    for (auto comp : not_eq_comps[x])
-	      {
-		assert(comp->args[0]->args[1] != comps[0]->args[1]);
-		elems.erase(comp);
-	      }
-	    not_eq_comps[x].clear();
+	    std::vector<Inst *>& ne_comps = not_eq_comps[x];
+	    erase.insert(erase.end(), ne_comps.begin(), ne_comps.end());
+	    ne_comps.clear();
 	  }
       }
 
@@ -648,10 +645,7 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	    // The comparisons in ult_comps are consistent with the
 	    // equality comparison, but this means all of them are
 	    // redundant.
-	    for (auto comp : comps)
-	      {
-		elems.erase(comp);
-	      }
+	    erase.insert(erase.end(), comps.begin(), comps.end());
 	    continue;
 	  }
 
@@ -661,10 +655,10 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	  {
 	    std::optional<unsigned __int128> ubnd = ult_upper_bound(comp);
 	    if (ubnd && upper_bound && *upper_bound < *ubnd)
-	      elems.erase(comp);
+	      erase.push_back(comp);
 	    std::optional<unsigned __int128> lbnd = ult_lower_bound(comp);
 	    if (lbnd && lower_bound && *lbnd < *lower_bound)
-	      elems.erase(comp);
+	      erase.push_back(comp);
 	  }
 
 	// Eliminate the not_eq_comps comparisons that are redundant with
@@ -674,9 +668,9 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	    Inst *value_inst = comp->args[0]->args[1];
 	    unsigned __int128 value = value_inst->value();
 	    if (upper_bound && *upper_bound < value )
-	      elems.erase(comp);
+	      erase.push_back(comp);
 	    if (lower_bound && value < *lower_bound)
-	      elems.erase(comp);
+	      erase.push_back(comp);
 
 	    // Expressions such as
 	    //   x <= 4 && x != 4
@@ -687,14 +681,14 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	    // redundant instructions.
 	    if (upper_bound && *upper_bound == value)
 	      {
-		elems.insert(build_inst(Op::ULT, x, value_inst));
-		elems.erase(comp);
+		elems.push_back(build_inst(Op::ULT, x, value_inst));
+		erase.push_back(comp);
 		new_comparisons_added = true;
 	      }
 	    if (lower_bound && value == *lower_bound)
 	      {
-		elems.insert(build_inst(Op::ULT, value_inst, x));
-		elems.erase(comp);
+		elems.push_back(build_inst(Op::ULT, value_inst, x));
+		erase.push_back(comp);
 		new_comparisons_added = true;
 	      }
 	  }
@@ -738,7 +732,7 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	    // redundant.
 	    for (auto comp : comps)
 	      {
-		elems.erase(comp);
+		erase.push_back(comp);
 	      }
 	    continue;
 	  }
@@ -749,10 +743,10 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	  {
 	    std::optional<__int128> ubnd = slt_upper_bound(comp);
 	    if (ubnd && upper_bound && *upper_bound < *ubnd)
-	      elems.erase(comp);
+	      erase.push_back(comp);
 	    std::optional<__int128> lbnd = slt_lower_bound(comp);
 	    if (lbnd && lower_bound && *lbnd < *lower_bound)
-	      elems.erase(comp);
+	      erase.push_back(comp);
 	  }
 
 	// Eliminate the not_eq_comps comparisons that are redundant with
@@ -762,9 +756,9 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	    Inst *value_inst = comp->args[0]->args[1];
 	    __int128 value = value_inst->signed_value();
 	    if (upper_bound && *upper_bound < value )
-	      elems.erase(comp);
+	      erase.push_back(comp);
 	    if (lower_bound && value < *lower_bound)
-	      elems.erase(comp);
+	      erase.push_back(comp);
 
 	    // Expressions such as
 	    //   x <= 4 && x != 4
@@ -775,18 +769,32 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	    // redundant instructions.
 	    if (upper_bound && *upper_bound == value)
 	      {
-		elems.insert(build_inst(Op::SLT, x, value_inst));
-		elems.erase(comp);
+		elems.push_back(build_inst(Op::SLT, x, value_inst));
+		erase.push_back(comp);
 		new_comparisons_added = true;
 	      }
 	    if (lower_bound && value == *lower_bound)
 	      {
-		elems.insert(build_inst(Op::SLT, value_inst, x));
-		elems.erase(comp);
+		elems.push_back(build_inst(Op::SLT, value_inst, x));
+		erase.push_back(comp);
 		new_comparisons_added = true;
 	      }
 	  }
       }
+
+    if (new_comparisons_added)
+      {
+	std::sort(elems.begin(), elems.end(), inst_comp);
+	elems.erase(std::unique(elems.begin(), elems.end()), elems.end());
+      }
+    std::sort(erase.begin(), erase.end(), inst_comp);
+    erase.erase(std::unique(erase.begin(), erase.end()), erase.end());
+    std::vector<Inst *> tmp;
+    tmp.reserve(elems.size());
+    std::set_difference(elems.begin(), elems.end(),
+			erase.begin(), erase.end(),
+			std::back_inserter(tmp), inst_comp);
+    elems = std::move(tmp);
   }
 
   assert(!elems.empty());
