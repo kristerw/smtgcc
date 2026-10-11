@@ -9435,9 +9435,6 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
 
 void Converter::init_var(tree decl, Inst *mem_inst)
 {
-  uint64_t size = bytesize_for_type(TREE_TYPE(decl));
-  if (size > MAX_MEMORY_UNROLL_LIMIT)
-    throw Not_implemented("init_var: too large constructor");
   check_type(TREE_TYPE(decl));
 
   Basic_block *entry_bb = func->bbs[0];
@@ -9452,6 +9449,8 @@ void Converter::init_var(tree decl, Inst *mem_inst)
       // Uninitializied static variables are guaranted to be initialized to 0.
       Inst *zero = entry_bb->value_inst(0, 8);
       uint64_t size = bytesize_for_type(TREE_TYPE(decl));
+      if (size > MAX_MEMORY_UNROLL_LIMIT)
+	throw Not_implemented("init_var: too large constructor");
       entry_bb->build_inst(Op::MEMSET, mem_inst, zero, size);
       return;
     }
