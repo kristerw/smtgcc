@@ -638,6 +638,8 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
 	  if (DECL_BIT_FIELD_TYPE(fld))
 	    continue;
 	  tree elem_type = TREE_TYPE(fld);
+	  if (!COMPLETE_TYPE_P(elem_type))
+	    continue;
 	  uint64_t elem_size = bytesize_for_type(elem_type);
 	  if (elem_size == 0)
 	    continue;
