@@ -1957,7 +1957,7 @@ Addr Converter::process_address(tree expr, bool is_mem_access)
       Inst *id = extract_id(bb, ptr);
       return {ptr, 0, id};
     }
-  if (code == PARM_DECL && TREE_ADDRESSABLE(expr))
+  if (code == PARM_DECL && parm_decl2mem.contains(expr))
     {
       Inst *ptr = parm_decl2mem.at(expr);
       Inst *prov = extract_id(bb, ptr);
@@ -9556,7 +9556,7 @@ void Converter::process_func_args()
 	  Inst *param_bitsize = entry_bb->value_inst(bitsize, 32);
 	  Inst *param_inst =
 	    entry_bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
-	  if (TREE_ADDRESSABLE(decl))
+	  if (!is_gimple_reg(decl))
 	    {
 	      Inst *inst = to_mem_repr(param_inst, TREE_TYPE(decl));
 	      uint64_t size = inst->bitsize / 8;
