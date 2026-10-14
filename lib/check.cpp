@@ -112,7 +112,6 @@ private:
   Inst *get_inst(const Cse_key& key);
   bool is_min_max(Inst *arg1, Inst *arg2, Inst *arg3);
   Inst *cse_min_max(Inst *arg1, Inst *arg2, Inst *arg3);
-  Inst *cse_icomparison(Op op, Inst *arg1, Inst *arg2);
 
 public:
   Inst *get_inst(Op op)
@@ -128,10 +127,11 @@ public:
     Inst *inst = get_inst(key);
     if (!inst && op == Op::NOT && arg1->op == Op::ITE && check_neg_ite)
       {
-	Inst *a2 = get_inst(Op::NOT, arg1->args[1], false);
-	Inst *a3 = get_inst(Op::NOT, arg1->args[2], false);
-	if (a2 && a3)
-	  return get_inst(Op::ITE, arg1->args[0], a2, a3);
+	if (Inst *a2 = get_inst(Op::NOT, arg1->args[1], false))
+	  {
+	    if (Inst *a3 = get_inst(Op::NOT, arg1->args[2], false))
+	      return get_inst(Op::ITE, arg1->args[0], a2, a3);
+	  }
       }
     return inst;
   }
@@ -139,8 +139,6 @@ public:
   {
     const Cse_key key(op, arg1, arg2);
     Inst *inst = get_inst(key);
-    if (!inst && inst_info[(int)op].iclass == Inst_class::icomparison)
-      inst = cse_icomparison(op, arg1, arg2);
     return inst;
   }
   Inst *get_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
@@ -260,6 +258,7 @@ class Converter : Simplify_config {
   Inst *canonicalize_and(Inst *inst);
   Inst *canonicalize_add(Inst *inst);
   bool reprocess_dest_func();
+  Inst *cse_icomparison(Op op, Inst *arg1, Inst *arg2);
 
 public:
   Inst *build_inst(Op op) final;
@@ -524,6 +523,7 @@ Inst *Converter::canonicalize_and(Inst *inst)
 	  non_negated.push_back(elem);
       }
     std::vector<Inst *> tmp;
+    std::sort(negated.begin(), negated.end(), inst_comp);
     std::set_intersection(non_negated.begin(), non_negated.end(),
 			  negated.begin(), negated.end(),
 			  std::back_inserter(tmp), inst_comp);
@@ -870,58 +870,42 @@ Inst *Cse::cse_min_max(Inst *arg1, Inst *arg2, Inst *arg3)
   return get_inst(key);
 }
 
-Inst *Cse::cse_icomparison(Op op, Inst *arg1, Inst *arg2)
+Inst *Converter::cse_icomparison(Op op, Inst *arg1, Inst *arg2)
 {
   // ult x, c <--> not (ult c-1, x)
   if (op == Op::ULT && arg2->op == Op::VALUE && !is_value_zero(arg2))
     {
       Inst *val = arg1->bb->value_inst(arg2->value() - 1, arg1->bitsize);
-      const Cse_key key1(op, val, arg1);
-      Inst *cmp = get_inst(key1);
+      Inst *cmp = cse.get_inst(op, val, arg1);
       if (cmp)
-	{
-	  const Cse_key key2(Op::NOT, cmp);
-	  return get_inst(key2);
-	}
+	return build_inst(Op::NOT, cmp);
     }
 
   // slt x, c <--> not (slt c-1, x)
   if (op == Op::SLT && arg2->op == Op::VALUE && !is_value_signed_min(arg2))
     {
       Inst *val = arg1->bb->value_inst(arg2->signed_value() - 1, arg1->bitsize);
-      const Cse_key key1(op, val, arg1);
-      Inst *cmp = get_inst(key1);
+      Inst *cmp = cse.get_inst(op, val, arg1);
       if (cmp)
-	{
-	  const Cse_key key2(Op::NOT, cmp);
-	  return get_inst(key2);
-	}
+	return build_inst(Op::NOT, cmp);
     }
 
   // ult c, x <--> not (ult x, c+1)
   if (op == Op::ULT && arg1->op == Op::VALUE && !is_value_m1(arg1))
     {
       Inst *val = arg1->bb->value_inst(arg1->value() + 1, arg1->bitsize);
-      const Cse_key key1(op, arg2, val);
-      Inst *cmp = get_inst(key1);
+      Inst *cmp = cse.get_inst(op, arg2, val);
       if (cmp)
-	{
-	  const Cse_key key2(Op::NOT, cmp);
-	  return get_inst(key2);
-	}
+	return build_inst(Op::NOT, cmp);
     }
 
   // slt c, x <--> not (slt x, c+1)
   if (op == Op::SLT && arg1->op == Op::VALUE && !is_value_signed_max(arg1))
     {
       Inst *val = arg1->bb->value_inst(arg1->signed_value() + 1, arg1->bitsize);
-      const Cse_key key1(op, arg2, val);
-      Inst *cmp = get_inst(key1);
+      Inst *cmp = cse.get_inst(op, arg2, val);
       if (cmp)
-	{
-	  const Cse_key key2(Op::NOT, cmp);
-	  return get_inst(key2);
-	}
+	return build_inst(Op::NOT, cmp);
     }
 
   return nullptr;
@@ -955,7 +939,9 @@ Inst *Converter::build_inst(Op op, Inst *arg, bool insert_after)
 Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 {
   Inst *inst = cse.get_inst(op, arg1, arg2);
-  if (!inst && (op == Op::AND || op == Op::OR))
+  if (!inst && inst_info[(int)op].iclass == Inst_class::icomparison)
+    inst = cse_icomparison(op, arg1, arg2);
+  else if (!inst && (op == Op::AND || op == Op::OR))
     {
       if (op == Op::AND)
 	{
@@ -1023,12 +1009,6 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
       inst = dest_bb->build_inst(op, arg1, arg2);
       inst = simplify(inst);
       cse.set_inst(inst, op, arg1, arg2);
-
-      // Booleans are often used negated. Create the negated form right after
-      // the instruction to reduce differences in the result, independent of
-      // later simplifications.
-      if (inst->bitsize == 1 && inst->op != Op::NOT)
-	build_inst(Op::NOT, inst);
     }
 
   return inst;
@@ -1061,12 +1041,6 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
       inst = dest_bb->build_inst(op, arg1, arg2, arg3);
       inst = simplify(inst);
       cse.set_inst(inst, op, arg1, arg2, arg3);
-
-      // Booleans are often used negated. Create the negated form right after
-      // the instruction to reduce differences in the result, independent of
-      // later simplifications.
-      if (inst->bitsize == 1 && inst->op != Op::NOT)
-	build_inst(Op::NOT, inst);
     }
 
   return inst;
