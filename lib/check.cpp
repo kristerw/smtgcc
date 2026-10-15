@@ -183,10 +183,12 @@ class Converter : Simplify_config {
   // True if simplify_inst should be called while building instructions.
   bool run_simplify_inst;
 
-  // True if we are currently canonicalizing Op::AND, Op::OR, or Op::ADD
-  // sequences. Used to prevent recursive calls while building the
-  // canonicalized sequence.
+  // True if we are currently canonicalizing Op::ADD sequences. Used to
+  // prevent recursive calls while building the canonicalized sequence.
   bool processing_canonicalization = false;
+
+  // Cache of canonicalized Op::AND instructions.
+  std::unordered_map<Inst *, Inst *> canonicalized_and;
 
   // Maps basic blocks to an expression telling if it is executed.
   std::map<Basic_block *, Inst *> bb2cond;
@@ -323,11 +325,7 @@ Inst *Converter::simplify(Inst *inst)
   if (!inst->has_lhs())
     return inst;
 
-  if (!processing_canonicalization
-      && inst->bitsize == 1
-      && inst->op == Op::AND)
-    inst = canonicalize_and(inst);
-  else if (!processing_canonicalization && inst->op == Op::ADD)
+  if (!processing_canonicalization && inst->op == Op::ADD)
     inst = canonicalize_add(inst);
   else
     inst = simplify_inst(inst, this);
@@ -497,8 +495,12 @@ std::optional<__int128> slt_lower_bound(std::vector<Inst*>& comps)
 //   (and (and (and (and e1, e2), e3), e4) ...
 Inst *Converter::canonicalize_and(Inst *inst)
 {
-  assert(inst->op == Op::AND);
-  assert(inst->bitsize == 1);
+  if (!run_simplify_inst
+      || inst->op != Op::AND
+      || inst->bitsize != 1)
+    return inst;
+  if (canonicalized_and.contains(inst))
+    return canonicalized_and[inst];
 
   // Collect the elements.
   std::vector<Inst *> elems;
@@ -804,7 +806,6 @@ Inst *Converter::canonicalize_and(Inst *inst)
   // Generate the sequence.
   bool orig_run_simplify_inst = run_simplify_inst;
   run_simplify_inst = false;
-  processing_canonicalization = true;
   auto first = elems.begin();
   auto second = std::next(first);
   Inst *new_inst = build_inst(inst->op, *first, *second);
@@ -812,12 +813,13 @@ Inst *Converter::canonicalize_and(Inst *inst)
     {
       new_inst = build_inst(inst->op, new_inst, *it);
     }
-  processing_canonicalization = false;
   run_simplify_inst = orig_run_simplify_inst;
 
   if (new_comparisons_added && new_inst->op == Op::AND)
     new_inst = canonicalize_and(new_inst);
 
+  canonicalized_and[inst] = new_inst;
+  canonicalized_and[new_inst] = new_inst;
   return new_inst;
 }
 
@@ -924,6 +926,7 @@ Inst *Converter::build_inst(Op op)
 
 Inst *Converter::build_inst(Op op, Inst *arg, bool insert_after)
 {
+  arg = canonicalize_and(arg);
   Inst *inst = cse.get_inst(op, arg);
   if (!inst)
     {
@@ -938,6 +941,11 @@ Inst *Converter::build_inst(Op op, Inst *arg, bool insert_after)
 
 Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 {
+  if (op != Op::AND)
+    {
+      arg1 = canonicalize_and(arg1);
+      arg2 = canonicalize_and(arg2);
+    }
   Inst *inst = cse.get_inst(op, arg1, arg2);
   if (!inst && inst_info[(int)op].iclass == Inst_class::icomparison)
     inst = cse_icomparison(op, arg1, arg2);
@@ -1016,6 +1024,9 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 
 Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2, Inst *arg3)
 {
+  arg1 = canonicalize_and(arg1);
+  arg2 = canonicalize_and(arg2);
+  arg3 = canonicalize_and(arg3);
   if (op == Op::ARRAY_STORE
       || op == Op::ARRAY_SET_FLAG
       || op == Op::ARRAY_SET_INDEF)
@@ -2328,6 +2339,7 @@ bool Converter::reprocess_dest_func()
 
   translate.clear();
   cse.clear();
+  canonicalized_and.clear();
   destroy_function(old_dest_func);
 
   dead_code_elimination(dest_func);
@@ -2348,6 +2360,7 @@ void Converter::finalize()
   src_bbcond2ub.clear();
   tgt_bbcond2ub.clear();
   cse.clear();
+  canonicalized_and.clear();
 
   if (run_simplify_inst)
     {
