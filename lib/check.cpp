@@ -2550,6 +2550,14 @@ Solver_result check_refine(Module *module, bool run_simplify_inst)
       return *result_cache;
     }
 
+  if (config.smt_solver == SmtSolver::none)
+    {
+      if (config.verbose > 0)
+	fprintf(stderr,
+		"SMTGCC: No checking done (SMTGCC_SMT_SOLVER is none)\n");
+      return {};
+    }
+
   Solver_result result = {Result_status::correct, {}};
   struct SStats stats;
   if (config.smt_solver == SmtSolver::z3)
@@ -2603,6 +2611,14 @@ Solver_result verify(Function *func, bool run_simplify_inst)
       if (config.verbose > 0)
 	fprintf(stderr, "SMTGCC: Using cached result\n");
       return *result_cache;
+    }
+
+  if (config.smt_solver == SmtSolver::none)
+    {
+      if (config.verbose > 0)
+	fprintf(stderr,
+		"SMTGCC: No checking done (SMTGCC_SMT_SOLVER is none)\n");
+      return {};
     }
 
   Solver_result result = {Result_status::correct, {}};

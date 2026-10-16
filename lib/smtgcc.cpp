@@ -244,6 +244,8 @@ Config::Config()
 	smt_solver = SmtSolver::bitwuzla;
       else if (!strcmp(p, "cvc5") || !strcmp(p, "CVC5"))
 	smt_solver = SmtSolver::cvc5;
+      else if (!strcmp(p, "none"))
+	smt_solver = SmtSolver::none;
       else
 	throw Not_implemented("Unknown SMTGCC_SMT_SOLVER");
     }

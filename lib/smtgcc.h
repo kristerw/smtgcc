@@ -393,6 +393,7 @@ struct Module {
 };
 
 enum class SmtSolver : uint8_t {
+  none,
   z3,
   cvc5,
   bitwuzla
