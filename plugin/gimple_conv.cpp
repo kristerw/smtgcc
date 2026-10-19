@@ -7404,7 +7404,7 @@ void Converter::process_cfn_signbit(gimple *stmt)
       // The backend typically generates it as `x & 0x80000000` when
       // it fits in the return type, so we use that as our default
       // strategy.
-#ifdef SMTGCC_M68K
+#if defined(SMTGCC_M68K) || defined(SMTGCC_SH)
       {
 	if (elem1->bitsize > bitsize)
 	  {
