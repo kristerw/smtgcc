@@ -2083,6 +2083,19 @@ void Parser::process_call()
       bb->build_inst(Op::MEMMOVE, dest_ptr, src_ptr, size);
       return;
     }
+  if (name == "mempcpy")
+    {
+      Inst *dest_ptr =
+	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::x0]);
+      Inst *src_ptr =
+	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::x1]);
+      Inst *size =
+	bb->build_inst(Op::READ, rstate->registers[Aarch64RegIdx::x2]);
+      bb->build_inst(Op::MEMMOVE, dest_ptr, src_ptr, size);
+      Inst *res = bb->build_inst(Op::ADD, dest_ptr, size);
+      bb->build_inst(Op::WRITE, rstate->registers[Aarch64RegIdx::x0], res);
+      return;
+    }
   if (name == "memset")
     {
       Inst *ptr =
