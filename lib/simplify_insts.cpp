@@ -916,13 +916,6 @@ Inst *Simplify::simplify_or()
   Inst *const arg1 = inst->args[0];
   Inst *const arg2 = inst->args[1];
 
-  if (inst->bitsize == 1)
-    {
-      Inst *not_arg1 = build_inst(Op::NOT, arg1);
-      Inst *not_arg2 = build_inst(Op::NOT, arg2);
-      return build_inst(Op::NOT, build_inst(Op::AND, not_arg1, not_arg2));
-    }
-
   // or x, 0 -> x
   if (is_value_zero(arg2))
     return arg1;
@@ -989,6 +982,7 @@ Inst *Simplify::simplify_or()
     return arg2;
 
   // or (slt x, y) (eq (x, y)) -> not (slt y, x)
+  // or (ult x, y) (eq (x, y)) -> not (ult y, x)
   if (arg1->op == Op::EQ || arg2->op == Op::EQ)
     {
       Inst *a1 = arg1;
@@ -1350,6 +1344,14 @@ Inst *Simplify::simplify_slt()
   // slt x, signed_min_val -> false
   if (is_value_signed_min(arg2))
     return value_inst(0, 1);
+
+  // slt x, signed_max_val -> ne x, signed_max_val
+  if (is_value_signed_max(arg2))
+    return build_inst(Op::NE, arg1, arg2);
+
+  // slt signed_min_val, x -> ne x, signed_min_val
+  if (is_value_signed_min(arg1))
+    return build_inst(Op::NE, arg2, arg1);
 
   // slt signed_max_val, x -> false
   if (is_value_signed_max(arg1))
@@ -1916,17 +1918,18 @@ Inst *Simplify::simplify_ult()
     return value_inst(0, 1);
 
   // ult x, 1 -> eq x, 0
-  if (arg2->op == Op::VALUE && arg2->value() == 1)
-    {
-      Inst *zero = value_inst(0, arg1->bitsize);
-      return build_inst(Op::EQ, arg1, zero);
-    }
+  if (is_value_one(arg2))
+    return build_inst(Op::EQ, arg1, value_inst(0, arg1->bitsize));
+
+  // ult x, -1 -> ne x, -1
+  if (is_value_m1(arg2))
+    return build_inst(Op::NE, arg1, arg2);
 
   // ult 0, x -> not (eq x, 0)
   if (is_value_zero(arg1))
     return build_inst(Op::NOT, build_inst(Op::EQ, arg2, arg1));
 
-  // ult c, x -> false if c == the maximal possible value of x
+  // ult -1, x -> false
   if (is_value_m1(arg1))
     return value_inst(0, 1);
 

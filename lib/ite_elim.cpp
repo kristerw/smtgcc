@@ -52,12 +52,12 @@ struct Ite_elim
   bool changed = false;
 };
 
-void flatten_and(Inst *inst, std::vector<Inst *>& elems)
+void flatten(Op op, Inst *inst, std::vector<Inst *>& elems)
 {
-  if (inst->op == Op::AND)
+  if (inst->op == op)
     {
-      flatten_and(inst->args[0], elems);
-      flatten_and(inst->args[1], elems);
+      flatten(op, inst->args[0], elems);
+      flatten(op, inst->args[1], elems);
     }
   else
     elems.push_back(inst);
@@ -96,7 +96,7 @@ std::optional<bool> Ite_elim::specialize_cond_true(Inst *inst, Inst *cond, int d
   if (inst->op == Op::AND)
     {
       std::vector<Inst*> conds;
-      flatten_and(inst, conds);
+      flatten(Op::AND, inst, conds);
       for (auto cnd : conds)
 	{
 	  std::optional<bool> value =
@@ -109,10 +109,26 @@ std::optional<bool> Ite_elim::specialize_cond_true(Inst *inst, Inst *cond, int d
       return true;
     }
 
+  if (inst->op == Op::OR)
+    {
+      std::vector<Inst*> conds;
+      flatten(Op::OR, inst, conds);
+      for (auto cnd : conds)
+	{
+	  std::optional<bool> value =
+	    specialize_cond_true(cnd, cond, depth + 1);
+	  if (!value)
+	    return {};
+	  if (*value)
+	    return true;
+	}
+      return false;
+    }
+
   if (cond->op == Op::AND)
     {
       std::vector<Inst*> conds;
-      flatten_and(cond, conds);
+      flatten(Op::AND, cond, conds);
       for (auto cnd : conds)
 	{
 	  std::optional<bool> value =
@@ -286,7 +302,7 @@ std::optional<bool> Ite_elim::specialize_cond_false(Inst *inst, Inst *cond, int 
   if (inst->op == Op::AND)
     {
       std::vector<Inst*> conds;
-      flatten_and(inst, conds);
+      flatten(Op::AND, inst, conds);
       for (auto cnd : conds)
 	{
 	  std::optional<bool> value =
@@ -297,6 +313,35 @@ std::optional<bool> Ite_elim::specialize_cond_false(Inst *inst, Inst *cond, int 
 	    return false;
 	}
       return true;
+    }
+
+  if (inst->op == Op::OR)
+    {
+      std::vector<Inst*> conds;
+      flatten(Op::OR, inst, conds);
+      for (auto cnd : conds)
+	{
+	  std::optional<bool> value =
+	    specialize_cond_false(cnd, cond, depth + 1);
+	  if (!value)
+	    return {};
+	  if (*value)
+	    return true;
+	}
+      return false;
+    }
+
+  if (cond->op == Op::OR)
+    {
+      std::vector<Inst*> conds;
+      flatten(Op::OR, cond, conds);
+      for (auto cnd : conds)
+	{
+	  std::optional<bool> value =
+	    specialize_cond_false(inst, cnd, depth + 1);
+	  if (value)
+	    return value;
+	}
     }
 
   if (cond->op == Op::ULT && cond->args[0]->op == Op::VALUE)
