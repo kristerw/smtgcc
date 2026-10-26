@@ -830,6 +830,59 @@ Inst *Simplify::simplify_eq()
       return build_inst(Op::ULT, arg1, new_c);
     }
 
+  // eq x, (ite (ult y, x), y, x) -> not (ult y, x)
+  // eq x, (ite (slt y, x), y, x) -> not (slt y, x)
+  // eq (ite (ult y, x), y, x), x -> not (ult y, x)
+  // eq (ite (slt y, x), y, x), x -> not (slt y, x)
+  // eq x, (ite (ult x, y), y, x) -> not (ult x, y)
+  // eq x, (ite (slt x, y), y, x) -> not (slt x, y)
+  // eq (ite (ult x, y), y, x), x -> not (ult x, y)
+  // eq (ite (slt x, y), y, x), x -> not (slt x, y)
+  if (arg2->op == Op::ITE)
+    {
+      Inst *const ite_arg1 = arg2->args[0];
+      Inst *const ite_arg2 = arg2->args[1];
+      Inst *const ite_arg3 = arg2->args[2];
+      if ((ite_arg1->op == Op::ULT || ite_arg1->op == Op::SLT)
+	  && ite_arg1->args[0] == ite_arg2
+	  && ite_arg1->args[1] == ite_arg3
+	  && ite_arg3 == arg1)
+	return build_inst(Op::NOT, ite_arg1);
+    }
+  if (arg1->op == Op::ITE)
+    {
+      Inst *const ite_arg1 = arg1->args[0];
+      Inst *const ite_arg2 = arg1->args[1];
+      Inst *const ite_arg3 = arg1->args[2];
+      if ((ite_arg1->op == Op::ULT || ite_arg1->op == Op::SLT)
+	  && ite_arg1->args[0] == ite_arg2
+	  && ite_arg1->args[1] == ite_arg3
+	  && ite_arg3 == arg2)
+	return build_inst(Op::NOT, ite_arg1);
+    }
+  if (arg2->op == Op::ITE)
+    {
+      Inst *const ite_arg1 = arg2->args[0];
+      Inst *const ite_arg2 = arg2->args[1];
+      Inst *const ite_arg3 = arg2->args[2];
+      if ((ite_arg1->op == Op::ULT || ite_arg1->op == Op::SLT)
+	  && ite_arg1->args[1] == ite_arg2
+	  && ite_arg1->args[0] == ite_arg3
+	  && ite_arg3 == arg1)
+	return build_inst(Op::NOT, ite_arg1);
+    }
+  if (arg1->op == Op::ITE)
+    {
+      Inst *const ite_arg1 = arg1->args[0];
+      Inst *const ite_arg2 = arg1->args[1];
+      Inst *const ite_arg3 = arg1->args[2];
+      if ((ite_arg1->op == Op::ULT || ite_arg1->op == Op::SLT)
+	  && ite_arg1->args[1] == ite_arg2
+	  && ite_arg1->args[0] == ite_arg3
+	  && ite_arg3 == arg2)
+	return build_inst(Op::NOT, ite_arg1);
+    }
+
   return inst;
 }
 
