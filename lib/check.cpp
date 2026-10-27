@@ -1545,22 +1545,16 @@ Converter::Converter(Module *m, bool run_simplify_inst)
 
 void Converter::add_ub(Basic_block *bb, Inst *cond)
 {
+  cond = canonicalize_and_or(cond);
   if (cond->op == Op::VALUE && cond->value() == 0)
     return;
 
-  // It is more effective to split Op::OR into two elements to better handle
-  // cases where, for example, one of the arguments is common to both src
-  // and tgt.
-  //
-  // Note: This split needs to be done here rather than in earlier passes
-  // such as simplify_inst, because it is common to encounter IR of the form
-  //   UB(!uninit & (cond1 | cond2))
-  // and the uninit check is not eliminated until the memory array
-  // optimizations are performed here in the Converter pass.
   if (cond->op == Op::OR)
     {
-      add_ub(bb, cond->args[0]);
-      add_ub(bb, cond->args[1]);
+      std::vector<Inst *> elems;
+      flatten(Op::OR, cond, elems);
+      for (auto elem : elems)
+	bb2ub[bb].push_back(elem);
     }
   else
     bb2ub[bb].push_back(cond);
@@ -1568,10 +1562,19 @@ void Converter::add_ub(Basic_block *bb, Inst *cond)
 
 void Converter::add_assume_ub(Basic_block *bb, Inst *cond)
 {
-  if (cond->op == Op::VALUE && cond->value() == 1)
+  cond = build_inst(Op::NOT, cond);
+  if (cond->op == Op::VALUE && cond->value() == 0)
     return;
 
-  bb2ub_assume[bb].push_back(build_inst(Op::NOT, cond));
+  if (cond->op == Op::OR)
+    {
+      std::vector<Inst *> elems;
+      flatten(Op::OR, cond, elems);
+      for (auto elem : elems)
+	bb2ub_assume[bb].push_back(elem);
+    }
+  else
+    bb2ub_assume[bb].push_back(cond);
 }
 
 bool is_always_ub(const std::vector<Inst *>& v)
@@ -1861,7 +1864,7 @@ Inst *Converter::get_full_edge_cond(Basic_block *src, Basic_block *dest)
   Inst *cond = translate.at(src->last_inst->args[0]);
   if (dest != src->succs[0])
     cond = build_inst(Op::NOT, cond);
-  return build_inst(Op::AND, bb2cond.at(src), cond);
+  return canonicalize_and_or(build_inst(Op::AND, bb2cond.at(src), cond));
 }
 
 // Build a chain of ite instructions for a phi-node.
@@ -1994,7 +1997,7 @@ void Converter::generate_bb2cond(Basic_block *bb)
 	{
 	  cond = build_inst(Op::OR, cond, get_full_edge_cond(pred_bb, bb));
 	}
-      bb2cond.insert({bb, cond});
+      bb2cond.insert({bb, canonicalize_and_or(cond)});
     }
 }
 
