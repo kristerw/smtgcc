@@ -246,4 +246,397 @@ Inst *gen_bswap(Basic_block *bb, Inst *arg)
   return inst;
 }
 
+void flatten(Op op, Inst *inst, std::vector<Inst *>& elems)
+{
+  if (inst->op == op)
+    {
+      flatten(op, inst->args[0], elems);
+      flatten(op, inst->args[1], elems);
+    }
+  else
+    elems.push_back(inst);
+}
+
+// Return the value of inst provided we know that cond evaluates
+// to true.
+//
+// For example, an inst representing x == 0 is false if we know that
+// cond x > 4 evaluates to true.
+std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond, int depth)
+{
+  if (depth > max_depth)
+    return {};
+
+  if (inst->op == Op::VALUE)
+    return inst->value();
+
+  if (inst == cond)
+    return true;
+  if (inst->op == Op::NOT)
+    {
+      std::optional<bool> value =
+	specialize_cond_true(inst->args[0], cond, depth + 1);
+      if (value)
+	return !*value;
+    }
+  if (cond->op == Op::NOT)
+    {
+      std::optional<bool> value =
+	specialize_cond_false(inst, cond->args[0], depth + 1);
+      if (value)
+	return value;
+    }
+
+  if (inst->op == Op::AND)
+    {
+      std::vector<Inst*> conds;
+      flatten(Op::AND, inst, conds);
+      for (auto cnd : conds)
+	{
+	  std::optional<bool> value =
+	    specialize_cond_true(cnd, cond, depth + 1);
+	  if (!value)
+	    return {};
+	  if (!*value)
+	    return false;
+	}
+      return true;
+    }
+
+  if (inst->op == Op::OR)
+    {
+      std::vector<Inst*> conds;
+      flatten(Op::OR, inst, conds);
+      for (auto cnd : conds)
+	{
+	  std::optional<bool> value =
+	    specialize_cond_true(cnd, cond, depth + 1);
+	  if (!value)
+	    return {};
+	  if (*value)
+	    return true;
+	}
+      return false;
+    }
+
+  if (cond->op == Op::AND)
+    {
+      std::vector<Inst*> conds;
+      flatten(Op::AND, cond, conds);
+      for (auto cnd : conds)
+	{
+	  std::optional<bool> value =
+	    specialize_cond_true(inst, cnd, depth + 1);
+	  if (value)
+	    return value;
+	}
+    }
+
+  if (cond->op == Op::ULT && cond->args[0]->op == Op::VALUE)
+    {
+      if (inst->op == Op::ULT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[1])
+	{
+	  if (inst->args[0]->value() <= cond->args[0]->value())
+	    return true;
+	}
+      if (inst->op == Op::ULT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1]
+	  && !is_value_zero(inst->args[1]))
+	{
+	  if (inst->args[1]->value() - 1 <= cond->args[0]->value())
+	    return false;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->value() <= cond->args[0]->value())
+	    return false;
+	}
+    }
+  if (cond->op == Op::ULT && cond->args[1]->op == Op::VALUE)
+    {
+      if (inst->op == Op::ULT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[0]
+	  && !is_value_zero(cond->args[1]))
+	{
+	  if (inst->args[0]->value() >= cond->args[1]->value() - 1)
+	    return false;
+	}
+      if (inst->op == Op::ULT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->value() >= cond->args[1]->value())
+	    return true;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->value() >= cond->args[1]->value())
+	    return false;
+	}
+    }
+
+  if (cond->op == Op::SLT && cond->args[0]->op == Op::VALUE)
+    {
+      if (inst->op == Op::SLT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[1])
+	{
+	  if (inst->args[0]->signed_value() <= cond->args[0]->signed_value())
+	    return true;
+	}
+      if (inst->op == Op::SLT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1]
+	  && !is_value_signed_min(inst->args[1]))
+	{
+	  if (inst->args[1]->signed_value() - 1 <= cond->args[0]->signed_value())
+	    return false;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->signed_value() <= cond->args[0]->signed_value())
+	    return false;
+	}
+    }
+  if (cond->op == Op::SLT && cond->args[1]->op == Op::VALUE)
+    {
+      if (inst->op == Op::SLT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[0]
+	  && !is_value_signed_min(cond->args[1]))
+	{
+	  if (inst->args[0]->signed_value() >= cond->args[1]->signed_value() - 1)
+	    return false;
+	}
+      if (inst->op == Op::SLT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->signed_value() >= cond->args[1]->signed_value())
+	    return true;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->signed_value() >= cond->args[1]->signed_value())
+	    return false;
+	}
+    }
+
+  if (cond->op == Op::EQ && cond->args[1]->op == Op::VALUE)
+    {
+      if (inst->op == Op::ULT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[0])
+	return inst->args[0]->value() < cond->args[1]->value();
+      if (inst->op == Op::ULT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	return inst->args[1]->value() > cond->args[1]->value();
+
+      if (inst->op == Op::SLT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[0])
+	return inst->args[0]->signed_value() < cond->args[1]->signed_value();
+      if (inst->op == Op::SLT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	return inst->args[1]->signed_value() > cond->args[1]->signed_value();
+
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	return inst->args[1]->value() == cond->args[1]->value();
+    }
+
+  return {};
+}
+
+// Return the value of inst provided we know that cond evaluates
+// to false.
+//
+// For example, an inst representing x < 7 is true if we know that
+// cond x > 4 evaluates to false.
+std::optional<bool> specialize_cond_false(Inst *inst, Inst *cond, int depth)
+{
+  if (depth > max_depth)
+    return {};
+
+  if (inst->op == Op::VALUE)
+    return inst->value();
+
+  if (inst == cond)
+    return false;
+  if (inst->op == Op::NOT)
+    {
+      std::optional<bool> value =
+	specialize_cond_false(inst->args[0], cond, depth + 1);
+      if (value)
+	return !*value;
+    }
+  if (cond->op == Op::NOT)
+    {
+      std::optional<bool> value =
+	specialize_cond_true(inst, cond->args[0], depth + 1);
+      if (value)
+	return value;
+    }
+
+  if (inst->op == Op::AND)
+    {
+      std::vector<Inst*> conds;
+      flatten(Op::AND, inst, conds);
+      for (auto cnd : conds)
+	{
+	  std::optional<bool> value =
+	    specialize_cond_false(cnd, cond, depth + 1);
+	  if (!value)
+	    return {};
+	  if (!*value)
+	    return false;
+	}
+      return true;
+    }
+
+  if (inst->op == Op::OR)
+    {
+      std::vector<Inst*> conds;
+      flatten(Op::OR, inst, conds);
+      for (auto cnd : conds)
+	{
+	  std::optional<bool> value =
+	    specialize_cond_false(cnd, cond, depth + 1);
+	  if (!value)
+	    return {};
+	  if (*value)
+	    return true;
+	}
+      return false;
+    }
+
+  if (cond->op == Op::OR)
+    {
+      std::vector<Inst*> conds;
+      flatten(Op::OR, cond, conds);
+      for (auto cnd : conds)
+	{
+	  std::optional<bool> value =
+	    specialize_cond_false(inst, cnd, depth + 1);
+	  if (value)
+	    return value;
+	}
+    }
+
+  if (cond->op == Op::ULT && cond->args[0]->op == Op::VALUE)
+    {
+      if (inst->op == Op::ULT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[1])
+	{
+	  if (inst->args[0]->value() >= cond->args[0]->value())
+	    return false;
+	}
+      if (inst->op == Op::ULT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->value() > cond->args[0]->value())
+	    return true;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->value() > cond->args[0]->value())
+	    return false;
+	}
+    }
+  if (cond->op == Op::ULT && cond->args[1]->op == Op::VALUE)
+    {
+      if (inst->op == Op::ULT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[0])
+	{
+	  if (inst->args[0]->value() < cond->args[1]->value())
+	    return true;
+	}
+      if (inst->op == Op::ULT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->value() <= cond->args[1]->value())
+	    return false;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->value() < cond->args[1]->value())
+	    return false;
+	}
+    }
+
+  if (cond->op == Op::SLT && cond->args[0]->op == Op::VALUE)
+    {
+      if (inst->op == Op::SLT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[1])
+	{
+	  if (inst->args[0]->signed_value() >= cond->args[0]->signed_value())
+	    return false;
+	}
+      if (inst->op == Op::SLT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->signed_value() > cond->args[0]->signed_value())
+	    return true;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[1])
+	{
+	  if (inst->args[1]->signed_value() > cond->args[0]->signed_value())
+	    return false;
+	}
+    }
+  if (cond->op == Op::SLT && cond->args[1]->op == Op::VALUE)
+    {
+      if (inst->op == Op::SLT
+	  && inst->args[0]->op == Op::VALUE
+	  && inst->args[1] == cond->args[0])
+	{
+	  if (inst->args[0]->signed_value() < cond->args[1]->signed_value())
+	    return true;
+	}
+      if (inst->op == Op::SLT
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->signed_value() <= cond->args[1]->signed_value())
+	    return false;
+	}
+      if (inst->op == Op::EQ
+	  && inst->args[1]->op == Op::VALUE
+	  && inst->args[0] == cond->args[0])
+	{
+	  if (inst->args[1]->signed_value() < cond->args[1]->signed_value())
+	    return false;
+	}
+    }
+
+  return {};
+}
+
 }  // end namespace smtgcc

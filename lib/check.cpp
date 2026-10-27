@@ -256,7 +256,6 @@ class Converter : Simplify_config {
   Inst *get_cmp_inst(const Cse_key& key);
   Inst *value_inst(unsigned __int128 value, uint32_t bitsize);
   Inst *simplify(Inst *inst);
-  void flatten(Op op, Inst *inst, std::vector<Inst *>& elems);
   Inst *canonicalize_and(Inst *inst);
   Inst *canonicalize_and(std::vector<Inst *>& elems);
   Inst *canonicalize_or(Inst *inst);
@@ -335,17 +334,6 @@ Inst *Converter::simplify(Inst *inst)
     inst = simplify_inst(inst, this);
 
   return inst;
-}
-
-void Converter::flatten(Op op, Inst *inst, std::vector<Inst *>& elems)
-{
-  if (inst->op == op)
-    {
-      flatten(op, inst->args[0], elems);
-      flatten(op, inst->args[1], elems);
-    }
-  else
-    elems.push_back(inst);
 }
 
 // If this is an unsigned comparison x < constant or x <= constant, return

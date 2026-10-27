@@ -146,15 +146,15 @@ bool is_boolean_zext(Inst *inst)
   return inst->op == Op::ZEXT && inst->args[0]->bitsize == 1;
 }
 
-void flatten(Inst *inst, std::vector<Inst *>& elems)
+void flatten_concat(Inst *inst, std::vector<Inst *>& elems)
 {
   Op op = inst->op;
   if (inst->args[1]->op == op)
-    flatten(inst->args[1], elems);
+    flatten_concat(inst->args[1], elems);
   else
     elems.push_back(inst->args[1]);
   if (inst->args[0]->op == op)
-    flatten(inst->args[0], elems);
+    flatten_concat(inst->args[0], elems);
   else
     elems.push_back(inst->args[0]);
 }
@@ -563,7 +563,7 @@ Inst *Simplify::simplify_concat()
   if (arg1->op == Op::CONCAT)
     {
       std::vector<Inst *> elems;
-      flatten(arg1, elems);
+      flatten_concat(arg1, elems);
       Inst *new_inst = arg2;
       for (auto elem : elems)
 	{
@@ -2519,7 +2519,7 @@ Inst *Simplify::simplify_extract()
   if (arg1->op == Op::CONCAT)
     {
       std::vector<Inst *> elems;
-      flatten(arg1, elems);
+      flatten_concat(arg1, elems);
 
       if (low_val >= elems[0]->bitsize
 	  || high_val < (arg1->bitsize - elems.back()->bitsize))
