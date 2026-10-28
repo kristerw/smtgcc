@@ -241,6 +241,8 @@ class Converter : Simplify_config {
   void remove_redundant_ub(Function *func);
   std::map<Inst *, std::vector<Inst *>, Inst_comp> prepare_ub(Function *func);
   std::map<Inst *, std::vector<Inst *>, Inst_comp> prepare_ub_assume(Function *func);
+  void gen_all_ite_ub(const std::map<Inst *, std::vector<Inst *>,
+		      Inst_comp>& bbcond2ub, std::vector<Inst *>& result);
   void generate_ub();
   void verify_generate_ub();
   Inst *get_full_edge_cond(Basic_block *src, Basic_block *dest);
@@ -1418,8 +1420,10 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 	    return arg2;
 	  if (is_value_m1(arg2))
 	    return arg1;
-	  if (is_value_zero(arg1) || is_value_zero(arg2))
-	    return value_inst(0, arg1->bitsize);
+	  if (is_value_zero(arg1))
+	    return arg1;
+	  if (is_value_zero(arg2))
+	    return arg2;
 	}
       else
 	{
@@ -1427,8 +1431,10 @@ Inst *Converter::build_inst(Op op, Inst *arg1, Inst *arg2)
 	    return arg2;
 	  if (is_value_zero(arg2))
 	    return arg1;
-	  if (is_value_m1(arg1) || is_value_m1(arg2))
-	    return value_inst(-1, arg1->bitsize);
+	  if (is_value_m1(arg1))
+	    return arg1;
+	  if (is_value_m1(arg2))
+	    return arg2;
 	}
 
       // Check if the expression already exists in a different form.
@@ -1756,24 +1762,43 @@ std::map<Inst *, std::vector<Inst *>, Inst_comp> Converter::prepare_ub_assume(Fu
   return bbcond2ub_assume;
 }
 
+void Converter::gen_all_ite_ub(const std::map<Inst *, std::vector<Inst *>, Inst_comp>& bbcond2ub, std::vector<Inst *>& result)
+{
+  Inst *b0 = value_inst(0, 1);
+  for (auto& [cond, ub_set] : bbcond2ub)
+    {
+      std::vector<Inst *> path_conds;
+      flatten(Op::AND, cond, path_conds);
+      for (auto ub : ub_set)
+	{
+	  std::vector<Inst *> ub_conds;
+	  flatten(Op::AND, ub, ub_conds);
+	  for (size_t i = 0; i < ub_conds.size(); i++)
+	    {
+	      for (auto cnd : path_conds)
+		{
+		  std::optional<bool> spec =
+		    specialize_cond_true(ub_conds[i], cnd);
+		  if (spec)
+		    ub_conds[i] = value_inst(*spec, 1);
+		}
+	    }
+	  Inst *inst = canonicalize_and(ub_conds);
+	  if (!is_value_zero(inst))
+	    result.push_back(build_inst(Op::ITE_UB, cond, inst, b0));
+	}
+    }
+}
+
 void Converter::generate_ub()
 {
   Inst_comp comp;
   std::vector<Inst *> src_ub;
   std::vector<Inst *> tgt_ub;
-  Inst *b0 = value_inst(0, 1);
-  for (auto& [cond, ub_set] : src_bbcond2ub)
-    {
-      for (auto ub : ub_set)
-	src_ub.push_back(build_inst(Op::ITE_UB, cond, ub, b0));
-    }
+  gen_all_ite_ub(src_bbcond2ub, src_ub);
   std::sort(src_ub.begin(), src_ub.end(), comp);
   src_ub.erase(std::unique(src_ub.begin(), src_ub.end()), src_ub.end());
-  for (auto& [cond, ub_set] : tgt_bbcond2ub)
-    {
-      for (auto ub : ub_set)
-	tgt_ub.push_back(build_inst(Op::ITE_UB, cond, ub, b0));
-    }
+  gen_all_ite_ub(tgt_bbcond2ub, tgt_ub);
   std::sort(tgt_ub.begin(), tgt_ub.end(), comp);
   tgt_ub.erase(std::unique(tgt_ub.begin(), tgt_ub.end()), tgt_ub.end());
 
