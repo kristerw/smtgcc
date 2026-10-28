@@ -332,6 +332,17 @@ std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond, int depth)
 	}
     }
 
+  if (cond->op == Op::ULT)
+    {
+      if (inst->op == Op::EQ
+	  && cond->args[0] == inst->args[0]
+	  && cond->args[1] == inst->args[1])
+	return false;
+      if (inst->op == Op::EQ
+	  && cond->args[0] == inst->args[1]
+	  && cond->args[1] == inst->args[0])
+	return false;
+    }
   if (cond->op == Op::ULT && cond->args[0]->op == Op::VALUE)
     {
       if (inst->op == Op::ULT
@@ -383,6 +394,17 @@ std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond, int depth)
 	}
     }
 
+  if (cond->op == Op::SLT)
+    {
+      if (inst->op == Op::EQ
+	  && cond->args[0] == inst->args[0]
+	  && cond->args[1] == inst->args[1])
+	return false;
+      if (inst->op == Op::EQ
+	  && cond->args[0] == inst->args[1]
+	  && cond->args[1] == inst->args[0])
+	return false;
+    }
   if (cond->op == Op::SLT && cond->args[0]->op == Op::VALUE)
     {
       if (inst->op == Op::SLT
@@ -434,6 +456,25 @@ std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond, int depth)
 	}
     }
 
+  if (cond->op == Op::EQ)
+    {
+      if (inst->op == Op::ULT
+	  && cond->args[0] == inst->args[0]
+	  && cond->args[1] == inst->args[1])
+	return false;
+      if (inst->op == Op::ULT
+	  && cond->args[0] == inst->args[1]
+	  && cond->args[1] == inst->args[0])
+	return false;
+      if (inst->op == Op::SLT
+	  && cond->args[0] == inst->args[0]
+	  && cond->args[1] == inst->args[1])
+	return false;
+      if (inst->op == Op::SLT
+	  && cond->args[0] == inst->args[1]
+	  && cond->args[1] == inst->args[0])
+	return false;
+    }
   if (cond->op == Op::EQ && cond->args[1]->op == Op::VALUE)
     {
       if (inst->op == Op::ULT
