@@ -241,6 +241,8 @@ class Converter : Simplify_config {
   void remove_redundant_ub(Function *func);
   std::map<Inst *, std::vector<Inst *>, Inst_comp> prepare_ub(Function *func);
   std::map<Inst *, std::vector<Inst *>, Inst_comp> prepare_ub_assume(Function *func);
+  void gen_ite_ub(Inst *cond, const std::vector<Inst *>& path_conds,
+		  std::vector<Inst *>& ub_conds, std::vector<Inst *>& result);
   void gen_all_ite_ub(const std::map<Inst *, std::vector<Inst *>,
 		      Inst_comp>& bbcond2ub, std::vector<Inst *>& result);
   void generate_ub();
@@ -1762,9 +1764,54 @@ std::map<Inst *, std::vector<Inst *>, Inst_comp> Converter::prepare_ub_assume(Fu
   return bbcond2ub_assume;
 }
 
+// Generate Op::ITE_UB for one UB condition.
+void Converter::gen_ite_ub(Inst *cond, const std::vector<Inst *>& path_conds, std::vector<Inst *>& ub_conds, std::vector<Inst *>& result)
+{
+  // It is often beneficial to convert the UB expression to disjunctive
+  // normal form as this makes it easier for both canonicalize_and and
+  // ite_elim to eliminate redundant operations. This may explode in size
+  // for expressions containing a large number of Op::OR, but the common
+  // cases we care about have only one Op::OR, so it is fine to limit this
+  // to just a few Op::OR.
+  auto is_or = [](const Inst* inst) {
+    return inst->op == Op::OR;
+  };
+  auto count = std::count_if(ub_conds.begin(), ub_conds.end(), is_or);
+  if (count > 0 && count < 3)
+    {
+      auto it = std::find_if(ub_conds.begin(), ub_conds.end(), is_or);
+      assert(it != ub_conds.end());
+      Inst *or_inst = *it;
+      assert(or_inst->args[1]->op != Op::OR);
+      if (or_inst->args[0]->op != Op::OR)
+	{
+	  ub_conds.erase(it);
+	  std::vector<Inst *> ub_conds2 = ub_conds;
+	  ub_conds.push_back(or_inst->args[0]);
+	  ub_conds2.push_back(or_inst->args[1]);
+	  gen_ite_ub(cond, path_conds, ub_conds, result);
+	  gen_ite_ub(cond, path_conds, ub_conds2, result);
+	  return;
+	}
+    }
+
+  for (size_t i = 0; i < ub_conds.size(); i++)
+    {
+      for (auto cnd : path_conds)
+	{
+	  std::optional<bool> spec =
+	    specialize_cond_true(ub_conds[i], cnd);
+	  if (spec)
+	    ub_conds[i] = value_inst(*spec, 1);
+	}
+    }
+  Inst *inst = canonicalize_and(ub_conds);
+  if (!is_value_zero(inst))
+    result.push_back(build_inst(Op::ITE_UB, cond, inst, value_inst(0, 1)));
+}
+
 void Converter::gen_all_ite_ub(const std::map<Inst *, std::vector<Inst *>, Inst_comp>& bbcond2ub, std::vector<Inst *>& result)
 {
-  Inst *b0 = value_inst(0, 1);
   for (auto& [cond, ub_set] : bbcond2ub)
     {
       std::vector<Inst *> path_conds;
@@ -1773,19 +1820,7 @@ void Converter::gen_all_ite_ub(const std::map<Inst *, std::vector<Inst *>, Inst_
 	{
 	  std::vector<Inst *> ub_conds;
 	  flatten(Op::AND, ub, ub_conds);
-	  for (size_t i = 0; i < ub_conds.size(); i++)
-	    {
-	      for (auto cnd : path_conds)
-		{
-		  std::optional<bool> spec =
-		    specialize_cond_true(ub_conds[i], cnd);
-		  if (spec)
-		    ub_conds[i] = value_inst(*spec, 1);
-		}
-	    }
-	  Inst *inst = canonicalize_and(ub_conds);
-	  if (!is_value_zero(inst))
-	    result.push_back(build_inst(Op::ITE_UB, cond, inst, b0));
+	  gen_ite_ub(cond, path_conds, ub_conds, result);
 	}
     }
 }
