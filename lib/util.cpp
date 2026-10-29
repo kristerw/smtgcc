@@ -291,15 +291,18 @@ std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond, int depth)
     {
       std::vector<Inst*> conds;
       flatten(Op::AND, inst, conds);
+      bool unknown = false;
       for (auto cnd : conds)
 	{
 	  std::optional<bool> value =
 	    specialize_cond_true(cnd, cond, depth + 1);
 	  if (!value)
-	    return {};
-	  if (!*value)
+	    unknown = true;
+	  else if (!*value)
 	    return false;
 	}
+      if (unknown)
+	return {};
       return true;
     }
 
@@ -307,15 +310,18 @@ std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond, int depth)
     {
       std::vector<Inst*> conds;
       flatten(Op::OR, inst, conds);
+      bool unknown = false;
       for (auto cnd : conds)
 	{
 	  std::optional<bool> value =
 	    specialize_cond_true(cnd, cond, depth + 1);
 	  if (!value)
-	    return {};
-	  if (*value)
+	    unknown = true;
+	  else if (*value)
 	    return true;
 	}
+      if (unknown)
+	return {};
       return false;
     }
 
@@ -407,6 +413,21 @@ std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond, int depth)
     }
   if (cond->op == Op::SLT && cond->args[0]->op == Op::VALUE)
     {
+      if ((is_value_zero(cond->args[0]) || is_value_m1(cond->args[0]))
+	  && inst->op == Op::ULT)
+	{
+	  unsigned bitsize = cond->args[0]->bitsize;
+	  unsigned __int128 u_smin = ((unsigned __int128)1) << (bitsize - 1);
+	  unsigned __int128 u_smax = u_smin - 1;
+	  if (cond->args[1] == inst->args[1]
+	      && inst->args[0]->op == Op::VALUE
+	      && u_smax <= inst->args[0]->value())
+	    return false;
+	  if (cond->args[1] == inst->args[0]
+	      && inst->args[1]->op == Op::VALUE
+	      && u_smin <= inst->args[1]->value())
+	    return true;
+	}
       if (inst->op == Op::SLT
 	  && inst->args[0]->op == Op::VALUE
 	  && inst->args[1] == cond->args[1])
@@ -538,15 +559,18 @@ std::optional<bool> specialize_cond_false(Inst *inst, Inst *cond, int depth)
     {
       std::vector<Inst*> conds;
       flatten(Op::AND, inst, conds);
+      bool unknown = false;
       for (auto cnd : conds)
 	{
 	  std::optional<bool> value =
 	    specialize_cond_false(cnd, cond, depth + 1);
 	  if (!value)
-	    return {};
-	  if (!*value)
+	    unknown = true;
+	  else if (!*value)
 	    return false;
 	}
+      if (unknown)
+	return {};
       return true;
     }
 
@@ -554,15 +578,18 @@ std::optional<bool> specialize_cond_false(Inst *inst, Inst *cond, int depth)
     {
       std::vector<Inst*> conds;
       flatten(Op::OR, inst, conds);
+      bool unknown = false;
       for (auto cnd : conds)
 	{
 	  std::optional<bool> value =
 	    specialize_cond_false(cnd, cond, depth + 1);
 	  if (!value)
-	    return {};
-	  if (*value)
+	    unknown = true;
+	  else if (*value)
 	    return true;
 	}
+      if (unknown)
+	return {};
       return false;
     }
 
