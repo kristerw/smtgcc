@@ -15,9 +15,6 @@
 // How many bytes load, store, __builtin_memset, etc. can expand.
 #define MAX_MEMORY_UNROLL_LIMIT  10000
 
-// Max recursion depth for specialize_cond.
-const int max_depth = 10;
-
 namespace smtgcc {
 
 const int unroll_limit = 16;
@@ -1108,8 +1105,8 @@ Inst *gen_parity(Basic_block *bb, Inst *arg);
 Inst *gen_popcount(Basic_block *bb, Inst *arg);
 Inst *gen_bswap(Basic_block *bb, Inst *arg);
 void flatten(Op op, Inst *inst, std::vector<Inst *>& elems);
-std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond, int depth = 0);
-std::optional<bool> specialize_cond_false(Inst *inst, Inst *cond, int depth = 0);
+std::optional<bool> specialize_cond_true(Inst *inst, Inst *cond, int depth = 1);
+std::optional<bool> specialize_cond_false(Inst *inst, Inst *cond, int depth = 1);
 
 // validate_ir.cpp
 void validate(Module *module);
