@@ -4168,7 +4168,11 @@ std::pair<Inst *, Inst *> Converter::process_vec_perm_expr(gimple *stmt)
       Inst *idx1 = extract_vec_elem(bb, arg3, elem_bitsize3, i);
       idx1 = bb->build_inst(Op::AND, idx1, mask1);
       Inst *idx2 = bb->build_inst(Op::AND, idx1, mask2);
-      Inst *cmp = bb->build_inst(Op::ULT, idx1,  nof_elt_inst);
+      Inst *cmp;
+      if (std::bit_width(nof_elt1) <= (int)elem_bitsize3)
+	cmp = bb->build_inst(Op::ULT, idx1,  nof_elt_inst);
+      else
+	cmp = bb->value_inst(1, 1);
       Inst *elt1 = extract_elem(bb, arg1, elem_bitsize1, idx2);
       Inst *elt2 = extract_elem(bb, arg2, elem_bitsize1, idx2);
       Inst *inst = bb->build_inst(Op::ITE, cmp, elt1, elt2);
