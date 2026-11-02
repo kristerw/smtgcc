@@ -127,6 +127,7 @@ struct Converter {
   Addr process_bit_field_ref(tree expr, bool is_mem_access);
   Addr process_address(tree expr, bool is_mem_access);
   std::tuple<Inst *, Inst *, Inst *> vector_as_array(tree expr);
+  bool type_has_indef_padding(tree type);
   std::tuple<Inst *, Inst *, Inst *> process_load(tree expr);
   bool is_load(tree expr);
   void load_store_overlap_ub_check(tree store_expr, tree load_expr);
@@ -1998,6 +1999,17 @@ std::tuple<Inst *, Inst *, Inst *> Converter::vector_as_array(tree expr)
   return {inst, indef, nullptr};
 }
 
+bool Converter::type_has_indef_padding(tree type)
+{
+  uint64_t size = bytesize_for_type(type);
+  for (uint64_t i = 0; i < size; i++)
+    {
+      if (padding_at_offset(type, i))
+	return true;
+    }
+  return false;
+}
+
 std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
 {
   if (reverse_storage_order_for_component_p(expr))
@@ -2024,27 +2036,33 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
   Inst *value;
   Inst *indef = nullptr;
   Inst *mem_flags2;
+  bool has_indef_padding = type_has_indef_padding(type);
   if (BYTES_BIG_ENDIAN)
     {
       value = bb->build_inst(Op::LOAD_BE, addr.ptr, size);
       mem_flags2 = bb->build_inst(Op::GET_MEM_FLAG_BE, addr.ptr, size);
-      for (uint64_t i = 0; i < size; i++)
+      if (!has_indef_padding)
+	indef = bb->build_inst(Op::GET_MEM_INDEF_BE, addr.ptr, size);
+      else
 	{
-	  Inst *offset = bb->value_inst(size - 1 - i, addr.ptr->bitsize);
-	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
-
-	  uint8_t padding = padding_at_offset(type, size - 1 - i);
-	  Inst *indef_byte = bb->build_inst(Op::GET_MEM_INDEF, ptr);
-	  if (padding != 0)
+	  for (uint64_t i = 0; i < size; i++)
 	    {
-	      Inst *padding_inst = bb->value_inst(padding, 8);
-	      indef_byte = bb->build_inst(Op::OR, indef_byte, padding_inst);
-	    }
+	      Inst *offset = bb->value_inst(size - 1 - i, addr.ptr->bitsize);
+	      Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
 
-	  if (indef)
-	    indef = bb->build_inst(Op::CONCAT, indef_byte, indef);
-	  else
-	    indef = indef_byte;
+	      uint8_t padding = padding_at_offset(type, size - 1 - i);
+	      Inst *indef_byte = bb->build_inst(Op::GET_MEM_INDEF, ptr);
+	      if (padding != 0)
+		{
+		  Inst *padding_inst = bb->value_inst(padding, 8);
+		  indef_byte = bb->build_inst(Op::OR, indef_byte, padding_inst);
+		}
+
+	      if (indef)
+		indef = bb->build_inst(Op::CONCAT, indef_byte, indef);
+	      else
+		indef = indef_byte;
+	    }
 	}
     }
   else
@@ -2052,23 +2070,28 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_load(tree expr)
       value = bb->build_inst(Op::LOAD_LE, addr.ptr, size);
       indef = nullptr;
       mem_flags2 = bb->build_inst(Op::GET_MEM_FLAG_LE, addr.ptr, size);
-      for (uint64_t i = 0; i < size; i++)
+      if (!has_indef_padding)
+	indef = bb->build_inst(Op::GET_MEM_INDEF_LE, addr.ptr, size);
+      else
 	{
-	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
-	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
-
-	  uint8_t padding = padding_at_offset(type, i);
-	  Inst *indef_byte = bb->build_inst(Op::GET_MEM_INDEF, ptr);
-	  if (padding != 0)
+	  for (uint64_t i = 0; i < size; i++)
 	    {
-	      Inst *padding_inst = bb->value_inst(padding, 8);
-	      indef_byte = bb->build_inst(Op::OR, indef_byte, padding_inst);
-	    }
+	      Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
+	      Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
 
-	  if (indef)
-	    indef = bb->build_inst(Op::CONCAT, indef_byte, indef);
-	  else
-	    indef = indef_byte;
+	      uint8_t padding = padding_at_offset(type, i);
+	      Inst *indef_byte = bb->build_inst(Op::GET_MEM_INDEF, ptr);
+	      if (padding != 0)
+		{
+		  Inst *padding_inst = bb->value_inst(padding, 8);
+		  indef_byte = bb->build_inst(Op::OR, indef_byte, padding_inst);
+		}
+
+	      if (indef)
+		indef = bb->build_inst(Op::CONCAT, indef_byte, indef);
+	      else
+		indef = indef_byte;
+	    }
 	}
     }
   if (is_bitfield)
@@ -2343,26 +2366,32 @@ void Converter::process_store(tree addr_expr, tree value_expr)
   if (inst2memory_flagsx.contains(value))
     memory_flagsx = inst2memory_flagsx.at(value);
 
+  bool has_indef_padding = type_has_indef_padding(value_type);
   if (BYTES_BIG_ENDIAN)
     {
       bb->build_inst(Op::STORE_BE, addr.ptr, value);
-      for (uint64_t i = 0; i < size; i++)
+      if (!has_indef_padding)
+	indef = bb->build_inst(Op::SET_MEM_INDEF_BE, addr.ptr, indef);
+      else
 	{
-	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
-	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
-
-	  Inst *high = bb->value_inst((size - i - 1) * 8 + 7, 32);
-	  Inst *low = bb->value_inst((size - i - 1) * 8, 32);
-
-	  uint8_t padding = padding_at_offset(value_type, (size - i - 1));
-
-	  Inst *byte = bb->build_inst(Op::EXTRACT, indef, high, low);
-	  if (padding != 0)
+	  for (uint64_t i = 0; i < size; i++)
 	    {
-	      Inst *padding_inst = bb->value_inst(padding, 8);
-	      byte = bb->build_inst(Op::OR, byte, padding_inst);
+	      Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
+	      Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
+
+	      Inst *high = bb->value_inst((size - i - 1) * 8 + 7, 32);
+	      Inst *low = bb->value_inst((size - i - 1) * 8, 32);
+
+	      uint8_t padding = padding_at_offset(value_type, (size - i - 1));
+
+	      Inst *byte = bb->build_inst(Op::EXTRACT, indef, high, low);
+	      if (padding != 0)
+		{
+		  Inst *padding_inst = bb->value_inst(padding, 8);
+		  byte = bb->build_inst(Op::OR, byte, padding_inst);
+		}
+	      bb->build_inst(Op::SET_MEM_INDEF, ptr, byte);
 	    }
-	  bb->build_inst(Op::SET_MEM_INDEF, ptr, byte);
 	}
       if (memory_flagsx)
 	bb->build_inst(Op::SET_MEM_FLAG_BE, addr.ptr, memory_flagsx);
@@ -2375,23 +2404,28 @@ void Converter::process_store(tree addr_expr, tree value_expr)
   else
     {
       bb->build_inst(Op::STORE_LE, addr.ptr, value);
-      for (uint64_t i = 0; i < size; i++)
+      if (!has_indef_padding)
+	indef = bb->build_inst(Op::SET_MEM_INDEF_LE, addr.ptr, indef);
+      else
 	{
-	  Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
-	  Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
-
-	  Inst *high = bb->value_inst(i * 8 + 7, 32);
-	  Inst *low = bb->value_inst(i * 8, 32);
-
-	  uint8_t padding = padding_at_offset(value_type, i);
-
-	  Inst *byte = bb->build_inst(Op::EXTRACT, indef, high, low);
-	  if (padding != 0)
+	  for (uint64_t i = 0; i < size; i++)
 	    {
-	      Inst *padding_inst = bb->value_inst(padding, 8);
-	      byte = bb->build_inst(Op::OR, byte, padding_inst);
+	      Inst *offset = bb->value_inst(i, addr.ptr->bitsize);
+	      Inst *ptr = bb->build_inst(Op::ADD, addr.ptr, offset);
+
+	      Inst *high = bb->value_inst(i * 8 + 7, 32);
+	      Inst *low = bb->value_inst(i * 8, 32);
+
+	      uint8_t padding = padding_at_offset(value_type, i);
+
+	      Inst *byte = bb->build_inst(Op::EXTRACT, indef, high, low);
+	      if (padding != 0)
+		{
+		  Inst *padding_inst = bb->value_inst(padding, 8);
+		  byte = bb->build_inst(Op::OR, byte, padding_inst);
+		}
+	      bb->build_inst(Op::SET_MEM_INDEF, ptr, byte);
 	    }
-	  bb->build_inst(Op::SET_MEM_INDEF, ptr, byte);
 	}
       if (memory_flagsx)
 	bb->build_inst(Op::SET_MEM_FLAG_LE, addr.ptr, memory_flagsx);
