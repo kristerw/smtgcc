@@ -294,6 +294,7 @@ struct Converter {
   void make_uninit(Inst *ptr, uint64_t size);
   void build_ub_assume(Basic_block *bb, Inst *cond);
   void constrain_src_finite_math_only(Inst *inst);
+  bool type_need_constrain(tree type);
   void constrain_src_value(Inst *inst, tree type, Inst *mem_flags = nullptr);
   void process_variables();
   void process_func_args();
@@ -555,6 +556,45 @@ void Converter::constrain_src_finite_math_only(Inst *inst)
   build_ub_assume(bb, is_finite);
 }
 
+bool Converter::type_need_constrain(tree type)
+{
+  if (POINTER_TYPE_P(type))
+    return true;
+  if (SCALAR_FLOAT_TYPE_P(type))
+    return true;
+  if (TREE_CODE(type) == BOOLEAN_TYPE)
+    return true;
+  if (TREE_CODE(type) == RECORD_TYPE)
+    {
+      for (tree fld = TYPE_FIELDS(type); fld; fld = DECL_CHAIN(fld))
+	{
+	  if (TREE_CODE(fld) != FIELD_DECL)
+	    continue;
+	  if (DECL_BIT_FIELD_TYPE(fld))
+	    continue;
+	  tree elem_type = TREE_TYPE(fld);
+	  if (!COMPLETE_TYPE_P(elem_type))
+	    continue;
+	  uint64_t elem_size = bytesize_for_type(elem_type);
+	  if (elem_size == 0)
+	    continue;
+	  if (type_need_constrain(elem_type))
+	    return true;
+	}
+    }
+  if (VECTOR_TYPE_P(type) && TREE_CODE(TREE_TYPE(type)) == BOOLEAN_TYPE)
+    return false;
+  if (VECTOR_TYPE_P(type)
+      || TREE_CODE(type) == COMPLEX_TYPE
+      || TREE_CODE(type) == ARRAY_TYPE)
+    {
+      tree elem_type = TREE_TYPE(type);
+      if (type_need_constrain(elem_type))
+	return true;
+    }
+  return false;
+}
+
 // Add checks in the src function to ensure that the value is a valid value
 // for the type. The main use is to make sure the initial state is valid
 // (for example, global pointers can't point to local memory).
@@ -577,6 +617,9 @@ void Converter::constrain_src_finite_math_only(Inst *inst)
 void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
 {
   if (role == Function_role::tgt)
+    return;
+
+  if (!type_need_constrain(type))
     return;
 
   // TODO: We should invert the meaning of mem_flags.
@@ -621,7 +664,8 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
 	build_ub_assume(bb, bb->build_inst(Op::IS_NONCANONICAL_NAN, inst));
       return;
     }
-  if (INTEGRAL_TYPE_P(type) && inst->bitsize != bitsize_for_type(type))
+  if (TREE_CODE(type) == BOOLEAN_TYPE
+      && inst->bitsize != bitsize_for_type(type))
     {
       Inst *tmp = bb->build_trunc(inst, bitsize_for_type(type));
       Op op = TYPE_UNSIGNED(type) ? Op::ZEXT : Op::SEXT;
@@ -644,6 +688,8 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
 	  uint64_t elem_size = bytesize_for_type(elem_type);
 	  if (elem_size == 0)
 	    continue;
+	  if (!type_need_constrain(elem_type))
+	    continue;
 	  uint64_t elem_offset = get_int_cst_val(DECL_FIELD_OFFSET(fld));
 	  elem_offset += get_int_cst_val(DECL_FIELD_BIT_OFFSET(fld)) / 8;
 	  Inst *high = bb->value_inst((elem_offset + elem_size) * 8 - 1, 32);
@@ -656,18 +702,20 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
 	}
       return;
     }
+  if (VECTOR_TYPE_P(type) && TREE_CODE(TREE_TYPE(type)) == BOOLEAN_TYPE)
+    {
+      // There is nothing to constrain for Boolean vectors. Special-case
+      // this, as the general code for vectors below does not handle
+      // vectors with 1-bit elements.
+      return;
+    }
   if (VECTOR_TYPE_P(type)
       || TREE_CODE(type) == COMPLEX_TYPE
       || TREE_CODE(type) == ARRAY_TYPE)
     {
-      if (VECTOR_TYPE_P(type) && TREE_CODE(TREE_TYPE(type)) == BOOLEAN_TYPE)
-	{
-	  // There is nothing to constrain for Boolean vectors. Special-case
-	  // this, as the general code for vectors below does not handle
-	  // vectors with 1-bit elements.
-	  return;
-	}
       tree elem_type = TREE_TYPE(type);
+      if (!type_need_constrain(elem_type))
+	return;
       uint32_t elem_bitsize = bytesize_for_type(elem_type) * 8;
       assert(inst->bitsize % elem_bitsize == 0);
       assert(inst->bitsize == bitsize_for_type(type));
