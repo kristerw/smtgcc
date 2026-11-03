@@ -1851,10 +1851,13 @@ void Converter::process_decl(tree decl)
   tree type = TREE_TYPE(decl);
   if (!COMPLETE_TYPE_P(type))
     {
+      // We set the size of objects with incomplete type to ANON_MEM_SIZE.
       // For unbounded arrays, we use the largest array size that fits
       // within the default anonymous memory size (or one element if the
       // element size is larger than the default anonymous memory size).
-      if (TREE_CODE(type) == ARRAY_TYPE)
+      if (TREE_CODE(type) == RECORD_TYPE || TREE_CODE(type) == UNION_TYPE)
+	size = ANON_MEM_SIZE;
+      else if (TREE_CODE(type) == ARRAY_TYPE)
 	{
 	  uint64_t elem_size = bytesize_for_type(TREE_TYPE(type));
 	  uint64_t nof = ANON_MEM_SIZE / elem_size;
