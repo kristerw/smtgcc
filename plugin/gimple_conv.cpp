@@ -1118,12 +1118,14 @@ uint8_t Converter::padding_at_offset(tree type, uint64_t offset)
 	  if (TREE_CODE(fld) != FIELD_DECL)
 	    continue;
 	  tree elem_type = TREE_TYPE(fld);
-	  uint64_t elem_size = bytesize_for_type(elem_type);
 	  uint64_t elem_offset = get_int_cst_val(DECL_FIELD_OFFSET(fld));
 	  uint64_t elem_bit_offset =
 	    get_int_cst_val(DECL_FIELD_BIT_OFFSET(fld));
 	  elem_offset += elem_bit_offset / 8;
 	  elem_bit_offset &= 7;
+	  if (offset >= elem_offset && flexible_array_member_type_p(elem_type))
+	    return 0;
+	  uint64_t elem_size = bytesize_for_type(elem_type);
 	  if (DECL_BIT_FIELD_TYPE(fld))
 	    {
 	      uint64_t elem_bit_size = bitsize_for_type(elem_type);
