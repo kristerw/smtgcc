@@ -2278,7 +2278,12 @@ void Converter::process_store(tree addr_expr, tree value_expr)
   if (TREE_CODE(value_expr) == STRING_CST)
     {
       uint64_t str_len = TREE_STRING_LENGTH(value_expr);
-      uint64_t size = bytesize_for_type(TREE_TYPE(addr_expr));
+      uint64_t size;
+      if (TREE_CODE(addr_expr) == COMPONENT_REF
+	  && flexible_array_member_type_p(TREE_TYPE(TREE_OPERAND(addr_expr, 1))))
+	size = str_len;
+      else
+	size = bytesize_for_type(TREE_TYPE(addr_expr));
       assert(str_len <= size);
       const char *p = TREE_STRING_POINTER(value_expr);
       Addr addr = process_address(addr_expr, true);
