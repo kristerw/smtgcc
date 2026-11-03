@@ -1866,7 +1866,7 @@ void Converter::process_decl(tree decl)
 	throw Not_implemented("process_decl: incomplete type");
     }
   else
-    size = bytesize_for_type(type);
+    size = get_int_cst_val(DECL_SIZE_UNIT(decl));
   if (size >= ((uint64_t)1 << module->ptr_offset_bits))
     throw Not_implemented("process_decl: too large variable");
   if (size == 0)
