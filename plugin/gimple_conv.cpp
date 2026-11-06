@@ -4277,12 +4277,6 @@ void Converter::process_constructor(tree lhs, tree rhs)
   Addr addr = process_address(lhs, true);
   assert(!addr.bitoffset);
 
-  if (TREE_CLOBBER_P(rhs) && CLOBBER_KIND(rhs) == CLOBBER_STORAGE_END)
-    {
-      bb->build_inst(Op::FREE, extract_id(bb, addr.ptr));
-      return;
-    }
-
   assert(!CONSTRUCTOR_NO_CLEARING(rhs));
   uint64_t size = bytesize_for_type(TREE_TYPE(rhs));
   if (size > MAX_MEMORY_UNROLL_LIMIT)
