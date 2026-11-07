@@ -78,6 +78,7 @@ struct Converter {
   std::map<basic_block, Basic_block *> gccbb_bottom2bb;
   std::map<Basic_block *, std::pair<Inst *, Inst *> > bb2retval;
   std::set<Basic_block *> bb_abort;
+  Basic_block *init_bb;
   Basic_block *abort_bb;
   Basic_block *exit_bb;
   std::map<Basic_block *, Inst *> bb2exit;
@@ -286,8 +287,8 @@ struct Converter {
 				Basic_block *bb);
   void process_gimple_switch(gimple *stmt, Basic_block *bb);
   Basic_block *get_phi_arg_bb(gphi *phi, int i);
-  void generate_abort_inst();
-  void generate_exit_inst();
+  void generate_abort_exit_inst();
+  std::pair<Inst *, Inst *> generate_return_value();
   void generate_return_inst();
   void init_var_values(tree initial, Inst *mem_inst);
   void init_var(tree decl, Inst *mem_inst);
@@ -300,6 +301,7 @@ struct Converter {
   void process_func_args();
   bool need_prov_phi(gimple *phi);
   void process_instructions(int nof_blocks, int *postorder);
+  void process_function_body();
   Function *process_function();
 };
 
@@ -734,15 +736,14 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
 
 Inst *Converter::build_memory_inst(uint64_t id, uint64_t size, uint32_t flags, bool uninit)
 {
-  Basic_block *entry_bb = func->bbs[0];
-  Inst *arg1 = entry_bb->value_inst(id, module->ptr_id_bits);
-  Inst *arg2 = entry_bb->value_inst(size, module->ptr_offset_bits);
-  Inst *arg3 = entry_bb->value_inst(flags, 32);
-  Inst *mem = entry_bb->build_inst(Op::MEMORY, arg1, arg2, arg3);
+  Inst *arg1 = init_bb->value_inst(id, module->ptr_id_bits);
+  Inst *arg2 = init_bb->value_inst(size, module->ptr_offset_bits);
+  Inst *arg3 = init_bb->value_inst(flags, 32);
+  Inst *mem = init_bb->build_inst(Op::MEMORY, arg1, arg2, arg3);
   if (uninit)
     {
-      Inst *value = entry_bb->value_inst(255, 8);
-      entry_bb->build_inst(Op::MEMSET_MEM_INDEF, mem, value, size);
+      Inst *value = init_bb->value_inst(255, 8);
+      init_bb->build_inst(Op::MEMSET_MEM_INDEF, mem, value, size);
     }
   return mem;
 }
@@ -768,7 +769,7 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *in
   prange pr;
   if (pr.supports_type_p(TREE_TYPE(expr)))
     {
-      if (!get_range_query(cfun)->range_of_expr(pr, expr))
+      if (!get_range_query(fun)->range_of_expr(pr, expr))
 	return;
       if (pr.undefined_p() || pr.varying_p())
 	return;
@@ -789,7 +790,7 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *in
   int_range_max r;
   if (!r.supports_type_p(TREE_TYPE(expr)))
     return;
-  if (!get_range_query(cfun)->range_of_expr(r, expr))
+  if (!get_range_query(fun)->range_of_expr(r, expr))
     return;
   if (r.undefined_p() || r.varying_p())
     return;
@@ -1277,7 +1278,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 		// were used when passes were sinking/hoisting the params.
 		// See gcc.dg/analyzer/pointer-merging.c for a test where
 		// this check makes a difference.
-		constrain_range(func->bbs[0], expr, inst);
+		constrain_range(init_bb, expr, inst);
 
 		assert(!POINTER_TYPE_P(TREE_TYPE(expr))
 		       || tree2prov.contains(var));
@@ -9213,73 +9214,66 @@ void Converter::process_gimple_return(gimple *stmt)
   // miscompile otherwise...
 }
 
-void Converter::generate_abort_inst()
+void Converter::generate_abort_exit_inst()
 {
-  if (bb_abort.empty())
-    return;
+  abort_bb->build_br_inst(exit_bb);
 
-  Inst *abort_called = abort_bb->build_phi_inst(1);
-  for (Basic_block *pred_bb : abort_bb->preds)
+  if (!bb_abort.empty())
     {
-      Inst *a = abort_bb->value_inst(bb_abort.contains(pred_bb), 1);
-      abort_called->add_phi_arg(a, pred_bb);
+      Inst *abort_called = abort_bb->build_phi_inst(1);
+      for (Basic_block *pred_bb : abort_bb->preds)
+	{
+	  Inst *a = abort_bb->value_inst(bb_abort.contains(pred_bb), 1);
+	  abort_called->add_phi_arg(a, pred_bb);
+	}
+
+      basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
+      Basic_block *return_bb = gccbb_top2bb.at(gcc_exit_block);
+      Inst *phi = exit_bb->build_phi_inst(1);
+      phi->add_phi_arg(abort_called, abort_bb);
+      phi->add_phi_arg(return_bb->value_inst(0, 1), return_bb);
+      Inst *abort_san_called = abort_bb->value_inst(0, 1);
+      exit_bb->build_inst(Op::ABORT, phi, abort_san_called);
     }
 
-  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
-  Basic_block *return_bb = gccbb_top2bb.at(gcc_exit_block);
-  Inst *phi = exit_bb->build_phi_inst(1);
-  phi->add_phi_arg(abort_called, abort_bb);
-  phi->add_phi_arg(return_bb->value_inst(0, 1), return_bb);
-  Inst *abort_san_called = abort_bb->value_inst(0, 1);
-  exit_bb->build_inst(Op::ABORT, phi, abort_san_called);
-}
-
-void Converter::generate_exit_inst()
-{
-  if (bb2exit.empty())
-    return;
-
-  Inst *exit_called = abort_bb->build_phi_inst(1);
-  Inst *exit_val =
-    abort_bb->build_phi_inst(bitsize_for_type(integer_type_node));
-  for (Basic_block *pred_bb : abort_bb->preds)
+  if (!bb2exit.empty())
     {
-      Inst *e = abort_bb->value_inst(bb2exit.contains(pred_bb), 1);
-      exit_called->add_phi_arg(e, pred_bb);
+      Inst *exit_called = abort_bb->build_phi_inst(1);
+      Inst *exit_val =
+	abort_bb->build_phi_inst(bitsize_for_type(integer_type_node));
+      for (Basic_block *pred_bb : abort_bb->preds)
+	{
+	  Inst *e = abort_bb->value_inst(bb2exit.contains(pred_bb), 1);
+	  exit_called->add_phi_arg(e, pred_bb);
 
-      Inst *v;
-      if (bb2exit.contains(pred_bb))
-	v = bb2exit[pred_bb];
-      else
-	v = abort_bb->value_inst(0, exit_val->bitsize);
-      exit_val->add_phi_arg(v, pred_bb);
+	  Inst *v;
+	  if (bb2exit.contains(pred_bb))
+	    v = bb2exit[pred_bb];
+	  else
+	    v = abort_bb->value_inst(0, exit_val->bitsize);
+	  exit_val->add_phi_arg(v, pred_bb);
+	}
+
+      basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
+      Basic_block *return_bb = gccbb_top2bb.at(gcc_exit_block);
+      Inst *phi1 = exit_bb->build_phi_inst(1);
+      Inst *phi2 = exit_bb->build_phi_inst(exit_val->bitsize);
+      phi1->add_phi_arg(exit_called, abort_bb);
+      phi2->add_phi_arg(exit_val, abort_bb);
+      phi1->add_phi_arg(return_bb->value_inst(0, 1), return_bb);
+      phi2->add_phi_arg(return_bb->value_inst(0, exit_val->bitsize), return_bb);
+      exit_bb->build_inst(Op::EXIT, phi1, phi2);
     }
-
-  basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
-  Basic_block *return_bb = gccbb_top2bb.at(gcc_exit_block);
-  Inst *phi1 = exit_bb->build_phi_inst(1);
-  Inst *phi2 = exit_bb->build_phi_inst(exit_val->bitsize);
-  phi1->add_phi_arg(exit_called, abort_bb);
-  phi2->add_phi_arg(exit_val, abort_bb);
-  phi1->add_phi_arg(return_bb->value_inst(0, 1), return_bb);
-  phi2->add_phi_arg(return_bb->value_inst(0, exit_val->bitsize), return_bb);
-  exit_bb->build_inst(Op::EXIT, phi1, phi2);
 }
 
-void Converter::generate_return_inst()
+std::pair<Inst *, Inst *> Converter::generate_return_value()
 {
   tree retval_type = TREE_TYPE(DECL_RESULT(fun->decl));
   if (VOID_TYPE_P(retval_type))
-    {
-      exit_bb->build_ret_inst();
-      return;
-    }
+    return {nullptr, nullptr};
   int retval_bitsize = bitsize_for_type(retval_type);
   if (!retval_bitsize)
-    {
-      exit_bb->build_ret_inst();
-      return;
-    }
+    return {nullptr, nullptr};
 
   basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
   Basic_block *return_bb = gccbb_top2bb.at(gcc_exit_block);
@@ -9291,22 +9285,21 @@ void Converter::generate_return_inst()
   {
     Inst *retval = nullptr;
     Inst *indef = nullptr;
-    Basic_block *entry_bb = func->bbs[0];
     for (Basic_block *pred_bb : return_bb->preds)
       {
 	if (!bb2retval.contains(pred_bb))
 	  {
 	    if (!retval)
 	      {
-		retval = entry_bb->value_inst(0, retval_bitsize);
+		retval = init_bb->value_inst(0, retval_bitsize);
 		unsigned bitsize = retval_bitsize;
 		while (bitsize)
 		  {
 		    uint32_t bs = std::min(bitsize, 128u);
 		    bitsize -= bs;
-		    Inst *inst = entry_bb->value_inst(-1, bs);
+		    Inst *inst = init_bb->value_inst(-1, bs);
 		    if (indef)
-		      indef = entry_bb->build_inst(Op::CONCAT, inst, indef);
+		      indef = init_bb->build_inst(Op::CONCAT, inst, indef);
 		    else
 		      indef = inst;
 		  }
@@ -9354,24 +9347,34 @@ void Converter::generate_return_inst()
     }
 
   Inst *phi = exit_bb->build_phi_inst(retval->bitsize);
+  Inst *phi_indef = nullptr;
   phi->add_phi_arg(retval, return_bb);
   phi->add_phi_arg(return_bb->value_inst(0, retval->bitsize), abort_bb);
   if (retval_indef)
     {
-      Inst *phi_indef = exit_bb->build_phi_inst(retval->bitsize);
+      phi_indef = exit_bb->build_phi_inst(retval->bitsize);
       phi_indef->add_phi_arg(retval_indef, return_bb);
       phi_indef->add_phi_arg(return_bb->value_inst(0, retval->bitsize),
 			     abort_bb);
-      exit_bb->build_ret_inst(phi, phi_indef);
     }
+  return {phi, phi_indef};
+}
+
+void Converter::generate_return_inst()
+{
+  auto [retval, retval_indef] = generate_return_value();
+  if (!retval)
+    exit_bb->build_ret_inst();
+  else if (!retval_indef)
+    exit_bb->build_ret_inst(retval);
   else
-    exit_bb->build_ret_inst(phi);
+    exit_bb->build_ret_inst(retval, retval_indef);
 }
 
 // Write the values to initialized variables.
 void Converter::init_var_values(tree initial, Inst *mem_inst)
 {
-  assert(bb == func->bbs[0]);
+  assert(bb == init_bb);
   if (TREE_CODE(initial) == ERROR_MARK)
     throw Not_implemented("init_var_values: ERROR_MARK");
 
@@ -9489,15 +9492,12 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
 		  if (bit_offset)
 		    {
 		      Inst *first_byte = bb->build_inst(Op::LOAD, ptr);
-		      Inst *bits =
-			bb->build_trunc(first_byte, bit_offset);
-		      value_inst =
-			bb->build_inst(Op::CONCAT, value_inst, bits);
+		      Inst *bits = bb->build_trunc(first_byte, bit_offset);
+		      value_inst = bb->build_inst(Op::CONCAT, value_inst, bits);
 		    }
 		  if (bitsize + bit_offset != size * 8)
 		    {
-		      Inst *offset =
-			bb->value_inst(size - 1, ptr->bitsize);
+		      Inst *offset = bb->value_inst(size - 1, ptr->bitsize);
 		      Inst *ptr3 = bb->build_inst(Op::ADD, ptr, offset);
 
 		      uint64_t remaining = size * 8 - (bitsize + bit_offset);
@@ -9508,8 +9508,7 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
 		      Inst *last_byte = bb->build_inst(Op::LOAD, ptr3);
 		      Inst *bits =
 			bb->build_inst(Op::EXTRACT, last_byte, high, low);
-		      value_inst =
-			bb->build_inst(Op::CONCAT, bits, value_inst);
+		      value_inst = bb->build_inst(Op::CONCAT, bits, value_inst);
 		    }
 		}
 	      else
@@ -9529,8 +9528,7 @@ void Converter::init_var(tree decl, Inst *mem_inst)
 {
   check_type(TREE_TYPE(decl));
 
-  Basic_block *entry_bb = func->bbs[0];
-  assert(mem_inst->bb == entry_bb);
+  assert(mem_inst->bb == init_bb);
 
   tree initial = DECL_INITIAL(decl);
   if (!initial)
@@ -9539,11 +9537,11 @@ void Converter::init_var(tree decl, Inst *mem_inst)
 	return;
 
       // Uninitializied static variables are guaranted to be initialized to 0.
-      Inst *zero = entry_bb->value_inst(0, 8);
+      Inst *zero = init_bb->value_inst(0, 8);
       uint64_t size = bytesize_for_type(TREE_TYPE(decl));
       if (size > MAX_MEMORY_UNROLL_LIMIT)
 	throw Not_implemented("init_var: too large constructor");
-      entry_bb->build_inst(Op::MEMSET, mem_inst, zero, size);
+      init_bb->build_inst(Op::MEMSET, mem_inst, zero, size);
       return;
     }
 
@@ -9556,23 +9554,23 @@ void Converter::init_var(tree decl, Inst *mem_inst)
       if (CONSTRUCTOR_NO_CLEARING(initial))
 	throw Not_implemented("init_var: CONSTRUCTOR_NO_CLEARING");
 
-      Inst *zero = entry_bb->value_inst(0, 8);
+      Inst *zero = init_bb->value_inst(0, 8);
       if (size > MAX_MEMORY_UNROLL_LIMIT)
 	throw Not_implemented("init_var: too large constructor");
-      entry_bb->build_inst(Op::MEMSET, mem_inst, zero, size);
+      init_bb->build_inst(Op::MEMSET, mem_inst, zero, size);
       for (uint64_t i = 0; i < size; i++)
 	{
-	  Inst *offset = entry_bb->value_inst(i, mem_inst->bitsize);
-	  Inst *ptr = entry_bb->build_inst(Op::ADD, mem_inst, offset);
+	  Inst *offset = init_bb->value_inst(i, mem_inst->bitsize);
+	  Inst *ptr = init_bb->build_inst(Op::ADD, mem_inst, offset);
 	  uint8_t padding = padding_at_offset(type, i);
 	  if (padding)
-	    entry_bb->build_inst(Op::SET_MEM_INDEF, ptr,
-				 entry_bb->value_inst(padding, 8));
+	    init_bb->build_inst(Op::SET_MEM_INDEF, ptr,
+				init_bb->value_inst(padding, 8));
 	}
     }
 
   Basic_block *orig_bb = bb;
-  bb = func->bbs[0];
+  bb = init_bb;
   init_var_values(initial, mem_inst);
   bb = orig_bb;
 }
@@ -9600,12 +9598,15 @@ void Converter::process_variables()
   // is not used (for example, when arr[5] has been substituted with
   // the value from the initialization). We ensure this by always
   // adding all previously created global constant variables.
-  for (auto [decl, _] : state->decl2id)
+  if (role == Function_role::tgt)
     {
-      if (!decl2instruction.contains(decl)
-	  && TREE_PUBLIC(decl)
-	  && TREE_READONLY(decl))
-	process_decl(decl);
+      for (auto [decl, _] : state->decl2id)
+	{
+	  if (!decl2instruction.contains(decl)
+	      && TREE_PUBLIC(decl)
+	      && TREE_READONLY(decl))
+	    process_decl(decl);
+	}
     }
 }
 
@@ -9616,7 +9617,6 @@ void Converter::process_func_args()
   bitmap nonnullargs = get_nonnull_args(fntype);
   tree decl;
   int param_number = 0;
-  Basic_block *entry_bb = func->bbs[0];
   const char *decl_name = IDENTIFIER_POINTER(DECL_NAME(fun->decl));
   for (decl = DECL_ARGUMENTS(fun->decl); decl; decl = DECL_CHAIN(decl))
     {
@@ -9642,10 +9642,10 @@ void Converter::process_func_args()
 	}
       else
 	{
-	  Inst *param_nbr = entry_bb->value_inst(param_number, 32);
-	  Inst *param_bitsize = entry_bb->value_inst(bitsize, 32);
+	  Inst *param_nbr = bb->value_inst(param_number, 32);
+	  Inst *param_bitsize = bb->value_inst(bitsize, 32);
 	  Inst *param_inst =
-	    entry_bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
+	    bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
 	  if (!is_gimple_reg(decl))
 	    {
 	      Inst *inst = to_mem_repr(param_inst, TREE_TYPE(decl));
@@ -9663,7 +9663,7 @@ void Converter::process_func_args()
 		}
 	      Inst *mem = build_memory_inst(id, size, 0, false);
 	      Op store_op = BYTES_BIG_ENDIAN ? Op::STORE_BE : Op::STORE_LE;
-	      entry_bb->build_inst(store_op, mem, inst);
+	      bb->build_inst(store_op, mem, inst);
 	      parm_decl2mem.insert({decl, mem});
 	    }
 	  else
@@ -9692,9 +9692,8 @@ void Converter::process_func_args()
 		      // with different alignment/sizes.
 		      Inst *id1 = extract_id(bb, param_inst);
 		      Inst *id2 =
-			entry_bb->value_inst(restrict_id, module->ptr_id_bits);
-		      build_ub_assume(entry_bb,
-				      entry_bb->build_inst(Op::NE, id1, id2));
+			bb->value_inst(restrict_id, module->ptr_id_bits);
+		      build_ub_assume(bb, bb->build_inst(Op::NE, id1, id2));
 		      state->restrict_ids.push_back(id2);
 		    }
 		}
@@ -9714,9 +9713,9 @@ void Converter::process_func_args()
 	      && (bitmap_empty_p(nonnullargs)
 		  || bitmap_bit_p(nonnullargs, param_number)))
 	    {
-	      Inst *zero = entry_bb->value_inst(0, param_inst->bitsize);
-	      Inst *cond = entry_bb->build_inst(Op::EQ, param_inst, zero);
-	      build_ub_assume(entry_bb, cond);
+	      Inst *zero = bb->value_inst(0, param_inst->bitsize);
+	      Inst *cond = bb->build_inst(Op::EQ, param_inst, zero);
+	      build_ub_assume(bb, cond);
 	    }
 
 	  if (POINTER_TYPE_P(TREE_TYPE(decl)))
@@ -9734,14 +9733,12 @@ void Converter::process_func_args()
 	  widest_int mask;
 	  if (ipcp_get_parm_bits(decl, &value, &mask))
 	    {
-	      Inst *m_inst =
-		get_widest_int_inst(entry_bb, mask, param_inst->bitsize);
-	      m_inst = entry_bb->build_inst(Op::NOT, m_inst);
+	      Inst *m_inst = get_widest_int_inst(bb, mask, param_inst->bitsize);
+	      m_inst = bb->build_inst(Op::NOT, m_inst);
 	      Inst *v_inst = tree2inst(value);
-	      Inst *and_inst =
-		entry_bb->build_inst(Op::AND, param_inst, m_inst);
-	      Inst *cond = entry_bb->build_inst(Op::NE, v_inst, and_inst);
-	      build_ub_assume(entry_bb, cond);
+	      Inst *and_inst = bb->build_inst(Op::AND, param_inst, m_inst);
+	      Inst *cond = bb->build_inst(Op::NE, v_inst, and_inst);
+	      build_ub_assume(bb, cond);
 	    }
 	}
 
@@ -9754,8 +9751,8 @@ void Converter::process_func_args()
 
       // TODO: This should move into constrain_src_value.
       Inst *id = extract_id(bb, param_inst);
-      Inst *one = entry_bb->value_inst(1, module->ptr_id_bits);
-      build_ub_assume(entry_bb, entry_bb->build_inst(Op::EQ, id, one));
+      Inst *one = bb->value_inst(1, module->ptr_id_bits);
+      build_ub_assume(bb, bb->build_inst(Op::EQ, id, one));
     }
 
   BITMAP_FREE(nonnullargs);
@@ -9924,12 +9921,6 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
     }
   bb = nullptr;
 
-  // Generate all the result instructions.
-  abort_bb->build_br_inst(exit_bb);
-  generate_abort_inst();
-  generate_exit_inst();
-  generate_return_inst();
-
   // We have created all instructions, so it is now safe to add the phi
   // arguments (as they must have been created now).
   std::map<std::pair<Inst *, uint64_t>, std::vector<Inst *>> cache;
@@ -9978,10 +9969,39 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
     }
 }
 
+void Converter::process_function_body()
+{
+  int *postorder = nullptr;
+  try {
+    postorder = XNEWVEC(int, last_basic_block_for_fn(fun));
+    int nof_blocks = post_order_compute(postorder, true, true);
+
+    // Build the function's basic blocks.
+    int first_func_bb_idx = func->bbs.size();
+    for (int i = nof_blocks - 1; i >= 0; --i)
+      {
+	basic_block gcc_bb = (*fun->cfg->x_basic_block_info)[postorder[i]];
+	gccbb_top2bb.insert({gcc_bb, func->build_bb()});
+      }
+    bb = func->bbs[first_func_bb_idx];
+
+    process_instructions(nof_blocks, postorder);
+
+    free(postorder);
+    postorder = nullptr;
+  }
+  catch (...) {
+    free(postorder);
+    throw;
+  }
+}
+
 Function *Converter::process_function()
 {
-  if (!fun->cfg)
-    throw Not_implemented("missing fun->cfg");
+  if (!(fun->curr_properties & PROP_cfg))
+    throw Not_implemented("missing PROP_cfg");
+  if (!(fun->curr_properties & PROP_ssa))
+    throw Not_implemented("missing PROP_ssa");
 
   if (fun->static_chain_decl)
     {
@@ -9992,57 +10012,42 @@ Function *Converter::process_function()
 
   const char *name = function_name(fun);
   func = module->build_function(name);
+  init_bb = func->build_bb();
+  abort_bb = func->build_bb();
+  exit_bb = func->build_bb();
+  int first_func_bb_idx = func->bbs.size();
 
-  int *postorder = nullptr;
-  try {
-    postorder = XNEWVEC(int, last_basic_block_for_fn(fun));
-    int nof_blocks = post_order_compute(postorder, true, true);
+  // GCC assumes that __builtin functions have the specified semantics
+  // (see GCC PR 112949), so in practice, it is undefined behavior to
+  // create a __builtin function. Mark such functions as always invoking
+  // undefined behavior.
+  if (!strncmp(name, "__builtin_", 10))
+    init_bb->build_inst(Op::UB, init_bb->value_inst(1, 1));
 
-    // Build the new basic blocks.
-    for (int i = nof_blocks - 1; i >= 0; --i)
-      {
-	basic_block gcc_bb = (*fun->cfg->x_basic_block_info)[postorder[i]];
-	gccbb_top2bb.insert({gcc_bb, func->build_bb()});
-      }
-    abort_bb = func->build_bb();
-    exit_bb = func->build_bb();
-    bb = func->bbs[0];
+  bb = init_bb;
+  process_func_args();
+  process_variables();
 
-    process_func_args();
-    process_variables();
+  process_function_body();
+  init_bb->build_br_inst(func->bbs[first_func_bb_idx]);
 
-    // GCC assumes that __builtin functions have the specified semantics
-    // (see GCC PR 112949), so in practice, it is undefined behavior to
-    // create a __builtin function. Mark such functions as always invoking
-    // undefined behavior.
-    // TODO: We encounter similar issues with normal functions, such as
-    // memcpy. We should also detect such cases.
-    if (!strncmp(function_name(cfun), "__builtin_", 10))
-      func->bbs[0]->build_inst(Op::UB, func->bbs[0]->value_inst(1, 1));
+  // We did not have all information necessary in constrain_src_value to
+  // constrain pointers. Add the constraints now when the whole function
+  // has been processed.
+  for (auto id : constrain_ptr_id)
+    {
+      for (auto static_var_id : static_var_ids)
+	{
+	  Inst *cond = create_inst(Op::EQ, id, static_var_id);
+	  cond->insert_after(id);
+	  Inst *ub = create_inst(Op::UB, cond);
+	  ub->insert_after(cond);
+	}
+    }
 
-    process_instructions(nof_blocks, postorder);
-
-    // We did not have all information necessary in constrain_src_value to
-    // constrain pointers. Add the constraints now when the whole function
-    // has been processed.
-    for (auto id : constrain_ptr_id)
-      {
-	for (auto static_var_id : static_var_ids)
-	  {
-	    Inst *cond = create_inst(Op::EQ, id, static_var_id);
-	    cond->insert_after(id);
-	    Inst *ub = create_inst(Op::UB, cond);
-	    ub->insert_after(cond);
-	  }
-      }
-
-    free(postorder);
-    postorder = nullptr;
-  }
-  catch (...) {
-    free(postorder);
-    throw;
-  }
+  // Generate all the result instructions.
+  generate_abort_exit_inst();
+  generate_return_inst();
 
   reverse_post_order(func);
 
