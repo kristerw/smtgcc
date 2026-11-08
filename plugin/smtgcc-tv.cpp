@@ -164,15 +164,8 @@ static void check(opt_pass *pass, my_plugin *plugin_data, tv_function *tv_fun)
 
 	  Function *func = convert_function(tv_fun->module, tv_fun->state,
 					    tv_fun->errors, Function_role::tgt);
-	  if (!func)
-	    {
-	      destroy_module(next_module);
-	      delete next_state;
-	      tv_fun->delete_ir();
-	      tv_fun->pass_name = pass->name;
-	      return;
-	    }
-	  tv_fun->check(plugin_data);
+	  if (func)
+	    tv_fun->check(plugin_data);
 	}
       tv_fun->delete_ir();
     }
