@@ -146,7 +146,12 @@ static void check(opt_pass *pass, my_plugin *plugin_data, tv_function *tv_fun)
       return;
     }
 
-  if (tv_fun->module)
+  // Skip the einline pass as it may give false alarms when a pointer to
+  // a local variable is written to global memory.
+  // TODO: Implement a better solution.
+  if (tv_fun->pass_name == "einline")
+    tv_fun->delete_ir();
+  else if (tv_fun->module)
     {
       tv_fun->module->canonicalize();
       next_module->canonicalize();
