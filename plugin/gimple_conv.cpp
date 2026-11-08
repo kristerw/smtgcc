@@ -81,6 +81,8 @@ struct Converter {
   Basic_block *init_bb;
   Basic_block *abort_bb;
   Basic_block *exit_bb;
+  std::set<function *> calls_in_progress;
+  std::set<function *> called_functions;
   std::map<Basic_block *, Inst *> bb2exit;
   std::map<tree, Inst *> tree2instruction;
   std::map<tree, Inst *> tree2indef;
@@ -302,6 +304,7 @@ struct Converter {
   bool need_prov_phi(gimple *phi);
   void process_instructions(int nof_blocks, int *postorder);
   void process_function_body();
+  void emit_called_function(gimple *stmt);
   Function *process_function();
 };
 
@@ -1270,6 +1273,9 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 		handle_ipcp_ts(var);
 
 		Inst *inst = tree2instruction.at(var);
+		Inst *indef = nullptr;
+		if (auto it = tree2indef.find(var); it != tree2indef.end())
+		  indef = it->second;
 
 		// Place the range check in the entry block as it is
 		// invalid to call the function with invalid values.
@@ -1283,10 +1289,10 @@ std::tuple<Inst *, Inst *, Inst *> Converter::tree2inst_indef_prov(tree expr)
 		assert(!POINTER_TYPE_P(TREE_TYPE(expr))
 		       || tree2prov.contains(var));
 		Inst *prov = nullptr;
-		if (tree2prov.contains(var))
-		  prov = tree2prov.at(var);
+		if (auto it = tree2prov.find(var); it != tree2prov.end())
+		  prov = it->second;
 
-		return {inst, nullptr, prov};
+		return {inst, indef, prov};
 	      }
 	  }
 	if (var && TREE_CODE(var) == VAR_DECL)
@@ -9080,7 +9086,7 @@ void Converter::process_gimple_call(gimple *stmt)
 	    throw Not_implemented("gimple_call " + name);
 	}
       else
-	throw Not_implemented("gimple_call");
+	emit_called_function(stmt);
     }
 }
 
@@ -9216,8 +9222,6 @@ void Converter::process_gimple_return(gimple *stmt)
 
 void Converter::generate_abort_exit_inst()
 {
-  abort_bb->build_br_inst(exit_bb);
-
   if (!bb_abort.empty())
     {
       Inst *abort_called = abort_bb->build_phi_inst(1);
@@ -9346,18 +9350,26 @@ std::pair<Inst *, Inst *> Converter::generate_return_value()
       return_bb->build_inst(Op::UB, cond);
     }
 
-  Inst *phi = exit_bb->build_phi_inst(retval->bitsize);
-  Inst *phi_indef = nullptr;
-  phi->add_phi_arg(retval, return_bb);
-  phi->add_phi_arg(return_bb->value_inst(0, retval->bitsize), abort_bb);
-  if (retval_indef)
+  assert(abort_bb->last_inst
+	 && abort_bb->last_inst->op == Op::BR
+	 && abort_bb->last_inst->nof_args == 0);
+  if (abort_bb->last_inst->u.br1.dest_bb == exit_bb)
     {
-      phi_indef = exit_bb->build_phi_inst(retval->bitsize);
-      phi_indef->add_phi_arg(retval_indef, return_bb);
-      phi_indef->add_phi_arg(return_bb->value_inst(0, retval->bitsize),
-			     abort_bb);
+      Inst *phi = exit_bb->build_phi_inst(retval->bitsize);
+      Inst *phi_indef = nullptr;
+      phi->add_phi_arg(retval, return_bb);
+      phi->add_phi_arg(return_bb->value_inst(0, retval->bitsize), abort_bb);
+      if (retval_indef)
+	{
+	  phi_indef = exit_bb->build_phi_inst(retval->bitsize);
+	  phi_indef->add_phi_arg(retval_indef, return_bb);
+	  phi_indef->add_phi_arg(return_bb->value_inst(0, retval->bitsize),
+				 abort_bb);
+	}
+      return {phi, phi_indef};
     }
-  return {phi, phi_indef};
+  else
+    return {retval, retval_indef};
 }
 
 void Converter::generate_return_inst()
@@ -9853,7 +9865,7 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	{
 	  edge succ_edge = EDGE_SUCC(gcc_bb, j);
 	  if (succ_edge->flags & EDGE_ABNORMAL)
-	    throw Not_implemented("abnormal edge(exceptions)");
+	    throw Not_implemented("abnormal edge");
 	  if (succ_edge->flags & EDGE_IRREDUCIBLE_LOOP)
 	    throw Not_implemented("irreducible loop");
 	}
@@ -9996,8 +10008,112 @@ void Converter::process_function_body()
   }
 }
 
+void Converter::emit_called_function(gimple *stmt)
+{
+  tree decl = gimple_call_fndecl(stmt);
+  if (!decl)
+    throw Not_implemented("gimple_call");
+  function *fn = DECL_STRUCT_FUNCTION(decl);
+  if (!fn)
+    throw Not_implemented("gimple_call");
+
+  if (calls_in_progress.size() > 2)
+    throw Not_implemented("too deep call chain");
+
+  if (calls_in_progress.contains(fn))
+    throw Not_implemented("recursive calls");
+  calls_in_progress.insert(fn);
+
+  // We are placing various tree nodes in persistent dictionaries, so we
+  // cannot call a function more than once.
+  if (called_functions.contains(fn))
+    throw Not_implemented("function called multiple times");
+  called_functions.insert(fn);
+
+  int param_number = 0;
+  const char *decl_name = IDENTIFIER_POINTER(DECL_NAME(fn->decl));
+  for (tree decl = DECL_ARGUMENTS(fn->decl); decl; decl = DECL_CHAIN(decl))
+    {
+      if (POINTER_TYPE_P(TREE_TYPE(decl)))
+	{
+	  // TODO: Check that incoming pointers do not point to this
+	  // function's local variables (but it may point to the caller's).
+	  throw Not_implemented("emit_called_function: pointer");
+	}
+
+      // TODO: There must be better ways to determine if this is the "this"
+      // pointer of a C++ constructor.
+      if (param_number == 0 && !strcmp(decl_name, "__ct_base "))
+	throw Not_implemented("emit_called_function: __ct_base");
+      else if (!is_gimple_reg(decl))
+	throw Not_implemented("emit_called_function: variable is not a "
+			      "GIMPLE reg");
+      else
+	{
+	  tree arg_expr = gimple_call_arg(stmt, param_number);
+	  auto [arg, arg_indef] = tree2inst_indef(arg_expr);
+	  tree2instruction.insert({decl, arg});
+	  if (arg_indef)
+	    tree2indef.insert({decl, arg_indef});
+	}
+
+      param_number++;
+    }
+
+  function *orig_fun = fun;
+  Basic_block *orig_bb = bb;
+  Basic_block *orig_exit_bb = exit_bb;
+  exit_bb = func->build_bb();
+
+  int first_func_bb_idx = func->bbs.size();
+  fun = fn;
+  push_cfun(fn);
+
+  try {
+    process_function_body();
+    auto [retval, retval_indef] = generate_return_value();
+    tree lhs = gimple_call_lhs(stmt);
+    if (lhs)
+      {
+	if (POINTER_TYPE_P(TREE_TYPE(lhs)))
+	  {
+	    // TODO: Check that outgoing pointers do not point to this
+	    // function's local variables (but it may point to the caller's).
+	    // And set up prov for the returned value.
+	    throw Not_implemented("emit_called_function: pointer");
+	  }
+	if (TREE_CODE(lhs) != SSA_NAME)
+	  {
+	    basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
+	    bb = gccbb_top2bb.at(gcc_exit_block);
+	    process_store(lhs, retval, retval_indef);
+	  }
+	else
+	  {
+	    tree2instruction.insert({lhs, retval});
+	    if (retval_indef)
+	      tree2indef.insert({lhs, retval_indef});
+	  }
+      }
+    orig_bb->build_br_inst(func->bbs[first_func_bb_idx]);
+  }
+  catch (...) {
+    pop_cfun();
+    throw;
+  }
+
+  calls_in_progress.erase(fn);
+  pop_cfun();
+  fun = orig_fun;
+  bb = exit_bb;
+  exit_bb = orig_exit_bb;
+}
+
 Function *Converter::process_function()
 {
+  calls_in_progress.insert(fun);
+  called_functions.insert(fun);
+
   if (!(fun->curr_properties & PROP_cfg))
     throw Not_implemented("missing PROP_cfg");
   if (!(fun->curr_properties & PROP_ssa))
@@ -10015,6 +10131,7 @@ Function *Converter::process_function()
   init_bb = func->build_bb();
   abort_bb = func->build_bb();
   exit_bb = func->build_bb();
+  abort_bb->build_br_inst(exit_bb);
   int first_func_bb_idx = func->bbs.size();
 
   // GCC assumes that __builtin functions have the specified semantics
