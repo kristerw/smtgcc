@@ -3444,7 +3444,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
     {
     case EXACT_DIV_EXPR:
       {
-	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
+	if (!ignore_overflow && !TYPE_UNSIGNED(lhs_type))
 	  {
 	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
 	    Inst *minus1_inst = bb->value_inst(-1, arg1->bitsize);
@@ -3464,7 +3464,7 @@ std::tuple<Inst *, Inst *, Inst *> Converter::process_binary_int(enum tree_code 
       }
     case TRUNC_DIV_EXPR:
       {
-	if (!ignore_overflow && !TYPE_OVERFLOW_WRAPS(lhs_type))
+	if (!ignore_overflow && !TYPE_UNSIGNED(lhs_type))
 	  {
 	    Inst *min_int_inst = build_min_int(bb, arg1->bitsize);
 	    Inst *minus1_inst = bb->value_inst(-1, arg1->bitsize);
