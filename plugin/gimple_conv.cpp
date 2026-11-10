@@ -91,6 +91,7 @@ struct Converter {
   std::map<tree, Inst *> parm_decl2mem;
   std::map<Inst *, Inst *> inst2memory_flagsx;
   std::map<Inst *, Inst *> inst2id;
+  std::map<function *, std::vector<uint64_t>> fun2local_ids;
   std::vector<Inst *> static_var_ids;
   std::vector<Inst *> constrain_ptr_id;
   Inst *retval = nullptr;
@@ -304,6 +305,7 @@ struct Converter {
   bool need_prov_phi(gimple *phi);
   void process_instructions(int nof_blocks, int *postorder);
   void process_function_body();
+  Inst *is_invalid_arg_pointer(Inst *ptr);
   void emit_called_function(gimple *stmt);
   Function *process_function();
 };
@@ -1920,6 +1922,8 @@ void Converter::process_decl(tree decl)
   decl2instruction.insert({decl, memory_inst});
   if (TREE_READONLY(decl))
     init_var(decl, memory_inst);
+  if ((int64_t)id < 0)
+    fun2local_ids[fun].push_back(id);
 
   if (!auto_var_p(decl) && DECL_ASSEMBLER_NAME(decl))
     {
@@ -2512,6 +2516,8 @@ void Converter::process_store(tree addr_expr, Inst *value, Inst *value_indef)
   assert(!addr.bitoffset);
   store_ub_check(addr.ptr, addr.prov, size);
   Inst *memory_flag = bb->value_inst(0, 1);
+  if (!value_indef)
+    value_indef = bb->value_inst(0, value->bitsize);
   if (BYTES_BIG_ENDIAN)
     {
       bb->build_inst(Op::STORE_BE, addr.ptr, value);
@@ -4319,6 +4325,8 @@ void Converter::process_gimple_assign(gimple *stmt)
 
   if (TREE_CODE(lhs) != SSA_NAME)
     {
+      if (get_gimple_rhs_class(code) != GIMPLE_SINGLE_RHS)
+	throw Not_implemented("process_gimple_assign: unsupported lhs");
       assert(get_gimple_rhs_class(code) == GIMPLE_SINGLE_RHS);
       tree rhs = gimple_assign_rhs1(stmt);
       if (TREE_CODE(rhs) == CONSTRUCTOR)
@@ -9925,7 +9933,8 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 	}
       else
 	{
-	  assert(EDGE_COUNT(gcc_bb->succs) == 1);
+	  if (EDGE_COUNT(gcc_bb->succs) != 1)
+	    throw  Not_implemented("Unknown end of BB (EDGE_COUNT != 1)");
 	  Basic_block *succ_bb =
 	    gccbb_top2bb.at(single_succ_edge(gcc_bb)->dest);
 	  bb->build_br_inst(succ_bb);
@@ -9983,6 +9992,17 @@ void Converter::process_instructions(int nof_blocks, int *postorder)
 
 void Converter::process_function_body()
 {
+  if (!(fun->curr_properties & PROP_cfg))
+    throw Not_implemented("missing PROP_cfg");
+  if (!(fun->curr_properties & PROP_ssa))
+    throw Not_implemented("missing PROP_ssa");
+  if (fun->static_chain_decl)
+    {
+      // TODO: Should be possible to handle this by treating it as a normal
+      // pointer argument?
+      throw Not_implemented("nested functions");
+    }
+
   int *postorder = nullptr;
   try {
     postorder = XNEWVEC(int, last_basic_block_for_fn(fun));
@@ -10008,6 +10028,17 @@ void Converter::process_function_body()
   }
 }
 
+Inst *Converter::is_invalid_arg_pointer(Inst *ptr)
+{
+  Inst *id = extract_id(bb, ptr);
+  Inst *zero_id = bb->value_inst(0, id->bitsize);
+  Inst *is_local = bb->build_inst(Op::SLT, id, zero_id);
+  Inst *size = bb->build_inst(Op::GET_MEM_SIZE, id);
+  Inst *zero_size = bb->value_inst(0, size->bitsize);
+  Inst *is_invalid_prov = bb-> build_inst(Op::EQ, size, zero_size);
+  return bb->build_inst(Op::AND, is_local, is_invalid_prov);
+}
+
 void Converter::emit_called_function(gimple *stmt)
 {
   tree decl = gimple_call_fndecl(stmt);
@@ -10016,6 +10047,8 @@ void Converter::emit_called_function(gimple *stmt)
   function *fn = DECL_STRUCT_FUNCTION(decl);
   if (!fn)
     throw Not_implemented("gimple_call");
+  if (!prototype_p(TREE_TYPE (fn->decl)))
+    throw Not_implemented("calling function with no prototype");
 
   if (calls_in_progress.size() > 2)
     throw Not_implemented("too deep call chain");
@@ -10034,13 +10067,6 @@ void Converter::emit_called_function(gimple *stmt)
   const char *decl_name = IDENTIFIER_POINTER(DECL_NAME(fn->decl));
   for (tree decl = DECL_ARGUMENTS(fn->decl); decl; decl = DECL_CHAIN(decl))
     {
-      if (POINTER_TYPE_P(TREE_TYPE(decl)))
-	{
-	  // TODO: Check that incoming pointers do not point to this
-	  // function's local variables (but it may point to the caller's).
-	  throw Not_implemented("emit_called_function: pointer");
-	}
-
       // TODO: There must be better ways to determine if this is the "this"
       // pointer of a C++ constructor.
       if (param_number == 0 && !strcmp(decl_name, "__ct_base "))
@@ -10051,10 +10077,14 @@ void Converter::emit_called_function(gimple *stmt)
       else
 	{
 	  tree arg_expr = gimple_call_arg(stmt, param_number);
-	  auto [arg, arg_indef] = tree2inst_indef(arg_expr);
+	  auto [arg, arg_indef, arg_prov] = tree2inst_indef_prov(arg_expr);
 	  tree2instruction.insert({decl, arg});
 	  if (arg_indef)
 	    tree2indef.insert({decl, arg_indef});
+	  if (arg_prov)
+	    tree2prov.insert({decl, arg_prov});
+	  if (POINTER_TYPE_P(TREE_TYPE(decl)))
+	    bb->build_inst(Op::UB, is_invalid_arg_pointer(arg));
 	}
 
       param_number++;
@@ -10069,31 +10099,18 @@ void Converter::emit_called_function(gimple *stmt)
   fun = fn;
   push_cfun(fn);
 
+  Inst *retval = nullptr;
+  Inst *retval_indef = nullptr;
   try {
     process_function_body();
-    auto [retval, retval_indef] = generate_return_value();
-    tree lhs = gimple_call_lhs(stmt);
-    if (lhs)
+    std::tie(retval, retval_indef) = generate_return_value();
+
+    basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
+    bb = gccbb_top2bb.at(gcc_exit_block);
+    if (fun2local_ids.contains(fun))
       {
-	if (POINTER_TYPE_P(TREE_TYPE(lhs)))
-	  {
-	    // TODO: Check that outgoing pointers do not point to this
-	    // function's local variables (but it may point to the caller's).
-	    // And set up prov for the returned value.
-	    throw Not_implemented("emit_called_function: pointer");
-	  }
-	if (TREE_CODE(lhs) != SSA_NAME)
-	  {
-	    basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
-	    bb = gccbb_top2bb.at(gcc_exit_block);
-	    process_store(lhs, retval, retval_indef);
-	  }
-	else
-	  {
-	    tree2instruction.insert({lhs, retval});
-	    if (retval_indef)
-	      tree2indef.insert({lhs, retval_indef});
-	  }
+	for (auto& id : fun2local_ids[fun])
+	  bb->build_inst(Op::FREE, bb->value_inst(id, module->ptr_id_bits));
       }
     orig_bb->build_br_inst(func->bbs[first_func_bb_idx]);
   }
@@ -10102,29 +10119,44 @@ void Converter::emit_called_function(gimple *stmt)
     throw;
   }
 
+  // Restore the original function context.
   calls_in_progress.erase(fn);
   pop_cfun();
   fun = orig_fun;
   bb = exit_bb;
   exit_bb = orig_exit_bb;
+
+  // Handle the return value.
+  //
+  // Note: process_store may create a new Op::MEMORY, so we must do this
+  // after we have changed back to the original function in order to
+  // ensure it is associated with the correct context.
+  tree lhs = gimple_call_lhs(stmt);
+  if (lhs)
+    {
+      if (TREE_CODE(lhs) != SSA_NAME)
+	process_store(lhs, retval, retval_indef);
+      else
+	{
+	  tree2instruction.insert({lhs, retval});
+	  if (retval_indef)
+	    tree2indef.insert({lhs, retval_indef});
+	}
+
+      if (POINTER_TYPE_P(TREE_TYPE(lhs)))
+	{
+	  // TODO: Check that outgoing pointers do not point to this
+	  // function's local variables (but they may point to the caller's).
+	  // And set up prov for the returned value.
+	  throw Not_implemented("emit_called_function: pointer");
+	}
+    }
 }
 
 Function *Converter::process_function()
 {
   calls_in_progress.insert(fun);
   called_functions.insert(fun);
-
-  if (!(fun->curr_properties & PROP_cfg))
-    throw Not_implemented("missing PROP_cfg");
-  if (!(fun->curr_properties & PROP_ssa))
-    throw Not_implemented("missing PROP_ssa");
-
-  if (fun->static_chain_decl)
-    {
-      // TODO: Should be possible to handle this by treating it as a normal
-      // pointer argument?
-      throw Not_implemented("nested functions");
-    }
 
   const char *name = function_name(fun);
   func = module->build_function(name);
