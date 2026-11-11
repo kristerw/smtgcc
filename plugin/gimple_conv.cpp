@@ -291,7 +291,7 @@ struct Converter {
   void process_gimple_switch(gimple *stmt, Basic_block *bb);
   Basic_block *get_phi_arg_bb(gphi *phi, int i);
   void generate_abort_exit_inst();
-  std::pair<Inst *, Inst *> generate_return_value();
+  std::pair<Inst *, Inst *> generate_return_value(bool gen_ub_check = true);
   void generate_return_inst();
   void init_var_values(tree initial, Inst *mem_inst);
   void init_var(tree decl, Inst *mem_inst);
@@ -9278,7 +9278,7 @@ void Converter::generate_abort_exit_inst()
     }
 }
 
-std::pair<Inst *, Inst *> Converter::generate_return_value()
+std::pair<Inst *, Inst *> Converter::generate_return_value(bool gen_ub_check)
 {
   tree retval_type = TREE_TYPE(DECL_RESULT(fun->decl));
   if (VOID_TYPE_P(retval_type))
@@ -9344,7 +9344,7 @@ std::pair<Inst *, Inst *> Converter::generate_return_value()
     }
 
   // GCC treats it as UB to return the address of a local variable.
-  if (POINTER_TYPE_P(retval_type))
+  if (gen_ub_check && POINTER_TYPE_P(retval_type))
     {
       Inst *mem_id = extract_id(return_bb, retval);
       Inst *zero = return_bb->value_inst(0, module->ptr_id_bits);
@@ -10103,7 +10103,7 @@ void Converter::emit_called_function(gimple *stmt)
   Inst *retval_indef = nullptr;
   try {
     process_function_body();
-    std::tie(retval, retval_indef) = generate_return_value();
+    std::tie(retval, retval_indef) = generate_return_value(false);
 
     basic_block gcc_exit_block = EXIT_BLOCK_PTR_FOR_FN(fun);
     bb = gccbb_top2bb.at(gcc_exit_block);
@@ -10145,10 +10145,10 @@ void Converter::emit_called_function(gimple *stmt)
 
       if (POINTER_TYPE_P(TREE_TYPE(lhs)))
 	{
-	  // TODO: Check that outgoing pointers do not point to this
-	  // function's local variables (but they may point to the caller's).
-	  // And set up prov for the returned value.
-	  throw Not_implemented("emit_called_function: pointer");
+	  tree2prov.insert({lhs, extract_id(bb, retval)});
+
+	  // GCC treats it as UB to return the address of a local variable.
+	  bb->build_inst(Op::UB, is_invalid_arg_pointer(retval));
 	}
     }
 }
