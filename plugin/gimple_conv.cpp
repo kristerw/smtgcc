@@ -9632,12 +9632,15 @@ void Converter::process_variables()
 
 void Converter::process_func_args()
 {
+  if (DECL_CXX_CONSTRUCTOR_P(fun->decl))
+    throw Not_implemented("C++ constructor");
+  if (DECL_CXX_DESTRUCTOR_P(fun->decl))
+    throw Not_implemented("C++ destructor");
   std::vector<std::pair<Inst*, tree>> pointers;
   tree fntype = TREE_TYPE(fun->decl);
   bitmap nonnullargs = get_nonnull_args(fntype);
   tree decl;
   int param_number = 0;
-  const char *decl_name = IDENTIFIER_POINTER(DECL_NAME(fun->decl));
   for (decl = DECL_ARGUMENTS(fun->decl); decl; decl = DECL_CHAIN(decl))
     {
       check_type(TREE_TYPE(decl));
@@ -9645,22 +9648,7 @@ void Converter::process_func_args()
       if (bitsize <= 0)
 	throw Not_implemented("Parameter size == 0");
 
-      // TODO: There must be better ways to determine if this is the "this"
-      // pointer of a C++ constructor.
-      if (param_number == 0 && !strcmp(decl_name, "__ct_base "))
-	{
-	  assert(POINTER_TYPE_P(TREE_TYPE(decl)));
-
-	  // We use constant ID as it must be the same between src and tgt.
-	  int64_t id = 1;
-	  uint64_t size = bytesize_for_type(TREE_TYPE(TREE_TYPE(decl)));
-
-	  Inst *param_inst = build_memory_inst(id, size, MEM_KEEP, true);
-	  tree2prov.insert({decl, param_inst->args[0]});
-	  tree2instruction.insert({decl, param_inst});
-	  tree2prov.insert({decl, extract_id(bb, param_inst)});
-	}
-      else
+      if (true)
 	{
 	  Inst *param_nbr = bb->value_inst(param_number, 32);
 	  Inst *param_bitsize = bb->value_inst(bitsize, 32);
@@ -10049,6 +10037,10 @@ void Converter::emit_called_function(gimple *stmt)
     throw Not_implemented("gimple_call");
   if (!prototype_p(TREE_TYPE (fn->decl)))
     throw Not_implemented("calling function with no prototype");
+  if (DECL_CXX_CONSTRUCTOR_P(fn->decl))
+    throw Not_implemented("C++ constructor");
+  if (DECL_CXX_DESTRUCTOR_P(fn->decl))
+    throw Not_implemented("C++ destructor");
 
   if (calls_in_progress.size() > 2)
     throw Not_implemented("too deep call chain");
@@ -10064,14 +10056,9 @@ void Converter::emit_called_function(gimple *stmt)
   called_functions.insert(fn);
 
   int param_number = 0;
-  const char *decl_name = IDENTIFIER_POINTER(DECL_NAME(fn->decl));
   for (tree decl = DECL_ARGUMENTS(fn->decl); decl; decl = DECL_CHAIN(decl))
     {
-      // TODO: There must be better ways to determine if this is the "this"
-      // pointer of a C++ constructor.
-      if (param_number == 0 && !strcmp(decl_name, "__ct_base "))
-	throw Not_implemented("emit_called_function: __ct_base");
-      else if (!is_gimple_reg(decl))
+      if (!is_gimple_reg(decl))
 	throw Not_implemented("emit_called_function: variable is not a "
 			      "GIMPLE reg");
       else
