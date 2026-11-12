@@ -10056,25 +10056,61 @@ void Converter::emit_called_function(gimple *stmt)
   called_functions.insert(fn);
 
   int param_number = 0;
-  for (tree decl = DECL_ARGUMENTS(fn->decl); decl; decl = DECL_CHAIN(decl))
+  for (tree decl = DECL_ARGUMENTS(fn->decl);
+       decl;
+       decl = DECL_CHAIN(decl), param_number++)
     {
-      if (!is_gimple_reg(decl))
-	throw Not_implemented("emit_called_function: variable is not a "
-			      "GIMPLE reg");
-      else
+      if (POINTER_TYPE_P(TREE_TYPE(decl)))
 	{
 	  tree arg_expr = gimple_call_arg(stmt, param_number);
-	  auto [arg, arg_indef, arg_prov] = tree2inst_indef_prov(arg_expr);
+	  auto [arg, arg_indef] = tree2inst_indef(arg_expr);
+	  bb->build_inst(Op::UB, is_invalid_arg_pointer(arg));
+	}
+    }
+
+  param_number = 0;
+  for (tree decl = DECL_ARGUMENTS(fn->decl);
+       decl;
+       decl = DECL_CHAIN(decl), param_number++)
+    {
+      tree arg_expr = gimple_call_arg(stmt, param_number);
+      auto [arg, arg_indef, arg_prov] = tree2inst_indef_prov(arg_expr);
+      if (!is_gimple_reg(decl))
+	{
+	  std::tie(arg, arg_indef) =
+	    to_mem_repr(arg, arg_indef, TREE_TYPE(decl));
+	  uint64_t size = arg->bitsize / 8;
+	  uint64_t id;
+	  if (state->decl2id.contains(decl))
+	    id = state->decl2id.at(decl);
+	  else
+	    {
+	      if (state->id_local <= state->ptr_id_min)
+		throw Not_implemented("emit_called_function: "
+				      "too many local variables");
+	      id = --state->id_local;
+	      state->decl2id.insert({decl, id});
+	    }
+	  Inst *mem = build_memory_inst(id, size, 0, false);
+	  Op store_op = BYTES_BIG_ENDIAN ? Op::STORE_BE : Op::STORE_LE;
+	  bb->build_inst(store_op, mem, arg);
+	  if (arg_indef)
+	    {
+	      Op indef_op =
+		BYTES_BIG_ENDIAN ? Op::SET_MEM_INDEF_BE : Op::SET_MEM_INDEF_LE;
+	      bb->build_inst(indef_op, mem, arg_indef);
+	    }
+	  // TODO: mem_flags
+	  parm_decl2mem.insert({decl, mem});
+	}
+      else
+	{
 	  tree2instruction.insert({decl, arg});
 	  if (arg_indef)
 	    tree2indef.insert({decl, arg_indef});
 	  if (arg_prov)
 	    tree2prov.insert({decl, arg_prov});
-	  if (POINTER_TYPE_P(TREE_TYPE(decl)))
-	    bb->build_inst(Op::UB, is_invalid_arg_pointer(arg));
 	}
-
-      param_number++;
     }
 
   function *orig_fun = fun;
