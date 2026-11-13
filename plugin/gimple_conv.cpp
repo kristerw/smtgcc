@@ -78,6 +78,7 @@ struct Converter {
   std::map<basic_block, Basic_block *> gccbb_bottom2bb;
   std::map<Basic_block *, std::pair<Inst *, Inst *> > bb2retval;
   std::set<Basic_block *> bb_abort;
+  Basic_block *first_bb;
   Basic_block *init_bb;
   Basic_block *abort_bb;
   Basic_block *exit_bb;
@@ -741,14 +742,14 @@ void Converter::constrain_src_value(Inst *inst, tree type, Inst *mem_flags)
 
 Inst *Converter::build_memory_inst(uint64_t id, uint64_t size, uint32_t flags, bool uninit)
 {
-  Inst *arg1 = init_bb->value_inst(id, module->ptr_id_bits);
-  Inst *arg2 = init_bb->value_inst(size, module->ptr_offset_bits);
-  Inst *arg3 = init_bb->value_inst(flags, 32);
-  Inst *mem = init_bb->build_inst(Op::MEMORY, arg1, arg2, arg3);
+  Inst *arg1 = first_bb->value_inst(id, module->ptr_id_bits);
+  Inst *arg2 = first_bb->value_inst(size, module->ptr_offset_bits);
+  Inst *arg3 = first_bb->value_inst(flags, 32);
+  Inst *mem = first_bb->build_inst(Op::MEMORY, arg1, arg2, arg3);
   if (uninit)
     {
-      Inst *value = init_bb->value_inst(255, 8);
-      init_bb->build_inst(Op::MEMSET_MEM_INDEF, mem, value, size);
+      Inst *value = first_bb->value_inst(255, 8);
+      first_bb->build_inst(Op::MEMSET_MEM_INDEF, mem, value, size);
     }
   return mem;
 }
@@ -9303,15 +9304,15 @@ std::pair<Inst *, Inst *> Converter::generate_return_value(bool gen_ub_check)
 	  {
 	    if (!retval)
 	      {
-		retval = init_bb->value_inst(0, retval_bitsize);
+		retval = first_bb->value_inst(0, retval_bitsize);
 		unsigned bitsize = retval_bitsize;
 		while (bitsize)
 		  {
 		    uint32_t bs = std::min(bitsize, 128u);
 		    bitsize -= bs;
-		    Inst *inst = init_bb->value_inst(-1, bs);
+		    Inst *inst = first_bb->value_inst(-1, bs);
 		    if (indef)
-		      indef = init_bb->build_inst(Op::CONCAT, inst, indef);
+		      indef = first_bb->build_inst(Op::CONCAT, inst, indef);
 		    else
 		      indef = inst;
 		  }
@@ -9547,8 +9548,6 @@ void Converter::init_var_values(tree initial, Inst *mem_inst)
 void Converter::init_var(tree decl, Inst *mem_inst)
 {
   check_type(TREE_TYPE(decl));
-
-  assert(mem_inst->bb == init_bb);
 
   tree initial = DECL_INITIAL(decl);
   if (!initial)
@@ -10156,9 +10155,11 @@ void Converter::emit_called_function(gimple *stmt)
     }
 
   function *orig_fun = fun;
-  Basic_block *orig_bb = bb;
+  Basic_block *orig_init_bb = init_bb;
   Basic_block *orig_exit_bb = exit_bb;
+  init_bb = func->build_bb();
   exit_bb = func->build_bb();
+  bb->build_br_inst(init_bb);
 
   int first_func_bb_idx = func->bbs.size();
   fun = fn;
@@ -10177,7 +10178,7 @@ void Converter::emit_called_function(gimple *stmt)
 	for (auto& id : fun2local_ids[fun])
 	  bb->build_inst(Op::FREE, bb->value_inst(id, module->ptr_id_bits));
       }
-    orig_bb->build_br_inst(func->bbs[first_func_bb_idx]);
+    init_bb->build_br_inst(func->bbs[first_func_bb_idx]);
   }
   catch (...) {
     pop_cfun();
@@ -10190,6 +10191,7 @@ void Converter::emit_called_function(gimple *stmt)
   fun = orig_fun;
   bb = exit_bb;
   exit_bb = orig_exit_bb;
+  init_bb = orig_init_bb;
 
   // Handle the return value.
   //
@@ -10225,7 +10227,8 @@ Function *Converter::process_function()
 
   const char *name = function_name(fun);
   func = module->build_function(name);
-  init_bb = func->build_bb();
+  first_bb = func->build_bb();
+  init_bb = first_bb;
   abort_bb = func->build_bb();
   exit_bb = func->build_bb();
   abort_bb->build_br_inst(exit_bb);
