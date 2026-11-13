@@ -10035,8 +10035,6 @@ void Converter::emit_called_function(gimple *stmt)
   function *fn = DECL_STRUCT_FUNCTION(decl);
   if (!fn)
     throw Not_implemented("gimple_call");
-  if (!prototype_p(TREE_TYPE (fn->decl)))
-    throw Not_implemented("calling function with no prototype");
   if (DECL_CXX_CONSTRUCTOR_P(fn->decl))
     throw Not_implemented("C++ constructor");
   if (DECL_CXX_DESTRUCTOR_P(fn->decl))
@@ -10055,7 +10053,51 @@ void Converter::emit_called_function(gimple *stmt)
     throw Not_implemented("function called multiple times");
   called_functions.insert(fn);
 
+  // Check the arguments. We treat it as UB if the call is done with too
+  // few arguments, or with arguments of a different size compared to
+  // what the called function expects.
+  // GIMPLE is in general consistent with the type, but it may differ for
+  // invalid code that has cast a function pointer to an incompatible
+  // function type, or when calling functions with K&R-style function
+  // declarations. We allow too many arguments in the call, as this happens
+  // for functions using va_start etc.
+  // TODO: Is this the correct semantics for smtgcc?
   int param_number = 0;
+  int num_args = gimple_call_num_args(stmt);
+  bool invalid_call = false;
+  for (tree decl = DECL_ARGUMENTS(fn->decl);
+       decl;
+       decl = DECL_CHAIN(decl), param_number++)
+    {
+      if (param_number >= num_args)
+	{
+	  invalid_call = true;
+	  break;
+	}
+      tree arg_expr = gimple_call_arg(stmt, param_number);
+      uint64_t bitsize_arg = bitsize_for_type(TREE_TYPE(arg_expr));
+      uint64_t bitsize_decl = bitsize_for_type(TREE_TYPE(decl));
+      if (bitsize_arg != bitsize_decl)
+	invalid_call = true;
+    }
+  if (invalid_call)
+    {
+      tree lhs = gimple_call_lhs(stmt);
+      if (lhs)
+	{
+	  Inst *retval = bb->value_inst(0, bitsize_for_type(TREE_TYPE(lhs)));
+	  tree2instruction.insert({lhs, retval});
+	  if (POINTER_TYPE_P(TREE_TYPE(lhs)))
+	    tree2prov.insert({lhs, extract_id(bb, retval)});
+	}
+      return;
+    }
+
+  // Incoming pointers cannot point to local memory allocated in the
+  // called function. We must check this before the normal argument
+  // handling, as we otherwise would allow pointers to memory added
+  // in that processing.
+  param_number = 0;
   for (tree decl = DECL_ARGUMENTS(fn->decl);
        decl;
        decl = DECL_CHAIN(decl), param_number++)
