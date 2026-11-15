@@ -111,6 +111,8 @@ struct Converter {
   Inst *build_memory_inst(uint64_t id, uint64_t size, uint32_t flags, bool uninit = false);
   void build_ub_if_not_zero(Inst *inst, Inst *cmp = nullptr);
   void constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *indef=nullptr);
+  Inst *gen_r_ok(Inst *ptr, Inst *prov, Inst *size);
+  Inst *gen_rw_ok(Inst *ptr, Inst *prov, Inst *size);
   void store_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr);
   void load_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond = nullptr);
   void load_vec_ub_check(Inst *ptr, Inst *prov, uint64_t size, tree expr);
@@ -126,6 +128,7 @@ struct Converter {
   Inst *get_res_indef(Inst *arg1_indef, Inst *arg2_indef, tree lhs_type);
   Inst *get_res_indef(Inst *arg1_indef, Inst *arg2_indef, Inst *arg3_indef, tree lhs_type);
   void alignment_check(tree expr, Inst *ptr);
+  void assume_alignment(tree expr, Inst *ptr);
   void process_decl(tree decl);
   Addr process_array_ref(tree expr, bool is_mem_access);
   Addr process_component_ref(tree expr, bool is_mem_access);
@@ -284,6 +287,7 @@ struct Converter {
   void process_cfn_vec_widen_abd(gimple *stmt, bool high);
   void process_cfn_while_ult(gimple *stmt);
   void process_cfn_xorsign(gimple *stmt);
+  void process_gimple_call_smtgcc_fn(gimple *stmt);
   void process_gimple_call_combined_fn(gimple *stmt);
   void process_gimple_call(gimple *stmt);
   void process_gimple_return(gimple *stmt);
@@ -885,6 +889,57 @@ void Converter::constrain_range(Basic_block *bb, tree expr, Inst *inst, Inst *in
   if (is_ub1)
     bb->build_inst(Op::UB, is_ub1);
   bb->build_inst(Op::UB, is_ub2);
+}
+
+Inst *Converter::gen_r_ok(Inst *ptr, Inst *prov, Inst *size)
+{
+  // It is UB if the pointer provenance does not correspond to the address.
+  Inst *is_ub = bb->build_inst(Op::IS_UB_MEM_ACCESS0, ptr, prov);
+
+  Inst *ok;
+  {
+    // It is UB if the size overflows the offset field.
+    Inst *m1 = bb->value_inst(-1, size->bitsize);
+    Inst *size_inst = bb->build_inst(Op::ADD, size, m1);
+    Inst *end = bb->build_inst(Op::ADD, ptr, size_inst);
+    Inst *overflow = bb->build_inst(Op::IS_UB_MEM_ACCESS1, end, prov);
+    Inst *not_ok = bb->build_inst(Op::OR, is_ub, overflow);
+
+    // It is UB if the end is outside the memory object.
+    // Note: ptr is within the memory object; otherwise, the provenance check
+    // or the offset overflow check would have failed.
+    Inst *out_of_bound = bb->build_inst(Op::IS_UB_MEM_ACCESS2, end, prov);
+    not_ok = bb->build_inst(Op::OR, not_ok, out_of_bound);
+    ok = bb->build_inst(Op::NOT, not_ok);
+  }
+
+  Inst *ok_size0;
+  {
+    // The pointer must point to valid memory, or be one position past
+    // valid memory.
+    // TODO: Handle zero-sized memory blocks (such as malloc(0)).
+    Inst *mem_size = bb->build_inst(Op::GET_MEM_SIZE, prov);
+    Inst *offset = bb->build_extract_offset(ptr);
+    Inst *out_of_bound = bb->build_inst(Op::ULT, mem_size, offset);
+    Inst *not_ok = bb->build_inst(Op::OR, is_ub, out_of_bound);
+
+    Inst *zero = bb->value_inst(0, mem_size->bitsize);
+    Inst *invalid_mem = bb->build_inst(Op::EQ, mem_size, zero);
+    not_ok = bb->build_inst(Op::OR, not_ok, invalid_mem);
+
+    ok_size0 = bb->build_inst(Op::NOT, not_ok);
+  }
+
+  Inst *zero = bb->value_inst(0, size->bitsize);
+  Inst *cmp = bb->build_inst(Op::EQ, size, zero);
+  return bb->build_inst(Op::ITE, cmp, ok_size0, ok);
+}
+
+Inst *Converter::gen_rw_ok(Inst *ptr, Inst *prov, Inst *size)
+{
+  Inst *ok = gen_r_ok(ptr, prov, size);
+  Inst *is_const = bb->build_inst(Op::IS_CONST_MEM, prov);
+  return bb->build_inst(Op::AND, ok, bb->build_inst(Op::NOT, is_const));
 }
 
 void Converter::store_ub_check(Inst *ptr, Inst *prov, uint64_t size, Inst *cond)
@@ -1820,6 +1875,19 @@ void Converter::alignment_check(tree expr, Inst *ptr)
       Inst *zero = bb->value_inst(0, extract->bitsize);
       Inst *cond = bb->build_inst(Op::NE, extract, zero);
       bb->build_inst(Op::UB, cond);
+    }
+}
+
+void Converter::assume_alignment(tree type, Inst *ptr)
+{
+  uint32_t alignment = TYPE_ALIGN(type) / 8;
+  if (alignment > 1)
+    {
+      assert((alignment & (alignment - 1)) == 0);
+      Inst *extract = bb->build_trunc(ptr, __builtin_ctz(alignment));
+      Inst *zero = bb->value_inst(0, extract->bitsize);
+      Inst *cond = bb->build_inst(Op::EQ, extract, zero);
+      bb->build_inst(Op::ASSUME, cond);
     }
 }
 
@@ -8295,6 +8363,55 @@ void Converter::process_cfn_xorsign(gimple *stmt)
   process_cfn_binary(stmt, gen_elem);
 }
 
+void Converter::process_gimple_call_smtgcc_fn(gimple *stmt)
+{
+  std::string name = fndecl_name(gimple_call_fndecl(stmt));
+  if (name == "__smtgcc_assume" || name == "__smtgcc_precondition")
+    {
+      assert(gimple_call_num_args(stmt) == 1);
+      Inst *cond = tree2inst(gimple_call_arg(stmt, 0));
+      bb->build_inst(Op::ASSUME, cond);
+      return;
+    }
+  if (name == "__smtgcc_postcondition")
+    {
+      assert(gimple_call_num_args(stmt) == 1);
+      Inst *cond = tree2inst(gimple_call_arg(stmt, 0));
+      bb->build_inst(Op::UB, bb->build_inst(Op::NOT, cond));
+      return;
+    }
+  if (name == "__smtgcc_ub")
+    {
+      assert(gimple_call_num_args(stmt) == 1);
+      Inst *cond = tree2inst(gimple_call_arg(stmt, 0));
+      bb->build_inst(Op::UB, cond);
+      return;
+    }
+  if (name == "__smtgcc_r_ok")
+    {
+      assert(gimple_call_num_args(stmt) == 2);
+      auto [ptr, ptr_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
+      Inst *size = tree2inst(gimple_call_arg(stmt, 1));
+      Inst *retval = gen_r_ok(ptr, ptr_prov, size);
+      tree lhs = gimple_call_lhs(stmt);
+      if (lhs)
+	tree2instruction.insert({lhs, retval});
+      return;
+    }
+  if (name == "__smtgcc_rw_ok")
+    {
+      assert(gimple_call_num_args(stmt) == 2);
+      auto [ptr, ptr_prov] = tree2inst_prov(gimple_call_arg(stmt, 0));
+      Inst *size = tree2inst(gimple_call_arg(stmt, 1));
+      Inst *retval = gen_rw_ok(ptr, ptr_prov, size);
+      tree lhs = gimple_call_lhs(stmt);
+      if (lhs)
+	tree2instruction.insert({lhs, retval});
+      return;
+    }
+  throw Not_implemented(name);
+}
+
 void Converter::process_gimple_call_combined_fn(gimple *stmt)
 {
   switch (gimple_call_combined_fn(stmt))
@@ -9051,6 +9168,8 @@ void Converter::process_gimple_call(gimple *stmt)
 	  bb_abort.insert(bb);
 	  bb = dead_bb;
 	}
+      else if (name.starts_with("__smtgcc_"))
+	process_gimple_call_smtgcc_fn(stmt);
       else if (name.starts_with("__builtin_")
 	       || name.starts_with("__sync_")
 	       || name.starts_with("__atomic_"))
@@ -9760,6 +9879,9 @@ void Converter::process_func_args()
       Inst *id = extract_id(bb, param_inst);
       Inst *one = bb->value_inst(1, module->ptr_id_bits);
       build_ub_assume(bb, bb->build_inst(Op::EQ, id, one));
+
+      if (role == Function_role::ver)
+	assume_alignment(TREE_TYPE(TREE_TYPE(decl)), param_inst);
     }
 
   BITMAP_FREE(nonnullargs);

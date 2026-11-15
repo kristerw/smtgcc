@@ -8,6 +8,8 @@
 #include "cgraph.h"
 #include "tree.h"
 #include "diagnostic-core.h"
+#include "langhooks.h"
+#include "c-family/c-pragma.h"
 
 #include "smtgcc.h"
 #include "gimple_conv.h"
@@ -143,6 +145,31 @@ static void finish(void *, void *data)
   delete plugin_data;
 }
 
+static void register_smtgcc_builtins(void *, void *)
+{
+  cpp_define(parse_in, "__SMTGCC__");
+
+  tree type_void_bool =
+    build_function_type_list(void_type_node, boolean_type_node,
+			     NULL_TREE);
+  add_builtin_function("__smtgcc_assume", type_void_bool,
+		       0, NOT_BUILT_IN, nullptr, NULL_TREE);
+  add_builtin_function("__smtgcc_ub", type_void_bool,
+		       0, NOT_BUILT_IN, nullptr, NULL_TREE);
+  add_builtin_function("__smtgcc_precondition", type_void_bool,
+		       0, NOT_BUILT_IN, nullptr, NULL_TREE);
+  add_builtin_function("__smtgcc_postcondition", type_void_bool,
+		       0, NOT_BUILT_IN, nullptr, NULL_TREE);
+
+  tree type_bool_ptr_size =
+    build_function_type_list(boolean_type_node, ptr_type_node, size_type_node,
+			     NULL_TREE);
+  add_builtin_function("__smtgcc_r_ok", type_bool_ptr_size,
+		       0, NOT_BUILT_IN, nullptr, NULL_TREE);
+  add_builtin_function("__smtgcc_rw_ok", type_bool_ptr_size,
+		       0, NOT_BUILT_IN, nullptr, NULL_TREE);
+}
+
 int
 plugin_init(struct plugin_name_args *plugin_info,
 	    struct plugin_gcc_version *version)
@@ -155,6 +182,7 @@ plugin_init(struct plugin_name_args *plugin_info,
   register_callback(plugin_name, PLUGIN_PASS_EXECUTION, pass_execution,
 		    (void*)mp);
   register_callback(plugin_name, PLUGIN_FINISH, finish, (void*)mp);
-
+  register_callback(plugin_name, PLUGIN_START_UNIT, register_smtgcc_builtins,
+		    nullptr);
   return 0;
 }
