@@ -179,6 +179,8 @@ struct Converter {
   void process_constructor(tree lhs, tree rhs);
   void process_gimple_assign(gimple *stmt);
   void process_gimple_asm(gimple *stmt);
+  void process_lhs(tree lhs, Inst *inst, Inst *indef = nullptr,
+		   Inst *prov = nullptr);
   void process_cfn_unary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, tree)>& gen_elem);
   void process_cfn_binary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem, bool adjust_types = false);
   void process_cfn_ternary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem);
@@ -4691,6 +4693,21 @@ void Converter::process_gimple_asm(gimple *stmt)
     throw Not_implemented("process_function: gimple_asm");
 }
 
+void Converter::process_lhs(tree lhs, Inst *inst, Inst *indef, Inst *prov)
+{
+  if (TREE_CODE(lhs) != SSA_NAME)
+    process_store(lhs, inst, indef);
+  else
+    {
+      constrain_range(bb, lhs, inst);
+      tree2instruction.insert({lhs, inst});
+      if (indef)
+	tree2indef.insert({lhs, indef});
+      if (prov)
+	tree2prov.insert({lhs, prov});
+    }
+}
+
 void Converter::process_cfn_binary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem, bool adjust_types)
 {
   tree arg1_expr = gimple_call_arg(stmt, 0);
@@ -4774,10 +4791,7 @@ void Converter::process_cfn_binary(gimple *stmt, const std::function<std::pair<I
       std::tie(res, res_indef, prov) =
 	type_convert(res, res_indef, nullptr, elem_type, lhs_type);
     }
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_ternary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, Inst *, Inst *, Inst *, Inst *, tree)>& gen_elem)
@@ -4847,10 +4861,7 @@ void Converter::process_cfn_ternary(gimple *stmt, const std::function<std::pair<
 	    res_indef = indef;
 	}
     }
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_unary(gimple *stmt, const std::function<std::pair<Inst *, Inst *>(Inst *, Inst *, tree)>& gen_elem)
@@ -4908,10 +4919,7 @@ void Converter::process_cfn_unary(gimple *stmt, const std::function<std::pair<In
 	    res_indef = indef;
 	}
     }
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_abd(gimple *stmt)
@@ -5005,10 +5013,7 @@ void Converter::process_cfn_add_overflow(gimple *stmt)
 
   auto [res, res_indef] =
     gen_complex(inst, inst_indef, overflow, overflow_indef);
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_bit_andn(gimple *stmt)
@@ -5063,11 +5068,7 @@ void Converter::process_cfn_assume_aligned(gimple *stmt)
   bb->build_inst(Op::UB, cond);
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
-    {
-      constrain_range(bb, lhs, arg1);
-      tree2instruction.insert({lhs, arg1});
-      tree2prov.insert({lhs, arg1_prov});
-    }
+    process_lhs(lhs, arg1, nullptr, arg1_prov);
 }
 
 void Converter::process_cfn_built_in_atomic_fetch_op(gimple *stmt, uint64_t size, enum tree_code code, bool invert)
@@ -5092,12 +5093,7 @@ void Converter::process_cfn_built_in_atomic_fetch_op(gimple *stmt, uint64_t size
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
-    {
-      constrain_range(bb, lhs, res);
-      tree2instruction.insert({lhs, res});
-      if (res_indef)
-	tree2indef.insert({lhs, res_indef});
-    }
+    process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_built_in_atomic_op_fetch(gimple *stmt, uint64_t size, enum tree_code code, bool invert)
@@ -5122,12 +5118,7 @@ void Converter::process_cfn_built_in_atomic_op_fetch(gimple *stmt, uint64_t size
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
-    {
-      constrain_range(bb, lhs, res);
-      tree2instruction.insert({lhs, res});
-      if (res_indef)
-	tree2indef.insert({lhs, res_indef});
-    }
+    process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_built_in_atomic_load(gimple *stmt)
@@ -5155,10 +5146,7 @@ void Converter::process_cfn_built_in_atomic_load(gimple *stmt, uint64_t size)
   if (lhs)
     {
       auto [res, res_indef, _] = load_value(src, size);
-      constrain_range(bb, lhs, res);
-      tree2instruction.insert({lhs, res});
-      if (res_indef)
-	tree2indef.insert({lhs, res_indef});
+      process_lhs(lhs, res, res_indef);
     }
 }
 
@@ -5220,12 +5208,7 @@ void Converter::process_cfn_built_in_atomic_exchange(gimple *stmt, uint64_t size
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
-    {
-      constrain_range(bb, lhs, res);
-      tree2instruction.insert({lhs, res});
-      if (res_indef)
-	tree2indef.insert({lhs, res_indef});
-    }
+    process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_atomic_compare_exchange(gimple *stmt)
@@ -5260,10 +5243,7 @@ void Converter::process_cfn_atomic_compare_exchange(gimple *stmt)
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
-    {
-      constrain_range(bb, lhs, res);
-      tree2instruction.insert({lhs, res});
-    }
+    process_lhs(lhs, res);
 }
 
 void Converter::process_cfn_built_in_atomic_compare_exchange(gimple *stmt)
@@ -5303,10 +5283,7 @@ void Converter::process_cfn_built_in_atomic_compare_exchange(gimple *stmt)
   bb = next_bb;
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
-    {
-      constrain_range(bb, lhs, res);
-      tree2instruction.insert({lhs, res});
-    }
+    process_lhs(lhs, res);
 }
 
 void Converter::process_cfn_built_in_atomic_compare_exchange(gimple *stmt, uint64_t size)
@@ -5342,10 +5319,7 @@ void Converter::process_cfn_built_in_atomic_compare_exchange(gimple *stmt, uint6
   bb = next_bb;
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
-    {
-      constrain_range(bb, lhs, res);
-      tree2instruction.insert({lhs, res});
-    }
+    process_lhs(lhs, res);
 }
 
 void Converter::process_cfn_built_in_atomic_test_and_set(gimple *stmt)
@@ -5364,10 +5338,7 @@ void Converter::process_cfn_built_in_atomic_test_and_set(gimple *stmt)
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
-    {
-      constrain_range(bb, lhs, res);
-      tree2instruction.insert({lhs, res});
-    }
+    process_lhs(lhs, res);
 }
 
 void Converter::process_cfn_built_in_atomic_clear(gimple *stmt)
@@ -5423,12 +5394,7 @@ void Converter::process_cfn_bswap(gimple *stmt)
 	  inst_indef = bb->build_inst(Op::CONCAT, inst_indef, byte_indef);
 	}
     }
-  constrain_range(bb, lhs, inst);
-  tree2instruction.insert({lhs, inst});
-  if (inst_indef)
-    tree2indef.insert({lhs, inst_indef});
-  if (arg_prov)
-    tree2prov.insert({lhs, arg_prov});
+  process_lhs(lhs, inst, inst_indef, arg_prov);
 }
 
 void Converter::process_cfn_check_war_ptrs(gimple *stmt)
@@ -5448,7 +5414,7 @@ void Converter::process_cfn_check_war_ptrs(gimple *stmt)
       uint32_t lhs_bitsize = bitsize_for_type(TREE_TYPE(lhs));
       if (res->bitsize < lhs_bitsize)
 	res = bb->build_inst(Op::ZEXT, res, lhs_bitsize);
-      tree2instruction.insert({lhs, res});
+      process_lhs(lhs, res);
     }
 }
 
@@ -5472,7 +5438,7 @@ void Converter::process_cfn_check_raw_ptrs(gimple *stmt)
       uint32_t lhs_bitsize = bitsize_for_type(TREE_TYPE(lhs));
       if (res->bitsize < lhs_bitsize)
 	res = bb->build_inst(Op::ZEXT, res, lhs_bitsize);
-      tree2instruction.insert({lhs, res});
+      process_lhs(lhs, res);
     }
 }
 
@@ -5577,8 +5543,7 @@ void Converter::process_cfn_clz(gimple *stmt)
       else
 	res = inst;
     }
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
+  process_lhs(lhs, res);
 }
 
 std::pair<Inst*, Inst*> Converter::gen_cfn_cond_unary(tree_code code, Inst *cond, Inst *cond_indef, Inst *arg1, Inst *arg1_indef, Inst *orig, Inst *orig_indef, Inst *len, tree cond_type, tree arg1_type, tree orig_type)
@@ -5698,11 +5663,7 @@ void Converter::process_cfn_cond_unary(gimple *stmt, tree_code code)
 		       orig_type);
 
   if (lhs)
-    {
-      tree2instruction.insert({lhs, res});
-      if (res_indef)
-	tree2indef.insert({lhs, res_indef});
-    }
+    process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_cond_binary(gimple *stmt, tree_code code)
@@ -5728,11 +5689,7 @@ void Converter::process_cfn_cond_binary(gimple *stmt, tree_code code)
 			cond_type, arg1_type, arg2_type, orig_type);
 
   if (lhs)
-    {
-      tree2instruction.insert({lhs, res});
-      if (res_indef)
-	tree2indef.insert({lhs, res_indef});
-    }
+    process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_cond_len_binary(gimple *stmt, tree_code code)
@@ -5768,11 +5725,7 @@ void Converter::process_cfn_cond_len_binary(gimple *stmt, tree_code code)
 			cond_type, arg1_type, arg2_type, orig_type);
 
   if (lhs)
-    {
-      tree2instruction.insert({lhs, res});
-      if (res_indef)
-	tree2indef.insert({lhs, res_indef});
-    }
+    process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_cond_fminmax(gimple *stmt)
@@ -5884,11 +5837,7 @@ void Converter::process_cfn_cond_fminmax(gimple *stmt)
     }
 
   if (lhs)
-    {
-      tree2instruction.insert({lhs, res});
-      if (res_indef)
-	tree2indef.insert({lhs, res_indef});
-    }
+    process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_copysign(gimple *stmt)
@@ -5999,8 +5948,7 @@ void Converter::process_cfn_ctz(gimple *stmt)
       else
 	res = inst;
     }
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
+  process_lhs(lhs, res);
 }
 
 void Converter::process_cfn_exit(gimple *stmt)
@@ -6069,8 +6017,7 @@ void Converter::process_cfn_divmod(gimple *stmt)
 					   arg2_type);
   div = to_mem_repr(div, lhs_elem_type);
   auto [inst, _] = gen_complex(div, nullptr, mod, nullptr);
-  constrain_range(bb, lhs, inst);
-  tree2instruction.insert({lhs, inst});
+  process_lhs(lhs, inst);
 }
 
 std::pair<Inst *, Inst *> Converter::gen_fold_left_plus(Inst *arg1, Inst *arg1_indef, Inst *arg2, Inst *arg2_indef, Inst *mask, Inst *mask_indef, tree arg2_type, tree mask_type, Inst *len)
@@ -6164,8 +6111,7 @@ void Converter::process_cfn_expect(gimple *stmt)
   Inst *arg1 = tree2inst(gimple_call_arg(stmt, 0));
   // Ignore arg2 and arg3. They only contain the most common value and the
   // probability, which we can't use for anything.
-  constrain_range(bb, lhs, arg1);
-  tree2instruction.insert({lhs, arg1});
+  process_lhs(lhs, arg1);
 }
 
 void Converter::process_cfn_fabs(gimple *stmt)
@@ -6209,8 +6155,7 @@ void Converter::process_cfn_ffs(gimple *stmt)
       Inst *val = bb->value_inst(i + 1, bitsize);
       inst = bb->build_inst(Op::ITE, bit, val, inst);
     }
-  constrain_range(bb, lhs, inst);
-  tree2instruction.insert({lhs, inst});
+  process_lhs(lhs, inst);
 }
 
 void Converter::process_cfn_fma(gimple *stmt)
@@ -6340,19 +6285,13 @@ void Converter::process_cfn_load_lanes(gimple *stmt)
   auto [inst, indef] =
     load_lanes(ptr, ptr_indef, ptr_prov, alignment, lhs_type);
   std::tie(inst, indef) = from_mem_repr(inst, indef, lhs_type);
-  if (TREE_CODE(lhs) != SSA_NAME)
-    process_store(lhs, inst, indef);
-  else
-    {
-      tree2instruction.insert({lhs, inst});
-      tree2indef.insert({lhs, indef});
-    }
+  process_lhs(lhs, inst, indef);
 }
 
 void Converter::process_cfn_loop_vectorized(gimple *stmt)
 {
   tree lhs = gimple_call_lhs(stmt);
-  tree2instruction.insert({lhs, bb->value_inst(0, 1)});
+  process_lhs(lhs, bb->value_inst(0, 1));
 }
 
 std::tuple<Inst*, Inst*> Converter::mask_len_load(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, Inst *mask, Inst *mask_indef, tree mask_type, Inst *len, tree lhs_type, Inst *orig, Inst *orig_indef)
@@ -6467,13 +6406,7 @@ void Converter::process_cfn_mask_len_load_lanes(gimple *stmt)
     mask_len_load_lanes(ptr, ptr_indef, ptr_prov, alignment, mask, mask_indef,
 			mask_type, len, lhs_type, orig, orig_indef);
   std::tie(inst, indef) = from_mem_repr(inst, indef, lhs_type);
-  if (TREE_CODE(lhs) != SSA_NAME)
-    process_store(lhs, inst, indef);
-  else
-    {
-      tree2instruction.insert({lhs, inst});
-      tree2indef.insert({lhs, indef});
-    }
+  process_lhs(lhs, inst, indef);
 }
 
 std::tuple<Inst*, Inst*> Converter::load_lanes(Inst *ptr, Inst *ptr_indef, Inst *ptr_prov, uint64_t alignment, tree lhs_type)
@@ -6733,11 +6666,8 @@ void Converter::process_cfn_mask_len_load(gimple *stmt)
     mask_len_load(ptr, ptr_indef, ptr_prov, alignment, mask, mask_indef,
 		  mask_type, len, lhs_type, orig, orig_indef);
   std::tie(inst, indef) = from_mem_repr(inst, indef, lhs_type);
-  constrain_range(bb, lhs, inst);
-  tree2instruction.insert({lhs, inst});
-  tree2indef.insert({lhs, indef});
-  if (POINTER_TYPE_P(lhs_type))
-    tree2prov.insert({lhs, extract_id(bb, inst)});
+  Inst *prov = POINTER_TYPE_P(lhs_type) ? extract_id(bb, inst) : nullptr;
+  process_lhs(lhs, inst, indef, prov);
 }
 
 void Converter::process_cfn_mask_load(gimple *stmt)
@@ -6761,11 +6691,8 @@ void Converter::process_cfn_mask_load(gimple *stmt)
     mask_len_load(ptr, ptr_indef, ptr_prov, alignment, mask, mask_indef,
 		  mask_type, nullptr, lhs_type, orig, orig_indef);
   std::tie(inst, indef) = from_mem_repr(inst, indef, lhs_type);
-  constrain_range(bb, lhs, inst);
-  tree2instruction.insert({lhs, inst});
-  tree2indef.insert({lhs, indef});
-  if (POINTER_TYPE_P(lhs_type))
-    tree2prov.insert({lhs, extract_id(bb, inst)});
+  Inst *prov = POINTER_TYPE_P(lhs_type) ? extract_id(bb, inst) : nullptr;
+  process_lhs(lhs, inst, indef, prov);
 }
 
 std::pair<Inst*,Inst*> Converter::store_lanes(tree value_type, Inst *value, Inst *value_indef)
@@ -7066,10 +6993,7 @@ void Converter::process_cfn_fold_left_plus(gimple *stmt)
   auto [res, res_indef] =
     gen_fold_left_plus(arg1, arg1_indef, arg2, arg2_indef, arg2_type);
 
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_mask_fold_left_plus(gimple *stmt)
@@ -7094,10 +7018,7 @@ void Converter::process_cfn_mask_fold_left_plus(gimple *stmt)
     gen_fold_left_plus(arg1, arg1_indef, arg2, arg2_indef,
 		       mask, mask_indef, arg2_type, mask_type);
 
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_mask_len_fold_left_plus(gimple *stmt)
@@ -7131,10 +7052,7 @@ void Converter::process_cfn_mask_len_fold_left_plus(gimple *stmt)
     gen_fold_left_plus(arg1, arg1_indef, arg2, arg2_indef,
 		       mask, mask_indef, arg2_type, mask_type, len);
 
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_memcpy(gimple *stmt)
@@ -7154,11 +7072,7 @@ void Converter::process_cfn_memcpy(gimple *stmt)
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
-    {
-      constrain_range(bb, lhs, dest_ptr);
-      tree2instruction.insert({lhs, dest_ptr});
-      tree2prov.insert({lhs, dest_prov});
-    }
+    process_lhs(lhs, dest_ptr, nullptr, dest_prov);
 
   bb->build_inst(Op::MEMMOVE, dest_ptr, src_ptr, size);
   bb->build_inst(Op::MEMMOVE_MEM_FLAG, dest_ptr, src_ptr, size);
@@ -7181,11 +7095,7 @@ void Converter::process_cfn_memmove(gimple *stmt)
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
-    {
-      constrain_range(bb, lhs, dest_ptr);
-      tree2instruction.insert({lhs, dest_ptr});
-      tree2prov.insert({lhs, dest_prov});
-    }
+    process_lhs(lhs, dest_ptr, nullptr, dest_prov);
 
   bb->build_inst(Op::MEMMOVE, dest_ptr, src_ptr, size);
   bb->build_inst(Op::MEMMOVE_MEM_FLAG, dest_ptr, src_ptr, size);
@@ -7212,9 +7122,7 @@ void Converter::process_cfn_mempcpy(gimple *stmt)
     {
       Inst *offset = bb->value_inst(size, src_ptr->bitsize);
       Inst *ptr = bb->build_inst(Op::ADD, dest_ptr, offset);
-      constrain_range(bb, lhs, ptr);
-      tree2instruction.insert({lhs, ptr});
-      tree2prov.insert({lhs, dest_prov});
+      process_lhs(lhs, ptr, nullptr, dest_prov);
     }
 
   bb->build_inst(Op::MEMMOVE, dest_ptr, src_ptr, size);
@@ -7237,11 +7145,7 @@ void Converter::process_cfn_memset(gimple *stmt)
 
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
-    {
-      constrain_range(bb, lhs, ptr);
-      tree2instruction.insert({lhs, ptr});
-      tree2prov.insert({lhs, ptr_prov});
-    }
+    process_lhs(lhs, ptr, nullptr, ptr_prov);
 
   assert(value->bitsize >= 8);
   if (value->bitsize > 8)
@@ -7305,10 +7209,7 @@ void Converter::process_cfn_mul_overflow(gimple *stmt)
 
   auto [res, res_indef] =
     gen_complex(inst, inst_indef, overflow, overflow_indef);
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_mulh(gimple *stmt)
@@ -7343,7 +7244,8 @@ void Converter::process_cfn_nan(gimple *stmt)
     throw Not_implemented("process_cfn_nan: vector type");
 
   Inst *bs = bb->value_inst(bitsize_for_type(TREE_TYPE(lhs)), 32);
-  tree2instruction.insert({lhs, bb->build_inst(Op::NAN, bs)});
+  Inst *res = bb->build_inst(Op::NAN, bs);
+  process_lhs(lhs, res);
 }
 
 void Converter::process_cfn_parity(gimple *stmt)
@@ -7364,8 +7266,7 @@ void Converter::process_cfn_parity(gimple *stmt)
     }
   bitwidth = TYPE_PRECISION(TREE_TYPE(lhs));
   inst = bb->build_inst(Op::ZEXT, inst, bitwidth);
-  constrain_range(bb, lhs, inst);
-  tree2instruction.insert({lhs, inst});
+  process_lhs(lhs, inst);
 }
 
 void Converter::process_cfn_popcount(gimple *stmt)
@@ -7553,8 +7454,7 @@ void Converter::process_cfn_select_vl(gimple *stmt)
   Inst *nof = bb->value_inst(nof_elem, arg1->bitsize);
   Inst *cmp = bb->build_inst(Op::ULT, nof, arg1);
   Inst *res = bb->build_inst(Op::ITE, cmp, nof, arg1);
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
+  process_lhs(lhs, res);
 }
 
 void Converter::process_cfn_signbit(gimple *stmt)
@@ -7664,10 +7564,7 @@ void Converter::process_cfn_sub_overflow(gimple *stmt)
 
   auto [res, res_indef] =
     gen_complex(inst, inst_indef, overflow, overflow_indef);
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_reduc(gimple *stmt, tree_code code)
@@ -7694,13 +7591,7 @@ void Converter::process_cfn_reduc(gimple *stmt, tree_code code)
     }
 
   if (lhs)
-    {
-      tree2instruction.insert({lhs, inst});
-      if (indef)
-	tree2indef.insert({lhs, indef});
-      if (prov)
-	tree2prov.insert({lhs, prov});
-    }
+    process_lhs(lhs, inst, indef, prov);
 }
 
 void Converter::process_cfn_reduc_fminmax(gimple *stmt)
@@ -7749,11 +7640,7 @@ void Converter::process_cfn_reduc_fminmax(gimple *stmt)
     }
 
   if (lhs)
-    {
-      tree2instruction.insert({lhs, inst});
-      if (indef)
-	tree2indef.insert({lhs, indef});
-    }
+    process_lhs(lhs, inst, indef);
 }
 
 void Converter::process_cfn_trap(gimple *stmt ATTRIBUTE_UNUSED)
@@ -7783,10 +7670,7 @@ void Converter::process_cfn_vcond_mask(gimple *stmt)
   auto [arg3, arg3_indef] = tree2inst_indef(arg3_expr);
   auto [inst, indef] = gen_vec_cond(arg1, arg1_indef, arg2, arg2_indef,
 				    arg3, arg3_indef, arg1_type, arg2_type);
-  constrain_range(bb, lhs, inst);
-  tree2instruction.insert({lhs, inst});
-  if (indef)
-    tree2indef.insert({lhs, indef});
+  process_lhs(lhs, inst, indef);
 }
 
 void Converter::process_cfn_vcond_mask_len(gimple *stmt)
@@ -7816,10 +7700,7 @@ void Converter::process_cfn_vcond_mask_len(gimple *stmt)
   auto [inst, indef] = gen_vec_cond(arg1, arg1_indef, arg2, arg2_indef,
 				    arg3, arg3_indef, arg1_type, arg2_type,
 				    len);
-  constrain_range(bb, lhs, inst);
-  tree2instruction.insert({lhs, inst});
-  if (indef)
-    tree2indef.insert({lhs, indef});
+  process_lhs(lhs, inst, indef);
 }
 
 void Converter::process_cfn_vec_addsub(gimple *stmt)
@@ -7868,10 +7749,7 @@ void Converter::process_cfn_vec_addsub(gimple *stmt)
 	    res_indef = indef;
 	}
     }
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_vec_convert(gimple *stmt)
@@ -7888,8 +7766,7 @@ void Converter::process_cfn_vec_convert(gimple *stmt)
     process_unary_vec(CONVERT_EXPR, arg1, nullptr, lhs_elem_type,
 		      arg1_elem_type);
   assert(!indef);
-  constrain_range(bb, lhs, inst);
-  tree2instruction.insert({lhs, inst});
+  process_lhs(lhs, inst);
 }
 
 void Converter::process_cfn_vec_extract(gimple *stmt)
@@ -7928,10 +7805,7 @@ void Converter::process_cfn_vec_extract(gimple *stmt)
     std::tie(res, res_indef) =
       extract_elem(bb, arg1, arg1_indef, elem_bitsize, arg2, arg2_indef);
 
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_vec_set(gimple *stmt)
@@ -7991,10 +7865,7 @@ void Converter::process_cfn_vec_set(gimple *stmt)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_vec_trunc_add_high(gimple *stmt)
@@ -8066,10 +7937,7 @@ void Converter::process_cfn_vec_widen(gimple *stmt, Op op, bool high)
 	    res_indef = indef;
 	}
     }
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_vec_widen_abd(gimple *stmt, bool high)
@@ -8126,10 +7994,7 @@ void Converter::process_cfn_vec_widen_abd(gimple *stmt, bool high)
 	    res_indef = indef;
 	}
     }
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_uaddc(gimple *stmt)
@@ -8250,10 +8115,7 @@ void Converter::process_cfn_ubsan_check_op(gimple *stmt, Op op, Op overflow_op)
   tree lhs = gimple_call_lhs(stmt);
   if (!lhs)
     return;
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_unreachable(gimple *stmt ATTRIBUTE_UNUSED)
@@ -8298,10 +8160,7 @@ void Converter::process_cfn_usubc(gimple *stmt)
   overflow = bb->build_inst(Op::NE, overflow, zero);
   overflow = bb->build_inst(Op::ZEXT, overflow, lhs_elem_bitsize);
   res = bb->build_inst(Op::CONCAT, overflow, res);
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
-  if (res_indef)
-    tree2indef.insert({lhs, res_indef});
+  process_lhs(lhs, res, res_indef);
 }
 
 void Converter::process_cfn_while_ult(gimple *stmt)
@@ -8333,8 +8192,7 @@ void Converter::process_cfn_while_ult(gimple *stmt)
       arg1 = bb->build_inst(Op::ADD, arg1, one);
     }
 
-  constrain_range(bb, lhs, res);
-  tree2instruction.insert({lhs, res});
+  process_lhs(lhs, res);
 }
 
 void Converter::process_cfn_xorsign(gimple *stmt)
@@ -8395,7 +8253,7 @@ void Converter::process_gimple_call_smtgcc_fn(gimple *stmt)
       Inst *retval = gen_r_ok(ptr, ptr_prov, size);
       tree lhs = gimple_call_lhs(stmt);
       if (lhs)
-	tree2instruction.insert({lhs, retval});
+	process_lhs(lhs, retval);
       return;
     }
   if (name == "__smtgcc_rw_ok")
@@ -8406,7 +8264,7 @@ void Converter::process_gimple_call_smtgcc_fn(gimple *stmt)
       Inst *retval = gen_rw_ok(ptr, ptr_prov, size);
       tree lhs = gimple_call_lhs(stmt);
       if (lhs)
-	tree2instruction.insert({lhs, retval});
+	process_lhs(lhs, retval);
       return;
     }
   throw Not_implemented(name);
@@ -10207,9 +10065,10 @@ void Converter::emit_called_function(gimple *stmt)
       if (lhs)
 	{
 	  Inst *retval = bb->value_inst(0, bitsize_for_type(TREE_TYPE(lhs)));
-	  tree2instruction.insert({lhs, retval});
+	  Inst *retval_prov = nullptr;
 	  if (POINTER_TYPE_P(TREE_TYPE(lhs)))
-	    tree2prov.insert({lhs, extract_id(bb, retval)});
+	    retval_prov = extract_id(bb, retval);
+	  process_lhs(lhs, retval, nullptr, retval_prov);
 	}
       return;
     }
@@ -10323,22 +10182,15 @@ void Converter::emit_called_function(gimple *stmt)
   tree lhs = gimple_call_lhs(stmt);
   if (lhs)
     {
-      if (TREE_CODE(lhs) != SSA_NAME)
-	process_store(lhs, retval, retval_indef);
-      else
-	{
-	  tree2instruction.insert({lhs, retval});
-	  if (retval_indef)
-	    tree2indef.insert({lhs, retval_indef});
-	}
-
+      Inst *retval_prov = nullptr;
       if (POINTER_TYPE_P(TREE_TYPE(lhs)))
 	{
-	  tree2prov.insert({lhs, extract_id(bb, retval)});
+	  retval_prov = extract_id(bb, retval);
 
 	  // GCC treats it as UB to return the address of a local variable.
 	  bb->build_inst(Op::UB, is_invalid_arg_pointer(retval));
 	}
+      process_lhs(lhs, retval, retval_indef, retval_prov);
     }
 }
 
