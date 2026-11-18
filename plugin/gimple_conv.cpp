@@ -8565,6 +8565,7 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BITREVERSE:
       process_cfn_bitreverse(stmt);
       break;
+    case CFN_BSWAP:
     case CFN_BUILT_IN_BSWAP16:
     case CFN_BUILT_IN_BSWAP32:
     case CFN_BUILT_IN_BSWAP64:
