@@ -189,6 +189,7 @@ struct Converter {
   void process_cfn_add_overflow(gimple *stmt);
   void process_cfn_bit_andn(gimple *stmt);
   void process_cfn_bit_iorn(gimple *stmt);
+  void process_cfn_assume(gimple *stmt);
   void process_cfn_assume_aligned(gimple *stmt);
   void process_cfn_built_in_atomic_fetch_op(gimple *stmt, uint64_t size,
 					    enum tree_code code,
@@ -313,7 +314,8 @@ struct Converter {
   void process_instructions(int nof_blocks, int *postorder);
   void process_function_body();
   Inst *is_invalid_arg_pointer(Inst *ptr);
-  void emit_called_function(gimple *stmt);
+  void emit_called_function(tree decl, tree lhs, std::vector<tree>& arg_exprs,
+			    bool is_cfn_assume = false);
   Function *process_function();
 };
 
@@ -5052,6 +5054,20 @@ void Converter::process_cfn_bit_iorn(gimple *stmt)
   process_cfn_binary(stmt, gen_elem);
 }
 
+void Converter::process_cfn_assume(gimple *stmt)
+{
+  int num_args = gimple_call_num_args(stmt);
+  assert(num_args > 0);
+  tree arg1_expr = gimple_call_arg(stmt, 0);
+  assert(!gimple_call_lhs(stmt));
+  assert(TREE_CODE(arg1_expr) == ADDR_EXPR);
+  tree fndecl = TREE_OPERAND(arg1_expr, 0);
+  std::vector<tree> arg_exprs;
+  for (int i = 1; i < num_args; i++)
+    arg_exprs.push_back(gimple_call_arg(stmt, i));
+  emit_called_function(fndecl, NULL_TREE, arg_exprs, true);
+}
+
 void Converter::process_cfn_assume_aligned(gimple *stmt)
 {
   assert(gimple_call_num_args(stmt) == 2
@@ -8292,6 +8308,9 @@ void Converter::process_gimple_call_combined_fn(gimple *stmt)
     case CFN_BUILT_IN_ABORT:
       process_cfn_abort(stmt);
       break;
+    case CFN_ASSUME:
+      process_cfn_assume(stmt);
+      break;
     case CFN_BUILT_IN_ASSUME_ALIGNED:
       process_cfn_assume_aligned(stmt);
       break;
@@ -9073,7 +9092,18 @@ void Converter::process_gimple_call(gimple *stmt)
 	    throw Not_implemented("gimple_call " + name);
 	}
       else
-	emit_called_function(stmt);
+	{
+	  tree decl = gimple_call_fndecl(stmt);
+	  if (!decl)
+	    throw Not_implemented("gimple_call");
+	  std::vector<tree> arg_exprs;
+	  int num_args = gimple_call_num_args(stmt);
+	  arg_exprs.reserve(num_args);
+	  for (int i = 0; i < num_args; i++)
+	    arg_exprs.push_back(gimple_call_arg(stmt, i));
+	  tree lhs = gimple_call_lhs(stmt);
+	  emit_called_function(decl, lhs, arg_exprs);
+	}
     }
 }
 
@@ -10016,11 +10046,8 @@ Inst *Converter::is_invalid_arg_pointer(Inst *ptr)
   return bb->build_inst(Op::AND, is_local, is_invalid_prov);
 }
 
-void Converter::emit_called_function(gimple *stmt)
+void Converter::emit_called_function(tree decl, tree lhs, std::vector<tree>& arg_exprs, bool is_cfn_assume)
 {
-  tree decl = gimple_call_fndecl(stmt);
-  if (!decl)
-    throw Not_implemented("gimple_call");
   function *fn = DECL_STRUCT_FUNCTION(decl);
   if (!fn)
     throw Not_implemented("gimple_call");
@@ -10052,7 +10079,7 @@ void Converter::emit_called_function(gimple *stmt)
   // for functions using va_start etc.
   // TODO: Is this the correct semantics for smtgcc?
   int param_number = 0;
-  int num_args = gimple_call_num_args(stmt);
+  int num_args = arg_exprs.size();
   bool invalid_call = false;
   for (tree decl = DECL_ARGUMENTS(fn->decl);
        decl;
@@ -10063,7 +10090,7 @@ void Converter::emit_called_function(gimple *stmt)
 	  invalid_call = true;
 	  break;
 	}
-      tree arg_expr = gimple_call_arg(stmt, param_number);
+      tree arg_expr = arg_exprs[param_number];
       uint64_t bitsize_arg = bitsize_for_type(TREE_TYPE(arg_expr));
       uint64_t bitsize_decl = bitsize_for_type(TREE_TYPE(decl));
       if (bitsize_arg != bitsize_decl)
@@ -10071,7 +10098,6 @@ void Converter::emit_called_function(gimple *stmt)
     }
   if (invalid_call)
     {
-      tree lhs = gimple_call_lhs(stmt);
       if (lhs)
 	{
 	  Inst *retval = bb->value_inst(0, bitsize_for_type(TREE_TYPE(lhs)));
@@ -10094,7 +10120,7 @@ void Converter::emit_called_function(gimple *stmt)
     {
       if (POINTER_TYPE_P(TREE_TYPE(decl)))
 	{
-	  tree arg_expr = gimple_call_arg(stmt, param_number);
+	  tree arg_expr = arg_exprs[param_number];
 	  auto [arg, arg_indef] = tree2inst_indef(arg_expr);
 	  bb->build_inst(Op::UB, is_invalid_arg_pointer(arg));
 	}
@@ -10105,7 +10131,7 @@ void Converter::emit_called_function(gimple *stmt)
        decl;
        decl = DECL_CHAIN(decl), param_number++)
     {
-      tree arg_expr = gimple_call_arg(stmt, param_number);
+      tree arg_expr = arg_exprs[param_number];
       auto [arg, arg_indef, arg_prov] = tree2inst_indef_prov(arg_expr);
       if (!is_gimple_reg(decl))
 	{
@@ -10189,7 +10215,6 @@ void Converter::emit_called_function(gimple *stmt)
   // Note: process_store may create a new Op::MEMORY, so we must do this
   // after we have changed back to the original function in order to
   // ensure it is associated with the correct context.
-  tree lhs = gimple_call_lhs(stmt);
   if (lhs)
     {
       Inst *retval_prov = nullptr;
@@ -10201,6 +10226,12 @@ void Converter::emit_called_function(gimple *stmt)
 	  bb->build_inst(Op::UB, is_invalid_arg_pointer(retval));
 	}
       process_lhs(lhs, retval, retval_indef, retval_prov);
+    }
+  else if (is_cfn_assume)
+    {
+      build_ub_assume(bb, bb->build_inst(Op::NOT, retval));
+      if (retval_indef)
+	build_ub_if_not_zero(retval_indef);
     }
 }
 
