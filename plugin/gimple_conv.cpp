@@ -9337,6 +9337,15 @@ std::pair<Inst *, Inst *> Converter::generate_return_value(bool gen_ub_check)
       return_bb->build_inst(Op::UB, cond);
     }
 
+  if (POINTER_TYPE_P(retval_type)
+      && lookup_attribute("returns_nonnull",
+			  TYPE_ATTRIBUTES(TREE_TYPE(fun->decl))))
+    {
+      Inst *zero = return_bb->value_inst(0, retval->bitsize);
+      Inst *eq = return_bb->build_inst(Op::EQ, retval, zero);
+      return_bb->build_inst(Op::UB, eq);
+    }
+
   assert(abort_bb->last_inst
 	 && abort_bb->last_inst->op == Op::BR
 	 && abort_bb->last_inst->nof_args == 0);
