@@ -16,13 +16,40 @@ namespace {
 
 const int stack_size = 1024 * 100;
 
-bool is_returned_in_fregs(tree expr)
+bool is_returned_in_fregs(tree type)
 {
-  tree type = TREE_TYPE(expr);
+  if (!TYPE_SIZE(type))
+    return false;
+
   uint64_t bitsize = bitsize_for_type(type);
   if (SCALAR_FLOAT_TYPE_P(type) && (bitsize == 32 || bitsize == 64))
     return true;
 
+  // One-element arrays are treated as the element type.
+  if (TREE_CODE(type) == ARRAY_TYPE
+      && bitsize_for_type(TREE_TYPE(type)) == bitsize)
+    return is_returned_in_fregs(TREE_TYPE(type));
+
+  // One-element structures are treated as the element type.
+  if (TREE_CODE(type) == RECORD_TYPE)
+    {
+      tree fld = TYPE_FIELDS(type);
+      if (!fld)
+	return false;
+      if (DECL_CHAIN(fld))
+	return false;
+      return is_returned_in_fregs(TREE_TYPE(fld));
+    }
+
+  return false;
+}
+
+bool is_returned_in_fregs_complex(tree type)
+{
+  if (!TYPE_SIZE(type))
+    return false;
+
+  uint64_t bitsize = bitsize_for_type(type);
   if (TREE_CODE(type) == COMPLEX_TYPE)
     {
       tree elem_type = TREE_TYPE(type);
@@ -30,6 +57,22 @@ bool is_returned_in_fregs(tree expr)
       if (SCALAR_FLOAT_TYPE_P(elem_type)
 	  && (elem_bitsize == 32 || elem_bitsize == 64))
 	return true;
+    }
+
+  // One-element arrays are treated as the element type.
+  if (TREE_CODE(type) == ARRAY_TYPE
+      && bitsize_for_type(TREE_TYPE(type)) == bitsize)
+    return is_returned_in_fregs_complex(TREE_TYPE(type));
+
+  // One-element structures are treated as the element type.
+  if (TREE_CODE(type) == RECORD_TYPE)
+    {
+      tree fld = TYPE_FIELDS(type);
+      if (!fld)
+	return false;
+      if (DECL_CHAIN(fld))
+	return false;
+      return is_returned_in_fregs_complex(TREE_TYPE(fld));
     }
 
   return false;
@@ -98,8 +141,7 @@ void build_return(sh_state *rstate, Function *src_func, function *fun)
   retval_phi->add_phi_arg(abort_retval, rstate->abort_bb);
 
   Basic_block *bb = rstate->return_bb;
-  if (TREE_CODE(TREE_TYPE(ret_expr)) == COMPLEX_TYPE
-      && is_returned_in_fregs(ret_expr))
+  if (is_returned_in_fregs_complex(TREE_TYPE(ret_expr)))
     {
       assert(ret_bitsize == 64 || ret_bitsize == 128);
 
@@ -127,7 +169,7 @@ void build_return(sh_state *rstate, Function *src_func, function *fun)
       retval_phi->add_phi_arg(retval, rstate->return_bb);
       return;
     }
-  if (is_returned_in_fregs(ret_expr))
+  if (is_returned_in_fregs(TREE_TYPE(ret_expr)))
     {
       Inst *retval = bb->build_inst(Op::READ, rstate->registers[ShRegIdx::fr0]);
       for (int i = 1; retval->bitsize < ret_bitsize; i++)
