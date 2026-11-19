@@ -61,6 +61,8 @@ bool flatten_struct(riscv_state *rstate, tree struct_type, std::vector<struct_el
       if (TREE_CODE(fld) != FIELD_DECL)
 	continue;
       tree type = TREE_TYPE(fld);
+      if (!TYPE_SIZE(type))
+	return false;
       uint64_t bitsize = bitsize_for_type(type);
       if (bitsize == 0)
 	continue;
