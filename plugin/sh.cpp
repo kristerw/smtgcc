@@ -100,7 +100,8 @@ bool is_returned_in_regs(tree expr)
   if (TREE_CODE(type) == COMPLEX_TYPE && INTEGRAL_TYPE_P(TREE_TYPE(type)))
     return true;
 
-  if (TREE_CODE(type) == RECORD_TYPE || TREE_CODE(type) == UNION_TYPE)
+  if ((TREE_CODE(type) == RECORD_TYPE || TREE_CODE(type) == UNION_TYPE)
+      && !flexible_array_type_p(type))
     {
       uint64_t alignment = get_object_alignment(expr);
       if ((bitsize == 8 && alignment == 8)
