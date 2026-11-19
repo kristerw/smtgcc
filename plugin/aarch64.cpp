@@ -28,6 +28,9 @@ bool is_short_vector(tree type)
 
 std::optional<std::pair<unsigned, unsigned>> hfa_size(aarch64_state *rstate, tree type)
 {
+  if (!TYPE_SIZE(type))
+    return {};
+
   if (TREE_CODE(type) == COMPLEX_TYPE)
     {
       tree elem_type = TREE_TYPE(type);
