@@ -114,6 +114,34 @@ bool is_returned_in_regs(tree expr)
   return false;
 }
 
+bool arg_in_fregs(tree type)
+{
+  if (!TYPE_SIZE(type))
+    return false;
+
+  uint64_t bitsize = bitsize_for_type(type);
+  if (SCALAR_FLOAT_TYPE_P(type) && (bitsize == 32 || bitsize == 64))
+    return true;
+
+  // One-element arrays are treated as the element type.
+  if (TREE_CODE(type) == ARRAY_TYPE
+      && bitsize_for_type(TREE_TYPE(type)) == bitsize)
+    return arg_in_fregs(TREE_TYPE(type));
+
+  // One-element structures are treated as the element type.
+  if (TREE_CODE(type) == RECORD_TYPE)
+    {
+      tree fld = TYPE_FIELDS(type);
+      if (!fld)
+	return false;
+      if (DECL_CHAIN(fld))
+	return false;
+      return arg_in_fregs(TREE_TYPE(fld));
+    }
+
+  return false;
+}
+
 Inst *extract_vec_elem(Basic_block *bb, Inst *inst, uint32_t elem_bitsize, uint32_t idx)
 {
   if (idx == 0 && inst->bitsize == elem_bitsize)
@@ -342,7 +370,7 @@ sh_state setup_sh_function(CommonState *state, Function *src_func, function *fun
       Inst *param_bitsize = bb->value_inst(bitsize, 32);
       Inst *param = bb->build_inst(Op::PARAM, param_nbr, param_bitsize);
 
-      if (SCALAR_FLOAT_TYPE_P(type) && (bitsize == 32 || bitsize == 64))
+      if (arg_in_fregs(type))
 	{
 	  if (bitsize > 32 && (freg_nr & 1) != 0)
 	    freg_nr++;
